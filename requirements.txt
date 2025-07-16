@@ -4,3 +4,4 @@ google-cloud-bigquery
 rapidfuzz
 haversine
 openpyxl
+db-dtypes
