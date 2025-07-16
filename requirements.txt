@@ -1,0 +1,6 @@
+streamlit
+pandas
+google-cloud-bigquery
+rapidfuzz
+haversine
+openpyxl
