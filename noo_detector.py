@@ -361,8 +361,8 @@ if option == "Upload Excel":
                 
                 st_value_cols = [col for col in result_df.columns if col.startswith('ST Value')]
                 display_columns = [
-                    "New Store Name", "New Address", "region", "city", "address", 
-                    "latitude", "longitude", "nik", "npwp", "Match Score"
+                    "New Store Name", "cust_id", "store_name", "region", 
+                    "city", "address", "latitude", "longitude", "nik", "npwp", "Match Score"
                     ] + sorted(st_value_cols)
 
                 # Create a copy for display to avoid modifying the original result_df
