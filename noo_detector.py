@@ -352,7 +352,7 @@ if option == "Upload Excel":
         else:
             all_matches = []
             for _, new_store in new_stores.iterrows():
-                matches = match_store(new_store, filtered_existing_df)
+                matches = match_store(new_store, filtered_existing_df, return_all=True)
                 all_matches.extend(matches)
 
             if all_matches:
@@ -360,7 +360,10 @@ if option == "Upload Excel":
                 st.write("### Possible Duplicates")
                 
                 st_value_cols = [col for col in result_df.columns if col.startswith('ST Value')]
-                display_columns = ["store_name", "city", "Match Score"] + sorted(st_value_cols)
+                display_columns = [
+                    "New Store Name", "New Address", "region", "city", "address", 
+                    "latitude", "longitude", "nik", "npwp", "Match Score"
+                    ] + sorted(st_value_cols)
 
                 # Create a copy for display to avoid modifying the original result_df
                 display_df = result_df[display_columns].copy()
