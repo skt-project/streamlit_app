@@ -72,7 +72,8 @@ def load_existing_data():
             DATE_TRUNC(calendar_date, MONTH) AS month_,
             SUM(value) AS monthly_st_value
         FROM `{sell_through_table_path}`
-        WHERE calendar_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+        calendar_date >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 6 MONTH)
+            AND calendar_date < DATE_TRUNC(CURRENT_DATE(), MONTH)
         GROUP BY cust_id, month_
     """
     sell_through_df = client.query(sell_through_query).to_dataframe()
