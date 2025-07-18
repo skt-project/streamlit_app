@@ -382,7 +382,7 @@ if option == "Upload Excel":
                         st.text(row["Match Log"])
 
                 output = BytesIO()
-                result_df.to_excel(output, index=False, engine='openpyxl')
+                display_df.to_excel(output, index=False, engine='openpyxl')
                 st.download_button("Download Results", data=output.getvalue(), file_name="duplicates.xlsx")
             else:
                 st.success("No duplicates found.")
@@ -451,7 +451,7 @@ else:
                         st.text(row["Match Log"])
 
                 output = BytesIO()
-                result_df.to_excel(output, index=False, engine='openpyxl')
+                display_df.to_excel(output, index=False, engine='openpyxl')
                 st.download_button("Download Possible Duplicate", data=output.getvalue(), file_name="manual_all_scores.xlsx")
             else:
                 st.success("No potential duplicates found.")
