@@ -378,7 +378,7 @@ if option == "Upload Excel":
                 
                 st_value_cols = [col for col in result_df.columns if col.startswith('ST Value')]
                 display_columns = [
-                    "New Store Name", "New Store Address", "cust_id", "store_name", "region", 
+                    "New Store Name", "New Address", "cust_id", "store_name", "region", 
                     "city", "address", "latitude", "longitude", "reference_id_skt", "reference_id_g2g",
                     "reference_id_tph", "nik", "npwp", "Match Score"
                     ] + sorted(st_value_cols)
@@ -389,7 +389,7 @@ if option == "Upload Excel":
                 # Rename columns for display
                 rename_map = {
                     "New Store Name": "Input Store Name",
-                    "New Store Address": "Input Address",
+                    "New Address": "Input Address",
                     "cust_id": "Matched Customer ID",
                     "store_name": "Matched Store Name",
                     "region": "Region",
