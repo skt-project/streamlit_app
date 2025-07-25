@@ -253,7 +253,6 @@ def match_store(new_store, existing_stores, return_all=False):
             log_lines.append("• NPWP match ❌")
 
         score += nik_score + npwp_score
-        log_lines.append(f"• Total Score: {score}")
 
         # Reference ID check
         input_ref_id = str(new_store.get("Reference ID", "")).strip().upper()
@@ -266,6 +265,8 @@ def match_store(new_store, existing_stores, return_all=False):
             log_lines.append("• Reference ID match ✅ (+10)")
         else:
             log_lines.append("• Reference ID match ❌")
+
+        log_lines.append(f"• Total Score: {score}")
 
         if score >= 70 or (return_all and score >= 50):
             result = store.to_dict()
