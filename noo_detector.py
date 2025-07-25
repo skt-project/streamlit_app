@@ -15,6 +15,7 @@ REQUIRED_COLUMNS = [
     "Address",
     "Latitude",
     "Longitude",
+    "Reference ID",
     "NIK",
     "NPWP"
 ]
@@ -59,7 +60,10 @@ def load_existing_data():
             longitude,
             latitude,
             nik,
-            npwp
+            npwp,
+            reference_id_skt,
+            reference_id_g2g,
+            reference_id_tph
         FROM `{master_store_table_path}`
     """
     existing_df = client.query(query).to_dataframe()
@@ -73,7 +77,7 @@ def load_existing_data():
             SUM(value) AS monthly_st_value
         FROM `{sell_through_table_path}`
         WHERE calendar_date >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 6 MONTH)
-            AND calendar_date < DATE_TRUNC(CURRENT_DATE(), MONTH)
+            AND calendar_date <= LAST_DAY(CURRENT_DATE(), MONTH)
         GROUP BY cust_id, month_
     """
     sell_through_df = client.query(sell_through_query).to_dataframe()
@@ -114,9 +118,9 @@ def load_existing_data():
     else:
         # If no sell-through data is returned, initialize the columns with 0
         merged_df = existing_df.copy()
-        # Create column names for the last 6 months dynamically
+        # Create column names for the last 6 months dynamically and MTD
         today = pd.to_datetime(pd.Timestamp.now().date())
-        for i in range(6):
+        for i in range(7):
             # We want the *last* 6 full months. So 1 month ago, 2 months ago, etc.
             # Example: If today is July 16, 2025, we want June, May, April, March, Feb, Jan 2025
             month_date = today - pd.DateOffset(months=i+1)
@@ -161,7 +165,7 @@ def match_store(new_store, existing_stores, return_all=False):
             fuzz.token_set_ratio(normalize(new_store['Store Name'], "store_name"), normalize(store['store_name'], "store_name")),
             fuzz.partial_ratio(normalize(new_store['Store Name'], "store_name"), normalize(store['store_name'], "store_name"))
         )
-        name_weight = 40
+        name_weight = 35
         name_score_scaled = (name_score / 100) * name_weight
         score += name_score_scaled
         log_lines.append(f"• Name Similarity: {name_score} → Score: {name_score_scaled:.1f} / {name_weight}")
@@ -175,7 +179,7 @@ def match_store(new_store, existing_stores, return_all=False):
         # Check if both new_city and existing_city are filled (not NaN and not empty string after strip)
         if pd.notna(new_city) and str(new_city).strip() != "" and \
            pd.notna(existing_city) and str(existing_city).strip() != "":
-            # Both cities are present, split the 30 points: 20 for address, 10 for city
+            # Both cities are present, split the 25 points: 20 for address, 5 for city
             address_weight_current = 20
             city_weight_current = 10
 
@@ -197,8 +201,8 @@ def match_store(new_store, existing_stores, return_all=False):
             log_lines.append(f"• Address Similarity: {address_score} → Score: {address_score_scaled:.1f} / {address_weight_current}")
             log_lines.append(f"• City Similarity: {city_score} → Score: {city_score_scaled:.1f} / {city_weight_current}")
         else:
-            # City is blank in one or both, assign full 30 points to address
-            address_weight_current = 30
+            # City is blank in one or both, assign full 25 points to address
+            address_weight_current = 25
 
             address_score = max(
                 fuzz.ratio(normalize(new_address, "address"), normalize(existing_address, "address")),
@@ -251,6 +255,18 @@ def match_store(new_store, existing_stores, return_all=False):
         score += nik_score + npwp_score
         log_lines.append(f"• Total Score: {score}")
 
+        # Reference ID check
+        input_ref_id = str(new_store.get("Reference ID", "")).strip().upper()
+        if input_ref_id and input_ref_id in [
+            str(store.get("reference_id_skt", "")).strip().upper(),
+            str(store.get("reference_id_g2g", "")).strip().upper(),
+            str(store.get("reference_id_tph", "")).strip().upper()
+        ]:
+            score += 10
+            log_lines.append("• Reference ID match ✅ (+10)")
+        else:
+            log_lines.append("• Reference ID match ❌")
+
         if score >= 70 or (return_all and score >= 50):
             result = store.to_dict()
             result["Match Score"] = score
@@ -291,6 +307,7 @@ if option == "Upload Excel":
         f"- **Store Name**\n"
         f"- **Region**\n"
         f"- **Address**\n"
+        f"- **Reference ID**\n"
         f"- **Latitude**\n"
         f"- **Longitude**"
     )
@@ -323,7 +340,7 @@ if option == "Upload Excel":
             )
             st.stop() # Stop execution if validation fails
 
-        # Normalize the 'Region' column in the new_stores DataFrame
+        # Normalize the columns in the new_stores DataFrame
         new_stores['Region'] = new_stores['Region'].apply(lambda x: normalize(x, 'region') if pd.notna(x) else x)
         new_stores['City'] = new_stores['City'].apply(lambda x: normalize(x, 'city') if pd.notna(x) else x)
         new_stores['Store Name'] = new_stores['Store Name'].apply(lambda x: normalize(x, 'store_name') if pd.notna(x) else x)
@@ -361,12 +378,35 @@ if option == "Upload Excel":
                 
                 st_value_cols = [col for col in result_df.columns if col.startswith('ST Value')]
                 display_columns = [
-                    "New Store Name", "cust_id", "store_name", "region", 
-                    "city", "address", "latitude", "longitude", "nik", "npwp", "Match Score"
+                    "New Store Name", "New Store Address", "cust_id", "store_name", "region", 
+                    "city", "address", "latitude", "longitude", "reference_id_skt", "reference_id_g2g",
+                    "reference_id_tph", "nik", "npwp", "Match Score"
                     ] + sorted(st_value_cols)
 
                 # Create a copy for display to avoid modifying the original result_df
                 display_df = result_df[display_columns].copy()
+
+                # Rename columns for display
+                rename_map = {
+                    "New Store Name": "Input Store Name",
+                    "New Store Address": "Input Address",
+                    "cust_id": "Matched Customer ID",
+                    "store_name": "Matched Store Name",
+                    "region": "Region",
+                    "city": "City",
+                    "address": "Matched Address",
+                    "latitude": "Latitude",
+                    "longitude": "Longitude",
+                    "reference_id_skt": "Ref ID SKT",
+                    "reference_id_g2g": "Ref ID G2G",
+                    "reference_id_tph": "Ref ID TPH",
+                    "nik": "NIK",
+                    "npwp": "NPWP",
+                    "Match Score": "Similarity Score"
+                }
+
+                # Apply renaming
+                display_df.rename(columns=rename_map, inplace=True)
 
                 # Apply formatting to ST Value columns for display
                 for col in st_value_cols:
@@ -394,6 +434,7 @@ else:
         address = st.text_input("Address")
         lat = st.text_input("Latitude")
         lon = st.text_input("Longitude")
+        ref_id = st.text_input("Reference ID")
         nik = st.text_input("NIK")
         npwp = st.text_input("NPWP")
         submitted = st.form_submit_button("Check for Duplicates")
@@ -406,6 +447,7 @@ else:
             "Address": normalize(address, 'address'),
             "Latitude": lat,
             "Longitude": lon,
+            "Reference ID": ref_id,
             "NIK": nik,
             "NPWP": npwp
         }
@@ -431,11 +473,32 @@ else:
                 st_value_cols = [col for col in result_df.columns if col.startswith('ST Value')]
                 display_columns = [
                     "cust_id", "store_name", "region", "city", "address", 
-                    "latitude", "longitude", "nik", "npwp", "Match Score"
+                    "latitude", "longitude", "reference_id_skt", "reference_id_g2g",
+                    "reference_id_tph", "nik", "npwp", "Match Score"
                 ] + sorted(st_value_cols)
 
                 # Create a copy for display to avoid modifying the original result_df
                 display_df = result_df[display_columns].copy()
+
+                # Rename columns for display
+                rename_map = {
+                    "cust_id": "Matched Customer ID",
+                    "store_name": "Matched Store Name",
+                    "region": "Region",
+                    "city": "City",
+                    "address": "Matched Address",
+                    "latitude": "Latitude",
+                    "longitude": "Longitude",
+                    "reference_id_skt": "Ref ID SKT",
+                    "reference_id_g2g": "Ref ID G2G",
+                    "reference_id_tph": "Ref ID TPH",
+                    "nik": "NIK",
+                    "npwp": "NPWP",
+                    "Match Score": "Similarity Score"
+                }
+
+                # Apply renaming
+                display_df.rename(columns=rename_map, inplace=True)
 
                 # Apply formatting to ST Value columns for display
                 for col in st_value_cols:
