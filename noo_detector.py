@@ -381,7 +381,7 @@ if option == "Upload Excel":
                 display_columns = [
                     "New Store Name", "New Address", "cust_id", "store_name", "region", 
                     "city", "address", "latitude", "longitude", "reference_id_skt", "reference_id_g2g",
-                    "reference_id_tph", "nik", "npwp", "Match Score"
+                    "reference_id_tph", "nik", "npwp", "Match Score", "Match Log"
                     ] + sorted(st_value_cols)
 
                 # Create a copy for display to avoid modifying the original result_df
@@ -403,7 +403,8 @@ if option == "Upload Excel":
                     "reference_id_tph": "Ref ID TPH",
                     "nik": "NIK",
                     "npwp": "NPWP",
-                    "Match Score": "Similarity Score"
+                    "Match Score": "Similarity Score",
+                    "Match Log": "Log Info"
                 }
 
                 # Apply renaming
@@ -475,7 +476,7 @@ else:
                 display_columns = [
                     "cust_id", "store_name", "region", "city", "address", 
                     "latitude", "longitude", "reference_id_skt", "reference_id_g2g",
-                    "reference_id_tph", "nik", "npwp", "Match Score"
+                    "reference_id_tph", "nik", "npwp", "Match Score", "Match Log"
                 ] + sorted(st_value_cols)
 
                 # Create a copy for display to avoid modifying the original result_df
@@ -495,7 +496,8 @@ else:
                     "reference_id_tph": "Ref ID TPH",
                     "nik": "NIK",
                     "npwp": "NPWP",
-                    "Match Score": "Similarity Score"
+                    "Match Score": "Similarity Score",
+                    "Match Log": "Log Info"
                 }
 
                 # Apply renaming
