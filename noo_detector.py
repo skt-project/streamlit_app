@@ -149,6 +149,11 @@ def normalize(text: str, text_type: str):
     elif text_type == 'city':
         text = re.sub(r"[^a-z0-9\s]", " ", text)  # Remove punctuation
         text = re.sub(r"\s+", " ", text).strip()
+    # Normalize for region
+    elif text_type == 'region':
+        text = re.sub(r'\s*\(.*\)\s*', '', text)  # Remove text in parentheses and surrounding spaces (e.g., "(SD)")
+        text = re.sub(r"[^a-z0-9\s]", " ", text)  # Remove any other non-alphanumeric punctuation
+        text = re.sub(r"\s+", " ", text).strip()  # Replace multiple spaces with single space and trim
 
     return text
 
@@ -361,9 +366,25 @@ if option == "Upload Excel":
         
         # Now we know there's exactly one region to filter by
         selected_input_region = input_regions[0]
+
+        # Normalize the specific regions for comparison, assuming 'normalize' handles these strings correctly
+        normalized_west_java = normalize('West Java (SD)', 'region')
+        normalized_jakarta_csa = normalize('Jakarta (CSA)', 'region')
         
-        # Filter existing_df based on the input region
-        filtered_existing_df = existing_df[existing_df['region'].apply(lambda x: normalize(x, 'region')) == selected_input_region]
+        if selected_input_region == normalized_west_java or selected_input_region == normalized_jakarta_csa:
+            # If the input region is one of the special cases, filter for both regions
+            st.info(f"Special case detected: Input region is '{selected_input_region}'. Filtering existing data for both 'West Java (SD)' and 'Jakarta (CSA)' for potential duplicates.")
+            
+            target_regions_for_filter = [normalized_west_java, normalized_jakarta_csa]
+            
+            filtered_existing_df = existing_df[
+                existing_df['region'].apply(lambda x: normalize(x, 'region')).isin(target_regions_for_filter)
+            ]
+        else:
+            # Existing logic: Filter existing_df based on the single input region
+            filtered_existing_df = existing_df[
+                existing_df['region'].apply(lambda x: normalize(x, 'region')) == selected_input_region
+            ]
 
         if filtered_existing_df.empty:
             st.warning(f"No existing stores found in the specified region: '{selected_input_region}'. Cannot perform matching.")
