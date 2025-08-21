@@ -6,3 +6,4 @@ haversine
 openpyxl
 db-dtypes
 xlrd
+xlsxwriter
