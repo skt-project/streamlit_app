@@ -252,9 +252,15 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
 
 
 def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Data") -> bytes:
+    """
+    Converts a pandas DataFrame to an in-memory Excel file (xlsx).
+
+    The output is configured to have column headers in the first row,
+    and the data starting on the second row.
+    """
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        df.to_excel(writer, index=False, header=True, startrow=1, sheet_name=sheet_name)
     buf.seek(0)
     return buf.getvalue()
 
