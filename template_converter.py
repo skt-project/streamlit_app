@@ -10,17 +10,6 @@ from google.oauth2 import service_account
 # =========================
 # Environment / Secrets
 # =========================
-# Set these as environment variables in your deployment
-# GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-# GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-# OAUTH_REDIRECT_URI = os.getenv(
-#     "OAUTH_REDIRECT_URI", ""
-# )
-# GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
-# BQ_DATASET = os.getenv("BQ_DATASET", "dist_config")
-# BQ_CONFIGS_TABLE = os.getenv("BQ_CONFIGS_TABLE", "distributor_configs")
-# BQ_ROLES_TABLE = os.getenv("BQ_ROLES_TABLE", "app_roles")
-
 try:
     # Use Streamlit secrets if available
     gcp_secrets = st.secrets["connections"]["bigquery"]
@@ -176,6 +165,10 @@ def intelligent_mapping(
     effective_mapping = {}
     failed_columns = []
 
+    # Standardize column names for case-insensitive matching
+    df.columns = [col.lower() for col in df.columns]
+    mapping_lower = {k: v.lower() for k, v in mapping.items()}
+
     # Fill fixed fields for all rows
     for col in FIXED_FIRST_5:
         out[col] = [static_fields.get(col, "")] * len(df)
@@ -189,7 +182,7 @@ def intelligent_mapping(
 
     # 1) apply direct mapping where source exists
     for target in needed:
-        src = mapping.get(target, "")
+        src = mapping_lower.get(target, "")
         if src and src in df.columns:
             # Special handling for PO Date: convert to datetime and format as date
             if target == "PO Date":
@@ -305,6 +298,7 @@ def main():
     st.write("Preview of uploaded data:")
     try:
         df = read_any_table(uploaded)
+        df.columns = [col.lower() for col in df.columns]
         st.dataframe(df.head())
     except Exception as e:
         st.error(f"Error reading the uploaded file: {e}")
