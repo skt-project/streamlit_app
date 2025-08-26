@@ -201,7 +201,7 @@ def intelligent_mapping(
             if out[target].isna().all():
                 # find best source candidate by comparing target label to df columns
                 guesses = get_close_matches(
-                    target, df.columns.tolist(), n=1, cutoff=fuzzy_cutoff
+                    target.lower(), df.columns.tolist(), n=1, cutoff=fuzzy_cutoff
                 )
                 if guesses:
                     src = guesses[0]
