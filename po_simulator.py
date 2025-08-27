@@ -96,7 +96,10 @@ def get_sku_data_from_bq(distributor_name: str, sku_list: List[str]) -> pd.DataF
         buffer_plan_by_lm_val_adj
     FROM `{table_id}`
     WHERE distributor = '{distributor_name}'
-    AND sku IN ({sku_list_str})
+    AND (
+        sku IN ({sku_list_str})
+        OR buffer_plan_by_lm_qty_adj > 0
+    )
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
@@ -112,33 +115,56 @@ def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Seri
     (Stock + PO Quantity) / Average Weekly Sales LM
     """
     # Handle division by zero
-    return (stock + po_qty) / avg_weekly_sales.replace(0, pd.NA).astype(float)
+    # return (stock + po_qty) / avg_weekly_sales.replace(0, pd.NA).astype(float)
+    # Use np.where to handle division by zero
+    return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
 
 def to_excel_with_styling(df: pd.DataFrame) -> bytes:
     """
-    Converts a pandas DataFrame to an Excel file with special styling for the first 4 columns.
+    Converts a pandas DataFrame to an Excel file with special styling for the first 7 columns.
     """
     output = io.BytesIO()
     wb = Workbook()
     ws = wb.active
     ws.title = "PO Simulation"
 
-    # Define the fill style for the first 7 columns
-    fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+    # Define the fill style for the SKU types
+    po_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+    suggestion_fill = PatternFill(
+        start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"
+    )
 
-    # Write the dataframe to the worksheet
-    rows = dataframe_to_rows(df, index=False, header=True)
+    # Store the `is_po_sku` Series and then drop the column from the DataFrame
+    # so it does not appear in the final Excel file.
+    is_po_sku_series = df["is_po_sku"]
+    df_no_flag = df.drop("is_po_sku", axis=1)
+
+    # Write the DataFrame (without the flag column) to the worksheet
+    rows = dataframe_to_rows(df_no_flag, index=False, header=True)
+
+    # Iterate over rows and apply styling based on the original Series
     for r_idx, row in enumerate(rows, 1):
         for c_idx, value in enumerate(row, 1):
             cell = ws.cell(row=r_idx, column=c_idx, value=value)
-            # Apply color to the first 7 columns, including the header row
-            if c_idx <= 7:
-                cell.fill = fill
+
+            # Apply color to the first 7 columns for data rows only (r_idx > 1)
+            if c_idx <= 7 and r_idx > 1:
+                # Get the boolean value from the original `is_po_sku` Series
+                # The index for the series is the row index in the original df
+                original_row_index = (
+                    r_idx - 2
+                )  # Subtract 2 because header is row 1 and data starts at 0
+                is_po_row = is_po_sku_series.iloc[original_row_index]
+
+                # Set the fill based on the boolean flag
+                if is_po_row:
+                    cell.fill = po_fill
+                else:
+                    cell.fill = suggestion_fill
 
     wb.save(output)
     output.seek(0)
     return output.getvalue()
-
 
 def main():
     st.set_page_config(page_title="PO Simulator", page_icon="🛒", layout="wide")
@@ -198,6 +224,9 @@ def main():
             po_df = po_df[po_df["QTY"] > 0]
             po_df.dropna(subset=["PRODUCT CODE", "QTY", "DPP"], inplace=True)
 
+            # Add a flag to identify original PO SKUs
+            po_df["is_po_sku"] = True
+
             # Calculate the PO Value as requested: DPP * 1.11 (+ tax 11%) * QTY
             po_df["PO Value"] = po_df["DPP"] * 1.11 * po_df["QTY"]
 
@@ -211,7 +240,7 @@ def main():
             )
 
             # Keep only the required columns for the merge
-            po_df = po_df[["Customer SKU Code", "PO Qty", "PO Value"]]
+            po_df = po_df[["Customer SKU Code", "PO Qty", "PO Value", "is_po_sku"]]
 
             # --- Fetch missing data from BigQuery ---
             sku_list = po_df["Customer SKU Code"].unique().tolist()
@@ -227,15 +256,20 @@ def main():
                 sku_data_df.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
 
             # --- Data Processing and Calculation ---
-            st.header("3. PO Simulation and Results")
+            st.header("3. PO Simulation and Download Result")
 
             # Merge uploaded PO data with BigQuery SKU data
             # Use a left merge to keep all SKUs from the uploaded file
-            result_df = pd.merge(po_df, sku_data_df, on="Customer SKU Code", how="left")
+            result_df = pd.merge(po_df, sku_data_df, on="Customer SKU Code", how="outer")
+
+            # Fill NaN values in 'is_po_sku' with False
+            result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
 
             # Fill NaN values with 0 for calculations if data was not found for some SKUs
             result_df[
                 [
+                    "PO Qty",
+                    "PO Value",
                     "total_stock",
                     "buffer_plan_by_lm_qty_adj",
                     "avg_weekly_st_lm_qty",
@@ -243,6 +277,8 @@ def main():
                 ]
             ] = result_df[
                 [
+                    "PO Qty",
+                    "PO Value",
                     "total_stock",
                     "buffer_plan_by_lm_qty_adj",
                     "avg_weekly_st_lm_qty",
@@ -251,6 +287,11 @@ def main():
             ].fillna(
                 0
             )
+
+            # Filter to show only SKUs with PO Qty or a positive suggested qty
+            result_df = result_df[
+                (result_df["PO Qty"] > 0) | (result_df["buffer_plan_by_lm_qty_adj"] > 0)
+            ]
 
             # Add distributor_name column
             result_df["distributor_name"] = distributor_name
@@ -271,20 +312,23 @@ def main():
 
             # Conditions for np.select
             conditions = [
-                # 1. Hardcoded Reject
+                # 1. New condition for additional suggested SKUs
+                (result_df["is_po_sku"] == False),
+                # 2. Hardcoded Reject
                 result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
-                # 2. Reject if suggested PO is 0
+                # 3. Reject if suggested PO is 0
                 (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                # 3. PO Qty > Suggested PO Qty (Over-ordering)
+                # 4. PO Qty > Suggested PO Qty (Over-ordering)
                 (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                # 4. PO Qty < Suggested PO Qty (Under-ordering)
+                # 5. PO Qty < Suggested PO Qty (Under-ordering)
                 (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                # 5. PO Qty = Suggested PO Qty (Exact Match) - This is the default 'Proceed' if no other condition is met
+                # 6. PO Qty = Suggested PO Qty (Exact Match)
                 (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
             ]
 
             # Corresponding values
             choices = [
+                "Additional Suggestion",
                 "Reject (Manual from Steve)",
                 "Reject",
                 "Reject with suggestion",
@@ -315,7 +359,58 @@ def main():
             # Rename the columns in the DataFrame
             result_df.rename(columns=new_column_names, inplace=True)
 
-            # Final column order
+            # Sort the DataFrame: user SKUs first, then suggested SKUs
+            result_df.sort_values(
+                by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True
+            )
+
+            # Reorder columns for display
+            excel_cols = [
+                "Distributor",
+                "SKU",
+                "Product Name",
+                "PO Qty",
+                "PO Value",
+                "WOI (Stock + PO Ori)",
+                "Remark",
+                "Suggested PO Qty",
+                "Suggested PO Value",
+                "WOI (Stock + Suggestion)",
+                "is_po_sku"
+            ]
+
+            result_df = result_df.reindex(columns=excel_cols)
+
+            # Format 'PO Value' as currency with comma separators
+            result_df["PO Value"] = result_df["PO Value"].apply(
+                lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
+            )
+            result_df["Suggested PO Value"] = result_df["Suggested PO Value"].apply(
+                lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
+            )
+
+            # Format 'WOI' columns to 2 decimal places
+            result_df["WOI (Stock + PO Ori)"] = result_df[
+                "WOI (Stock + PO Ori)"
+            ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+            result_df["WOI (Stock + Suggestion)"] = result_df[
+                "WOI (Stock + Suggestion)"
+            ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+
+            # --- Download Button ---
+            xlsx_data = to_excel_with_styling(result_df)
+
+            st.download_button(
+                label="📥 Download PO Simulator Excel",
+                data=xlsx_data,
+                file_name="po_simulator_result.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+            # --- Display Results ---
+            st.subheader("Simulated PO Data")
+
+            # Reorder columns for display
             final_cols = [
                 "Distributor",
                 "SKU",
@@ -329,38 +424,7 @@ def main():
                 "WOI (Stock + Suggestion)",
             ]
 
-            result_df = result_df.reindex(columns=final_cols)
-
-            # Format 'PO Value' as currency with comma separators
-            result_df["PO Value"] = result_df["PO Value"].apply(
-                lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
-            )
-            result_df["Suggested PO Value"] = result_df["Suggested PO Value"].apply(
-                lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
-            )
-
-            # Format 'WOI' columns to 2 decimal places
-            result_df["WOI (Stock + PO Ori)"] = result_df["WOI (Stock + PO Ori)"].apply(
-                lambda x: f"{x:.2f}" if pd.notnull(x) else ""
-            )
-            result_df["WOI (Stock + Suggestion)"] = result_df[
-                "WOI (Stock + Suggestion)"
-            ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-
-            # --- Display Results ---
-            st.subheader("Simulated PO Data")
-            st.dataframe(result_df)
-
-            # --- Download Button ---
-            st.subheader("4. Download Result")
-            xlsx_data = to_excel_with_styling(result_df)
-
-            st.download_button(
-                label="📥 Download PO Simulator Excel",
-                data=xlsx_data,
-                file_name="po_simulator_result.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+            st.dataframe(result_df.reindex(columns=final_cols))
 
         except Exception as e:
             st.error(f"An error occurred: {e}")
