@@ -90,6 +90,7 @@ def get_sku_data_from_bq(distributor_name: str, sku_list: List[str]) -> pd.DataF
         distributor,
         sku,
         product_name,
+        assortment,
         total_stock,
         buffer_plan_by_lm_qty_adj,
         avg_weekly_st_lm_qty,
@@ -346,6 +347,7 @@ def main():
                 "distributor_name": "Distributor",
                 "Customer SKU Code": "SKU",
                 "product_name": "Product Name",
+                "assortment": "Assortment",
                 "PO Qty": "PO Qty",
                 "PO Value": "PO Value",
                 "total_stock": "Total Stock Qty",
@@ -369,6 +371,7 @@ def main():
                 "Distributor",
                 "SKU",
                 "Product Name",
+                "Assortment",
                 "PO Qty",
                 "PO Value",
                 "WOI (Stock + PO Ori)",
@@ -415,6 +418,7 @@ def main():
                 "Distributor",
                 "SKU",
                 "Product Name",
+                "Assortment",
                 "PO Qty",
                 "PO Value",
                 "WOI (Stock + PO Ori)",
@@ -424,7 +428,7 @@ def main():
                 "WOI (Stock + Suggestion)",
             ]
 
-            st.dataframe(result_df.reindex(columns=final_cols))
+            st.dataframe(result_df.reindex(columns=final_cols).reset_index(drop=True))
 
         except Exception as e:
             st.error(f"An error occurred: {e}")
