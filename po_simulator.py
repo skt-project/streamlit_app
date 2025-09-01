@@ -176,7 +176,29 @@ def main():
 
     # Hardcoded Reject List
     MANUAL_REJECT_SKUS = [
-
+        'G2G-45',
+        'G2G-51',
+        'G2G-186',
+        'G2G-202',
+        'G2G-110',
+        'G2G-74',
+        'G2G-37',
+        'G2G-103',
+        'G2G-36',
+        'G2G-230',
+        'G2G-235',
+        'G2G-18',
+        'G2G-70',
+        'G2G-44',
+        'G2G-217',
+        'G2G-800',
+        'G2G-213',
+        'G2G-47',
+        'G2G-1440',
+        'G2G-1445',
+        'G2G-17',
+        'G2G-1942',
+        'G2G-1943',
     ]
 
     st.header("1. Input Parameters")
