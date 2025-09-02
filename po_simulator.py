@@ -75,7 +75,34 @@ def get_distributor_data() -> List[str]:
 
 
 @st.cache_data(show_spinner="Fetching SKU data from BigQuery...")
-def get_sku_data_from_bq(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
+def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
+    """
+    Fetches SKU data for a given list of SKUs from BigQuery.
+    """
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.gt_schema.master_product"
+
+    # Create a string of the SKUs for the IN clause
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        sku,
+        product_name,
+        assortment
+    FROM `{table_id}`
+    WHERE sku IN ({sku_list_str})
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching SKU data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(show_spinner="Fetching Stock Analysis data from BigQuery...")
+def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
     """
     Fetches stock and sales data for a given list of SKUs from BigQuery.
     """
@@ -87,6 +114,7 @@ def get_sku_data_from_bq(distributor_name: str, sku_list: List[str]) -> pd.DataF
 
     query = f"""
     SELECT
+        UPPER(region) AS region,
         distributor,
         sku,
         product_name,
@@ -106,8 +134,40 @@ def get_sku_data_from_bq(distributor_name: str, sku_list: List[str]) -> pd.DataF
         df_sku_data = client.query(query).to_dataframe()
         return df_sku_data
     except Exception as e:
-        st.error(f"Error fetching SKU data from BigQuery: {e}")
+        st.error(f"Error fetching Stock Analysis data from BigQuery: {e}")
         return pd.DataFrame()
+
+
+@st.cache_data(show_spinner="Fetching NPD PO tracking data...")
+def get_npd_po_tracking_data_from_bq(
+    distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
+    """
+    Fetches PO tracking data for NPD SKUs from the specified BigQuery table.
+    """
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.dms.gt_po_tracking_mtd_mv"
+
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        region,
+        UPPER(distributor_name) AS distributor,
+        sku,
+        SUM(order_qty) as total_ordered_qty,
+        SUM(nett_amount_incl_ppn) as total_ordered_value
+    FROM `{table_id}`
+    WHERE UPPER(distributor_name) = '{distributor_name}'
+    AND sku IN ({sku_list_str})
+    GROUP BY region, sku, UPPER(distributor_name)
+    """
+    try:
+        df_tracking_data = client.query(query).to_dataframe()
+        return df_tracking_data
+    except Exception as e:
+        st.error(f"Error fetching NPD tracking data from BigQuery: {e}")
+        return pd.DataFrame()
+
 
 # --- Helper Functions ---
 def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Series) -> pd.Series:
@@ -176,30 +236,34 @@ def main():
 
     # Hardcoded Reject List
     MANUAL_REJECT_SKUS = [
-        'G2G-45',
-        'G2G-51',
-        'G2G-186',
-        'G2G-202',
-        'G2G-110',
-        'G2G-74',
-        'G2G-37',
-        'G2G-103',
-        'G2G-36',
-        'G2G-230',
-        'G2G-235',
-        'G2G-18',
-        'G2G-70',
-        'G2G-44',
-        'G2G-217',
-        'G2G-800',
-        'G2G-213',
-        'G2G-47',
-        'G2G-1440',
-        'G2G-1445',
-        'G2G-17',
-        'G2G-1942',
-        'G2G-1943',
+        'G2G-45', 'G2G-51', 'G2G-186', 'G2G-202', 'G2G-110', 'G2G-74', 'G2G-37',
+        'G2G-103', 'G2G-36', 'G2G-230', 'G2G-235', 'G2G-18', 'G2G-70', 'G2G-44',
+        'G2G-217', 'G2G-800', 'G2G-213', 'G2G-47', 'G2G-1440', 'G2G-1445', 'G2G-17',
+        'G2G-1942', 'G2G-1943', 'G2G-20900', 'G2G-20905'
     ]
+
+    MANUAL_APPROVE_SKUS = [
+        'G2G-248',
+        'G2G-249',
+        'G2G-250',
+    ]
+
+    # Hardcoded NPD SKUs and their allocation data
+    # npd_allocation_data = {
+    #     'Region': [
+    #         'Bali Nusa Tenggara', 'Central Java', 'Central Sumatera', 'East Java',
+    #         'East Kalimantan', 'Jakarta (Csa)', 'Northern Sumatera',
+    #         'South Kalimantan', 'Southern Sumatera 1', 'Southern Sumatera 2',
+    #         'Sulawesi 1', 'Sulawesi 2', 'West Java (Sd)', 'West Kalimantan'
+    #     ],
+    #     'G2G-20900': [504, 671, 630, 611, 301, 119, 439, 533, 314, 444, 626, 211, 1229, 1108],
+    #     'G2G-20901': [2031, 2773, 2549, 2466, 1211, 472, 1792, 2118, 1270, 1766, 2630, 858, 4815, 5581],
+    #     'G2G-20902': [7783, 11007, 9831, 9469, 4640, 1772, 7000, 7966, 4878, 6649, 10652, 3336, 17746, 27255],
+    #     'G2G-20903': [7783, 11007, 9831, 9469, 4640, 1772, 7000, 7966, 4878, 6649, 10652, 3336, 17746, 27255],
+    #     'G2G-20904': [2031, 2773, 2549, 2466, 1211, 472, 1792, 2118, 1270, 1766, 2630, 858, 4815, 5581]
+    # }
+    # npd_allocation_df_full = pd.DataFrame(npd_allocation_data)
+    # npd_skus = [col for col in npd_allocation_df_full.columns if col != 'Region']
 
     st.header("1. Input Parameters")
 
@@ -267,7 +331,7 @@ def main():
 
             # --- Fetch missing data from BigQuery ---
             sku_list = po_df["Customer SKU Code"].unique().tolist()
-            sku_data_df = get_sku_data_from_bq(distributor_name, sku_list)
+            sku_data_df = get_stock_data(distributor_name, sku_list)
 
             if sku_data_df.empty:
                 st.warning(
@@ -284,6 +348,19 @@ def main():
             # Merge uploaded PO data with BigQuery SKU data
             # Use a left merge to keep all SKUs from the uploaded file
             result_df = pd.merge(po_df, sku_data_df, on="Customer SKU Code", how="outer")
+
+            # Fallback for missing Product Name and Assortment
+            missing_sku_list = result_df[result_df["product_name"].isnull()]["Customer SKU Code"].tolist()
+            if missing_sku_list:
+                fallback_sku_data = get_sku_data(missing_sku_list)
+                if not fallback_sku_data.empty:
+                    fallback_sku_data.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
+                    result_df.set_index("Customer SKU Code", inplace=True)
+                    fallback_sku_data.set_index("Customer SKU Code", inplace=True)
+                    
+                    # Update the missing values with data from the fallback table
+                    result_df.update(fallback_sku_data)
+                    result_df.reset_index(inplace=True)
 
             # Fill NaN values in 'is_po_sku' with False
             result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
@@ -310,6 +387,102 @@ def main():
             ].fillna(
                 0
             )
+
+            # --- Handle NPD SKUs and Allocation ---
+            # npd_tracking_df = get_npd_po_tracking_data_from_bq(
+            #     distributor_name, npd_skus
+            # )
+
+            # st.dataframe(npd_tracking_df.head(5))
+
+            # if npd_tracking_df.empty:
+            #     st.warning(
+            #         "No NPD tracking data found for this distributor. Continuing without NPD-specific logic."
+            #     )
+            #     selected_region = None
+            # else:
+            #     selected_region = npd_tracking_df["region"].iloc[0]
+
+            # if (
+            #     selected_region
+            #     and selected_region in npd_allocation_df_full["Region"].values
+            # ):
+            #     npd_allocations = (
+            #         npd_allocation_df_full[
+            #             npd_allocation_df_full["Region"] == selected_region
+            #         ]
+            #         .drop("Region", axis=1)
+            #         .iloc[0]
+            #     )
+
+            #     npd_tracking_df.rename(
+            #         columns={"sku": "Customer SKU Code"}, inplace=True
+            #     )
+
+            #     # Merge NPD tracking data with the main result_df
+            #     result_df = pd.merge(
+            #         result_df,
+            #         npd_tracking_df.drop(
+            #             columns=["region", "distributor"]
+            #         ),  # drop region and distributor from tracking df as they're redundant
+            #         on="Customer SKU Code",
+            #         how="left",
+            #     )
+            #     result_df[["total_ordered_qty", "total_ordered_value"]] = result_df[
+            #         ["total_ordered_qty", "total_ordered_value"]
+            #     ].fillna(0)
+
+            #     # Apply NPD logic to the result_df
+            #     for sku in npd_skus:
+            #         mask = result_df["Customer SKU Code"] == sku
+            #         if mask.any():
+
+            #             allocation_qty = npd_allocations.get(sku, 0)
+
+            #             row = result_df[mask]
+
+            #             # Use DPP from the uploaded PO if available, otherwise get a default value
+            #             dpp = (
+            #                 row["DPP"].iloc[0]
+            #                 if "DPP" in row.columns and not row["DPP"].isnull().iloc[0]
+            #                 else 0
+            #             )
+
+            #             # Calculate suggested values based on allocation and existing orders
+            #             current_ordered_qty = row["total_ordered_qty"].iloc[0]
+            #             current_ordered_value = row["total_ordered_value"].iloc[0]
+
+            #             po_qty_inputted = row["PO Qty"].iloc[0]
+
+            #             result_df.loc[mask, "buffer_plan_by_lm_qty_adj"] = max(
+            #                 0, allocation_qty - current_ordered_qty
+            #             )
+            #             result_df.loc[mask, "buffer_plan_by_lm_val_adj"] = max(
+            #                 0, (allocation_qty * dpp * 1.11) - current_ordered_value
+            #             )
+
+            #             is_original_po_sku = row["is_po_sku"].iloc[0]
+
+            #             if is_original_po_sku:
+            #                 total_qty_after_po = current_ordered_qty + po_qty_inputted
+            #                 if total_qty_after_po > allocation_qty:
+            #                     result_df.loc[mask, "Remark"] = (
+            #                         "Reject (NPD Allocation Exceeded)"
+            #                     )
+            #                 elif total_qty_after_po < allocation_qty:
+            #                     result_df.loc[mask, "Remark"] = (
+            #                         "Proceed with suggestion (NPD Under-ordered)"
+            #                     )
+            #                 else:
+            #                     result_df.loc[mask, "Remark"] = "Proceed (NPD)"
+            #             else:
+            #                 result_df.loc[mask, "Remark"] = "NPD Suggestion"
+
+            # # Drop unnecessary columns from the result_df before final calculations
+            # if "total_ordered_qty" in result_df.columns and "total_ordered_value" in result_df.columns:
+            #     result_df.drop(
+            #         columns=["total_ordered_qty", "total_ordered_value"], inplace=True
+            #     )
 
             # Filter to show only SKUs with PO Qty or a positive suggested qty
             result_df = result_df[
@@ -347,6 +520,8 @@ def main():
                 (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
                 # 6. PO Qty = Suggested PO Qty (Exact Match)
                 (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
+                # 7. Hardcoded Proceed
+                result_df["Customer SKU Code"].isin(MANUAL_APPROVE_SKUS)
             ]
 
             # Corresponding values
@@ -357,6 +532,7 @@ def main():
                 "Reject with suggestion",
                 "Proceed with suggestion",
                 "Proceed",
+                "Proceed (NPD)"
             ]
 
             # Apply the conditions to create the 'Remark' column
