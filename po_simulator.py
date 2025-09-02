@@ -357,7 +357,7 @@ def main():
                     fallback_sku_data.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
                     result_df.set_index("Customer SKU Code", inplace=True)
                     fallback_sku_data.set_index("Customer SKU Code", inplace=True)
-                    
+
                     # Update the missing values with data from the fallback table
                     result_df.update(fallback_sku_data)
                     result_df.reset_index(inplace=True)
@@ -512,27 +512,27 @@ def main():
                 (result_df["is_po_sku"] == False),
                 # 2. Hardcoded Reject
                 result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
-                # 3. Reject if suggested PO is 0
+                # 3. Hardcoded Proceed
+                result_df["Customer SKU Code"].isin(MANUAL_APPROVE_SKUS),
+                # 4. Reject if suggested PO is 0
                 (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                # 4. PO Qty > Suggested PO Qty (Over-ordering)
+                # 5. PO Qty > Suggested PO Qty (Over-ordering)
                 (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                # 5. PO Qty < Suggested PO Qty (Under-ordering)
+                # 6. PO Qty < Suggested PO Qty (Under-ordering)
                 (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                # 6. PO Qty = Suggested PO Qty (Exact Match)
+                # 7. PO Qty = Suggested PO Qty (Exact Match)
                 (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
-                # 7. Hardcoded Proceed
-                result_df["Customer SKU Code"].isin(MANUAL_APPROVE_SKUS)
             ]
 
             # Corresponding values
             choices = [
                 "Additional Suggestion",
-                "Reject (Manual from Steve)",
+                "Reject",
+                "Proceed (NPD)",
                 "Reject",
                 "Reject with suggestion",
                 "Proceed with suggestion",
                 "Proceed",
-                "Proceed (NPD)"
             ]
 
             # Apply the conditions to create the 'Remark' column
