@@ -239,13 +239,7 @@ def main():
         'G2G-45', 'G2G-51', 'G2G-186', 'G2G-202', 'G2G-110', 'G2G-74', 'G2G-37',
         'G2G-103', 'G2G-36', 'G2G-230', 'G2G-235', 'G2G-18', 'G2G-70', 'G2G-44',
         'G2G-217', 'G2G-800', 'G2G-213', 'G2G-47', 'G2G-1440', 'G2G-1445', 'G2G-17',
-        'G2G-1942', 'G2G-1943', 'G2G-20900', 'G2G-20905'
-    ]
-
-    MANUAL_APPROVE_SKUS = [
-        'G2G-248',
-        'G2G-249',
-        'G2G-250',
+        'G2G-1942', 'G2G-1943'
     ]
 
     # Hardcoded NPD SKUs and their allocation data
@@ -512,15 +506,13 @@ def main():
                 (result_df["is_po_sku"] == False),
                 # 2. Hardcoded Reject
                 result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
-                # 3. Hardcoded Proceed
-                result_df["Customer SKU Code"].isin(MANUAL_APPROVE_SKUS),
-                # 4. Reject if suggested PO is 0
+                # 3. Reject if suggested PO is 0
                 (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                # 5. PO Qty > Suggested PO Qty (Over-ordering)
+                # 4. PO Qty > Suggested PO Qty (Over-ordering)
                 (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                # 6. PO Qty < Suggested PO Qty (Under-ordering)
+                # 5. PO Qty < Suggested PO Qty (Under-ordering)
                 (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                # 7. PO Qty = Suggested PO Qty (Exact Match)
+                # 6. PO Qty = Suggested PO Qty (Exact Match)
                 (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
             ]
 
@@ -528,7 +520,6 @@ def main():
             choices = [
                 "Additional Suggestion",
                 "Reject",
-                "Proceed (NPD)",
                 "Reject",
                 "Reject with suggestion",
                 "Proceed with suggestion",
