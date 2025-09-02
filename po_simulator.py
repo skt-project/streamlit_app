@@ -138,35 +138,35 @@ def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(show_spinner="Fetching NPD PO tracking data...")
-def get_npd_po_tracking_data_from_bq(
-    distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
-    """
-    Fetches PO tracking data for NPD SKUs from the specified BigQuery table.
-    """
-    client = get_bq_client()
-    table_id = f"{GCP_PROJECT_ID}.dms.gt_po_tracking_mtd_mv"
+# @st.cache_data(show_spinner="Fetching NPD PO tracking data...")
+# def get_npd_po_tracking_data_from_bq(
+#     distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
+#     """
+#     Fetches PO tracking data for NPD SKUs from the specified BigQuery table.
+#     """
+#     client = get_bq_client()
+#     table_id = f"{GCP_PROJECT_ID}.dms.gt_po_tracking_mtd_mv"
 
-    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+#     sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
 
-    query = f"""
-    SELECT
-        region,
-        UPPER(distributor_name) AS distributor,
-        sku,
-        SUM(order_qty) as total_ordered_qty,
-        SUM(nett_amount_incl_ppn) as total_ordered_value
-    FROM `{table_id}`
-    WHERE UPPER(distributor_name) = '{distributor_name}'
-    AND sku IN ({sku_list_str})
-    GROUP BY region, sku, UPPER(distributor_name)
-    """
-    try:
-        df_tracking_data = client.query(query).to_dataframe()
-        return df_tracking_data
-    except Exception as e:
-        st.error(f"Error fetching NPD tracking data from BigQuery: {e}")
-        return pd.DataFrame()
+#     query = f"""
+#     SELECT
+#         region,
+#         UPPER(distributor_name) AS distributor,
+#         sku,
+#         SUM(order_qty) as total_ordered_qty,
+#         SUM(nett_amount_incl_ppn) as total_ordered_value
+#     FROM `{table_id}`
+#     WHERE UPPER(distributor_name) = '{distributor_name}'
+#     AND sku IN ({sku_list_str})
+#     GROUP BY region, sku, UPPER(distributor_name)
+#     """
+#     try:
+#         df_tracking_data = client.query(query).to_dataframe()
+#         return df_tracking_data
+#     except Exception as e:
+#         st.error(f"Error fetching NPD tracking data from BigQuery: {e}")
+#         return pd.DataFrame()
 
 
 # --- Helper Functions ---
@@ -344,17 +344,17 @@ def main():
             result_df = pd.merge(po_df, sku_data_df, on="Customer SKU Code", how="outer")
 
             # Fallback for missing Product Name and Assortment
-            missing_sku_list = result_df[result_df["product_name"].isnull()]["Customer SKU Code"].tolist()
-            if missing_sku_list:
-                fallback_sku_data = get_sku_data(missing_sku_list)
-                if not fallback_sku_data.empty:
-                    fallback_sku_data.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
-                    result_df.set_index("Customer SKU Code", inplace=True)
-                    fallback_sku_data.set_index("Customer SKU Code", inplace=True)
+            # missing_sku_list = result_df[result_df["product_name"].isnull()]["Customer SKU Code"].tolist()
+            # if missing_sku_list:
+            #     fallback_sku_data = get_sku_data(missing_sku_list)
+            #     if not fallback_sku_data.empty:
+            #         fallback_sku_data.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
+            #         result_df.set_index("Customer SKU Code", inplace=True)
+            #         fallback_sku_data.set_index("Customer SKU Code", inplace=True)
 
-                    # Update the missing values with data from the fallback table
-                    result_df.update(fallback_sku_data)
-                    result_df.reset_index(inplace=True)
+            #         # Update the missing values with data from the fallback table
+            #         result_df.update(fallback_sku_data)
+            #         result_df.reset_index(inplace=True)
 
             # Fill NaN values in 'is_po_sku' with False
             result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
