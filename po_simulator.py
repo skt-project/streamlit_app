@@ -210,8 +210,8 @@ def to_excel_with_styling(df: pd.DataFrame) -> bytes:
         for c_idx, value in enumerate(row, 1):
             cell = ws.cell(row=r_idx, column=c_idx, value=value)
 
-            # Apply color to the first 8 columns for data rows only (r_idx > 1)
-            if c_idx <= 8 and r_idx > 1:
+            # Apply color to the first 10 columns for data rows only (r_idx > 1)
+            if c_idx <= 10 and r_idx > 1:
                 # Get the boolean value from the original `is_po_sku` Series
                 # The index for the series is the row index in the original df
                 original_row_index = (
