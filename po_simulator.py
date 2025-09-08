@@ -574,6 +574,8 @@ def main():
                 by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True
             )
 
+            result_df["RSA Notes"] = ""
+
             # Reorder columns for display
             excel_cols = [
                 "Distributor",
@@ -589,7 +591,8 @@ def main():
                 "Suggested PO Value",
                 "WOI (Stock + Suggestion)",
                 "Remaining Allocation (By Region)",
-                "is_po_sku"
+                "is_po_sku",
+                "RSA Notes"
             ]
 
             result_df = result_df.reindex(columns=excel_cols)
