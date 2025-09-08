@@ -504,6 +504,13 @@ def main():
                 result_df["avg_weekly_st_lm_qty"],
             )
 
+            # Calculate Current WOI
+            result_df["Current WOI"] = calculate_woi(
+                result_df["total_stock"],
+                0,
+                result_df["avg_weekly_st_lm_qty"],
+            )
+
             # Conditions for np.select
             conditions = [
                 # 1. New condition for additional suggested SKUs
@@ -583,6 +590,7 @@ def main():
                 "Product Name",
                 "Assortment",
                 "Supply Control",
+                "Current WOI",
                 "PO Qty",
                 "PO Value",
                 "WOI (Stock + PO Ori)",
@@ -615,6 +623,9 @@ def main():
             result_df["WOI (Stock + Suggestion)"] = result_df[
                 "WOI (Stock + Suggestion)"
             ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+            result_df["Current WOI"] = result_df[
+                "Current WOI"
+            ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
 
             # --- Download Button ---
             xlsx_data = to_excel_with_styling(result_df)
@@ -636,6 +647,7 @@ def main():
                 "Product Name",
                 "Assortment",
                 "Supply Control",
+                "Current WOI",
                 "PO Qty",
                 "PO Value",
                 "WOI (Stock + PO Ori)",
