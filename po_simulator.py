@@ -123,7 +123,8 @@ def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
         total_stock,
         buffer_plan_by_lm_qty_adj,
         avg_weekly_st_lm_qty,
-        buffer_plan_by_lm_val_adj
+        buffer_plan_by_lm_val_adj,
+        remaining_allocation_qty_region
     FROM `{table_id}`
     WHERE distributor = '{distributor_name}'
     AND (
@@ -369,6 +370,7 @@ def main():
                     "buffer_plan_by_lm_qty_adj",
                     "avg_weekly_st_lm_qty",
                     "buffer_plan_by_lm_val_adj",
+                    "remaining_allocation_qty_region",
                 ]
             ] = result_df[
                 [
@@ -378,6 +380,7 @@ def main():
                     "buffer_plan_by_lm_qty_adj",
                     "avg_weekly_st_lm_qty",
                     "buffer_plan_by_lm_val_adj",
+                    "remaining_allocation_qty_region",
                 ]
             ].fillna(
                 0
@@ -507,13 +510,24 @@ def main():
                 (result_df["is_po_sku"] == False),
                 # 2. Hardcoded Reject
                 result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
-                # 3. Reject if suggested PO is 0
+                # 3. Proceed (ST LM = 0) -> NPD or there's no ST for LM
+                (
+                    (result_df["avg_weekly_st_lm_qty"] == 0) &
+                    (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
+                    (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED"]))
+                ),
+                # 4. NPD with Allocation
+                (
+                    (result_df["remaining_allocation_qty_region"] > 0) &
+                    (result_df["PO Qty"] <= result_df["remaining_allocation_qty_region"])
+                ),
+                # 4. Reject if suggested PO is 0
                 (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                # 4. PO Qty > Suggested PO Qty (Over-ordering)
+                # 5. PO Qty > Suggested PO Qty (Over-ordering)
                 (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                # 5. PO Qty < Suggested PO Qty (Under-ordering)
+                # 6. PO Qty < Suggested PO Qty (Under-ordering)
                 (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                # 6. PO Qty = Suggested PO Qty (Exact Match)
+                # 7. PO Qty = Suggested PO Qty (Exact Match)
                 (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
             ]
 
@@ -521,6 +535,8 @@ def main():
             choices = [
                 "Additional Suggestion",
                 "Reject",
+                "Proceed",
+                "Proceed",
                 "Reject",
                 "Reject with suggestion",
                 "Proceed with suggestion",
@@ -547,6 +563,7 @@ def main():
                 "buffer_plan_by_lm_val_adj": "Suggested PO Value",
                 "WOI PO Original": "WOI (Stock + PO Ori)",
                 "WOI Suggest": "WOI (Stock + Suggestion)",
+                "remaining_allocation_qty_region": "Remaining Allocation (By Region)"
             }
 
             # Rename the columns in the DataFrame
@@ -571,6 +588,7 @@ def main():
                 "Suggested PO Qty",
                 "Suggested PO Value",
                 "WOI (Stock + Suggestion)",
+                "Remaining Allocation (By Region)",
                 "is_po_sku"
             ]
 
@@ -582,6 +600,9 @@ def main():
             )
             result_df["Suggested PO Value"] = result_df["Suggested PO Value"].apply(
                 lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
+            )
+            result_df["Remaining Allocation (By Region)"] = result_df["Remaining Allocation (By Region)"].apply(
+                lambda x: f"{x:,d}" if pd.notnull(x) else ""
             )
 
             # Format 'WOI' columns to 2 decimal places
@@ -619,6 +640,7 @@ def main():
                 "Suggested PO Qty",
                 "Suggested PO Value",
                 "WOI (Stock + Suggestion)",
+                "Remaining Allocation (By Region)",
             ]
 
             st.dataframe(result_df.reindex(columns=final_cols).reset_index(drop=True))
