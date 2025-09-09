@@ -590,6 +590,8 @@ def main():
                 "Product Name",
                 "Assortment",
                 "Supply Control",
+                "Avg Weekly Sales LM (Qty)",
+                "Total Stock Qty",
                 "Current WOI",
                 "PO Qty",
                 "PO Value",
@@ -600,7 +602,7 @@ def main():
                 "WOI (Stock + Suggestion)",
                 "Remaining Allocation (By Region)",
                 "is_po_sku",
-                "RSA Notes"
+                "RSA Notes",
             ]
 
             result_df = result_df.reindex(columns=excel_cols)
@@ -647,6 +649,8 @@ def main():
                 "Product Name",
                 "Assortment",
                 "Supply Control",
+                "Avg Weekly Sales LM (Qty)",
+                "Total Stock Qty",
                 "Current WOI",
                 "PO Qty",
                 "PO Value",
