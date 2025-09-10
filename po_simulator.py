@@ -482,7 +482,7 @@ def main():
                 "WOI (Stock + Suggestion)",
                 "Remaining Allocation (By Region)",
                 "is_po_sku",
-                "RSA Notes"
+                "RSA Notes",
             ]
 
             result_df = result_df.reindex(columns=excel_cols)
