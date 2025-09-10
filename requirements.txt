@@ -1,6 +1,10 @@
 streamlit
+streamlit-folium
+geopandas
 pandas
+folium
 google-cloud-bigquery
+google-auth
 rapidfuzz
 haversine
 openpyxl
