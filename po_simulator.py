@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from typing import List
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # --- BigQuery Imports ---
@@ -188,6 +188,16 @@ def to_excel_with_styling(df: pd.DataFrame) -> bytes:
         start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"
     )
 
+    # Define a style for the header row
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    header_alignment = Alignment(horizontal='left', vertical='center')
+
+    # Define a style for the 'Remark' column
+    proceed_font = Font(bold=True, color="54CE54")
+    reject_font = Font(bold=True, color="D73E3E")
+    suggest_font = Font(bold=True, color="F3C94C")
+
     # Store the `is_po_sku` Series and then drop the column from the DataFrame
     # so it does not appear in the final Excel file.
     is_po_sku_series = df["is_po_sku"]
@@ -196,18 +206,32 @@ def to_excel_with_styling(df: pd.DataFrame) -> bytes:
     # Write the DataFrame (without the flag column) to the worksheet
     rows = dataframe_to_rows(df_no_flag, index=False, header=True)
 
+    # Get the column names and their indices
+    headers = list(df_no_flag.columns)
+    # This is a mapping from column name to its 0-based index
+    col_map = {col: i for i, col in enumerate(headers)}
+
+    # Define the columns that need special number formatting
+    currency_cols = ["PO Value", "Suggested PO Value"]
+    integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
+    decimal_cols = ["WOI (Stock + PO Ori)", "WOI (Stock + Suggestion)", "Current WOI"]
+
     # Iterate over rows and apply styling based on the original Series
     for r_idx, row in enumerate(rows, 1):
         for c_idx, value in enumerate(row, 1):
             cell = ws.cell(row=r_idx, column=c_idx, value=value)
 
+            # Apply header styling
+            if r_idx == 1:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+
             # Apply color to the first 10 columns for data rows only (r_idx > 1)
-            if c_idx <= 10 and r_idx > 1:
+            if c_idx <= 11 and r_idx > 1:
                 # Get the boolean value from the original `is_po_sku` Series
                 # The index for the series is the row index in the original df
-                original_row_index = (
-                    r_idx - 2
-                )  # Subtract 2 because header is row 1 and data starts at 0
+                original_row_index = (r_idx - 2)  # Subtract 2 because header is row 1 and data starts at 0
                 is_po_row = is_po_sku_series.iloc[original_row_index]
 
                 # Set the fill based on the boolean flag
@@ -215,6 +239,27 @@ def to_excel_with_styling(df: pd.DataFrame) -> bytes:
                     cell.fill = po_fill
                 else:
                     cell.fill = suggestion_fill
+
+            # Apply number formatting based on column name for data rows
+            if r_idx > 1:
+                col_name = headers[c_idx - 1]
+
+                if col_name in currency_cols:
+                    cell.number_format = "#,##0.00"
+                elif col_name in integer_cols:
+                    cell.number_format = "#,##0"
+                elif col_name in decimal_cols:
+                    cell.number_format = "0.00"
+
+                # Apply font styling to the 'Remark' column based on value
+                if col_name == "Remark":
+                    remark_value = row[c_idx - 1]
+                    if "Proceed" in remark_value:
+                        cell.font = proceed_font
+                    elif "Reject" in remark_value:
+                        cell.font = reject_font
+                    elif "Additional" in remark_value:
+                        cell.font = suggest_font
 
     wb.save(output)
     output.seek(0)
@@ -487,18 +532,21 @@ def main():
 
             result_df = result_df.reindex(columns=excel_cols)
 
+            # --- Download Button ---
+            xlsx_data = to_excel_with_styling(result_df)
+
             # Format 'PO Value' as currency with comma separators
             result_df["PO Value"] = result_df["PO Value"].apply(
-                lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
+                lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
             )
             result_df["Suggested PO Value"] = result_df["Suggested PO Value"].apply(
-                lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
+                lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
             )
             result_df["Remaining Allocation (By Region)"] = result_df["Remaining Allocation (By Region)"].apply(
-                lambda x: f"{x:,d}" if pd.notnull(x) else ""
+                lambda x: f"{x:,d}" if pd.notnull(x) else 0
             )
             result_df["Avg Weekly Sales LM (Qty)"] = result_df["Avg Weekly Sales LM (Qty)"].apply(
-                lambda x: f"{round(x):,d}" if pd.notnull(x) else ""
+                lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
             )
 
             # Format 'WOI' columns to 2 decimal places
@@ -511,9 +559,6 @@ def main():
             result_df["Current WOI"] = result_df[
                 "Current WOI"
             ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-
-            # --- Download Button ---
-            xlsx_data = to_excel_with_styling(result_df)
 
             st.download_button(
                 label="📥 Download PO Simulator Excel",
