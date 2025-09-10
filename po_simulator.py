@@ -140,37 +140,6 @@ def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-# @st.cache_data(show_spinner="Fetching NPD PO tracking data...")
-# def get_npd_po_tracking_data_from_bq(
-#     distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
-#     """
-#     Fetches PO tracking data for NPD SKUs from the specified BigQuery table.
-#     """
-#     client = get_bq_client()
-#     table_id = f"{GCP_PROJECT_ID}.dms.gt_po_tracking_mtd_mv"
-
-#     sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
-
-#     query = f"""
-#     SELECT
-#         region,
-#         UPPER(distributor_name) AS distributor,
-#         sku,
-#         SUM(order_qty) as total_ordered_qty,
-#         SUM(nett_amount_incl_ppn) as total_ordered_value
-#     FROM `{table_id}`
-#     WHERE UPPER(distributor_name) = '{distributor_name}'
-#     AND sku IN ({sku_list_str})
-#     GROUP BY region, sku, UPPER(distributor_name)
-#     """
-#     try:
-#         df_tracking_data = client.query(query).to_dataframe()
-#         return df_tracking_data
-#     except Exception as e:
-#         st.error(f"Error fetching NPD tracking data from BigQuery: {e}")
-#         return pd.DataFrame()
-
-
 # --- Helper Functions ---
 def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Series) -> pd.Series:
     """
@@ -181,6 +150,28 @@ def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Seri
     # return (stock + po_qty) / avg_weekly_sales.replace(0, pd.NA).astype(float)
     # Use np.where to handle division by zero
     return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
+
+
+def apply_sku_rejection_rules(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Auto-rejects specific SKUs based on region.
+    - G2G-20901 & G2G-20904 are rejected for all regions except Sulawesi 1 & Sulawesi 2.
+    """
+    # Define the SKUs to be auto-rejected
+    rejected_skus = ["G2G-20901", "G2G-20904"]
+
+    # Define the regions where rejection rules do NOT apply
+    allowed_regions = ["sulawesi 1", "sulawesi 2"]
+
+    # Create the rejection condition
+    condition = (df["SKU"].isin(rejected_skus)) & (~df['region'].str.lower().isin(allowed_regions))
+
+    # Apply the rejection logic
+    df.loc[condition, "Remark"] = "Reject"
+
+    st.info("Rejection rules for specific SKUs applied.")
+    return df
+
 
 def to_excel_with_styling(df: pd.DataFrame) -> bytes:
     """
@@ -243,23 +234,6 @@ def main():
         'G2G-217', 'G2G-800', 'G2G-213', 'G2G-47', 'G2G-1440', 'G2G-1445', 'G2G-17',
         'G2G-1942', 'G2G-1943'
     ]
-
-    # Hardcoded NPD SKUs and their allocation data
-    # npd_allocation_data = {
-    #     'Region': [
-    #         'Bali Nusa Tenggara', 'Central Java', 'Central Sumatera', 'East Java',
-    #         'East Kalimantan', 'Jakarta (Csa)', 'Northern Sumatera',
-    #         'South Kalimantan', 'Southern Sumatera 1', 'Southern Sumatera 2',
-    #         'Sulawesi 1', 'Sulawesi 2', 'West Java (Sd)', 'West Kalimantan'
-    #     ],
-    #     'G2G-20900': [504, 671, 630, 611, 301, 119, 439, 533, 314, 444, 626, 211, 1229, 1108],
-    #     'G2G-20901': [2031, 2773, 2549, 2466, 1211, 472, 1792, 2118, 1270, 1766, 2630, 858, 4815, 5581],
-    #     'G2G-20902': [7783, 11007, 9831, 9469, 4640, 1772, 7000, 7966, 4878, 6649, 10652, 3336, 17746, 27255],
-    #     'G2G-20903': [7783, 11007, 9831, 9469, 4640, 1772, 7000, 7966, 4878, 6649, 10652, 3336, 17746, 27255],
-    #     'G2G-20904': [2031, 2773, 2549, 2466, 1211, 472, 1792, 2118, 1270, 1766, 2630, 858, 4815, 5581]
-    # }
-    # npd_allocation_df_full = pd.DataFrame(npd_allocation_data)
-    # npd_skus = [col for col in npd_allocation_df_full.columns if col != 'Region']
 
     st.header("1. Input Parameters")
 
@@ -386,102 +360,6 @@ def main():
                 0
             )
 
-            # --- Handle NPD SKUs and Allocation ---
-            # npd_tracking_df = get_npd_po_tracking_data_from_bq(
-            #     distributor_name, npd_skus
-            # )
-
-            # st.dataframe(npd_tracking_df.head(5))
-
-            # if npd_tracking_df.empty:
-            #     st.warning(
-            #         "No NPD tracking data found for this distributor. Continuing without NPD-specific logic."
-            #     )
-            #     selected_region = None
-            # else:
-            #     selected_region = npd_tracking_df["region"].iloc[0]
-
-            # if (
-            #     selected_region
-            #     and selected_region in npd_allocation_df_full["Region"].values
-            # ):
-            #     npd_allocations = (
-            #         npd_allocation_df_full[
-            #             npd_allocation_df_full["Region"] == selected_region
-            #         ]
-            #         .drop("Region", axis=1)
-            #         .iloc[0]
-            #     )
-
-            #     npd_tracking_df.rename(
-            #         columns={"sku": "Customer SKU Code"}, inplace=True
-            #     )
-
-            #     # Merge NPD tracking data with the main result_df
-            #     result_df = pd.merge(
-            #         result_df,
-            #         npd_tracking_df.drop(
-            #             columns=["region", "distributor"]
-            #         ),  # drop region and distributor from tracking df as they're redundant
-            #         on="Customer SKU Code",
-            #         how="left",
-            #     )
-            #     result_df[["total_ordered_qty", "total_ordered_value"]] = result_df[
-            #         ["total_ordered_qty", "total_ordered_value"]
-            #     ].fillna(0)
-
-            #     # Apply NPD logic to the result_df
-            #     for sku in npd_skus:
-            #         mask = result_df["Customer SKU Code"] == sku
-            #         if mask.any():
-
-            #             allocation_qty = npd_allocations.get(sku, 0)
-
-            #             row = result_df[mask]
-
-            #             # Use DPP from the uploaded PO if available, otherwise get a default value
-            #             dpp = (
-            #                 row["DPP"].iloc[0]
-            #                 if "DPP" in row.columns and not row["DPP"].isnull().iloc[0]
-            #                 else 0
-            #             )
-
-            #             # Calculate suggested values based on allocation and existing orders
-            #             current_ordered_qty = row["total_ordered_qty"].iloc[0]
-            #             current_ordered_value = row["total_ordered_value"].iloc[0]
-
-            #             po_qty_inputted = row["PO Qty"].iloc[0]
-
-            #             result_df.loc[mask, "buffer_plan_by_lm_qty_adj"] = max(
-            #                 0, allocation_qty - current_ordered_qty
-            #             )
-            #             result_df.loc[mask, "buffer_plan_by_lm_val_adj"] = max(
-            #                 0, (allocation_qty * dpp * 1.11) - current_ordered_value
-            #             )
-
-            #             is_original_po_sku = row["is_po_sku"].iloc[0]
-
-            #             if is_original_po_sku:
-            #                 total_qty_after_po = current_ordered_qty + po_qty_inputted
-            #                 if total_qty_after_po > allocation_qty:
-            #                     result_df.loc[mask, "Remark"] = (
-            #                         "Reject (NPD Allocation Exceeded)"
-            #                     )
-            #                 elif total_qty_after_po < allocation_qty:
-            #                     result_df.loc[mask, "Remark"] = (
-            #                         "Proceed with suggestion (NPD Under-ordered)"
-            #                     )
-            #                 else:
-            #                     result_df.loc[mask, "Remark"] = "Proceed (NPD)"
-            #             else:
-            #                 result_df.loc[mask, "Remark"] = "NPD Suggestion"
-
-            # # Drop unnecessary columns from the result_df before final calculations
-            # if "total_ordered_qty" in result_df.columns and "total_ordered_value" in result_df.columns:
-            #     result_df.drop(
-            #         columns=["total_ordered_qty", "total_ordered_value"], inplace=True
-            #     )
-
             # Filter to show only SKUs with PO Qty or a positive suggested qty
             result_df = result_df[
                 (result_df["PO Qty"] > 0) | (result_df["buffer_plan_by_lm_qty_adj"] > 0)
@@ -564,7 +442,7 @@ def main():
                 "supply_control_status_gt": "Supply Control",
                 "PO Qty": "PO Qty",
                 "PO Value": "PO Value",
-                "total_stock": "Total Stock Qty",
+                "total_stock": "Total Stock (Qty)",
                 "avg_weekly_st_lm_qty": "Avg Weekly Sales LM (Qty)",
                 "buffer_plan_by_lm_qty_adj": "Suggested PO Qty",
                 "buffer_plan_by_lm_val_adj": "Suggested PO Value",
@@ -575,6 +453,8 @@ def main():
 
             # Rename the columns in the DataFrame
             result_df.rename(columns=new_column_names, inplace=True)
+
+            result_df = apply_sku_rejection_rules(result_df)
 
             # Sort the DataFrame: user SKUs first, then suggested SKUs
             result_df.sort_values(
@@ -590,6 +470,8 @@ def main():
                 "Product Name",
                 "Assortment",
                 "Supply Control",
+                "Avg Weekly Sales LM (Qty)",
+                "Total Stock (Qty)",
                 "Current WOI",
                 "PO Qty",
                 "PO Value",
@@ -614,6 +496,9 @@ def main():
             )
             result_df["Remaining Allocation (By Region)"] = result_df["Remaining Allocation (By Region)"].apply(
                 lambda x: f"{x:,d}" if pd.notnull(x) else ""
+            )
+            result_df["Avg Weekly Sales LM (Qty)"] = result_df["Avg Weekly Sales LM (Qty)"].apply(
+                lambda x: f"{round(x):,d}" if pd.notnull(x) else ""
             )
 
             # Format 'WOI' columns to 2 decimal places
@@ -647,6 +532,8 @@ def main():
                 "Product Name",
                 "Assortment",
                 "Supply Control",
+                "Avg Weekly Sales LM (Qty)",
+                "Total Stock (Qty)",
                 "Current WOI",
                 "PO Qty",
                 "PO Value",
