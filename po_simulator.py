@@ -101,6 +101,35 @@ def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(show_spinner="Fetching NPD Allocation data from BigQuery...")
+def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
+    """
+    Fetches NPD Allocation data for a given list of SKUs from BigQuery.
+    """
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.gt_schema.npd_allocation"
+
+    # Create a string of the SKUs for the IN clause
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        calendar_date,
+        region,
+        sku,
+        allocation
+    FROM `{table_id}`
+    WHERE sku IN ({sku_list_str})
+    AND calendar_date = '2025-09-01'
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching NPD data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
 @st.cache_data(show_spinner="Fetching Stock Analysis data from BigQuery...")
 def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
     """
@@ -449,7 +478,7 @@ def main():
                 (
                     (result_df["avg_weekly_st_lm_qty"] == 0) &
                     (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
-                    (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED"]))
+                    (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
                 ),
                 # 4. NPD with Allocation
                 (
