@@ -152,22 +152,19 @@ def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Seri
     return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
 
 
-def apply_sku_rejection_rules(df: pd.DataFrame) -> pd.DataFrame:
+def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame) -> pd.DataFrame:
     """
     Auto-rejects specific SKUs based on region.
-    - G2G-20901 & G2G-20904 are rejected for all regions except Sulawesi 1 & Sulawesi 2.
     """
-    # Define the SKUs to be auto-rejected
-    rejected_skus = ["G2G-20901", "G2G-20904"]
 
     # Define the regions where rejection rules do NOT apply
     allowed_regions = ["sulawesi 1", "sulawesi 2"]
 
     # Create the rejection condition
-    condition = (df["SKU"].isin(rejected_skus)) & (~df['region'].str.lower().isin(allowed_regions))
+    condition = (df["SKU"].isin(sku_list)) & (~df['region'].str.lower().isin(allowed_regions))
 
     # Apply the rejection logic
-    df.loc[condition, "Remark"] = "Reject"
+    df.loc[condition, "Remark"] = "Reject (Stop by Steve)"
 
     st.info("Rejection rules for specific SKUs applied.")
     return df
@@ -279,6 +276,18 @@ def main():
         'G2G-217', 'G2G-800', 'G2G-213', 'G2G-47', 'G2G-1440', 'G2G-1445', 'G2G-17',
         'G2G-1942', 'G2G-1943'
     ]
+
+    # Additional rejected SKUs based on region rules
+    REJECTED_SKUS_REGION = ["G2G-20901", "G2G-20904"]
+
+    # Display Manual Rejection SKUs in an expander
+    st.header("Manual Rejection SKUs")
+    with st.expander("List of SKUs that are manually rejected by Steve"):
+        st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+
+    # Display Rejected SKUs by Region in a separate expander
+    with st.expander("List of Rejected SKUs by Region (Only allowed for Sulawesi 1 & 2)"):
+        st.dataframe(pd.DataFrame(REJECTED_SKUS_REGION, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
     st.header("1. Input Parameters")
 
@@ -464,7 +473,7 @@ def main():
             # Corresponding values
             choices = [
                 "Additional Suggestion",
-                "Reject",
+                "Reject (Stop by Steve)",
                 "Proceed",
                 "Proceed",
                 "Reject",
@@ -492,14 +501,14 @@ def main():
                 "buffer_plan_by_lm_qty_adj": "Suggested PO Qty",
                 "buffer_plan_by_lm_val_adj": "Suggested PO Value",
                 "WOI PO Original": "WOI (Stock + PO Ori)",
-                "WOI Suggest": "WOI (Stock + Suggestion)",
-                "remaining_allocation_qty_region": "Remaining Allocation (By Region)"
+                "WOI Suggest": "OH + IT + Suggested WOI (Projection Until EOM)",
+                "remaining_allocation_qty_region": "Remaining Allocation (By Region)",
             }
 
             # Rename the columns in the DataFrame
             result_df.rename(columns=new_column_names, inplace=True)
 
-            result_df = apply_sku_rejection_rules(result_df)
+            result_df = apply_sku_rejection_rules(REJECTED_SKUS_REGION, result_df)
 
             # Sort the DataFrame: user SKUs first, then suggested SKUs
             result_df.sort_values(
@@ -524,7 +533,7 @@ def main():
                 "Remark",
                 "Suggested PO Qty",
                 "Suggested PO Value",
-                "WOI (Stock + Suggestion)",
+                "OH + IT + Suggested WOI (Projection Until EOM)",
                 "Remaining Allocation (By Region)",
                 "is_po_sku",
                 "RSA Notes",
@@ -553,8 +562,8 @@ def main():
             result_df["WOI (Stock + PO Ori)"] = result_df[
                 "WOI (Stock + PO Ori)"
             ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-            result_df["WOI (Stock + Suggestion)"] = result_df[
-                "WOI (Stock + Suggestion)"
+            result_df["OH + IT + Suggested WOI (Projection Until EOM)"] = result_df[
+                "OH + IT + Suggested WOI (Projection Until EOM)"
             ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
             result_df["Current WOI"] = result_df[
                 "Current WOI"
@@ -586,7 +595,7 @@ def main():
                 "Remark",
                 "Suggested PO Qty",
                 "Suggested PO Value",
-                "WOI (Stock + Suggestion)",
+                "OH + IT + Suggested WOI (Projection Until EOM)",
                 "Remaining Allocation (By Region)",
             ]
 
