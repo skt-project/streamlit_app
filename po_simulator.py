@@ -175,8 +175,6 @@ def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Seri
     Calculates Weeks of Inventory (WOI) based on the formula:
     (Stock + PO Quantity) / Average Weekly Sales LM
     """
-    # Handle division by zero
-    # return (stock + po_qty) / avg_weekly_sales.replace(0, pd.NA).astype(float)
     # Use np.where to handle division by zero
     return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
 
@@ -199,9 +197,10 @@ def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def to_excel_with_styling(df: pd.DataFrame) -> bytes:
+def to_excel_with_styling(df: pd.DataFrame, npd_sku_list: List[str] = None) -> bytes:
     """
     Converts a pandas DataFrame to an Excel file with special styling for the first 7 columns.
+    Applies specific color to 'Remaining Allocation (By Region)' column if SKU is in npd_sku_list.
     """
     output = io.BytesIO()
     wb = Workbook()
@@ -213,6 +212,7 @@ def to_excel_with_styling(df: pd.DataFrame) -> bytes:
     suggestion_fill = PatternFill(
         start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"
     )
+    npd_fill = PatternFill(start_color="B1DBF0", end_color="B1DBF0", fill_type="solid")
 
     # Define a style for the header row
     header_font = Font(bold=True)
@@ -286,6 +286,14 @@ def to_excel_with_styling(df: pd.DataFrame) -> bytes:
                         cell.font = reject_font
                     elif "Additional" in remark_value:
                         cell.font = suggest_font
+
+                # Apply specific fill to 'Remaining Allocation (By Region)' if SKU is in npd_sku_list
+                if col_name == "Remaining Allocation (By Region)" and npd_sku_list is not None:
+                    sku_col_index = col_map.get("SKU")
+                    if sku_col_index is not None:
+                        sku_value = row[sku_col_index]
+                        if sku_value in npd_sku_list:
+                            cell.fill = npd_fill
 
     wb.save(output)
     output.seek(0)
@@ -398,18 +406,7 @@ def main():
             # Use a left merge to keep all SKUs from the uploaded file
             result_df = pd.merge(po_df, sku_data_df, on="Customer SKU Code", how="outer")
 
-            # Fallback for missing Product Name and Assortment
-            # missing_sku_list = result_df[result_df["product_name"].isnull()]["Customer SKU Code"].tolist()
-            # if missing_sku_list:
-            #     fallback_sku_data = get_sku_data(missing_sku_list)
-            #     if not fallback_sku_data.empty:
-            #         fallback_sku_data.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
-            #         result_df.set_index("Customer SKU Code", inplace=True)
-            #         fallback_sku_data.set_index("Customer SKU Code", inplace=True)
-
-            #         # Update the missing values with data from the fallback table
-            #         result_df.update(fallback_sku_data)
-            #         result_df.reset_index(inplace=True)
+            result_sku_list = result_df["Customer SKU Code"].unique().tolist()
 
             # Fill NaN values in 'is_po_sku' with False
             result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
@@ -535,6 +532,10 @@ def main():
 
             result_df = apply_sku_rejection_rules(REJECTED_SKUS_REGION, result_df)
 
+            # Fetch NPD SKU list for conditional coloring
+            npd_df = get_npd_data(result_sku_list)
+            npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
+
             # Sort the DataFrame: user SKUs first, then suggested SKUs
             result_df.sort_values(
                 by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True
@@ -567,7 +568,7 @@ def main():
             result_df = result_df.reindex(columns=excel_cols)
 
             # --- Download Button ---
-            xlsx_data = to_excel_with_styling(result_df)
+            xlsx_data = to_excel_with_styling(result_df, npd_sku_list)
 
             # Format 'PO Value' as currency with comma separators
             result_df["PO Value"] = result_df["PO Value"].apply(
