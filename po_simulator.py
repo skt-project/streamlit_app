@@ -178,16 +178,18 @@ def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Seri
     return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
 
 
-def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame) -> pd.DataFrame:
+def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame, regions: List[str], is_in: bool) -> pd.DataFrame:
     """
-    Auto-rejects specific SKUs based on region.
+    Auto-rejects specific SKUs based on a provided list and region rules.
     """
-
-    # Define the regions where rejection rules do NOT apply
-    allowed_regions = ["sulawesi 1", "sulawesi 2"]
-
     # Create the rejection condition
-    condition = (df["SKU"].isin(sku_list)) & (~df['region'].str.lower().isin(allowed_regions))
+    # If is_in = False, then only allow for the regions in the list
+    if not is_in:
+        # Rejects if SKU is in the sku_list AND region is NOT in the regions list
+        condition = (df["SKU"].isin(sku_list)) & (~df["region"].str.lower().isin(regions))
+    else:
+        # Rejects if SKU is in the sku_list AND region is in the regions list
+        condition = (df["SKU"].isin(sku_list)) & (df["region"].str.lower().isin(regions))
 
     # Apply the rejection logic
     df.loc[condition, "Remark"] = "Reject (Stop by Steve)"
@@ -311,10 +313,18 @@ def main():
 
     # Hardcoded Reject List
     MANUAL_REJECT_SKUS = [
+        "G2G-2111",
+        "G2G-2112",
+        "G2G-2113",
+        "G2G-2114"
     ]
 
     # Additional rejected SKUs based on region rules
-    REJECTED_SKUS_REGION = ["G2G-20901", "G2G-20904"]
+    REJECTED_SKUS_1 = ["G2G-20901", "G2G-20904"]
+    REGION_LIST_1 = ['Sulawesi 2']
+
+    REJECTED_SKUS_2 = ["G2G-20902", 'G2G-20903']
+    REGION_LIST_2 = ['Sulawesi 1', 'Southern Sumatera 1', 'Central Java', 'West Kalimantan']
 
     with tab1:
         st.header("How to Use the PO Simulator")
@@ -355,8 +365,8 @@ def main():
         #     st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
         # Display Rejected SKUs by Region in a separate expander
-        with st.expander("🌏 List of Rejected SKUs by Region (Only allowed for Sulawesi 1 & 2)"):
-            st.dataframe(pd.DataFrame(REJECTED_SKUS_REGION, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+        with st.expander("🌏 List of Rejected SKUs by Region (Only allowed for Sulawesi 2)"):
+            st.dataframe(pd.DataFrame(REJECTED_SKUS_1, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
     with tab2:
         st.header("1. Input Parameters")
@@ -456,7 +466,6 @@ def main():
 
                 # Calculate the PO Value using price_for_distri
                 po_df["PO Value"] = po_df["SIP"] * po_df["PO Qty"]
-
 
                 # Merge uploaded PO data with BigQuery SKU data
                 # Use a left merge to keep all SKUs from the uploaded file
@@ -589,7 +598,8 @@ def main():
                 # Rename the columns in the DataFrame
                 result_df.rename(columns=new_column_names, inplace=True)
 
-                result_df = apply_sku_rejection_rules(REJECTED_SKUS_REGION, result_df)
+                result_df = apply_sku_rejection_rules(REJECTED_SKUS_1, result_df, REGION_LIST_1, False)
+                result_df = apply_sku_rejection_rules(REJECTED_SKUS_2, result_df, REGION_LIST_2, True)
 
                 # Fetch NPD SKU list for conditional coloring
                 npd_df = get_npd_data(result_sku_list)
