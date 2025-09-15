@@ -88,8 +88,7 @@ def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
     query = f"""
     SELECT
         sku,
-        product_name,
-        assortment
+        price_for_distri
     FROM `{table_id}`
     WHERE sku IN ({sku_list_str})
     """
@@ -301,10 +300,14 @@ def to_excel_with_styling(df: pd.DataFrame, npd_sku_list: List[str] = None) -> b
 
 def main():
     st.set_page_config(page_title="PO Simulator", page_icon="🛒", layout="wide")
+
     st.title("🛒 PO Simulator")
     st.markdown(
         "Use this app to simulate Purchase Order data and decide on whether to Reject / Approve the PO."
     )
+
+    # Create tabs
+    tab1, tab2 = st.tabs(["📖 Guide & Rules", "🔍 Simulation & Results"])
 
     # Hardcoded Reject List
     MANUAL_REJECT_SKUS = [
@@ -313,325 +316,382 @@ def main():
     # Additional rejected SKUs based on region rules
     REJECTED_SKUS_REGION = ["G2G-20901", "G2G-20904"]
 
-    # Display Manual Rejection SKUs in an expander
-    st.header("Manual Rejection SKUs")
-    with st.expander("List of SKUs that are manually rejected by Steve"):
-        st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+    with tab1:
+        st.header("How to Use the PO Simulator")
+        with st.expander("📋 Step-by-Step Guide"):
+            st.markdown("""
+            1. **Select Distributor**: Choose the distributor name from the dropdown to fetch relevant data.
+            2. **Upload PO Data**: Upload an Excel or CSV file containing the required columns: 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'DPP'. The file should start from the 8th row.
+            3. **Review Rejection Lists**: Check the manual rejection SKUs and region-based rejections if applicable.
+            4. **Simulate and Analyze**: The app will fetch stock and sales data from BigQuery, perform calculations like Weeks of Inventory (WOI), and apply approval/rejection rules.
+            5. **View Results**: Review the simulated data in the table, including remarks on whether to proceed, reject, or suggest adjustments.
+            6. **Download Excel**: Click the download button above the results preview table to get the results in a styled Excel file.
+            """)
 
-    # Display Rejected SKUs by Region in a separate expander
-    with st.expander("List of Rejected SKUs by Region (Only allowed for Sulawesi 1 & 2)"):
-        st.dataframe(pd.DataFrame(REJECTED_SKUS_REGION, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+        # Display Proceed / Reject Rules Explanation
+        st.header("Proceed / Reject Rules per SKU")
+        with st.expander("⚖️ Proceed / Reject Rules Explanation"):
+            st.markdown("""
+            The following rules are applied in order to determine the remark for each SKU. The first matching rule determines the outcome.
 
-    st.header("1. Input Parameters")
+            1.  **Reject**: The SKU is rejected if any of these conditions are met:
+                * It is on the **regional rejection list** (Stop by Steve), unless the region is allowed to order.
+                * It is on the **manual rejection list** (Stop by Steve).
+                * The **Current WOI** is too high (Exceeded the WOI Standard).
+                * The PO quantity is **greater than** the suggested PO quantity (over-ordering) -> **Reject with Suggestion**.
 
-    # Fetch data for dropdowns
-    distributors = get_distributor_data()
-    distributor_name = st.selectbox("Distributor Name", options=distributors)
+            2.  **Proceed**: The SKU is approved if any of these conditions are met:
+                * The PO quantity is **less than** the suggested PO quantity (under-ordering) -> **Proceed with Suggestion**.
+                * The PO quantity **exactly matches** the suggested PO quantity.
+                * It's a new product (NPD) with remaining region allocation **greater than 0**, and the PO quantity is **less than or equal to** the remaining allocation by region.
+                * It has no historical trend data, and the supply control status is **not** "STOP PO," "DISCONTINUED," or "OOS."
 
-    st.header("2. Upload PO Data")
-    uploaded_file = st.file_uploader(
-        "Upload a PO file (.xlsx/.csv) containing: 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'DPP', and 'TOTAL PRICE'.",
-        type=["xlsx", "xls", "csv"],
-    )
+            3.  **Additional Suggestion**: The SKU is marked as an "Additional Suggestion" if it was not on the original PO but was **suggested by the system**.
+            """)
 
-    if uploaded_file:
-        try:
-            required_cols = ["PRODUCT CODE", "DESCRIPTION", "QTY", "DPP"]
+        # Display Manual Rejection SKUs in an expander
+        st.header("Manual Rejection SKUs")
+        # with st.expander("🚫 List of SKUs that are manually rejected by Steve"):
+        #     st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
-            # Read the uploaded file (Start from 8th row)
-            if uploaded_file.name.endswith(".xlsx"):
-                po_df = pd.read_excel(uploaded_file, header=7, engine="openpyxl")
-            else:
-                po_df = pd.read_csv(uploaded_file, header=7)
-            st.success("File uploaded successfully!")
+        # Display Rejected SKUs by Region in a separate expander
+        with st.expander("🌏 List of Rejected SKUs by Region (Only allowed for Sulawesi 1 & 2)"):
+            st.dataframe(pd.DataFrame(REJECTED_SKUS_REGION, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
-            # Drop columns that are all empty or have "Unnamed" in their header
-            po_df.dropna(axis=1, how='all', inplace=True)
-            po_df.drop(columns=[col for col in po_df.columns if 'Unnamed' in str(col)], inplace=True)
+    with tab2:
+        st.header("1. Input Parameters")
 
-            # Ensure required columns are present in the uploaded file
-            if not all(col in po_df.columns for col in required_cols):
-                st.error("The uploaded file is missing one or more required columns.")
-                st.write("Please check for these columns:", required_cols)
-                return
+        # Fetch data for dropdowns
+        distributors = get_distributor_data()
+        distributor_name = st.selectbox("Distributor Name", options=distributors)
 
-            # Clean and filter the data
-            # Ensure columns are of the correct type for calculations
-            po_df["QTY"] = pd.to_numeric(po_df["QTY"], errors="coerce")
-            po_df["DPP"] = pd.to_numeric(po_df["DPP"], errors="coerce")
-            po_df.dropna(subset=["QTY", "DPP"], inplace=True)
+        st.header("2. Upload PO Data")
+        uploaded_file = st.file_uploader(
+            "Upload a PO file (.xlsx/.csv) containing: 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'DPP'.",
+            type=["xlsx", "xls", "csv"],
+        )
 
-            st.write("Preview of uploaded PO data:")
-            st.dataframe(po_df.head())
+        if uploaded_file:
+            try:
+                required_cols = ["PRODUCT CODE", "DESCRIPTION", "QTY", "DPP"]
 
-            # Filter out SKUs with QTY of 0 or empty
-            po_df = po_df[po_df["QTY"] > 0]
-            po_df.dropna(subset=["PRODUCT CODE", "QTY", "DPP"], inplace=True)
+                # Read the uploaded file (Start from 8th row)
+                if uploaded_file.name.endswith(".xlsx"):
+                    po_df = pd.read_excel(uploaded_file, header=7, engine="openpyxl")
+                else:
+                    po_df = pd.read_csv(uploaded_file, header=7)
+                st.success("File uploaded successfully!")
 
-            # Add a flag to identify original PO SKUs
-            po_df["is_po_sku"] = True
+                # Drop columns that are all empty or have "Unnamed" in their header
+                po_df.dropna(axis=1, how='all', inplace=True)
+                po_df.drop(columns=[col for col in po_df.columns if 'Unnamed' in str(col)], inplace=True)
 
-            # Calculate the PO Value as requested: DPP * 1.11 (+ tax 11%) * QTY
-            po_df["PO Value"] = po_df["DPP"] * 1.11 * po_df["QTY"]
+                # Ensure required columns are present in the uploaded file
+                if not all(col in po_df.columns for col in required_cols):
+                    st.error("The uploaded file is missing one or more required columns.")
+                    st.write("Please check for these columns:", required_cols)
+                    return
 
-            # Rename columns to match the rest of the script's expectations
-            po_df.rename(
-                columns={
-                    "PRODUCT CODE": "Customer SKU Code",
-                    "QTY": "PO Qty",
-                },
-                inplace=True,
-            )
+                # Clean and filter the data
+                # Ensure columns are of the correct type for calculations
+                po_df["QTY"] = pd.to_numeric(po_df["QTY"], errors="coerce")
+                po_df["DPP"] = pd.to_numeric(po_df["DPP"], errors="coerce")
+                po_df.dropna(subset=["QTY", "DPP"], inplace=True)
 
-            # Keep only the required columns for the merge
-            po_df = po_df[["Customer SKU Code", "PO Qty", "PO Value", "is_po_sku"]]
+                st.write("Preview of uploaded PO data:")
+                st.dataframe(po_df.head())
 
-            # --- Fetch missing data from BigQuery ---
-            sku_list = po_df["Customer SKU Code"].unique().tolist()
-            sku_data_df = get_stock_data(distributor_name, sku_list)
+                # Filter out SKUs with QTY of 0 or empty
+                po_df = po_df[po_df["QTY"] > 0]
+                po_df.dropna(subset=["PRODUCT CODE", "QTY", "DPP"], inplace=True)
 
-            if sku_data_df.empty:
-                st.warning(
-                    "Could not find stock and sales data for the uploaded SKUs in BigQuery. Please check the SKU codes."
+                # Add a flag to identify original PO SKUs
+                po_df["is_po_sku"] = True
+
+                # Rename columns to match the rest of the script's expectations
+                po_df.rename(
+                    columns={
+                        "PRODUCT CODE": "Customer SKU Code",
+                        "QTY": "PO Qty",
+                    },
+                    inplace=True,
                 )
-                return
 
-            if "sku" in sku_data_df.columns:
-                sku_data_df.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
+                # Keep only the required columns for the merge
+                po_df = po_df[["Customer SKU Code", "PO Qty", "is_po_sku"]]
 
-            # --- Data Processing and Calculation ---
-            st.header("3. PO Simulation and Download Result")
+                # --- Fetch missing data from BigQuery ---
+                sku_list = po_df["Customer SKU Code"].unique().tolist()
+                # Fetch SKU data for price
+                sku_df = get_sku_data(sku_list)
+                # Fetch stock and other data
+                sku_data_df = get_stock_data(distributor_name, sku_list)
 
-            # Merge uploaded PO data with BigQuery SKU data
-            # Use a left merge to keep all SKUs from the uploaded file
-            result_df = pd.merge(po_df, sku_data_df, on="Customer SKU Code", how="outer")
+                sku_df.rename(
+                    columns={
+                        "sku": "Customer SKU Code",
+                        "price_for_distri": "SIP",
+                    },
+                    inplace=True,
+                )
 
-            result_sku_list = result_df["Customer SKU Code"].unique().tolist()
+                if sku_data_df.empty:
+                    st.warning(
+                        "Could not find stock and sales data for the uploaded SKUs in BigQuery. Please check the SKU codes."
+                    )
+                    return
 
-            # Fill NaN values in 'is_po_sku' with False
-            result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
+                if "sku" in sku_data_df.columns:
+                    sku_data_df.rename(columns={"sku": "Customer SKU Code"}, inplace=True)
 
-            # Fill NaN values with 0 for calculations if data was not found for some SKUs
-            result_df[
-                [
+                # --- Data Processing and Calculation ---
+                st.header("3. PO Simulation and Download Result")
+
+                progress = st.progress(0)
+                progress.progress(0.1, "Starting data processing...")
+
+                # Merge uploaded PO data with SKU price data
+                po_df = pd.merge(po_df, sku_df, on="Customer SKU Code", how="left")
+                po_df["SIP"] = pd.to_numeric(po_df["SIP"], errors="coerce").fillna(0)
+
+                # Calculate the PO Value using price_for_distri
+                po_df["PO Value"] = po_df["SIP"] * po_df["PO Qty"]
+
+
+                # Merge uploaded PO data with BigQuery SKU data
+                # Use a left merge to keep all SKUs from the uploaded file
+                result_df = pd.merge(po_df, sku_data_df, on="Customer SKU Code", how="outer")
+                progress.progress(0.3, "Data merged successfully")
+
+                result_sku_list = result_df["Customer SKU Code"].unique().tolist()
+
+                # Fill NaN values in 'is_po_sku' with False
+                result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
+
+                # Fill NaN values with 0 for calculations if data was not found for some SKUs
+                result_df[
+                    [
+                        "PO Qty",
+                        "PO Value",
+                        "total_stock",
+                        "buffer_plan_by_lm_qty_adj",
+                        "avg_weekly_st_lm_qty",
+                        "buffer_plan_by_lm_val_adj",
+                        "remaining_allocation_qty_region",
+                    ]
+                ] = result_df[
+                    [
+                        "PO Qty",
+                        "PO Value",
+                        "total_stock",
+                        "buffer_plan_by_lm_qty_adj",
+                        "avg_weekly_st_lm_qty",
+                        "buffer_plan_by_lm_val_adj",
+                        "remaining_allocation_qty_region",
+                    ]
+                ].fillna(
+                    0
+                )
+
+                # Filter to show only SKUs with PO Qty or a positive suggested qty
+                result_df = result_df[
+                    (result_df["PO Qty"] > 0) | (result_df["buffer_plan_by_lm_qty_adj"] > 0)
+                ]
+
+                # Add distributor_name column
+                result_df["distributor_name"] = distributor_name
+
+                # Calculate WOI Original
+                result_df["WOI PO Original"] = calculate_woi(
+                    result_df["total_stock"],
+                    result_df["PO Qty"],
+                    result_df["avg_weekly_st_lm_qty"],
+                )
+
+                # Calculate WOI Suggest
+                result_df["WOI Suggest"] = calculate_woi(
+                    result_df["total_stock"],
+                    result_df["buffer_plan_by_lm_qty_adj"],
+                    result_df["avg_weekly_st_lm_qty"],
+                )
+
+                # Calculate Current WOI
+                result_df["Current WOI"] = calculate_woi(
+                    result_df["total_stock"],
+                    0,
+                    result_df["avg_weekly_st_lm_qty"],
+                )
+                progress.progress(0.6, "Calculations completed")
+
+                # Conditions for np.select
+                conditions = [
+                    # 1. New condition for additional suggested SKUs
+                    (result_df["is_po_sku"] == False),
+                    # 2. Hardcoded Reject
+                    result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
+                    # 3. Proceed (ST LM = 0) -> NPD or there's no ST for LM
+                    (
+                        (result_df["avg_weekly_st_lm_qty"] == 0) &
+                        (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
+                        (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
+                    ),
+                    # 4. NPD with Allocation
+                    (
+                        (result_df["remaining_allocation_qty_region"] > 0) &
+                        (result_df["PO Qty"] <= result_df["remaining_allocation_qty_region"])
+                    ),
+                    # 4. Reject if suggested PO is 0
+                    (result_df["buffer_plan_by_lm_qty_adj"] == 0),
+                    # 5. PO Qty > Suggested PO Qty (Over-ordering)
+                    (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
+                    # 6. PO Qty < Suggested PO Qty (Under-ordering)
+                    (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
+                    # 7. PO Qty = Suggested PO Qty (Exact Match)
+                    (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
+                ]
+
+                # Corresponding values
+                choices = [
+                    "Additional Suggestion",
+                    "Reject (Stop by Steve)",
+                    "Proceed",
+                    "Proceed",
+                    "Reject",
+                    "Reject with suggestion",
+                    "Proceed with suggestion",
+                    "Proceed",
+                ]
+
+                # Apply the conditions to create the 'Remark' column
+                # The last choice "Proceed" catches the case PO Qty = Suggested PO Qty
+                result_df["Remark"] = np.select(
+                    conditions, choices, default="N/A (Missing Data)"
+                )
+                progress.progress(0.9, "Rules applied")
+
+                new_column_names = {
+                    "distributor_name": "Distributor",
+                    "Customer SKU Code": "SKU",
+                    "product_name": "Product Name",
+                    "assortment": "Assortment",
+                    "supply_control_status_gt": "Supply Control",
+                    "PO Qty": "PO Qty",
+                    "PO Value": "PO Value",
+                    "total_stock": "Total Stock (Qty)",
+                    "avg_weekly_st_lm_qty": "Avg Weekly Sales LM (Qty)",
+                    "buffer_plan_by_lm_qty_adj": "Suggested PO Qty",
+                    "buffer_plan_by_lm_val_adj": "Suggested PO Value",
+                    "WOI PO Original": "WOI (Stock + PO Ori)",
+                    "WOI Suggest": "OH + IT + Suggested WOI (Projection Until EOM)",
+                    "remaining_allocation_qty_region": "Remaining Allocation (By Region)",
+                }
+
+                # Rename the columns in the DataFrame
+                result_df.rename(columns=new_column_names, inplace=True)
+
+                result_df = apply_sku_rejection_rules(REJECTED_SKUS_REGION, result_df)
+
+                # Fetch NPD SKU list for conditional coloring
+                npd_df = get_npd_data(result_sku_list)
+                npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
+
+                # Sort the DataFrame: user SKUs first, then suggested SKUs
+                result_df.sort_values(
+                    by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True
+                )
+
+                result_df["RSA Notes"] = ""
+
+                # Reorder columns for display
+                excel_cols = [
+                    "Distributor",
+                    "SKU",
+                    "Product Name",
+                    "Assortment",
+                    "Supply Control",
+                    "Avg Weekly Sales LM (Qty)",
+                    "Total Stock (Qty)",
+                    "Current WOI",
                     "PO Qty",
                     "PO Value",
-                    "total_stock",
-                    "buffer_plan_by_lm_qty_adj",
-                    "avg_weekly_st_lm_qty",
-                    "buffer_plan_by_lm_val_adj",
-                    "remaining_allocation_qty_region",
+                    "WOI (Stock + PO Ori)",
+                    "Remark",
+                    "Suggested PO Qty",
+                    "Suggested PO Value",
+                    "OH + IT + Suggested WOI (Projection Until EOM)",
+                    "Remaining Allocation (By Region)",
+                    "is_po_sku",
+                    "RSA Notes",
                 ]
-            ] = result_df[
-                [
+
+                result_df = result_df.reindex(columns=excel_cols)
+
+                # --- Download Button ---
+                xlsx_data = to_excel_with_styling(result_df, npd_sku_list)
+
+                # Format 'PO Value' as currency with comma separators
+                result_df["PO Value"] = result_df["PO Value"].apply(
+                    lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
+                )
+                result_df["Suggested PO Value"] = result_df["Suggested PO Value"].apply(
+                    lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
+                )
+                result_df["Remaining Allocation (By Region)"] = result_df["Remaining Allocation (By Region)"].apply(
+                    lambda x: f"{x:,d}" if pd.notnull(x) else 0
+                )
+                result_df["Avg Weekly Sales LM (Qty)"] = result_df["Avg Weekly Sales LM (Qty)"].apply(
+                    lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
+                )
+
+                # Format 'WOI' columns to 2 decimal places
+                result_df["WOI (Stock + PO Ori)"] = result_df[
+                    "WOI (Stock + PO Ori)"
+                ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+                result_df["OH + IT + Suggested WOI (Projection Until EOM)"] = result_df[
+                    "OH + IT + Suggested WOI (Projection Until EOM)"
+                ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+                result_df["Current WOI"] = result_df[
+                    "Current WOI"
+                ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+                progress.progress(1.0, "Processing complete")
+
+                st.download_button(
+                    label="📥 Download PO Simulator Excel",
+                    data=xlsx_data,
+                    file_name="po_simulator_result.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+                # --- Display Results ---
+                st.subheader("Simulated PO Data")
+
+                # Reorder columns for display
+                final_cols = [
+                    "Distributor",
+                    "SKU",
+                    "Product Name",
+                    "Assortment",
+                    "Supply Control",
+                    "Avg Weekly Sales LM (Qty)",
+                    "Total Stock (Qty)",
+                    "Current WOI",
                     "PO Qty",
                     "PO Value",
-                    "total_stock",
-                    "buffer_plan_by_lm_qty_adj",
-                    "avg_weekly_st_lm_qty",
-                    "buffer_plan_by_lm_val_adj",
-                    "remaining_allocation_qty_region",
+                    "WOI (Stock + PO Ori)",
+                    "Remark",
+                    "Suggested PO Qty",
+                    "Suggested PO Value",
+                    "OH + IT + Suggested WOI (Projection Until EOM)",
+                    "Remaining Allocation (By Region)",
                 ]
-            ].fillna(
-                0
-            )
 
-            # Filter to show only SKUs with PO Qty or a positive suggested qty
-            result_df = result_df[
-                (result_df["PO Qty"] > 0) | (result_df["buffer_plan_by_lm_qty_adj"] > 0)
-            ]
+                st.dataframe(result_df.reindex(columns=final_cols).reset_index(drop=True))
 
-            # Add distributor_name column
-            result_df["distributor_name"] = distributor_name
-
-            # Calculate WOI Original
-            result_df["WOI PO Original"] = calculate_woi(
-                result_df["total_stock"],
-                result_df["PO Qty"],
-                result_df["avg_weekly_st_lm_qty"],
-            )
-
-            # Calculate WOI Suggest
-            result_df["WOI Suggest"] = calculate_woi(
-                result_df["total_stock"],
-                result_df["buffer_plan_by_lm_qty_adj"],
-                result_df["avg_weekly_st_lm_qty"],
-            )
-
-            # Calculate Current WOI
-            result_df["Current WOI"] = calculate_woi(
-                result_df["total_stock"],
-                0,
-                result_df["avg_weekly_st_lm_qty"],
-            )
-
-            # Conditions for np.select
-            conditions = [
-                # 1. New condition for additional suggested SKUs
-                (result_df["is_po_sku"] == False),
-                # 2. Hardcoded Reject
-                result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
-                # 3. Proceed (ST LM = 0) -> NPD or there's no ST for LM
-                (
-                    (result_df["avg_weekly_st_lm_qty"] == 0) &
-                    (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
-                    (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
-                ),
-                # 4. NPD with Allocation
-                (
-                    (result_df["remaining_allocation_qty_region"] > 0) &
-                    (result_df["PO Qty"] <= result_df["remaining_allocation_qty_region"])
-                ),
-                # 4. Reject if suggested PO is 0
-                (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                # 5. PO Qty > Suggested PO Qty (Over-ordering)
-                (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                # 6. PO Qty < Suggested PO Qty (Under-ordering)
-                (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                # 7. PO Qty = Suggested PO Qty (Exact Match)
-                (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
-            ]
-
-            # Corresponding values
-            choices = [
-                "Additional Suggestion",
-                "Reject (Stop by Steve)",
-                "Proceed",
-                "Proceed",
-                "Reject",
-                "Reject with suggestion",
-                "Proceed with suggestion",
-                "Proceed",
-            ]
-
-            # Apply the conditions to create the 'Remark' column
-            # The last choice "Proceed" catches the case PO Qty = Suggested PO Qty
-            result_df["Remark"] = np.select(
-                conditions, choices, default="N/A (Missing Data)"
-            )
-
-            new_column_names = {
-                "distributor_name": "Distributor",
-                "Customer SKU Code": "SKU",
-                "product_name": "Product Name",
-                "assortment": "Assortment",
-                "supply_control_status_gt": "Supply Control",
-                "PO Qty": "PO Qty",
-                "PO Value": "PO Value",
-                "total_stock": "Total Stock (Qty)",
-                "avg_weekly_st_lm_qty": "Avg Weekly Sales LM (Qty)",
-                "buffer_plan_by_lm_qty_adj": "Suggested PO Qty",
-                "buffer_plan_by_lm_val_adj": "Suggested PO Value",
-                "WOI PO Original": "WOI (Stock + PO Ori)",
-                "WOI Suggest": "OH + IT + Suggested WOI (Projection Until EOM)",
-                "remaining_allocation_qty_region": "Remaining Allocation (By Region)",
-            }
-
-            # Rename the columns in the DataFrame
-            result_df.rename(columns=new_column_names, inplace=True)
-
-            result_df = apply_sku_rejection_rules(REJECTED_SKUS_REGION, result_df)
-
-            # Fetch NPD SKU list for conditional coloring
-            npd_df = get_npd_data(result_sku_list)
-            npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
-
-            # Sort the DataFrame: user SKUs first, then suggested SKUs
-            result_df.sort_values(
-                by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True
-            )
-
-            result_df["RSA Notes"] = ""
-
-            # Reorder columns for display
-            excel_cols = [
-                "Distributor",
-                "SKU",
-                "Product Name",
-                "Assortment",
-                "Supply Control",
-                "Avg Weekly Sales LM (Qty)",
-                "Total Stock (Qty)",
-                "Current WOI",
-                "PO Qty",
-                "PO Value",
-                "WOI (Stock + PO Ori)",
-                "Remark",
-                "Suggested PO Qty",
-                "Suggested PO Value",
-                "OH + IT + Suggested WOI (Projection Until EOM)",
-                "Remaining Allocation (By Region)",
-                "is_po_sku",
-                "RSA Notes",
-            ]
-
-            result_df = result_df.reindex(columns=excel_cols)
-
-            # --- Download Button ---
-            xlsx_data = to_excel_with_styling(result_df, npd_sku_list)
-
-            # Format 'PO Value' as currency with comma separators
-            result_df["PO Value"] = result_df["PO Value"].apply(
-                lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
-            )
-            result_df["Suggested PO Value"] = result_df["Suggested PO Value"].apply(
-                lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
-            )
-            result_df["Remaining Allocation (By Region)"] = result_df["Remaining Allocation (By Region)"].apply(
-                lambda x: f"{x:,d}" if pd.notnull(x) else 0
-            )
-            result_df["Avg Weekly Sales LM (Qty)"] = result_df["Avg Weekly Sales LM (Qty)"].apply(
-                lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
-            )
-
-            # Format 'WOI' columns to 2 decimal places
-            result_df["WOI (Stock + PO Ori)"] = result_df[
-                "WOI (Stock + PO Ori)"
-            ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-            result_df["OH + IT + Suggested WOI (Projection Until EOM)"] = result_df[
-                "OH + IT + Suggested WOI (Projection Until EOM)"
-            ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-            result_df["Current WOI"] = result_df[
-                "Current WOI"
-            ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-
-            st.download_button(
-                label="📥 Download PO Simulator Excel",
-                data=xlsx_data,
-                file_name="po_simulator_result.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
-            # --- Display Results ---
-            st.subheader("Simulated PO Data")
-
-            # Reorder columns for display
-            final_cols = [
-                "Distributor",
-                "SKU",
-                "Product Name",
-                "Assortment",
-                "Supply Control",
-                "Avg Weekly Sales LM (Qty)",
-                "Total Stock (Qty)",
-                "Current WOI",
-                "PO Qty",
-                "PO Value",
-                "WOI (Stock + PO Ori)",
-                "Remark",
-                "Suggested PO Qty",
-                "Suggested PO Value",
-                "OH + IT + Suggested WOI (Projection Until EOM)",
-                "Remaining Allocation (By Region)",
-            ]
-
-            st.dataframe(result_df.reindex(columns=final_cols).reset_index(drop=True))
-
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
-            st.info(
-                "Please ensure the uploaded file is a valid .xlsx or .csv and contains all the required columns."
-            )
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+                st.info(
+                    "Please ensure the uploaded file is a valid .xlsx or .csv and contains all the required columns."
+                )
 
 if __name__ == "__main__":
     main()
