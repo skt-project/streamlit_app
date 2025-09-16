@@ -537,6 +537,10 @@ def main():
                 progress.progress(0.6, "Calculations completed")
 
                 # Conditions for np.select
+                # Fetch NPD SKU list for conditional coloring
+                npd_df = get_npd_data(result_sku_list)
+                npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
+
                 conditions = [
                     # 1. New condition for additional suggested SKUs
                     (result_df["is_po_sku"] == False),
@@ -546,6 +550,7 @@ def main():
                     (
                         (result_df["avg_weekly_st_lm_qty"] == 0) &
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
+                        (~result_df["Customer SKU Code"].str.upper().isin(npd_sku_list)) &
                         (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
                     ),
                     # 4. NPD with Allocation
@@ -604,10 +609,6 @@ def main():
 
                 result_df = apply_sku_rejection_rules(REJECTED_SKUS_1, result_df, REGION_LIST_1, False)
                 result_df = apply_sku_rejection_rules(REJECTED_SKUS_2, result_df, REGION_LIST_2, True)
-
-                # Fetch NPD SKU list for conditional coloring
-                npd_df = get_npd_data(result_sku_list)
-                npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
 
                 # Sort the DataFrame: user SKUs first, then suggested SKUs
                 result_df.sort_values(
