@@ -361,8 +361,8 @@ def main():
 
         # Display Manual Rejection SKUs in an expander
         st.header("Manual Rejection SKUs")
-        # with st.expander("🚫 List of SKUs that are manually rejected by Steve"):
-        #     st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+        with st.expander("🚫 List of SKUs that are manually rejected by Steve"):
+            st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
         # Display Rejected SKUs by Region in a separate expander
         with st.expander("🌏 List of Rejected SKUs by Region (Only allowed for Sulawesi 2)"):
