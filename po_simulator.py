@@ -182,14 +182,17 @@ def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame, regions: List[st
     """
     Auto-rejects specific SKUs based on a provided list and region rules.
     """
+    # Convert regions list to lowercase for case-insensitive matching
+    regions_lower = [r.lower() for r in regions]
+
     # Create the rejection condition
     # If is_in = False, then only allow for the regions in the list
     if not is_in:
         # Rejects if SKU is in the sku_list AND region is NOT in the regions list
-        condition = (df["SKU"].isin(sku_list)) & (~df["region"].str.lower().isin(regions))
+        condition = (df["SKU"].isin(sku_list)) & (~df["region"].str.lower().isin(regions_lower))
     else:
         # Rejects if SKU is in the sku_list AND region is in the regions list
-        condition = (df["SKU"].isin(sku_list)) & (df["region"].str.lower().isin(regions))
+        condition = (df["SKU"].isin(sku_list)) & (df["region"].str.lower().isin(regions_lower))
 
     # Apply the rejection logic
     df.loc[condition, "Remark"] = "Reject (Stop by Steve)"
@@ -331,7 +334,7 @@ def main():
         with st.expander("📋 Step-by-Step Guide"):
             st.markdown("""
             1. **Select Distributor**: Choose the distributor name from the dropdown to fetch relevant data.
-            2. **Upload PO Data**: Upload an Excel or CSV file containing the required columns: 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'DPP'. The file should start from the 8th row.
+            2. **Upload PO Data**: Upload an Excel or CSV file containing the required columns: 'PRODUCT CODE', 'DESCRIPTION', 'QTY'. The file should start from the 8th row.
             3. **Review Rejection Lists**: Check the manual rejection SKUs and region-based rejections if applicable.
             4. **Simulate and Analyze**: The app will fetch stock and sales data from BigQuery, perform calculations like Weeks of Inventory (WOI), and apply approval/rejection rules.
             5. **View Results**: Review the simulated data in the table, including remarks on whether to proceed, reject, or suggest adjustments.
@@ -339,10 +342,10 @@ def main():
             """)
 
         # Display Proceed / Reject Rules Explanation
-        st.header("Logic/Rules & Calculations")
-        with st.expander("⚖️ Logic/Rules & Calculations Explanation"):
+        st.header("Rules & Calculations Logic")
+        with st.expander("⚖️ Rules & Calculations Logic Explanation"):
             st.markdown("""
-            The following rules are applied in order to determine the remark for each SKU. The first matching rule determines the outcome.
+            The following rules are applied in order to determine the remark for each SKU. The rest are the calculations logic behind the results.
 
             1.  **Reject**: The SKU is rejected if any of these conditions are met:
                 * It is on the **regional rejection list** (Stop by Steve), unless the region is allowed to order.
@@ -379,13 +382,13 @@ def main():
 
         st.header("2. Upload PO Data")
         uploaded_file = st.file_uploader(
-            "Upload a PO file (.xlsx/.csv) containing: 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'DPP'.",
+            "Upload a PO file (.xlsx/.csv) containing: 'PRODUCT CODE', 'DESCRIPTION', 'QTY''.",
             type=["xlsx", "xls", "csv"],
         )
 
         if uploaded_file:
             try:
-                required_cols = ["PRODUCT CODE", "DESCRIPTION", "QTY", "DPP"]
+                required_cols = ["PRODUCT CODE", "DESCRIPTION", "QTY"]
 
                 # Read the uploaded file (Start from 8th row)
                 if uploaded_file.name.endswith(".xlsx"):
@@ -407,15 +410,14 @@ def main():
                 # Clean and filter the data
                 # Ensure columns are of the correct type for calculations
                 po_df["QTY"] = pd.to_numeric(po_df["QTY"], errors="coerce")
-                po_df["DPP"] = pd.to_numeric(po_df["DPP"], errors="coerce")
-                po_df.dropna(subset=["QTY", "DPP"], inplace=True)
+                po_df.dropna(subset=["QTY"], inplace=True)
 
                 st.write("Preview of uploaded PO data:")
                 st.dataframe(po_df.head())
 
                 # Filter out SKUs with QTY of 0 or empty
                 po_df = po_df[po_df["QTY"] > 0]
-                po_df.dropna(subset=["PRODUCT CODE", "QTY", "DPP"], inplace=True)
+                po_df.dropna(subset=["PRODUCT CODE", "QTY"], inplace=True)
 
                 # Add a flag to identify original PO SKUs
                 po_df["is_po_sku"] = True
