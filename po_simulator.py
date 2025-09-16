@@ -339,7 +339,7 @@ def main():
             """)
 
         # Display Proceed / Reject Rules Explanation
-        st.header("Proceed / Reject Rules per SKU")
+        st.header("Logic/Rules & Calculations")
         with st.expander("⚖️ Proceed / Reject Rules Explanation"):
             st.markdown("""
             The following rules are applied in order to determine the remark for each SKU. The first matching rule determines the outcome.
@@ -357,6 +357,8 @@ def main():
                 * It has no historical trend data, and the supply control status is **not** "STOP PO," "DISCONTINUED," or "OOS."
 
             3.  **Additional Suggestion**: The SKU is marked as an "Additional Suggestion" if it was not on the original PO but was **suggested by the system**.
+            
+            4.  **Suggested WOI (OH + IT + Suggested Qty + ST Projection until EOM)**: The suggested WOI is calculated based on the OH + IT Stock + Suggested Qty + ST Projection until end of month
             """)
 
         # Display Manual Rejection SKUs in an expander
