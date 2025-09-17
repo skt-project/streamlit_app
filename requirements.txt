@@ -12,3 +12,4 @@ db-dtypes
 xlrd
 xlsxwriter
 google-cloud-storage
+gspread
