@@ -11,3 +11,4 @@ openpyxl
 db-dtypes
 xlrd
 xlsxwriter
+google-cloud-storage
