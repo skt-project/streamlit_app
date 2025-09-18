@@ -28,7 +28,7 @@ try:
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
     SPREADSHEET_KEY = st.secrets["spreadsheet"]["url"]
-    _bucket_raw = st.secrets["bigquery"].get("public_skintific_storage", "smart_coverage")
+    _bucket_raw = st.secrets["bigquery"].get("public_skintific_storage", "public_skintific_storage/smart_coverage")
 except Exception:
     GCP_CREDENTIALS_PATH = r"D:\script\skintific-data-warehouse-ea77119e2e7a.json"
     credentials = service_account.Credentials.from_service_account_file(GCP_CREDENTIALS_PATH)
