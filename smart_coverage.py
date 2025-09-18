@@ -242,15 +242,17 @@ if all([region not in ["","- Pilih Region -"], distributor_company not in ["","-
         else:
                 try:
                     submission_id = str(uuid.uuid4())
-                    gcs_uris = []
-                    # Ambil store_id (cust_id) & tanggal
                     store_id = df_customer.iloc[0]["cust_id"]
                     date_str = now(jakarta_tz).format("YYYYMMDD")
-
+                    gcs_uris = []
                     for idx, uploaded in enumerate(uploaded_files, 1):
                         safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", uploaded.name)
                         obj_path = f"{store_id}_{date_str}_{submission_id}_{idx}_{safe_name}"
                         gcs_path = f"{BUCKET_PREFIX.rstrip('/')}/{obj_path}" if BUCKET_PREFIX else obj_path
+                        blob = gcs_client.bucket(BUCKET_NAME).blob(gcs_path)
+                        uploaded.seek(0)
+                        blob.upload_from_file(uploaded, content_type=uploaded.type)
+                        gcs_uris.append(f"https://storage.cloud.google.com/{BUCKET_NAME}/{gcs_path}")
 
                     preview = df_customer.iloc[0].copy()
                     preview["cluster"] = cluster
