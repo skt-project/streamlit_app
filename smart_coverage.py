@@ -245,7 +245,7 @@ if all([region not in ["","- Pilih Region -"], distributor_company not in ["","-
                     gcs_uris = []
                     for idx, uploaded in enumerate(uploaded_files, 1):
                         safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", uploaded.name)
-                        obj_path = f"{submission_id}/{idx}_{safe_name}"
+                        obj_path = f"{submission_id}_{idx}_{safe_name}"
                         gcs_path = f"{BUCKET_PREFIX.rstrip('/')}/{obj_path}" if BUCKET_PREFIX else obj_path
                         blob = gcs_client.bucket(BUCKET_NAME).blob(gcs_path)
                         uploaded.seek(0)
