@@ -323,8 +323,8 @@ def main():
     ]
 
     # Additional rejected SKUs based on region rules
-    REJECTED_SKUS_1 = ["G2G-20901", "G2G-20904"]
-    REGION_LIST_1 = ['Sulawesi 2']
+    REJECTED_SKUS_1 = []
+    REGION_LIST_1 = []
 
     REJECTED_SKUS_2 = ["G2G-20902", 'G2G-20903']
     REGION_LIST_2 = ['Sulawesi 1', 'Southern Sumatera 1', 'Central Java', 'West Kalimantan']
@@ -370,8 +370,8 @@ def main():
             st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))    
 
         # Display Rejected SKUs by Region in a separate expander
-        with st.expander("🌏 List of Rejected SKUs by Region (Only allowed for Sulawesi 2)"):
-            st.dataframe(pd.DataFrame(REJECTED_SKUS_1, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+        with st.expander("🌏 List of Rejected SKUs by Region (Reject for 'Sulawesi 1', 'Southern Sumatera 1', 'Central Java', 'West Kalimantan')"):
+            st.dataframe(pd.DataFrame(REJECTED_SKUS_2, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
     with tab2:
         st.header("1. Input Parameters")
