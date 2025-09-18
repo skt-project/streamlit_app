@@ -28,7 +28,7 @@ try:
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
     SPREADSHEET_KEY = st.secrets["spreadsheet"]["url"]
-    _bucket_raw = st.secrets["bigquery"].get("public_skintific_storage", "smart_coverage")
+    _bucket_raw = st.secrets["bigquery"].get("public_skintific_storage", "public_skintific_storage/smart_coverage")
 except Exception:
     GCP_CREDENTIALS_PATH = r"D:\script\skintific-data-warehouse-ea77119e2e7a.json"
     credentials = service_account.Credentials.from_service_account_file(GCP_CREDENTIALS_PATH)
@@ -242,10 +242,12 @@ if all([region not in ["","- Pilih Region -"], distributor_company not in ["","-
         else:
                 try:
                     submission_id = str(uuid.uuid4())
+                    store_id = df_customer.iloc[0]["cust_id"]
+                    date_str = now(jakarta_tz).format("YYYYMMDD")
                     gcs_uris = []
                     for idx, uploaded in enumerate(uploaded_files, 1):
                         safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", uploaded.name)
-                        obj_path = f"{submission_id}/{idx}_{safe_name}"
+                        obj_path = f"{store_id}_{date_str}_{submission_id}_{idx}_{safe_name}"
                         gcs_path = f"{BUCKET_PREFIX.rstrip('/')}/{obj_path}" if BUCKET_PREFIX else obj_path
                         blob = gcs_client.bucket(BUCKET_NAME).blob(gcs_path)
                         uploaded.seek(0)
