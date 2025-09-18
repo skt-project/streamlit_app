@@ -152,7 +152,8 @@ def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
         buffer_plan_by_lm_qty_adj,
         avg_weekly_st_lm_qty,
         buffer_plan_by_lm_val_adj,
-        remaining_allocation_qty_region
+        remaining_allocation_qty_region,
+        woi_end_of_month_by_lm
     FROM `{table_id}`
     WHERE distributor = '{distributor_name}'
     AND (
@@ -491,6 +492,7 @@ def main():
                         "avg_weekly_st_lm_qty",
                         "buffer_plan_by_lm_val_adj",
                         "remaining_allocation_qty_region",
+                        "woi_end_of_month_by_lm",
                     ]
                 ] = result_df[
                     [
@@ -501,6 +503,7 @@ def main():
                         "avg_weekly_st_lm_qty",
                         "buffer_plan_by_lm_val_adj",
                         "remaining_allocation_qty_region",
+                        "woi_end_of_month_by_lm",
                     ]
                 ].fillna(
                     0
@@ -600,14 +603,15 @@ def main():
                     "buffer_plan_by_lm_qty_adj": "Suggested PO Qty",
                     "buffer_plan_by_lm_val_adj": "Suggested PO Value",
                     "WOI PO Original": "WOI (Stock + PO Ori)",
-                    "WOI Suggest": "OH + IT + Suggested WOI (Projection Until EOM)",
+                    "WOI Suggest": "WOI After Buffer (Stock + Suggested Qty)",
+                    "woi_end_of_month_by_lm": "Stock + Suggested Qty WOI (Projection at EOM)",
                     "remaining_allocation_qty_region": "Remaining Allocation (By Region)",
                 }
 
                 # Rename the columns in the DataFrame
                 result_df.rename(columns=new_column_names, inplace=True)
 
-                result_df = apply_sku_rejection_rules(REJECTED_SKUS_1, result_df, REGION_LIST_1, False)
+                # result_df = apply_sku_rejection_rules(REJECTED_SKUS_1, result_df, REGION_LIST_1, False)
                 result_df = apply_sku_rejection_rules(REJECTED_SKUS_2, result_df, REGION_LIST_2, True)
 
                 # Sort the DataFrame: user SKUs first, then suggested SKUs
@@ -633,7 +637,8 @@ def main():
                     "Remark",
                     "Suggested PO Qty",
                     "Suggested PO Value",
-                    "OH + IT + Suggested WOI (Projection Until EOM)",
+                    "WOI After Buffer (Stock + Suggested Qty)",
+                    "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)",
                     "is_po_sku",
                     "RSA Notes",
@@ -662,8 +667,8 @@ def main():
                 result_df["WOI (Stock + PO Ori)"] = result_df[
                     "WOI (Stock + PO Ori)"
                 ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-                result_df["OH + IT + Suggested WOI (Projection Until EOM)"] = result_df[
-                    "OH + IT + Suggested WOI (Projection Until EOM)"
+                result_df["Stock + Suggested Qty WOI (Projection at EOM)"] = result_df[
+                    "Stock + Suggested Qty WOI (Projection at EOM)"
                 ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
                 result_df["Current WOI"] = result_df[
                     "Current WOI"
@@ -696,7 +701,8 @@ def main():
                     "Remark",
                     "Suggested PO Qty",
                     "Suggested PO Value",
-                    "OH + IT + Suggested WOI (Projection Until EOM)",
+                    "WOI After Buffer (Stock + Suggested Qty)",
+                    "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)",
                 ]
 
