@@ -58,12 +58,13 @@ def get_bigquery_client():
 
 # --- Step 2: Load GeoJSON & Nielsen Data ---
 @st.cache_data(show_spinner="Loading GeoJSON...")
-def load_geojson(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        geojson_data = json.load(f)
-    gdf = gpd.GeoDataFrame.from_features(geojson_data["features"])
-    gdf.set_crs(epsg=4326, inplace=True)
-    return gdf
+def load_geodata(path: str):
+    # with open(path, "r", encoding="utf-8") as f:
+    #     geojson_data = json.load(f)
+    # gdf = gpd.GeoDataFrame.from_features(geojson_data["features"])
+    # gdf.set_crs(epsg=4326, inplace=True)
+    # return gdf
+    return gpd.read_parquet(path)
 
 
 @st.cache_data(show_spinner="Loading Nielsen data...")
@@ -100,9 +101,9 @@ client, GCP_PROJECT_ID, BQ_DATASET, REPSLY_DATASET, BASIS_TABLE, WHITESPACE_TABL
 
 # --- Path helper ---
 BASE_DIR = os.path.dirname(__file__)
-JSON_PATH = os.path.join(BASE_DIR, "data", "indonesia_villages_border_simplified.json")
+JSON_PATH = os.path.join(BASE_DIR, "data", "indonesia_villages_border_simplified.parquet")
 
-gdf_subdistricts = load_geojson(JSON_PATH)
+gdf_subdistricts = load_geodata(JSON_PATH)
 nielsen_df = load_nielsen("data/Data Nielsen by Kelurahan in Indonesia.xlsx")
 # gdf_subdistricts = load_geojson("indonesia_villages_border_simplified.json")
 # nielsen_df = load_nielsen("Data Nielsen by Kelurahan in Indonesia.xlsx")
