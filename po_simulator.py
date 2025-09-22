@@ -616,25 +616,27 @@ def main():
                         (result_df["is_po_sku"] == False),
                         # 2. Hardcoded Reject
                         result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
-                        # 3. Proceed (ST LM = 0) -> NPD or there's no ST for LM
+                        # 3. Reject if the supply control status are ["STOP PO", "DISCONTINUED", "OOS"]
+                        (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"])),
+                        # 4. Proceed (ST LM = 0) -> NPD or there's no ST for LM
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
                             (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
                             (~result_df["Customer SKU Code"].str.upper().isin(npd_sku_list)) &
                             (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
                         ),
-                        # 4. NPD with Allocation
+                        # 5. NPD with Allocation
                         (
                             (result_df["remaining_allocation_qty_region"] > 0) &
                             (result_df["PO Qty"] <= result_df["remaining_allocation_qty_region"])
                         ),
-                        # 4. Reject if suggested PO is 0
+                        # 6. Reject if suggested PO is 0 or isin ["STOP PO", "DISCONTINUED", "OOS"]
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                        # 5. PO Qty > Suggested PO Qty (Over-ordering)
+                        # 7. PO Qty > Suggested PO Qty (Over-ordering)
                         (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                        # 6. PO Qty < Suggested PO Qty (Under-ordering)
+                        # 8. PO Qty < Suggested PO Qty (Under-ordering)
                         (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                        # 7. PO Qty = Suggested PO Qty (Exact Match)
+                        # 9. PO Qty = Suggested PO Qty (Exact Match)
                         (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
                     ]
 
@@ -642,6 +644,7 @@ def main():
                     choices = [
                         "Additional Suggestion",
                         "Reject (Stop by Steve)",
+                        "Reject",
                         "Proceed",
                         "Proceed",
                         "Reject",
