@@ -35,20 +35,25 @@ def get_bigquery_client():
         )
         GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
         BQ_DATASET = st.secrets["bigquery"]["dataset"]
-        BQ_TABLE = st.secrets["bigquery"]["bq_table"]
-
+        REPSLY_DATASET = st.secrets["bigquery"]["repsly_dataset"]
+        BASIS_TABLE = st.secrets["bigquery"]["basis"]
+        WHITESPACE_TABLE = st.secrets["bigquery"]["whitespace"]
+        REPSLY_TABLE = st.secrets["bigquery"]["repsly"]
     except Exception:
         # --- Local fallback for development ---
         GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
         GCP_PROJECT_ID = "skintific-data-warehouse"
         BQ_DATASET = "gt_schema"
-        BQ_TABLE = "master_store_database_basis"
+        REPSLY_DATASET = "repsly"
+        BASIS_TABLE = "master_store_database_basis"
+        WHITESPACE_TABLE = 'whitespace_long_lat'
+        REPSLY_TABLE = "ind_dim_clients"
         credentials = service_account.Credentials.from_service_account_file(
             GCP_CREDENTIALS_PATH
         )
 
     client = bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
-    return client, GCP_PROJECT_ID, BQ_DATASET, BQ_TABLE
+    return client, GCP_PROJECT_ID, BQ_DATASET, REPSLY_DATASET, BASIS_TABLE, WHITESPACE_TABLE, REPSLY_TABLE
 
 # --- Step 2: Load GeoJSON & Nielsen Data ---
 @st.cache_data(show_spinner="Loading GeoJSON...")
@@ -65,14 +70,24 @@ def load_nielsen(path: str):
     return pd.read_excel(path, sheet_name="Data by Kelurahan")
 
 @st.cache_data(show_spinner="Fetching stores from BigQuery...")
-def load_stores(project, dataset, table):
+def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
     query = f"""
-    SELECT region, cust_id, store_name, longitude, latitude
-    FROM `{project}.{dataset}.{table}`
-    WHERE (longitude IS NOT NULL AND longitude <> "")
-    AND (latitude IS NOT NULL AND latitude <> "")
+    SELECT
+        b.region,
+        b.cust_id,
+        b.store_name,
+        COALESCE(SAFE_CAST(c.longitude AS FLOAT64), w.longitude, SAFE_CAST(b.longitude AS FLOAT64)) AS longitude,
+        COALESCE(SAFE_CAST(c.latitude AS FLOAT64), w.latitude, SAFE_CAST(b.latitude AS FLOAT64)) AS latitude
+    FROM `{project}.{bq_dataset}.{basis}` AS b
+    LEFT JOIN `{project}.{repsly_dataset}.{repsly}` AS c
+        ON UPPER(b.cust_id) = UPPER(REGEXP_EXTRACT(c.code, r'^[^-]*-(.*)'))
+    LEFT JOIN `{project}.{bq_dataset}.{whitespace}` AS w
+        ON UPPER(b.cust_id) = UPPER(w.store_id)
+    WHERE
+        COALESCE(SAFE_CAST(c.longitude AS FLOAT64), w.longitude, SAFE_CAST(b.longitude AS FLOAT64)) IS NOT NULL
+        AND COALESCE(SAFE_CAST(c.latitude AS FLOAT64), w.latitude, SAFE_CAST(b.latitude AS FLOAT64)) IS NOT NULL
     """
-    client, _, _, _ = get_bigquery_client()
+    client, _, _, _, _, _, _ = get_bigquery_client()
     df = client.query(query).to_dataframe()
     df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
     df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
@@ -80,12 +95,12 @@ def load_stores(project, dataset, table):
     return df
 
 # --- Step 3: Load All Data Once ---
-client, GCP_PROJECT_ID, BQ_DATASET, BQ_TABLE = get_bigquery_client()
-gdf_subdistricts = load_geojson(r"C:\script\indonesia_villages_border_simplified.json")
-nielsen_df = load_nielsen(r"C:\Users\Mikael Andrew\Downloads\Excel\Data Nielsen by Kelurahan in Indonesia.xlsx")
+client, GCP_PROJECT_ID, BQ_DATASET, REPSLY_DATASET, BASIS_TABLE, WHITESPACE_TABLE, REPSLY_TABLE = get_bigquery_client()
+gdf_subdistricts = load_geojson("data/indonesia_villages_border_simplified.json")
+nielsen_df = load_nielsen("data/Data Nielsen by Kelurahan in Indonesia.xlsx")
 # gdf_subdistricts = load_geojson("indonesia_villages_border_simplified.json")
 # nielsen_df = load_nielsen("Data Nielsen by Kelurahan in Indonesia.xlsx")
-store_df = load_stores(GCP_PROJECT_ID, BQ_DATASET, BQ_TABLE)
+store_df = load_stores(GCP_PROJECT_ID, BQ_DATASET, REPSLY_DATASET, BASIS_TABLE, WHITESPACE_TABLE, REPSLY_TABLE)
 
 # --- Step 4: Create Composite Keys & Merge ---
 nielsen_df["geo_id"] = (
