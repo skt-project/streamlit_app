@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import geopandas as gpd
 import folium
@@ -96,7 +97,12 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
 
 # --- Step 3: Load All Data Once ---
 client, GCP_PROJECT_ID, BQ_DATASET, REPSLY_DATASET, BASIS_TABLE, WHITESPACE_TABLE, REPSLY_TABLE = get_bigquery_client()
-gdf_subdistricts = load_geojson("data/indonesia_villages_border_simplified.json")
+
+# --- Path helper ---
+BASE_DIR = os.path.dirname(__file__)
+JSON_PATH = os.path.join(BASE_DIR, "data", "indonesia_villages_border_simplified.json")
+
+gdf_subdistricts = load_geojson(JSON_PATH)
 nielsen_df = load_nielsen("data/Data Nielsen by Kelurahan in Indonesia.xlsx")
 # gdf_subdistricts = load_geojson("indonesia_villages_border_simplified.json")
 # nielsen_df = load_nielsen("Data Nielsen by Kelurahan in Indonesia.xlsx")
