@@ -119,7 +119,7 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
         allocation
     FROM `{table_id}`
     WHERE sku IN ({sku_list_str})
-    AND calendar_date = '2025-09-01'
+    AND calendar_date = '2025-10-01'
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
