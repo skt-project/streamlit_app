@@ -366,8 +366,8 @@ def main():
     REJECTED_SKUS_1 = []
     REGION_LIST_1 = []
 
-    REJECTED_SKUS_2 = ["G2G-20902", 'G2G-20903']
-    REGION_LIST_2 = ['Sulawesi 1', 'Southern Sumatera 1', 'Central Java', 'West Kalimantan']
+    REJECTED_SKUS_2 = []
+    REGION_LIST_2 = []
 
     with tab1:
         st.header("How to Use the PO Simulator")
@@ -409,8 +409,8 @@ def main():
             st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))    
 
         # Display Rejected SKUs by Region in a separate expander
-        with st.expander("🌏 List of Rejected SKUs by Region (Reject for 'Sulawesi 1', 'Southern Sumatera 1', 'Central Java', 'West Kalimantan')"):
-            st.dataframe(pd.DataFrame(REJECTED_SKUS_2, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+        # with st.expander("🌏 List of Rejected SKUs by Region (Reject for 'Sulawesi 1', 'Southern Sumatera 1', 'Central Java', 'West Kalimantan')"):
+        #     st.dataframe(pd.DataFrame(REJECTED_SKUS_2, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
     with tab2:
         # st.header("1. Input Parameters")
@@ -682,7 +682,7 @@ def main():
                     result_df.rename(columns=new_column_names, inplace=True)
 
                     # result_df = apply_sku_rejection_rules(REJECTED_SKUS_1, result_df, REGION_LIST_1, False)
-                    result_df = apply_sku_rejection_rules(REJECTED_SKUS_2, result_df, REGION_LIST_2, True)
+                    # result_df = apply_sku_rejection_rules(REJECTED_SKUS_2, result_df, REGION_LIST_2, True)
 
                     # Sort the DataFrame: user SKUs first, then suggested SKUs
                     result_df.sort_values(
