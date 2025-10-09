@@ -156,311 +156,335 @@ gold_gdf = merged_gdf[merged_gdf["Nielsen Tier"] == "Gold"].copy()
 gold_gdf["Nielsen Tier Value"] = gold_gdf["Nielsen Tier"].map({"Gold": 2})
 
 # --- Step 5: Dropdown for Region ---
+st.header("🗺️ Filter Map")
 available_regions = merged_gdf["Region"].dropna().unique()
-selected_region = st.selectbox("Select Region", sorted(available_regions))
+# Insert a placeholder at the start of the list for 'no selection'
+sorted_regions = ["--- Select Region ---"] + sorted(available_regions)
+# Set index=0 to default to the placeholder
+selected_region_placeholder = st.selectbox(
+    "Select Region",
+    sorted_regions,
+    index=0  # Default to the placeholder
+)
 
-# --- Step 6: Dropdown for Kabupaten ---
-available_kabupaten = merged_gdf[merged_gdf["Region"].astype(str).str.upper() == selected_region.upper()]["Kabupaten"].dropna().str.title().unique()
-selected_kabupaten = st.selectbox("Select Kabupaten", sorted(available_kabupaten))
+if selected_region_placeholder != "--- Select Region ---":
+    selected_region = selected_region_placeholder
+    # --- Step 6: Dropdown for Kabupaten ---
+    available_kabupaten = merged_gdf[merged_gdf["Region"].astype(str).str.upper() == selected_region.upper()]["Kabupaten"].dropna().str.title().unique()
+    sorted_kabupaten = ["--- Select Kabupaten ---"] + sorted(available_kabupaten)
 
-with st.spinner(text="Generating Map... This may take a moment."):
-    # Filter by both region and kabupaten
-    region_gdf = gold_gdf[
-        gold_gdf["Region"].astype(str).str.upper() == selected_region.upper()
-    ].copy()
-    region_stores = store_df[
-        store_df["region"].astype(str).str.upper() == selected_region.upper()
-    ].copy()
+    # Set index=0 to default to the placeholder
+    selected_kabupaten_placeholder = st.selectbox(
+        "Select Kabupaten", sorted_kabupaten, index=0  # Default to the placeholder
+    )
 
-    # --- Step 6: Perform Whitespace Analysis ---
-    @st.cache_data(show_spinner="Analyzing whitespace...")
-    def analyze_whitespace(_geodataframe, stores_df):
-        """
-        Performs a spatial analysis to identify 'whitespace' areas (gold-tier subdistricts
-        that do not contain any stores).
-        """
-        if stores_df.empty or _geodataframe.empty:
-            _geodataframe["has_store"] = False
-            return _geodataframe
+    if selected_kabupaten_placeholder != "--- Select Kabupaten ---":
+        selected_kabupaten = selected_kabupaten_placeholder
+        with st.spinner(text="Generating Map... This may take a moment."):
+            # Filter by both region and kabupaten
+            region_gdf = gold_gdf[
+                gold_gdf["Region"].astype(str).str.upper() == selected_region.upper()
+            ].copy()
+            region_stores = store_df[
+                store_df["region"].astype(str).str.upper() == selected_region.upper()
+            ].copy()
 
-        # Convert store DataFrame to a GeoDataFrame
-        stores_gdf = gpd.GeoDataFrame(
-            stores_df,
-            geometry=gpd.points_from_xy(stores_df.longitude, stores_df.latitude),
-            crs="EPSG:4326",
-        )
+            # --- Step 6: Perform Whitespace Analysis ---
+            @st.cache_data(show_spinner="Analyzing whitespace...")
+            def analyze_whitespace(_geodataframe, stores_df):
+                """
+                Performs a spatial analysis to identify 'whitespace' areas (gold-tier subdistricts
+                that do not contain any stores).
+                """
+                if stores_df.empty or _geodataframe.empty:
+                    _geodataframe["has_store"] = False
+                    return _geodataframe
 
-        # Perform a spatial join to link subdistricts with stores
-        sjoin_gdf = gpd.sjoin(_geodataframe, stores_gdf, how="left", predicate="intersects")
-
-        # Identify which subdistricts have at least one store
-        _geodataframe["has_store"] = _geodataframe.index.isin(
-            sjoin_gdf.dropna(subset=["cust_id"]).index
-        )
-
-        return _geodataframe
-
-    region_gdf_analyzed = analyze_whitespace(region_gdf, region_stores)
-
-    # --- Step 7: Build Folium Map ---
-    def style_function(feature):
-        """
-        Defines the styling for each GeoJSON feature based on its properties.
-        Now includes logic for 'whitespace' areas.
-        """
-        nielsen_tier = feature["properties"].get("Nielsen Tier")
-        has_store = feature["properties"].get("has_store")
-
-        if nielsen_tier == "Gold":
-            if has_store:
-                # Gold tier with stores
-                fill_color = "#d2af13"  # Gold
-            else:
-                # Gold tier 'whitespace' (no stores)
-                fill_color = "darkred"
-        else:
-            fill_color = "lightgray"  # Other tiers
-
-        return {
-            "fillColor": fill_color,
-            "color": "black",
-            "weight": 0.5,
-            "fillOpacity": 0.7,
-        }
-
-    def selected_kabupaten_style_function(feature):
-        style = style_function(feature)
-        style["color"] = "#4b5004d5"
-        style["weight"] = 2.5
-        return style
-
-    def other_kabupaten_style_function(feature):
-        style = style_function(feature)
-        style["fillOpacity"] = 0.2  # lower opacity for other kabupaten
-        return style
-
-    def create_legend():
-        """Generates a custom HTML legend for the map."""
-        legend_html = """
-        <div style="position: fixed; 
-                    bottom: 50px; left: 50px; width: 170px; 
-                    border:2px solid grey; z-index:9999; font-size:14px;
-                    background-color:darkgray; opacity:0.9;">
-        &nbsp; <b>Map Legend</b> <br>
-        &nbsp; <i style="background:#d2af13; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (With stores) <br>
-        &nbsp; <i style="background:darkred; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (No stores)<br>
-        &nbsp; <i style="background:white; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Other Tier<br>
-        </div>
-        """
-        return legend_html
-
-    if not region_gdf_analyzed.empty:
-        # Create new columns with title-cased names for the tooltip
-        region_gdf_analyzed['Region_title'] = region_gdf_analyzed['Region'].str.title()
-        region_gdf_analyzed['Kabupaten_title'] = region_gdf_analyzed['Kabupaten'].str.title()
-        region_gdf_analyzed['Kecamatan_title'] = region_gdf_analyzed['Kecamatan'].str.title()
-        region_gdf_analyzed['Kelurahan_title'] = region_gdf_analyzed['Kelurahan'].str.title()
-
-        # Filter for selected and other Kabupaten
-        kabupaten_gdf = region_gdf_analyzed[region_gdf_analyzed["Kabupaten"].astype(str).str.upper() == selected_kabupaten.upper()].copy()
-        other_kabupaten_gdf = region_gdf_analyzed[region_gdf_analyzed["Kabupaten"].astype(str).str.upper() != selected_kabupaten.upper()].copy()
-
-        # Get map center from the selected Kabupaten's centroid
-        try:
-            if not kabupaten_gdf.empty:
-                kabupaten_gdf_proj = kabupaten_gdf.to_crs(epsg=3857)
-                centroid_proj = kabupaten_gdf_proj.geometry.centroid
-                centroid_wgs84 = centroid_proj.to_crs(epsg=4326)
-                center = [centroid_wgs84.y.iloc[0], centroid_wgs84.x.iloc[0]]
-                zoom_start = 11  # Higher zoom for Kabupaten view
-            else:
-                region_gdf_proj = region_gdf_analyzed.to_crs(epsg=3857)
-                centroid_proj = region_gdf_proj.geometry.centroid
-                centroid_wgs84 = centroid_proj.to_crs(epsg=4326)
-                center = [centroid_wgs84.y.iloc[0], centroid_wgs84.x.iloc[0]]
-                zoom_start = 9  # Default zoom for Region view
-        except Exception:
-            center = [-2.5, 118.0]  # Fallback to Indonesia center
-            zoom_start = 9
-
-        m = folium.Map(location=center, zoom_start=zoom_start, tiles="CartoDB positron")
-
-        # folium.features.GeoJson(
-        #     region_gdf_analyzed,
-        #     name="Nielsen Tiers",
-        #     style_function=style_function,
-        #     tooltip=GeoJsonTooltip(
-        #         fields=[
-        #             "Region_title",
-        #             "Kabupaten_title",
-        #             "Kecamatan_title",
-        #             "Kelurahan_title",
-        #             "Nielsen Tier",
-        #         ],
-        #         aliases=[
-        #             "Region:",
-        #             "Kabupaten:",
-        #             "Kecamatan:",
-        #             "Kelurahan:",
-        #             "Nielsen Tier:",
-        #         ],
-        #         localize=True,
-        #         sticky=False,
-        #         labels=True,
-        #     ),
-        # ).add_to(m)
-
-        # Add the GeoJSON for other Kabupaten first
-        if not other_kabupaten_gdf.empty:
-            folium.features.GeoJson(
-                other_kabupaten_gdf,
-                name="Other Kabupaten",
-                style_function=other_kabupaten_style_function,
-                tooltip=GeoJsonTooltip(
-                    fields=[
-                        "Region_title",
-                        "Kabupaten_title",
-                        "Kecamatan_title",
-                        "Kelurahan_title",
-                        "Nielsen Tier",
-                    ],
-                    aliases=[
-                        "Region:",
-                        "Kabupaten:",
-                        "Kecamatan:",
-                        "Kelurahan:",
-                        "Nielsen Tier:",
-                    ],
-                    localize=True,
-                    sticky=False,
-                    labels=True,
-                ),
-            ).add_to(m)
-
-        # Add the GeoJSON for the selected Kabupaten with its unique style
-        if not kabupaten_gdf.empty:
-            folium.features.GeoJson(
-                kabupaten_gdf,
-                name=f"Selected Kabupaten: {selected_kabupaten}",
-                style_function=selected_kabupaten_style_function,
-                tooltip=GeoJsonTooltip(
-                    fields=[
-                        "Region_title",
-                        "Kabupaten_title",
-                        "Kecamatan_title",
-                        "Kelurahan_title",
-                        "Nielsen Tier",
-                    ],
-                    aliases=[
-                        "Region:",
-                        "Kabupaten:",
-                        "Kecamatan:",
-                        "Kelurahan:",
-                        "Nielsen Tier:",
-                    ],
-                    localize=True,
-                    sticky=False,
-                    labels=True,
-                ),
-            ).add_to(m)
-
-        # Add store markers
-        marker_cluster = MarkerCluster().add_to(m)
-        for _, row in region_stores.iterrows():
-            folium.CircleMarker(
-                location=[row["latitude"], row["longitude"]],
-                radius=4,
-                color="black",
-                fill=True,
-                fill_color="blue",
-                fill_opacity=1.0,
-                tooltip=f"Store: {row['cust_id']} - {row['store_name']}",
-            ).add_to(marker_cluster)
-
-        # Add the legend to the map
-        m.get_root().html.add_child(folium.Element(create_legend()))
-        folium.LayerControl().add_to(m)
-
-        # --- Step 8: Show Map in Streamlit ---
-        st_map = st_folium(m, width=1200, height=700, returned_objects=[])
-
-        # --- Step 9: Create Summary Table ---
-        st.subheader("📊 Area Summary")
-
-        @st.cache_data(show_spinner="Generating summary table...")
-        def create_summary_table(_region_gdf, _region_stores, selected_region, selected_kabupaten):
-            """Creates a summary table with store counts by area."""
-            # Create a copy of the region data
-            summary_gdf = _region_gdf.copy()
-
-            # Convert stores to GeoDataFrame for spatial analysis
-            if not _region_stores.empty:
+                # Convert store DataFrame to a GeoDataFrame
                 stores_gdf = gpd.GeoDataFrame(
-                    _region_stores,
-                    geometry=gpd.points_from_xy(_region_stores.longitude, _region_stores.latitude),
+                    stores_df,
+                    geometry=gpd.points_from_xy(stores_df.longitude, stores_df.latitude),
                     crs="EPSG:4326",
                 )
 
-                # Perform spatial join to count stores per area
-                joined_gdf = gpd.sjoin(summary_gdf, stores_gdf, how="left", predicate="intersects")
+                # Perform a spatial join to link subdistricts with stores
+                sjoin_gdf = gpd.sjoin(_geodataframe, stores_gdf, how="left", predicate="intersects")
 
-                # Count stores per area
-                store_counts = joined_gdf.groupby(joined_gdf.index).size().fillna(0)
-                summary_gdf["Number of Stores"] = store_counts
+                # Identify which subdistricts have at least one store
+                _geodataframe["has_store"] = _geodataframe.index.isin(
+                    sjoin_gdf.dropna(subset=["cust_id"]).index
+                )
+
+                return _geodataframe
+
+            region_gdf_analyzed = analyze_whitespace(region_gdf, region_stores)
+
+            # --- Step 7: Build Folium Map ---
+            def style_function(feature):
+                """
+                Defines the styling for each GeoJSON feature based on its properties.
+                Now includes logic for 'whitespace' areas.
+                """
+                nielsen_tier = feature["properties"].get("Nielsen Tier")
+                has_store = feature["properties"].get("has_store")
+
+                if nielsen_tier == "Gold":
+                    if has_store:
+                        # Gold tier with stores
+                        fill_color = "#d2af13"  # Gold
+                    else:
+                        # Gold tier 'whitespace' (no stores)
+                        fill_color = "darkred"
+                else:
+                    fill_color = "lightgray"  # Other tiers
+
+                return {
+                    "fillColor": fill_color,
+                    "color": "black",
+                    "weight": 0.5,
+                    "fillOpacity": 0.7,
+                }
+
+            def selected_kabupaten_style_function(feature):
+                style = style_function(feature)
+                style["color"] = "#4b5004d5"
+                style["weight"] = 2.5
+                return style
+
+            def other_kabupaten_style_function(feature):
+                style = style_function(feature)
+                style["fillOpacity"] = 0.2  # lower opacity for other kabupaten
+                return style
+
+            def create_legend():
+                """Generates a custom HTML legend for the map."""
+                legend_html = """
+                <div style="position: fixed; 
+                            bottom: 50px; left: 50px; width: 170px; 
+                            border:2px solid grey; z-index:9999; font-size:14px;
+                            background-color:darkgray; opacity:0.9;">
+                &nbsp; <b>Map Legend</b> <br>
+                &nbsp; <i style="background:#d2af13; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (With stores) <br>
+                &nbsp; <i style="background:darkred; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (No stores)<br>
+                &nbsp; <i style="background:white; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Other Tier<br>
+                </div>
+                """
+                return legend_html
+
+            if not region_gdf_analyzed.empty:
+                # Create new columns with title-cased names for the tooltip
+                region_gdf_analyzed['Region_title'] = region_gdf_analyzed['Region'].str.title()
+                region_gdf_analyzed['Kabupaten_title'] = region_gdf_analyzed['Kabupaten'].str.title()
+                region_gdf_analyzed['Kecamatan_title'] = region_gdf_analyzed['Kecamatan'].str.title()
+                region_gdf_analyzed['Kelurahan_title'] = region_gdf_analyzed['Kelurahan'].str.title()
+
+                # Filter for selected and other Kabupaten
+                kabupaten_gdf = region_gdf_analyzed[region_gdf_analyzed["Kabupaten"].astype(str).str.upper() == selected_kabupaten.upper()].copy()
+                other_kabupaten_gdf = region_gdf_analyzed[region_gdf_analyzed["Kabupaten"].astype(str).str.upper() != selected_kabupaten.upper()].copy()
+
+                # Get map center from the selected Kabupaten's centroid
+                try:
+                    if not kabupaten_gdf.empty:
+                        kabupaten_gdf_proj = kabupaten_gdf.to_crs(epsg=3857)
+                        centroid_proj = kabupaten_gdf_proj.geometry.centroid
+                        centroid_wgs84 = centroid_proj.to_crs(epsg=4326)
+                        center = [centroid_wgs84.y.iloc[0], centroid_wgs84.x.iloc[0]]
+                        zoom_start = 11  # Higher zoom for Kabupaten view
+                    else:
+                        region_gdf_proj = region_gdf_analyzed.to_crs(epsg=3857)
+                        centroid_proj = region_gdf_proj.geometry.centroid
+                        centroid_wgs84 = centroid_proj.to_crs(epsg=4326)
+                        center = [centroid_wgs84.y.iloc[0], centroid_wgs84.x.iloc[0]]
+                        zoom_start = 9  # Default zoom for Region view
+                except Exception:
+                    center = [-2.5, 118.0]  # Fallback to Indonesia center
+                    zoom_start = 9
+
+                m = folium.Map(location=center, zoom_start=zoom_start, tiles="CartoDB positron")
+
+                # folium.features.GeoJson(
+                #     region_gdf_analyzed,
+                #     name="Nielsen Tiers",
+                #     style_function=style_function,
+                #     tooltip=GeoJsonTooltip(
+                #         fields=[
+                #             "Region_title",
+                #             "Kabupaten_title",
+                #             "Kecamatan_title",
+                #             "Kelurahan_title",
+                #             "Nielsen Tier",
+                #         ],
+                #         aliases=[
+                #             "Region:",
+                #             "Kabupaten:",
+                #             "Kecamatan:",
+                #             "Kelurahan:",
+                #             "Nielsen Tier:",
+                #         ],
+                #         localize=True,
+                #         sticky=False,
+                #         labels=True,
+                #     ),
+                # ).add_to(m)
+
+                # Add the GeoJSON for other Kabupaten first
+                if not other_kabupaten_gdf.empty:
+                    folium.features.GeoJson(
+                        other_kabupaten_gdf,
+                        name="Other Kabupaten",
+                        style_function=other_kabupaten_style_function,
+                        tooltip=GeoJsonTooltip(
+                            fields=[
+                                "Region_title",
+                                "Kabupaten_title",
+                                "Kecamatan_title",
+                                "Kelurahan_title",
+                                "Nielsen Tier",
+                            ],
+                            aliases=[
+                                "Region:",
+                                "Kabupaten:",
+                                "Kecamatan:",
+                                "Kelurahan:",
+                                "Nielsen Tier:",
+                            ],
+                            localize=True,
+                            sticky=False,
+                            labels=True,
+                        ),
+                    ).add_to(m)
+
+                # Add the GeoJSON for the selected Kabupaten with its unique style
+                if not kabupaten_gdf.empty:
+                    folium.features.GeoJson(
+                        kabupaten_gdf,
+                        name=f"Selected Kabupaten: {selected_kabupaten}",
+                        style_function=selected_kabupaten_style_function,
+                        tooltip=GeoJsonTooltip(
+                            fields=[
+                                "Region_title",
+                                "Kabupaten_title",
+                                "Kecamatan_title",
+                                "Kelurahan_title",
+                                "Nielsen Tier",
+                            ],
+                            aliases=[
+                                "Region:",
+                                "Kabupaten:",
+                                "Kecamatan:",
+                                "Kelurahan:",
+                                "Nielsen Tier:",
+                            ],
+                            localize=True,
+                            sticky=False,
+                            labels=True,
+                        ),
+                    ).add_to(m)
+
+                # Add store markers
+                marker_cluster = MarkerCluster().add_to(m)
+                for _, row in region_stores.iterrows():
+                    folium.CircleMarker(
+                        location=[row["latitude"], row["longitude"]],
+                        radius=4,
+                        color="black",
+                        fill=True,
+                        fill_color="blue",
+                        fill_opacity=1.0,
+                        tooltip=f"Store: {row['cust_id']} - {row['store_name']}",
+                    ).add_to(marker_cluster)
+
+                # Add the legend to the map
+                m.get_root().html.add_child(folium.Element(create_legend()))
+                folium.LayerControl().add_to(m)
+
+                # --- Step 8: Show Map in Streamlit ---
+                st_map = st_folium(m, width=1200, height=700, returned_objects=[])
+
+                # --- Step 9: Create Summary Table ---
+                st.subheader("📊 Area Summary")
+
+                @st.cache_data(show_spinner="Generating summary table...")
+                def create_summary_table(_region_gdf, _region_stores, selected_region, selected_kabupaten):
+                    """Creates a summary table with store counts by area."""
+                    # Create a copy of the region data
+                    summary_gdf = _region_gdf.copy()
+
+                    # Convert stores to GeoDataFrame for spatial analysis
+                    if not _region_stores.empty:
+                        stores_gdf = gpd.GeoDataFrame(
+                            _region_stores,
+                            geometry=gpd.points_from_xy(_region_stores.longitude, _region_stores.latitude),
+                            crs="EPSG:4326",
+                        )
+
+                        # Perform spatial join to count stores per area
+                        joined_gdf = gpd.sjoin(summary_gdf, stores_gdf, how="left", predicate="intersects")
+
+                        # Count stores per area
+                        store_counts = joined_gdf.groupby(joined_gdf.index).size().fillna(0)
+                        summary_gdf["Number of Stores"] = store_counts
+                    else:
+                        summary_gdf["Number of Stores"] = 0
+
+                    # Group by Kabupaten, Kecamatan, Kelurahan and sum store counts
+                    summary_df = summary_gdf.groupby(['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan']).agg({
+                        'Number of Stores': 'sum'
+                    }).reset_index()
+
+                    # Filter by selected kabupaten if specified
+                    if selected_kabupaten:
+                        summary_df = summary_df[summary_df['Kabupaten'].astype(str).str.upper() == selected_kabupaten.upper()]
+
+                    # Sort by number of stores (descending)
+                    summary_df = summary_df.sort_values('Number of Stores', ascending=False)
+
+                    return summary_df
+
+                # Generate summary table
+                summary_df = create_summary_table(region_gdf_analyzed, region_stores, selected_region, selected_kabupaten)
+
+                if not summary_df.empty:
+                    # Display the table
+                    st.dataframe(
+                        summary_df,
+                        column_config={
+                            "Region": st.column_config.TextColumn("Region", width="medium"),
+                            "Kabupaten": st.column_config.TextColumn("Kabupaten", width="medium"),
+                            "Kecamatan": st.column_config.TextColumn("Kecamatan", width="medium"),
+                            "Kelurahan": st.column_config.TextColumn("Kelurahan", width="medium"),
+                            "Number of Stores": st.column_config.NumberColumn("Number of Stores", width="small")
+                        },
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+                    # --- Step 10: Excel Download Functionality ---
+                    def get_excel_download_link(df):
+                        """Generate Excel download link."""
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            df.to_excel(writer, sheet_name='Store Summary', index=False)
+                        output.seek(0)
+                        return output
+
+                    # Create download button
+                    excel_data = get_excel_download_link(summary_df)
+                    st.download_button(
+                        label="📥 Download Excel",
+                        data=excel_data,
+                        file_name=f"store_summary_{selected_region}_{selected_kabupaten or 'all'}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:
+                    st.info("No data available for the summary table.")
+
             else:
-                summary_gdf["Number of Stores"] = 0
-
-            # Group by Kabupaten, Kecamatan, Kelurahan and sum store counts
-            summary_df = summary_gdf.groupby(['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan']).agg({
-                'Number of Stores': 'sum'
-            }).reset_index()
-
-            # Filter by selected kabupaten if specified
-            if selected_kabupaten:
-                summary_df = summary_df[summary_df['Kabupaten'].astype(str).str.upper() == selected_kabupaten.upper()]
-
-            # Sort by number of stores (descending)
-            summary_df = summary_df.sort_values('Number of Stores', ascending=False)
-
-            return summary_df
-
-        # Generate summary table
-        summary_df = create_summary_table(region_gdf_analyzed, region_stores, selected_region, selected_kabupaten)
-
-        if not summary_df.empty:
-            # Display the table
-            st.dataframe(
-                summary_df,
-                column_config={
-                    "Region": st.column_config.TextColumn("Region", width="medium"),
-                    "Kabupaten": st.column_config.TextColumn("Kabupaten", width="medium"),
-                    "Kecamatan": st.column_config.TextColumn("Kecamatan", width="medium"),
-                    "Kelurahan": st.column_config.TextColumn("Kelurahan", width="medium"),
-                    "Number of Stores": st.column_config.NumberColumn("Number of Stores", width="small")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-
-            # --- Step 10: Excel Download Functionality ---
-            def get_excel_download_link(df):
-                """Generate Excel download link."""
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, sheet_name='Store Summary', index=False)
-                output.seek(0)
-                return output
-
-            # Create download button
-            excel_data = get_excel_download_link(summary_df)
-            st.download_button(
-                label="📥 Download Excel",
-                data=excel_data,
-                file_name=f"store_summary_{selected_region}_{selected_kabupaten or 'all'}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.info("No data available for the summary table.")
-
+                st.warning(f"No data available for {selected_region}")
     else:
-        st.warning(f"No data available for {selected_region}")
+        # Inform the user to select a Kabupaten
+        st.info("Please select a Kabupaten to view the map and area summary.")
+else:
+    # Inform the user to select a Region (although selected_region will likely not be None
+    # if available_regions is not empty, this is for robustness)
+    st.info("Please select a Region.")
