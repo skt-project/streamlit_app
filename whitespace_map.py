@@ -18,10 +18,10 @@ st.title("Indonesia Nielsen Store Map")
 STORE_GRADE_COLORS = {
     "S": "#006400",  # DarkGreen
     "A": "#32CD32",  # LimeGreen
-    "B": "#FFA500",  # Orange
-    "C": "#FF4500",  # OrangeRed
-    "D": "#FF0000",  # Red
-    "Other": "#1E90FF",  # Default/Missing Grade (Blue)
+    "B": "#FF8C00",  # Orange
+    "C": "#FFD700",  # OrangeRed
+    "D": "#B22222",  # Red
+    "Other": "#66B2FD",  # Default/Missing Grade (Blue)
 }
 
 # --- Step 1: Authenticate BigQuery ---
@@ -236,6 +236,12 @@ if selected_region_placeholder != "--- Select Region ---":
             region_stores = store_df[
                 store_df["region"].astype(str).str.upper() == selected_region.upper()
             ].copy()
+            distributor_df = distributor_df[
+                distributor_df["Region"].astype(str).str.upper() == selected_region.upper()
+            ]
+            potential_stores_df = potential_stores_df[
+                potential_stores_df["region"].astype(str).str.upper() == selected_region.upper()
+            ]
 
             # --- Step 6: Perform Whitespace Analysis ---
             @st.cache_data(show_spinner="Analyzing whitespace...")
@@ -317,12 +323,13 @@ if selected_region_placeholder != "--- Select Region ---":
                 &nbsp; <i style="background:white; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Other Tier<br>
                 <hr style="margin: 2px 0;">
                 &nbsp; <b>Store Points</b> <br>
-                &nbsp; <i style="background:{STORE_GRADE_COLORS['S']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade S <br>
-                &nbsp; <i style="background:{STORE_GRADE_COLORS['A']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade A <br>
-                &nbsp; <i style="background:{STORE_GRADE_COLORS['B']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade B <br>
-                &nbsp; <i style="background:{STORE_GRADE_COLORS['C']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade C <br>
-                &nbsp; <i style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> <span style="color: purple;">&#9830;</span> Distributor Branch <br>
-                &nbsp; <i style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> <span style="color: darkcyan;">&#9679;</span> Potential Store (GMaps) <br>
+                &nbsp; <i style="background:#006400; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade S <br>
+                &nbsp; <i style="background:#32CD32; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade A <br>
+                &nbsp; <i style="background:#FF8C00; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade B <br>
+                &nbsp; <i style="background:#FFD700; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade C <br>
+                &nbsp; <i style="background:#B22222; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade D <br>
+                &nbsp; <i></i> <span style="color: purple; font-size: 18px">&#9830;</span> Distributor Branch <br>
+                &nbsp; <i></i> <span style="color: darkcyan; font-size: 18px">&#9679;</span> Potential Store (GMaps) <br>
                 &nbsp; <span style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></span> <span style="font-size: 10px;">HeatMap shows Grade S density</span> <br>
                 </div>
                 """
@@ -340,22 +347,45 @@ if selected_region_placeholder != "--- Select Region ---":
                 other_kabupaten_gdf = region_gdf_analyzed[region_gdf_analyzed["Kabupaten"].astype(str).str.upper() != selected_kabupaten.upper()].copy()
 
                 # Get map center from the selected Kabupaten's centroid
+                # Get map center
                 try:
-                    if not kabupaten_gdf.empty:
-                        kabupaten_gdf_proj = kabupaten_gdf.to_crs(epsg=3857)
-                        centroid_proj = kabupaten_gdf_proj.geometry.centroid
-                        centroid_wgs84 = centroid_proj.to_crs(epsg=4326)
-                        center = [centroid_wgs84.y.iloc[0], centroid_wgs84.x.iloc[0]]
-                        zoom_start = 11  # Higher zoom for Kabupaten view
-                    else:
-                        region_gdf_proj = region_gdf_analyzed.to_crs(epsg=3857)
-                        centroid_proj = region_gdf_proj.geometry.centroid
-                        centroid_wgs84 = centroid_proj.to_crs(epsg=4326)
-                        center = [centroid_wgs84.y.iloc[0], centroid_wgs84.x.iloc[0]]
-                        zoom_start = 9  # Default zoom for Region view
-                except Exception:
-                    center = [-2.5, 118.0]  # Fallback to Indonesia center
+                    # Initialize center with a safe fallback
+                    center = [-2.5, 118.0]  # Default to Indonesia center
                     zoom_start = 9
+
+                    target_gdf = None
+                    target_zoom = 9
+
+                    if not kabupaten_gdf.empty:
+                        target_gdf = kabupaten_gdf
+                        target_zoom = 11
+                    elif not region_gdf_analyzed.empty:
+                        # Fallback to region center if selected Kabupaten is empty
+                        target_gdf = region_gdf_analyzed
+                        target_zoom = 9
+
+                    if target_gdf is not None:
+                        # 1. Check for valid geometry before projection/centroid calculation
+                        target_gdf = target_gdf[target_gdf.geometry.is_valid]
+
+                        if not target_gdf.empty:
+                            target_gdf_proj = target_gdf.to_crs(epsg=3857)
+                            centroid_proj = target_gdf_proj.geometry.centroid
+                            centroid_wgs84 = centroid_proj.to_crs(epsg=4326)
+
+                            # 2. Check if the resulting centroid is valid
+                            if not centroid_wgs84.empty:
+                                lat = centroid_wgs84.y.iloc[0]
+                                lon = centroid_wgs84.x.iloc[0]
+
+                                if pd.notna(lat) and pd.notna(lon):
+                                    center = [lat, lon]
+                                    zoom_start = target_zoom
+                                # Else: Fallback center remains [-2.5, 118.0]
+
+                except Exception as e:
+                    # Log the error for debugging, but keep the fallback center
+                    st.error(f"Error calculating map center: {e}")
 
                 m = folium.Map(location=center, zoom_start=zoom_start, tiles="CartoDB positron")
 
@@ -433,8 +463,8 @@ if selected_region_placeholder != "--- Select Region ---":
                         weight=1,
                         fill=True,
                         fill_color="darkcyan",
-                        fill_opacity=0.6,
-                        tooltip=f"Potential Store: {row['name']})",
+                        fill_opacity=0.4,
+                        tooltip=f"Potential Store: {row['name']}",
                     ).add_to(m)
 
                 # Add HeatMap for Grade S concentration
@@ -451,8 +481,9 @@ if selected_region_placeholder != "--- Select Region ---":
 
                     folium.CircleMarker(
                         location=[row["latitude"], row["longitude"]],
-                        radius=4,
+                        radius=6,
                         color="black",
+                        weight=2,
                         fill=True,
                         fill_color=grade_color,
                         fill_opacity=1.0,
@@ -504,10 +535,13 @@ if selected_region_placeholder != "--- Select Region ---":
                         for grade in grade_columns:
                             summary_gdf[f"Stores Grade {grade}"] = 0
 
-                    # Group by Kabupaten, Kecamatan, Kelurahan and sum store counts
-                    summary_df = summary_gdf.groupby(['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan']).agg({
-                        'Number of Stores': 'sum'
-                    }).reset_index()
+                    # Group by area and sum store counts/grades
+                    group_cols = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan']
+                    agg_dict = {'Number of Stores': 'sum'}
+                    for grade in grade_columns:
+                        agg_dict[f'Stores Grade {grade}'] = 'sum'
+
+                    summary_df = summary_gdf.groupby(group_cols).agg(agg_dict).reset_index()
 
                     # Filter by selected kabupaten if specified
                     if selected_kabupaten:
@@ -523,7 +557,7 @@ if selected_region_placeholder != "--- Select Region ---":
                     return summary_df
 
                 # Generate summary table
-                summary_df = create_summary_table(region_gdf_analyzed, region_stores, selected_region, selected_kabupaten)
+                summary_df = create_summary_table(region_gdf_analyzed, region_stores, selected_kabupaten)
 
                 if not summary_df.empty:
                     # Configure column display

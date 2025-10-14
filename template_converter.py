@@ -64,6 +64,7 @@ BRAND_PREFIXES = {
     "SKINTIFIC": "11",
     "G2G": "12",
     "TIMEPHORIA": "13",
+    "FACERINNA": "1A"
 }
 BRAND_OPTIONS = list(BRAND_PREFIXES.keys())
 
