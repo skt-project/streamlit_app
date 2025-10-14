@@ -461,6 +461,8 @@ def main():
                 # Standardize the distributor name to all uppercase for consistency
                 po_df["DISTRIBUTOR"] = po_df["DISTRIBUTOR"].str.upper()
 
+                po_df["PRODUCT CODE"] = po_df["PRODUCT CODE"].astype(str).str.strip().str.upper()
+
                 st.write("Preview of uploaded PO data:")
                 st.dataframe(po_df.head())
 

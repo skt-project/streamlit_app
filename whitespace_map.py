@@ -4,7 +4,7 @@ import geopandas as gpd
 import folium
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from folium.plugins import MarkerCluster, HeatMap
+from folium.plugins import MarkerCluster
 from folium import GeoJsonTooltip
 import streamlit as st
 from streamlit_folium import st_folium
@@ -102,7 +102,7 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
         b.region,
         b.cust_id,
         b.store_name,
-        COALESCE(b.store_grade_g2g_qtd, 'Other') AS store_grade,
+        COALESCE(NULLIF(b.store_grade_g2g_qtd, ''), 'Other') AS store_grade,
         COALESCE(SAFE_CAST(c.longitude AS FLOAT64), w.longitude, SAFE_CAST(b.longitude AS FLOAT64)) AS longitude,
         COALESCE(SAFE_CAST(c.latitude AS FLOAT64), w.latitude, SAFE_CAST(b.latitude AS FLOAT64)) AS latitude
     FROM `{project}.{bq_dataset}.{basis}` AS b
@@ -329,10 +329,10 @@ if selected_region_placeholder != "--- Select Region ---":
                 &nbsp; <i style="background:#FFD700; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade C <br>
                 &nbsp; <i style="background:#B22222; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade D <br>
                 &nbsp; <i></i> <span style="color: purple; font-size: 18px">&#9830;</span> Distributor Branch <br>
-                &nbsp; <i></i> <span style="color: darkcyan; font-size: 18px">&#9679;</span> Potential Store (GMaps) <br>
-                &nbsp; <span style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></span> <span style="font-size: 10px;">HeatMap shows Grade S density</span> <br>
+                &nbsp; <i style="background:cadetblue; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Potential Store (Shopping Cart) <br>
                 </div>
                 """
+                # &nbsp; <span style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></span> <span style="font-size: 10px;">HeatMap shows Grade S density</span> <br>
                 return legend_html
 
             if not region_gdf_analyzed.empty:
@@ -346,7 +346,6 @@ if selected_region_placeholder != "--- Select Region ---":
                 kabupaten_gdf = region_gdf_analyzed[region_gdf_analyzed["Kabupaten"].astype(str).str.upper() == selected_kabupaten.upper()].copy()
                 other_kabupaten_gdf = region_gdf_analyzed[region_gdf_analyzed["Kabupaten"].astype(str).str.upper() != selected_kabupaten.upper()].copy()
 
-                # Get map center from the selected Kabupaten's centroid
                 # Get map center
                 try:
                     # Initialize center with a safe fallback
@@ -456,25 +455,24 @@ if selected_region_placeholder != "--- Select Region ---":
 
                 # Add Potential Store markers (Custom Icon)
                 for _, row in potential_stores_df.iterrows():
-                    folium.CircleMarker(
+                    folium.Marker(
                         location=[row["latitude"], row["longitude"]],
-                        radius=5,
-                        color="darkcyan",
-                        weight=1,
-                        fill=True,
-                        fill_color="darkcyan",
-                        fill_opacity=0.4,
+                        icon=folium.Icon(
+                            color="cadetblue",
+                            icon="shopping-cart",  # Font Awesome Icon for potential store
+                            prefix="fa",
+                        ),
                         tooltip=f"Potential Store: {row['name']}",
                     ).add_to(m)
 
                 # Add HeatMap for Grade S concentration
-                grade_s_stores = region_stores[region_stores['store_grade'] == 'S']
-                if not grade_s_stores.empty:
-                    s_store_data = grade_s_stores[['latitude', 'longitude']].values.tolist()
-                    HeatMap(s_store_data, name='Grade S Store Density (HeatMap)', radius=15).add_to(m)
+                # grade_s_stores = region_stores[region_stores['store_grade'] == 'S']
+                # if not grade_s_stores.empty:
+                #     s_store_data = grade_s_stores[['latitude', 'longitude']].values.tolist()
+                #     HeatMap(s_store_data, name='Grade S Store Density (HeatMap)', radius=15).add_to(m)
 
                 # Add store markers
-                marker_cluster = MarkerCluster(name="Store by Grade").add_to(m)
+                # marker_cluster = MarkerCluster(name="Store by Grade").add_to(m)
                 for _, row in region_stores.iterrows():
                     store_grade = row.get('store_grade', 'Other')
                     grade_color = STORE_GRADE_COLORS.get(store_grade, STORE_GRADE_COLORS['Other'])
@@ -483,12 +481,12 @@ if selected_region_placeholder != "--- Select Region ---":
                         location=[row["latitude"], row["longitude"]],
                         radius=6,
                         color="black",
-                        weight=2,
+                        weight=1,
                         fill=True,
                         fill_color=grade_color,
                         fill_opacity=1.0,
                         tooltip=f"Store: {row['cust_id']} - {row['store_name']} (Grade: {store_grade})",
-                    ).add_to(marker_cluster)
+                    ).add_to(m)
 
                 # Add the legend to the map
                 m.get_root().html.add_child(folium.Element(create_legend()))
