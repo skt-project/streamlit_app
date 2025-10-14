@@ -4,7 +4,7 @@ import geopandas as gpd
 import folium
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from folium.plugins import MarkerCluster
+from folium.plugins import MarkerCluster, HeatMap
 from folium import GeoJsonTooltip
 import streamlit as st
 from streamlit_folium import st_folium
@@ -14,6 +14,15 @@ from io import BytesIO
 st.set_page_config(layout="wide")
 st.title("Indonesia Nielsen Store Map")
 
+# --- Configuration for Store Grade Colors ---
+STORE_GRADE_COLORS = {
+    "S": "#006400",  # DarkGreen
+    "A": "#32CD32",  # LimeGreen
+    "B": "#FFA500",  # Orange
+    "C": "#FF4500",  # OrangeRed
+    "D": "#FF0000",  # Red
+    "Other": "#1E90FF",  # Default/Missing Grade (Blue)
+}
 
 # --- Step 1: Authenticate BigQuery ---
 @st.cache_resource(show_spinner="Authenticating with BigQuery...")
@@ -44,6 +53,7 @@ def get_bigquery_client():
         BASIS_TABLE = st.secrets["bigquery"]["basis"]
         WHITESPACE_TABLE = st.secrets["bigquery"]["whitespace"]
         REPSLY_TABLE = st.secrets["bigquery"]["repsly"]
+        POTENTIAL_STORES_TABLE = st.secrets["bigquery"]["potential_stores"]
     except Exception:
         # --- Local fallback for development ---
         GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
@@ -53,6 +63,7 @@ def get_bigquery_client():
         BASIS_TABLE = "master_store_database_basis"
         WHITESPACE_TABLE = "whitespace_long_lat"
         REPSLY_TABLE = "ind_dim_clients"
+        POTENTIAL_STORES_TABLE = "indonesia_cosmetic_stores"
         credentials = service_account.Credentials.from_service_account_file(
             GCP_CREDENTIALS_PATH
         )
@@ -66,6 +77,7 @@ def get_bigquery_client():
         BASIS_TABLE,
         WHITESPACE_TABLE,
         REPSLY_TABLE,
+        POTENTIAL_STORES_TABLE
     )
 
 
@@ -84,12 +96,13 @@ def load_nielsen(path: str):
 
 @st.cache_data(show_spinner="Fetching stores from BigQuery...")
 def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
-    """Fetches store data with geocoordinates from BigQuery."""
+    """Fetches store data with geocoordinates and store grade from BigQuery."""
     query = f"""
     SELECT
         b.region,
         b.cust_id,
         b.store_name,
+        COALESCE(b.store_grade_g2g_qtd, 'Other') AS store_grade,
         COALESCE(SAFE_CAST(c.longitude AS FLOAT64), w.longitude, SAFE_CAST(b.longitude AS FLOAT64)) AS longitude,
         COALESCE(SAFE_CAST(c.latitude AS FLOAT64), w.latitude, SAFE_CAST(b.latitude AS FLOAT64)) AS latitude
     FROM `{project}.{bq_dataset}.{basis}` AS b
@@ -101,13 +114,42 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
         COALESCE(SAFE_CAST(c.longitude AS FLOAT64), w.longitude, SAFE_CAST(b.latitude AS FLOAT64)) IS NOT NULL
         AND COALESCE(SAFE_CAST(c.latitude AS FLOAT64), w.latitude, SAFE_CAST(b.latitude AS FLOAT64)) IS NOT NULL
     """
-    client, _, _, _, _, _, _ = get_bigquery_client()
+    client, _, _, _, _, _, _, _ = get_bigquery_client()
+    df = client.query(query).to_dataframe()
+    df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
+    df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
+    df.dropna(subset=["latitude", "longitude"], inplace=True)
+    df["store_grade"] = df["store_grade"].astype(str).str.upper().str.strip()
+    return df
+
+@st.cache_data(show_spinner="Loading distributor data...")
+def load_distributors(path: str):
+    """Loads distributor branch data from an Excel file."""
+    df = pd.read_excel(path)
+    df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
+    df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
+    df.dropna(subset=["Latitude", "Longitude"], inplace=True)
+    return df
+
+@st.cache_data(show_spinner="Fetching potential stores from BigQuery...")
+def load_potential_stores(project, bq_dataset, potential_stores_table):
+    """Fetches potential store data from BigQuery."""
+    query = f"""
+    SELECT
+        name,
+        latitude,
+        longitude,
+        province,
+        region
+    FROM `{project}.{bq_dataset}.{potential_stores_table}`
+    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+    """
+    client, _, _, _, _, _, _, _ = get_bigquery_client()
     df = client.query(query).to_dataframe()
     df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
     df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
     df.dropna(subset=["latitude", "longitude"], inplace=True)
     return df
-
 
 # --- Step 3: Load All Data Once ---
 (
@@ -118,6 +160,7 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
     BASIS_TABLE,
     WHITESPACE_TABLE,
     REPSLY_TABLE,
+    POTENTIAL_STORES_TABLE
 ) = get_bigquery_client()
 
 # --- Path helper ---
@@ -127,6 +170,9 @@ JSON_PATH = os.path.join(
 )
 NIELSEN_PATH = os.path.join(
     BASE_DIR, "data", "Data Nielsen by Kelurahan in Indonesia.xlsx"
+)
+DISTRIBUTOR_PATH = os.path.join(
+    BASE_DIR, "data", "Distributor Long Lat.xlsx"
 )
 
 gdf_subdistricts = load_geodata(JSON_PATH)
@@ -139,6 +185,8 @@ store_df = load_stores(
     WHITESPACE_TABLE,
     REPSLY_TABLE,
 )
+distributor_df = load_distributors(DISTRIBUTOR_PATH) # NEW
+potential_stores_df = load_potential_stores(GCP_PROJECT_ID, BQ_DATASET, POTENTIAL_STORES_TABLE)
 
 # --- Step 4: Create Composite Keys & Merge ---
 nielsen_df["geo_id"] = (
@@ -260,13 +308,22 @@ if selected_region_placeholder != "--- Select Region ---":
                 """Generates a custom HTML legend for the map."""
                 legend_html = """
                 <div style="position: fixed; 
-                            bottom: 50px; left: 50px; width: 170px; 
+                            bottom: 50px; left: 50px; width: 260px; 
                             border:2px solid grey; z-index:9999; font-size:14px;
                             background-color:darkgray; opacity:0.9;">
                 &nbsp; <b>Map Legend</b> <br>
                 &nbsp; <i style="background:#d2af13; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (With stores) <br>
                 &nbsp; <i style="background:darkred; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (No stores)<br>
                 &nbsp; <i style="background:white; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Other Tier<br>
+                <hr style="margin: 2px 0;">
+                &nbsp; <b>Store Points</b> <br>
+                &nbsp; <i style="background:{STORE_GRADE_COLORS['S']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade S <br>
+                &nbsp; <i style="background:{STORE_GRADE_COLORS['A']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade A <br>
+                &nbsp; <i style="background:{STORE_GRADE_COLORS['B']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade B <br>
+                &nbsp; <i style="background:{STORE_GRADE_COLORS['C']}; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade C <br>
+                &nbsp; <i style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> <span style="color: purple;">&#9830;</span> Distributor Branch <br>
+                &nbsp; <i style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> <span style="color: darkcyan;">&#9679;</span> Potential Store (GMaps) <br>
+                &nbsp; <span style="background:transparent; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></span> <span style="font-size: 10px;">HeatMap shows Grade S density</span> <br>
                 </div>
                 """
                 return legend_html
@@ -301,31 +358,6 @@ if selected_region_placeholder != "--- Select Region ---":
                     zoom_start = 9
 
                 m = folium.Map(location=center, zoom_start=zoom_start, tiles="CartoDB positron")
-
-                # folium.features.GeoJson(
-                #     region_gdf_analyzed,
-                #     name="Nielsen Tiers",
-                #     style_function=style_function,
-                #     tooltip=GeoJsonTooltip(
-                #         fields=[
-                #             "Region_title",
-                #             "Kabupaten_title",
-                #             "Kecamatan_title",
-                #             "Kelurahan_title",
-                #             "Nielsen Tier",
-                #         ],
-                #         aliases=[
-                #             "Region:",
-                #             "Kabupaten:",
-                #             "Kecamatan:",
-                #             "Kelurahan:",
-                #             "Nielsen Tier:",
-                #         ],
-                #         localize=True,
-                #         sticky=False,
-                #         labels=True,
-                #     ),
-                # ).add_to(m)
 
                 # Add the GeoJSON for other Kabupaten first
                 if not other_kabupaten_gdf.empty:
@@ -381,17 +413,50 @@ if selected_region_placeholder != "--- Select Region ---":
                         ),
                     ).add_to(m)
 
+                # Filter distributor and potential stores to the visible map area (Kabupaten boundary)
+                # This requires spatial filtering, which is skipped for simplicity but recommended for performance.
+
+                # Add Distributor markers (Diamond icon)
+                for _, row in distributor_df.iterrows():
+                    folium.Marker(
+                        location=[row["Latitude"], row["Longitude"]],
+                        icon=folium.Icon(color='purple', icon='diamond', prefix='fa'),
+                        tooltip=f"Distributor Branch: {row.get('Distributor Name', 'N/A')}",
+                    ).add_to(m)
+
+                # Add Potential Store markers (Custom Icon)
+                for _, row in potential_stores_df.iterrows():
+                    folium.CircleMarker(
+                        location=[row["latitude"], row["longitude"]],
+                        radius=5,
+                        color="darkcyan",
+                        weight=1,
+                        fill=True,
+                        fill_color="darkcyan",
+                        fill_opacity=0.6,
+                        tooltip=f"Potential Store: {row['name']})",
+                    ).add_to(m)
+
+                # Add HeatMap for Grade S concentration
+                grade_s_stores = region_stores[region_stores['store_grade'] == 'S']
+                if not grade_s_stores.empty:
+                    s_store_data = grade_s_stores[['latitude', 'longitude']].values.tolist()
+                    HeatMap(s_store_data, name='Grade S Store Density (HeatMap)', radius=15).add_to(m)
+
                 # Add store markers
-                marker_cluster = MarkerCluster().add_to(m)
+                marker_cluster = MarkerCluster(name="Store by Grade").add_to(m)
                 for _, row in region_stores.iterrows():
+                    store_grade = row.get('store_grade', 'Other')
+                    grade_color = STORE_GRADE_COLORS.get(store_grade, STORE_GRADE_COLORS['Other'])
+
                     folium.CircleMarker(
                         location=[row["latitude"], row["longitude"]],
                         radius=4,
                         color="black",
                         fill=True,
-                        fill_color="blue",
+                        fill_color=grade_color,
                         fill_opacity=1.0,
-                        tooltip=f"Store: {row['cust_id']} - {row['store_name']}",
+                        tooltip=f"Store: {row['cust_id']} - {row['store_name']} (Grade: {store_grade})",
                     ).add_to(marker_cluster)
 
                 # Add the legend to the map
@@ -405,10 +470,12 @@ if selected_region_placeholder != "--- Select Region ---":
                 st.subheader("📊 Area Summary")
 
                 @st.cache_data(show_spinner="Generating summary table...")
-                def create_summary_table(_region_gdf, _region_stores, selected_region, selected_kabupaten):
+                def create_summary_table(_region_gdf, _region_stores, selected_kabupaten):
                     """Creates a summary table with store counts by area."""
                     # Create a copy of the region data
                     summary_gdf = _region_gdf.copy()
+
+                    grade_columns = list(STORE_GRADE_COLORS.keys())
 
                     # Convert stores to GeoDataFrame for spatial analysis
                     if not _region_stores.empty:
@@ -424,8 +491,18 @@ if selected_region_placeholder != "--- Select Region ---":
                         # Count stores per area
                         store_counts = joined_gdf.groupby(joined_gdf.index).size().fillna(0)
                         summary_gdf["Number of Stores"] = store_counts
+
+                        # Calculate Grade Counts
+                        for grade in grade_columns:
+                            # Filter stores for the current grade (case-insensitive)
+                            grade_filtered_gdf = joined_gdf[joined_gdf['store_grade'].str.upper() == grade.upper()]
+                            # Count the occurrences of this grade for each Kelurahan (index)
+                            grade_counts = grade_filtered_gdf.groupby(grade_filtered_gdf.index).size().reindex(summary_gdf.index, fill_value=0)
+                            summary_gdf[f'Stores Grade {grade}'] = grade_counts
                     else:
                         summary_gdf["Number of Stores"] = 0
+                        for grade in grade_columns:
+                            summary_gdf[f"Stores Grade {grade}"] = 0
 
                     # Group by Kabupaten, Kecamatan, Kelurahan and sum store counts
                     summary_df = summary_gdf.groupby(['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan']).agg({
@@ -439,22 +516,32 @@ if selected_region_placeholder != "--- Select Region ---":
                     # Sort by number of stores (descending)
                     summary_df = summary_df.sort_values('Number of Stores', ascending=False)
 
+                    # Select and rename columns for display
+                    display_cols = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 'Number of Stores'] + [f'Stores Grade {g}' for g in grade_columns]
+                    summary_df = summary_df[display_cols]
+
                     return summary_df
 
                 # Generate summary table
                 summary_df = create_summary_table(region_gdf_analyzed, region_stores, selected_region, selected_kabupaten)
 
                 if not summary_df.empty:
+                    # Configure column display
+                    column_config_dict = {
+                        "Region": st.column_config.TextColumn("Region", width="medium"),
+                        "Kabupaten": st.column_config.TextColumn("Kabupaten", width="medium"),
+                        "Kecamatan": st.column_config.TextColumn("Kecamatan", width="medium"),
+                        "Kelurahan": st.column_config.TextColumn("Kelurahan", width="medium"),
+                        "Number of Stores": st.column_config.NumberColumn("Total Stores", width="small")
+                    }
+                    # Add grade columns to config
+                    for grade in list(STORE_GRADE_COLORS.keys()):
+                        column_config_dict[f'Stores Grade {grade}'] = st.column_config.NumberColumn(f'Grade {grade}', width="small")
+
                     # Display the table
                     st.dataframe(
                         summary_df,
-                        column_config={
-                            "Region": st.column_config.TextColumn("Region", width="medium"),
-                            "Kabupaten": st.column_config.TextColumn("Kabupaten", width="medium"),
-                            "Kecamatan": st.column_config.TextColumn("Kecamatan", width="medium"),
-                            "Kelurahan": st.column_config.TextColumn("Kelurahan", width="medium"),
-                            "Number of Stores": st.column_config.NumberColumn("Number of Stores", width="small")
-                        },
+                        column_config=column_config_dict,
                         hide_index=True,
                         use_container_width=True
                     )
