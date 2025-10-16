@@ -24,6 +24,14 @@ STORE_GRADE_COLORS = {
     "Other": "#66B2FD",  # Default/Missing Grade (Blue)
 }
 
+# --- Configuration for Distributor Brand Colors (Add this to the config section) ---
+DISTRIBUTOR_BRAND_COLORS = {
+    "SKT_ONLY": "lightblue",
+    "G2G_ONLY": "pink",
+    "BOTH_SKT_G2G": "purple",
+    "OTHER": "gray"
+}
+
 # --- Step 1: Authenticate BigQuery ---
 @st.cache_resource(show_spinner="Authenticating with BigQuery...")
 def get_bigquery_client():
@@ -122,6 +130,7 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
     df["store_grade"] = df["store_grade"].astype(str).str.upper().str.strip()
     return df
 
+
 @st.cache_data(show_spinner="Loading distributor data...")
 def load_distributors(path: str):
     """Loads distributor branch data from an Excel file."""
@@ -130,6 +139,7 @@ def load_distributors(path: str):
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
     df.dropna(subset=["Latitude", "Longitude"], inplace=True)
     return df
+
 
 @st.cache_data(show_spinner="Fetching potential stores from BigQuery...")
 def load_potential_stores(project, bq_dataset, potential_stores_table):
@@ -299,6 +309,25 @@ if selected_region_placeholder != "--- Select Region ---":
                     "fillOpacity": 0.7,
                 }
 
+            # Define a function to determine the distributor color
+            def get_distributor_color(brand_string):
+                """Determines the color based on brand presence (SKT and/or G2G)."""
+                if pd.isna(brand_string):
+                    return DISTRIBUTOR_BRAND_COLORS["OTHER"]
+
+                brand_upper = str(brand_string).upper()
+                has_skt = "SKT" in brand_upper
+                has_g2g = "G2G" in brand_upper
+
+                if has_skt and has_g2g:
+                    return DISTRIBUTOR_BRAND_COLORS["BOTH_SKT_G2G"]
+                elif has_skt:
+                    return DISTRIBUTOR_BRAND_COLORS["SKT_ONLY"]
+                elif has_g2g:
+                    return DISTRIBUTOR_BRAND_COLORS["G2G_ONLY"]
+                else:
+                    return DISTRIBUTOR_BRAND_COLORS["OTHER"]
+
             def selected_kabupaten_style_function(feature):
                 style = style_function(feature)
                 style["color"] = "#4b5004d5"
@@ -328,7 +357,12 @@ if selected_region_placeholder != "--- Select Region ---":
                 &nbsp; <i style="background:#FF8C00; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade B <br>
                 &nbsp; <i style="background:#FFD700; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade C <br>
                 &nbsp; <i style="background:#B22222; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade D <br>
-                &nbsp; <i></i> <span style="color: purple; font-size: 18px">&#9830;</span> Distributor Branch <br>
+                <hr style="margin: 2px 0;">
+                &nbsp; <b>Distributor Branches</b> <br>
+                &nbsp; <span style="color: lightblue; font-size: 18px">&#9830;</span> SKT <br>
+                &nbsp; <span style="color: pink; font-size: 18px">&#9830;</span> G2G <br>
+                &nbsp; <span style="color: purple; font-size: 18px">&#9830;</span> SKT & G2G <br>
+                &nbsp; <span style="color: gray; font-size: 18px">&#9830;</span> Other / N/A Brand <br>
                 &nbsp; <i style="background:cadetblue; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Potential Store (Shopping Cart) <br>
                 </div>
                 """
@@ -447,10 +481,13 @@ if selected_region_placeholder != "--- Select Region ---":
 
                 # Add Distributor markers (Diamond icon)
                 for _, row in distributor_df.iterrows():
+                    brand_string = row.get("Brand")
+                    dist_color = get_distributor_color(brand_string) # Get the color based on Brand
+
                     folium.Marker(
                         location=[row["Latitude"], row["Longitude"]],
-                        icon=folium.Icon(color='purple', icon='diamond', prefix='fa'),
-                        tooltip=f"Distributor Branch: {row.get('Distributor Name', 'N/A')}",
+                        icon=folium.Icon(color=dist_color, icon="diamond", prefix="fa"),
+                        tooltip=f"Distributor Branch: {row.get('Distributor Name', 'N/A')} ({brand_string})",
                     ).add_to(m)
 
                 # Add Potential Store markers (Custom Icon)
