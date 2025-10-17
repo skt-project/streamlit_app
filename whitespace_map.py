@@ -3,6 +3,7 @@ import pandas as pd
 import geopandas as gpd
 import folium
 from google.cloud import bigquery
+from google.cloud import storage
 from google.oauth2 import service_account
 from folium.plugins import MarkerCluster
 from folium import GeoJsonTooltip
@@ -33,9 +34,9 @@ DISTRIBUTOR_BRAND_COLORS = {
 }
 
 # --- Step 1: Authenticate BigQuery ---
-@st.cache_resource(show_spinner="Authenticating with BigQuery...")
-def get_bigquery_client():
-    """Initializes and returns a BigQuery client, handling both cloud and local environments."""
+@st.cache_resource(show_spinner="Authenticating with Google Cloud...")
+def get_google_client():
+    """Initializes and returns both BigQuery and GCS client, handling both cloud and local environments."""
     try:
         gcp_secrets = st.secrets["connections"]["bigquery"]
         private_key = gcp_secrets["private_key"].replace("\\n", "\n")
@@ -62,6 +63,7 @@ def get_bigquery_client():
         WHITESPACE_TABLE = st.secrets["bigquery"]["whitespace"]
         REPSLY_TABLE = st.secrets["bigquery"]["repsly"]
         POTENTIAL_STORES_TABLE = st.secrets["bigquery"]["potential_stores"]
+        BUCKET_NAME = st.secrets["gcs"]["data"]
     except Exception:
         # --- Local fallback for development ---
         GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
@@ -72,34 +74,50 @@ def get_bigquery_client():
         WHITESPACE_TABLE = "whitespace_long_lat"
         REPSLY_TABLE = "ind_dim_clients"
         POTENTIAL_STORES_TABLE = "indonesia_cosmetic_stores"
+        BUCKET_NAME = "public_skintific_storage"
         credentials = service_account.Credentials.from_service_account_file(
             GCP_CREDENTIALS_PATH
         )
 
-    client = bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
+    # Initialize both clients
+    bq_client = bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
+    gcs_client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
+
     return (
-        client,
+        bq_client,
+        gcs_client,
         GCP_PROJECT_ID,
         BQ_DATASET,
         REPSLY_DATASET,
         BASIS_TABLE,
         WHITESPACE_TABLE,
         REPSLY_TABLE,
-        POTENTIAL_STORES_TABLE
+        POTENTIAL_STORES_TABLE,
+        BUCKET_NAME
     )
 
 
 # --- Step 2: Load GeoJSON & Nielsen Data ---
-@st.cache_data(show_spinner="Loading GeoJSON...")
-def load_geodata(path: str):
-    """Loads geospatial data from a parquet file."""
-    return gpd.read_parquet(path)
+@st.cache_data(show_spinner="Loading GeoJSON from GCS...")
+def load_geodata(_gcs_client, bucket_name: str, blob_path: str):
+    """Loads geospatial data from a parquet file in GCS."""
+    bucket = _gcs_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+
+    # Download to bytes and read
+    data_bytes = blob.download_as_bytes()
+    return gpd.read_parquet(BytesIO(data_bytes))
 
 
-@st.cache_data(show_spinner="Loading Nielsen data...")
-def load_nielsen(path: str):
-    """Loads Nielsen data from an Excel file."""
-    return pd.read_excel(path, sheet_name="Data by Kelurahan")
+@st.cache_data(show_spinner="Loading Nielsen data from GCS...")
+def load_nielsen(_gcs_client, bucket_name: str, blob_path: str):
+    """Loads Nielsen data from an Excel file in GCS."""
+    bucket = _gcs_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+
+    # Download to bytes and read
+    data_bytes = blob.download_as_bytes()
+    return pd.read_excel(BytesIO(data_bytes), sheet_name="Data by Kelurahan")
 
 
 @st.cache_data(show_spinner="Fetching stores from BigQuery...")
@@ -122,8 +140,8 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
         COALESCE(SAFE_CAST(c.longitude AS FLOAT64), w.longitude, SAFE_CAST(b.latitude AS FLOAT64)) IS NOT NULL
         AND COALESCE(SAFE_CAST(c.latitude AS FLOAT64), w.latitude, SAFE_CAST(b.latitude AS FLOAT64)) IS NOT NULL
     """
-    client, _, _, _, _, _, _, _ = get_bigquery_client()
-    df = client.query(query).to_dataframe()
+    bq_client, _, _, _, _, _, _, _, _, _ = get_google_client()
+    df = bq_client.query(query).to_dataframe()
     df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
     df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
     df.dropna(subset=["latitude", "longitude"], inplace=True)
@@ -131,10 +149,14 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
     return df
 
 
-@st.cache_data(show_spinner="Loading distributor data...")
-def load_distributors(path: str):
-    """Loads distributor branch data from an Excel file."""
-    df = pd.read_excel(path)
+@st.cache_data(show_spinner="Loading distributor data from GCS...")
+def load_distributors(_gcs_client, bucket_name: str, blob_path: str):
+    """Loads distributor branch data from an Excel file in GCS."""
+    bucket = _gcs_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+
+    data_bytes = blob.download_as_bytes()
+    df = pd.read_excel(BytesIO(data_bytes))
     df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
     df.dropna(subset=["Latitude", "Longitude"], inplace=True)
@@ -154,8 +176,8 @@ def load_potential_stores(project, bq_dataset, potential_stores_table):
     FROM `{project}.{bq_dataset}.{potential_stores_table}`
     WHERE latitude IS NOT NULL AND longitude IS NOT NULL
     """
-    client, _, _, _, _, _, _, _ = get_bigquery_client()
-    df = client.query(query).to_dataframe()
+    bq_client, _, _, _, _, _, _, _, _, _ = get_google_client()
+    df = bq_client.query(query).to_dataframe()
     df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
     df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
     df.dropna(subset=["latitude", "longitude"], inplace=True)
@@ -163,30 +185,25 @@ def load_potential_stores(project, bq_dataset, potential_stores_table):
 
 # --- Step 3: Load All Data Once ---
 (
-    client,
+    bq_client,
+    gcs_client,
     GCP_PROJECT_ID,
     BQ_DATASET,
     REPSLY_DATASET,
     BASIS_TABLE,
     WHITESPACE_TABLE,
     REPSLY_TABLE,
-    POTENTIAL_STORES_TABLE
-) = get_bigquery_client()
+    POTENTIAL_STORES_TABLE,
+    BUCKET_NAME,
+) = get_google_client()
 
 # --- Path helper ---
-BASE_DIR = os.path.dirname(__file__)
-JSON_PATH = os.path.join(
-    BASE_DIR, "data", "indonesia_villages_border_simplified.parquet"
-)
-NIELSEN_PATH = os.path.join(
-    BASE_DIR, "data", "Data Nielsen by Kelurahan in Indonesia.xlsx"
-)
-DISTRIBUTOR_PATH = os.path.join(
-    BASE_DIR, "data", "Distributor Long Lat.xlsx"
-)
+JSON_BLOB_PATH = "external_dataset/indonesia_villages_border_simplified.parquet"
+NIELSEN_BLOB_PATH = "external_dataset/Data Nielsen by Kelurahan in Indonesia.xlsx"
+DISTRIBUTOR_BLOB_PATH = "external_dataset/Distributor Long Lat.xlsx"
 
-gdf_subdistricts = load_geodata(JSON_PATH)
-nielsen_df = load_nielsen(NIELSEN_PATH)
+gdf_subdistricts = load_geodata(gcs_client, BUCKET_NAME, JSON_BLOB_PATH)
+nielsen_df = load_nielsen(gcs_client, BUCKET_NAME, NIELSEN_BLOB_PATH)
 store_df = load_stores(
     GCP_PROJECT_ID,
     BQ_DATASET,
@@ -195,7 +212,7 @@ store_df = load_stores(
     WHITESPACE_TABLE,
     REPSLY_TABLE,
 )
-distributor_df = load_distributors(DISTRIBUTOR_PATH) # NEW
+distributor_df = load_distributors(gcs_client, BUCKET_NAME, DISTRIBUTOR_BLOB_PATH)
 potential_stores_df = load_potential_stores(GCP_PROJECT_ID, BQ_DATASET, POTENTIAL_STORES_TABLE)
 
 # --- Step 4: Create Composite Keys & Merge ---
