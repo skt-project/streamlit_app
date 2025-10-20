@@ -125,6 +125,7 @@ def load_stores(project, bq_dataset, repsly_dataset, basis, whitespace, repsly):
     """Fetches store data with geocoordinates and store grade from BigQuery."""
     query = f"""
     SELECT
+        b.city,
         b.region,
         b.cust_id,
         b.store_name,
@@ -172,6 +173,7 @@ def load_potential_stores(project, bq_dataset, potential_stores_table):
         latitude,
         longitude,
         province,
+        kabupaten,
         region
     FROM `{project}.{bq_dataset}.{potential_stores_table}`
     WHERE latitude IS NOT NULL AND longitude IS NOT NULL
@@ -267,7 +269,7 @@ if selected_region_placeholder != "--- Select Region ---":
                 distributor_df["Region"].astype(str).str.upper() == selected_region.upper()
             ]
             potential_stores_df = potential_stores_df[
-                potential_stores_df["region"].astype(str).str.upper() == selected_region.upper()
+                potential_stores_df["kabupaten"].astype(str).str.upper() == selected_kabupaten.upper()
             ]
 
             # --- Step 6: Perform Whitespace Analysis ---
@@ -374,12 +376,12 @@ if selected_region_placeholder != "--- Select Region ---":
                 &nbsp; <i style="background:#FF8C00; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade B <br>
                 &nbsp; <i style="background:#FFD700; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade C <br>
                 &nbsp; <i style="background:#B22222; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade D <br>
+                &nbsp; <i style="background:#66B2FD; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade Other <br>
                 <hr style="margin: 2px 0;">
                 &nbsp; <b>Distributor Branches</b> <br>
                 &nbsp; <span style="color: lightblue; font-size: 18px">&#9830;</span> SKT <br>
                 &nbsp; <span style="color: pink; font-size: 18px">&#9830;</span> G2G <br>
                 &nbsp; <span style="color: purple; font-size: 18px">&#9830;</span> SKT & G2G <br>
-                &nbsp; <span style="color: gray; font-size: 18px">&#9830;</span> Other / N/A Brand <br>
                 &nbsp; <i style="background:cadetblue; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Potential Store (Shopping Cart) <br>
                 </div>
                 """
