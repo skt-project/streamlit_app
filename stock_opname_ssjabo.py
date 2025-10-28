@@ -9,7 +9,7 @@ from pendulum import timezone, now
 # ---------------------------
 # Streamlit Config
 # ---------------------------
-st.set_page_config(page_title="📦 Stock Opname Entry", page_icon="🧾", layout="wide")
+st.set_page_config(page_title="📦 Stock Opname Entry", layout="wide")
 jakarta_tz = timezone("Asia/Jakarta")
 
 # ---------------------------
@@ -109,7 +109,7 @@ if all([
 ]):
     st.success("✅ Semua pilihan lengkap. Silakan isi quantity SKU di bawah.")
 
-    st.subheader("🧴 Input Quantity per SKU")
+    st.subheader("📥​ Input Quantity per SKU")
 
     sku_quantities = {}
     total_qty = 0
