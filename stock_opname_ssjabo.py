@@ -16,26 +16,30 @@ jakarta_tz = timezone("Asia/Jakarta")
 # Setup GCP Connections
 # ---------------------------
 try:
-    # BigQuery
+    # --- BigQuery Credentials ---
     gcp_secrets = st.secrets["connections"]["bigquery"]
+    gcp_secrets = dict(gcp_secrets)
     if "private_key" in gcp_secrets:
-        gcp_secrets = dict(gcp_secrets)
         gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
+
     credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
 
+    # --- BigQuery Config ---
     PROJECT_ID = st.secrets["bigquery"]["project"]
     DATASET = st.secrets["bigquery"]["dataset"]
     STORE_TABLE = st.secrets["bigquery"]["store_table"]
     PRODUCT_TABLE = st.secrets["bigquery"]["product_table"]
     OUTPUT_TABLE = st.secrets["bigquery"]["output_table"]
 
-    # GCS
+    # --- GCS Config ---
     BUCKET_NAME = st.secrets["gcs"]["bucket_name"]
+    FOLDER_PREFIX = st.secrets["gcs"].get("folder_prefix", "stock_opname")
 
 except Exception as e:
     st.error(f"Gagal membaca secrets.toml: {e}")
     st.stop()
 
+# Initialize clients
 bq_client = bigquery.Client(credentials=credentials, project=PROJECT_ID)
 gcs_client = storage.Client(credentials=credentials, project=PROJECT_ID)
 
@@ -79,16 +83,12 @@ region = st.selectbox(
 )
 df_region = store_df[store_df["region"] == region] if region not in ["- Pilih Region -", ""] else pd.DataFrame()
 
-# Exclude blank or null SPV
 if not df_region.empty:
     valid_spv_list = sorted([spv for spv in df_region["spv_skt"].dropna().unique().tolist() if spv.strip() != ""])
 else:
     valid_spv_list = []
 
-spv = st.selectbox(
-    "Pilih SPV",
-    options=["- Pilih SPV -"] + valid_spv_list
-) if valid_spv_list else "- Pilih SPV -"
+spv = st.selectbox("Pilih SPV", options=["- Pilih SPV -"] + valid_spv_list) if valid_spv_list else "- Pilih SPV -"
 
 df_spv = df_region[df_region["spv_skt"] == spv] if spv not in ["", "- Pilih SPV -"] else pd.DataFrame()
 
@@ -100,7 +100,7 @@ store_select = st.selectbox(
 ) if not df_spv.empty else "- Pilih Store -"
 
 # ---------------------------
-# SKU Input
+# SKU Input Section
 # ---------------------------
 if all([
     region not in ["", "- Pilih Region -"],
@@ -110,14 +110,11 @@ if all([
     st.success("✅ Semua pilihan lengkap. Silakan isi quantity SKU di bawah.")
 
     st.subheader("📥​ Input Quantity per SKU")
-
     sku_quantities = {}
     total_qty = 0
 
-    # Group products by brand for easier navigation
     for brand in ["SKINTIFIC", "TIMEPHORIA", "FACERINNA"]:
         brand_products = product_df[product_df["brand"] == brand]
-
         if not brand_products.empty:
             st.markdown(f"### 🧴 {brand}")
             for _, row in brand_products.iterrows():
@@ -133,7 +130,7 @@ if all([
     st.metric("Total Quantity Input", total_qty)
 
     # ---------------------------
-    # File Upload Section
+    # File Upload
     # ---------------------------
     st.subheader("📎 Upload Dokumen Pendukung (Opsional)")
     uploaded_files = st.file_uploader(
@@ -159,7 +156,7 @@ if all([
                 if uploaded_files:
                     bucket = gcs_client.bucket(BUCKET_NAME)
                     for file in uploaded_files:
-                        filename = f"stock_opname/{cust_id}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_{file.name}"
+                        filename = f"{FOLDER_PREFIX}/{cust_id}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_{file.name}"
                         blob = bucket.blob(filename)
                         blob.upload_from_file(file, content_type=file.type)
                         blob.make_public()
@@ -184,7 +181,7 @@ if all([
                     if data["quantity"] > 0
                 ]
 
-                # Insert into BigQuery
+                # Insert to BigQuery
                 table_id = f"{PROJECT_ID}.{DATASET}.{OUTPUT_TABLE}"
                 errors = bq_client.insert_rows_json(table_id, records)
                 if errors:
