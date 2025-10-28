@@ -79,10 +79,16 @@ region = st.selectbox(
 )
 df_region = store_df[store_df["region"] == region] if region not in ["- Pilih Region -", ""] else pd.DataFrame()
 
+# Exclude blank or null SPV
+if not df_region.empty:
+    valid_spv_list = sorted([spv for spv in df_region["spv_skt"].dropna().unique().tolist() if spv.strip() != ""])
+else:
+    valid_spv_list = []
+
 spv = st.selectbox(
     "Pilih SPV",
-    options=["- Pilih SPV -"] + sorted(df_region["spv_skt"].dropna().unique().tolist())
-) if not df_region.empty else "- Pilih SPV -"
+    options=["- Pilih SPV -"] + valid_spv_list
+) if valid_spv_list else "- Pilih SPV -"
 
 df_spv = df_region[df_region["spv_skt"] == spv] if spv not in ["", "- Pilih SPV -"] else pd.DataFrame()
 
@@ -104,17 +110,26 @@ if all([
     st.success("✅ Semua pilihan lengkap. Silakan isi quantity SKU di bawah.")
 
     st.subheader("🧴 Input Quantity per SKU")
-    sku_quantities = {}
-    for _, row in product_df.iterrows():
-        sku_label = f"{row['sku']} - {row['product_name']} ({row['brand']})"
-        qty = st.number_input(sku_label, min_value=0, value=0, step=1, key=row["sku"])
-        sku_quantities[row["sku"]] = {
-            "product_name": row["product_name"],
-            "brand": row["brand"],
-            "quantity": int(qty)
-        }
 
-    total_qty = sum(item["quantity"] for item in sku_quantities.values())
+    sku_quantities = {}
+    total_qty = 0
+
+    # Group products by brand for easier navigation
+    for brand in ["SKINTIFIC", "TIMEPHORIA", "FACERINNA"]:
+        brand_products = product_df[product_df["brand"] == brand]
+
+        if not brand_products.empty:
+            st.markdown(f"### 🧴 {brand}")
+            for _, row in brand_products.iterrows():
+                sku_label = f"{row['sku']} - {row['product_name']}"
+                qty = st.number_input(sku_label, min_value=0, value=0, step=1, key=row["sku"])
+                sku_quantities[row["sku"]] = {
+                    "product_name": row["product_name"],
+                    "brand": row["brand"],
+                    "quantity": int(qty)
+                }
+                total_qty += int(qty)
+
     st.metric("Total Quantity Input", total_qty)
 
     # ---------------------------
