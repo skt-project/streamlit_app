@@ -620,7 +620,7 @@ def main():
                         # 2. Hardcoded Reject
                         result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
                         # 3. Reject if the supply control status are ["STOP PO", "DISCONTINUED", "OOS"]
-                        (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"])),
+                        (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
                         # 4. Proceed (ST LM = 0) -> NPD or there's no ST for LM
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
