@@ -356,8 +356,8 @@ def main():
 
     # Hardcoded Reject List
     MANUAL_REJECT_SKUS = [
-        "G2G-34",
-        "G2G-72"
+        "G2G-252",
+        "G2G-253"
     ]
 
     # Additional rejected SKUs based on region rules
