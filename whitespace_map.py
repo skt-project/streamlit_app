@@ -260,7 +260,7 @@ if selected_region_placeholder != "--- Select Region ---":
         with st.spinner(text="Generating Map... This may take a moment."):
             # Filter by both region and kabupaten
             region_gdf = gold_gdf[
-                gold_gdf["Region"].astype(str).str.upper() == selected_region.upper()
+                gold_gdf["Kabupaten"].astype(str).str.upper() == selected_kabupaten.upper()
             ].copy()
             region_stores = store_df[
                 store_df["region"].astype(str).str.upper() == selected_region.upper()
@@ -273,7 +273,7 @@ if selected_region_placeholder != "--- Select Region ---":
             ]
 
             # --- Step 6: Perform Whitespace Analysis ---
-            @st.cache_data(show_spinner="Analyzing whitespace...")
+            # @st.cache_data(show_spinner="Analyzing whitespace...")
             def analyze_whitespace(_geodataframe, stores_df):
                 """
                 Performs a spatial analysis to identify 'whitespace' areas (gold-tier subdistricts

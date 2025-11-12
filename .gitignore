@@ -1,3 +1,4 @@
 secrets.toml
 places_api.py
+parquet_converter.py
 data/
