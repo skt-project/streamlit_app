@@ -229,8 +229,9 @@ nielsen_df["geo_id"] = (
 merged_gdf = gdf_subdistricts.merge(nielsen_df, on="geo_id", how="left")
 
 # Filter only "Gold" Nielsen Tier
-gold_gdf = merged_gdf[merged_gdf["Nielsen Tier"] == "Gold"].copy()
-gold_gdf["Nielsen Tier Value"] = gold_gdf["Nielsen Tier"].map({"Gold": 2})
+gold_gdf = merged_gdf.copy()
+# gold_gdf = merged_gdf[merged_gdf["Nielsen Tier"] == "Gold"].copy()
+# gold_gdf["Nielsen Tier Value"] = gold_gdf["Nielsen Tier"].map({"Gold": 2})
 
 # --- Step 5: Dropdown for Region ---
 st.header("🗺️ Filter Map")
@@ -319,7 +320,7 @@ if selected_region_placeholder != "--- Select Region ---":
                         # Gold tier 'whitespace' (no stores)
                         fill_color = "darkred"
                 else:
-                    fill_color = "lightgray"  # Other tiers
+                    fill_color = "#61615F"  # Other tiers
 
                 return {
                     "fillColor": fill_color,
@@ -368,7 +369,7 @@ if selected_region_placeholder != "--- Select Region ---":
                 &nbsp; <b>Map Legend</b> <br>
                 &nbsp; <i style="background:#d2af13; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (With stores) <br>
                 &nbsp; <i style="background:darkred; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (No stores)<br>
-                &nbsp; <i style="background:white; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Other Tier<br>
+                &nbsp; <i style="background:#61615F; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Other Tier<br>
                 <hr style="margin: 2px 0;">
                 &nbsp; <b>Store Points</b> <br>
                 &nbsp; <i style="background:#006400; border: 1px solid black; width: 10px; height: 10px; display: inline-block; border-radius: 50%;"></i> Store Grade S <br>
