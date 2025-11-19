@@ -494,6 +494,8 @@ def main():
                 # progress.progress(0.1, "Starting data processing...")
                 progress_step = 1.0 / len(po_df["Distributor"].unique())
 
+                # Master list to collect all NPD SKUs across all distributors
+                all_npd_sku_list = []
                 # Dictionary to hold dataframes for Excel sheets
                 excel_dfs = {}
                 # List to hold dataframes for on-screen display
@@ -549,9 +551,17 @@ def main():
                     result_sku_list = result_df["Customer SKU Code"].unique().tolist()
 
                     npd_df = get_npd_data(result_sku_list)
-                    npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
+                    # NPD SKUs for the current distributor's results
+                    current_npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
+
+                    # Add the current list of NPD SKUs to the master list
+                    all_npd_sku_list.extend(current_npd_sku_list)
+
+                    # Ensure the master list contains only unique SKUs
+                    all_npd_sku_list = list(set(all_npd_sku_list))
 
                     # Fill NaN values in 'is_po_sku' with False
+                    result_df["is_po_sku"] = result_df["is_po_sku"].astype("boolean")
                     result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
 
                     # Fill NaN values with 0 for calculations if data was not found for some SKUs
@@ -624,7 +634,7 @@ def main():
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
                             (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
-                            (~result_df["Customer SKU Code"].str.upper().isin(npd_sku_list)) &
+                            (~result_df["Customer SKU Code"].str.upper().isin(all_npd_sku_list)) &
                             (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
                         ),
                         # 5. NPD with Allocation
@@ -758,7 +768,7 @@ def main():
                 progress.progress(1.0, "Processing complete")
 
                 # --- Download Button ---
-                xlsx_data = to_excel_with_styling(excel_dfs, npd_sku_list)
+                xlsx_data = to_excel_with_styling(excel_dfs, all_npd_sku_list)
 
                 st.download_button(
                     label="📥 Download PO Simulator Excel",
