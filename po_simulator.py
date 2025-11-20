@@ -357,10 +357,14 @@ def main():
     # Hardcoded Reject List
     MANUAL_REJECT_SKUS = [
         "G2G-252",
-        "G2G-253",
+        "G2G-253"
+    ]
+
+    LIMITED_SKUS_500_QTY = [
         "G2G-271",
         "G2G-272"
     ]
+    MAX_QTY_LIMIT = 500
 
     # Additional rejected SKUs based on region rules
     REJECTED_SKUS_1 = []
@@ -624,6 +628,8 @@ def main():
                     # Conditions for np.select
 
                     conditions = [
+                        # Addtional: New condition for PO Qty > MAX_QTY_LIMIT for specific SKUs
+                        (result_df["Customer SKU Code"].isin(LIMITED_SKUS_500_QTY)) & (result_df["PO Qty"] > MAX_QTY_LIMIT),
                         # 1. New condition for additional suggested SKUs
                         (result_df["is_po_sku"] == False),
                         # 2. Hardcoded Reject
@@ -654,6 +660,7 @@ def main():
 
                     # Corresponding values
                     choices = [
+                        f"Reject (Exceeds Qty Limit of {MAX_QTY_LIMIT})",
                         "Additional Suggestion",
                         "Reject (Stop by Steve)",
                         "Reject",
