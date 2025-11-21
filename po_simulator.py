@@ -308,6 +308,108 @@ def to_excel_with_styling(dfs: dict, npd_sku_list: List[str] = None) -> bytes:
     output.seek(0)
     return output.getvalue()
 
+
+def to_excel_single_sheet(df: pd.DataFrame, npd_sku_list: List[str] = None) -> bytes:
+    """
+    Converts a single pandas DataFrame (all distributors stacked) 
+    to an Excel file with special styling.
+    """
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PO Simulator"
+
+    # Define the fill style for the SKU types
+    po_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+    suggestion_fill = PatternFill(
+        start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"
+    )
+    npd_fill = PatternFill(start_color="B1DBF0", end_color="B1DBF0", fill_type="solid")
+
+    # Define a style for the header row
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    header_alignment = Alignment(horizontal='left', vertical='center')
+
+    # Define a style for the 'Remark' column
+    proceed_font = Font(bold=True, color="54CE54")
+    reject_font = Font(bold=True, color="D73E3E")
+    suggest_font = Font(bold=True, color="F3C94C")
+
+    # Store the `is_po_sku` Series and then drop the column from the DataFrame
+    is_po_sku_series = df["is_po_sku"]
+    df_no_flag = df.drop("is_po_sku", axis=1)
+
+    # Write the DataFrame (without the flag column) to the worksheet
+    rows = dataframe_to_rows(df_no_flag, index=False, header=True)
+
+    # Get the column names and their indices
+    headers = list(df_no_flag.columns)
+    # This is a mapping from column name to its 0-based index
+    col_map = {col: i for i, col in enumerate(headers)}
+
+    # Define the columns that need special number formatting
+    currency_cols = ["PO Value", "Suggested PO Value"]
+    integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
+    decimal_cols = ["WOI (Stock + PO Ori)", "WOI After Buffer (Stock + Suggested Qty)", "Current WOI"]
+
+    # Iterate over rows and apply styling based on the original Series
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+            # Apply header styling
+            if r_idx == 1:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+
+            # Apply color to the first 11 columns for data rows only (r_idx > 1)
+            if c_idx <= 11 and r_idx > 1:
+                # Get the boolean value from the original `is_po_sku` Series
+                # The index for the series is the row index in the original df
+                original_row_index = (r_idx - 2)  # Subtract 2 because header is row 1 and data starts at 0
+                is_po_row = is_po_sku_series.iloc[original_row_index]
+
+                # Set the fill based on the boolean flag
+                if is_po_row:
+                    cell.fill = po_fill
+                else:
+                    cell.fill = suggestion_fill
+
+            # Apply number formatting based on column name for data rows
+            if r_idx > 1:
+                col_name = headers[c_idx - 1]
+
+                if col_name in currency_cols:
+                    cell.number_format = "#,##0.00"
+                elif col_name in integer_cols:
+                    cell.number_format = "#,##0"
+                elif col_name in decimal_cols:
+                    cell.number_format = "0.00"
+
+                # Apply font styling to the 'Remark' column based on value
+                if col_name == "Remark":
+                    remark_value = row[c_idx - 1]
+                    if "Proceed" in remark_value:
+                        cell.font = proceed_font
+                    elif "Reject" in remark_value:
+                        cell.font = reject_font
+                    elif "Additional" in remark_value:
+                        cell.font = suggest_font
+
+                # Apply specific fill to 'Remaining Allocation (By Region)' if SKU is in npd_sku_list
+                if col_name == "Remaining Allocation (By Region)" and npd_sku_list is not None:
+                    sku_col_index = col_map.get("SKU")
+                    if sku_col_index is not None:
+                        sku_value = row[sku_col_index]
+                        if sku_value in npd_sku_list:
+                            cell.fill = npd_fill
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
 def create_po_template_excel() -> bytes:
     """
     Creates a blank Excel template file with the required headers.
@@ -381,7 +483,7 @@ def main():
             2. **Review Rejection Lists**: Check the manual rejection SKUs and region-based rejections if applicable.
             3. **Simulate and Analyze**: The app will fetch stock and sales data from BigQuery, perform calculations like Weeks of Inventory (WOI), and apply approval/rejection rules.
             4. **View Results**: Review the simulated data in the table, including remarks on whether to proceed, reject, or suggest adjustments.
-            5. **Download Excel**: Click the download button to get a single Excel file with a separate sheet for each distributor's results.
+            5. **Download Excel**: Click the download button to get a single Excel file with a separate sheet for each distributor's results, or a single sheet for all distributors.
             """)
 
         # Display Proceed / Reject Rules Explanation
@@ -493,7 +595,15 @@ def main():
                 po_df = po_df[["Distributor", "Customer SKU Code", "PO Qty", "is_po_sku"]]
 
                 # --- Data Processing and Calculation ---
-                st.header("3. PO Simulation and Download Result")
+                st.header("3. PO Simulation")
+
+                st.subheader("4. Select Output Format and Download")
+                output_format = st.radio(
+                    "Choose Excel Output Format:",
+                    ["Separate Sheets (One per Distributor)", "Single Sheet (All Distributors Stacked)"],
+                    index=0
+                )
+                
                 progress = st.progress(0)
                 # progress.progress(0.1, "Starting data processing...")
                 progress_step = 1.0 / len(po_df["Distributor"].unique())
@@ -777,10 +887,19 @@ def main():
                 # --- Download Button ---
                 xlsx_data = to_excel_with_styling(excel_dfs, all_npd_sku_list)
 
+                # --- Download Button (Conditional Logic) ---
+                if output_format == "Single Sheet (All Distributors Stacked)":
+                    final_excel_df = pd.concat(excel_dfs.values(), ignore_index=True)
+                    xlsx_data = to_excel_single_sheet(final_excel_df, all_npd_sku_list)
+                    file_name = "po_simulator_result_single_sheet.xlsx"
+                else:
+                    xlsx_data = to_excel_with_styling(excel_dfs, all_npd_sku_list)
+                    file_name = "po_simulator_result_separate_sheets.xlsx"
+
                 st.download_button(
-                    label="📥 Download PO Simulator Excel",
+                    label=f"📥 Download PO Simulator Excel ({output_format})",
                     data=xlsx_data,
-                    file_name="po_simulator_result.xlsx",
+                    file_name=file_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
