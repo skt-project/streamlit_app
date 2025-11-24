@@ -856,7 +856,7 @@ def main():
                         lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
                     )
                     result_df["Remaining Allocation (By Region)"] = result_df["Remaining Allocation (By Region)"].apply(
-                        lambda x: f"{x:,d}" if pd.notnull(x) else 0
+                        lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
                     )
                     result_df["Avg Weekly Sales LM (Qty)"] = result_df["Avg Weekly Sales LM (Qty)"].apply(
                         lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
