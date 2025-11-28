@@ -462,9 +462,7 @@ def main():
         "G2G-253"
     ]
 
-    LIMITED_SKUS_500_QTY = [
-        "G2G-271",
-        "G2G-272"
+    LIMITED_SKUS_QTY = [
     ]
     MAX_QTY_LIMIT = 500
 
@@ -733,7 +731,7 @@ def main():
 
                     conditions = [
                         # Addtional: New condition for PO Qty > MAX_QTY_LIMIT for specific SKUs
-                        (result_df["Customer SKU Code"].isin(LIMITED_SKUS_500_QTY)) & (result_df["PO Qty"] > MAX_QTY_LIMIT),
+                        (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > MAX_QTY_LIMIT),
                         # 1. New condition for additional suggested SKUs
                         (result_df["is_po_sku"] == False),
                         # 2. Hardcoded Reject
