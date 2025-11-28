@@ -519,12 +519,6 @@ def main():
         #     st.dataframe(pd.DataFrame(REJECTED_SKUS_2, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
 
     with tab2:
-        # st.header("1. Input Parameters")
-
-        # # Fetch data for dropdowns
-        # distributors = get_distributor_data()
-        # distributor_name = st.selectbox("Distributor Name", options=distributors)
-
         st.header("1. Download PO Template")
 
         st.download_button(
