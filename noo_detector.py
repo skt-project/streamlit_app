@@ -22,7 +22,7 @@ REQUIRED_COLUMNS = [
 
 # --- BigQuery Setup ---
 @st.cache_data(ttl=3600)
-def load_existing_data():
+def load_existing_data(brand_filter):
     try:
         # Use Streamlit secrets if available
         gcp_secrets = st.secrets["connections"]["bigquery"]
@@ -70,6 +70,13 @@ def load_existing_data():
 
     # 2. Fetch last 6 months sell-through data
     sell_through_table_path = st.secrets["bigquery_tables"]["fact_sell_through"]
+
+    # --- Brand Filter Logic ---
+    brand_where_clause = ""
+    if brand_filter and brand_filter != "All Brand":
+        # Assuming the sell-through table has a 'brand' column
+        brand_where_clause = f"AND brand = '{brand_filter}'"
+
     sell_through_query = f"""
         SELECT
             cust_id,
@@ -78,6 +85,7 @@ def load_existing_data():
         FROM `{sell_through_table_path}`
         WHERE calendar_date >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 6 MONTH)
             AND calendar_date <= LAST_DAY(CURRENT_DATE(), MONTH)
+            {brand_where_clause}
         GROUP BY cust_id, month_
     """
     sell_through_df = client.query(sell_through_query).to_dataframe()
@@ -90,7 +98,7 @@ def load_existing_data():
 
         # Format month as YYYY-MM for column names
         sell_through_df['month_str'] = sell_through_df['month_'].dt.strftime('%Y-%m')
-        
+
         # Pivot the table
         pivoted_st_df = sell_through_df.pivot_table(
             index='cust_id',
@@ -120,11 +128,12 @@ def load_existing_data():
         merged_df = existing_df.copy()
         # Create column names for the last 6 months dynamically and MTD
         today = pd.to_datetime(pd.Timestamp.now().date())
+        st_col_prefix = f"ST Value ({brand_filter}) "
         for i in range(7):
             # We want the *last* 6 full months. So 1 month ago, 2 months ago, etc.
             # Example: If today is July 16, 2025, we want June, May, April, March, Feb, Jan 2025
             month_date = today - pd.DateOffset(months=i+1)
-            col_name = f"ST Value {month_date.strftime('%Y-%m')}"
+            col_name = f"{st_col_prefix}{month_date.strftime('%Y-%m')}"
             merged_df[col_name] = 0
 
     return merged_df
@@ -287,7 +296,16 @@ def match_store(new_store, existing_stores, return_all=False):
 st.set_page_config("Duplicate Store Checker", page_icon="🔍")
 st.title("🔍 Duplicate Store Detection")
 
-existing_df = load_existing_data()
+# --- Brand Filter Addition ---
+available_brands = ["All Brand", "SKINTIFIC", "G2G", "TIMEPHORIA", "FACERINNA", "BODIBREZE"]
+
+selected_brand = st.selectbox(
+    "Select Brand for Sell-Through (ST) Value Data",
+    available_brands,
+    key="brand_select",
+)
+
+existing_df = load_existing_data(selected_brand)
 
 option = st.radio("Input Type", ["Upload Excel", "Manual Entry"])
 
