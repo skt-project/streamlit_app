@@ -119,7 +119,7 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
         allocation
     FROM `{table_id}`
     WHERE sku IN ({sku_list_str})
-    AND calendar_date = '2025-11-01'
+    AND calendar_date = '2025-12-01'
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
@@ -249,7 +249,7 @@ def to_excel_with_styling(dfs: dict, npd_sku_list: List[str] = None) -> bytes:
         # Define the columns that need special number formatting
         currency_cols = ["PO Value", "Suggested PO Value"]
         integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
-        decimal_cols = ["WOI (Stock + PO Ori)", "WOI (Stock + Suggestion)", "Current WOI"]
+        decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI", "WOI After Buffer (Stock + Suggested Qty)", "Stock + Suggested Qty WOI (Projection at EOM)"]
 
         # Iterate over rows and apply styling based on the original Series
         for r_idx, row in enumerate(rows, 1):
@@ -351,7 +351,7 @@ def to_excel_single_sheet(df: pd.DataFrame, npd_sku_list: List[str] = None) -> b
     # Define the columns that need special number formatting
     currency_cols = ["PO Value", "Suggested PO Value"]
     integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
-    decimal_cols = ["WOI (Stock + PO Ori)", "WOI After Buffer (Stock + Suggested Qty)", "Current WOI"]
+    decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI", "WOI After Buffer (Stock + Suggested Qty)", "Stock + Suggested Qty WOI (Projection at EOM)"]
 
     # Iterate over rows and apply styling based on the original Series
     for r_idx, row in enumerate(rows, 1):
@@ -399,7 +399,7 @@ def to_excel_single_sheet(df: pd.DataFrame, npd_sku_list: List[str] = None) -> b
                         cell.font = suggest_font
 
                 # Apply specific fill to 'Remaining Allocation (By Region)' if SKU is in npd_sku_list
-                if col_name == "Remaining Allocation (By Region)" and npd_sku_list is not None:
+                if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list is not None:
                     sku_col_index = col_map.get("SKU")
                     if sku_col_index is not None:
                         sku_value = row[sku_col_index]
