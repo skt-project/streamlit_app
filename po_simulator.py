@@ -297,7 +297,7 @@ def to_excel_with_styling(dfs: dict, npd_sku_list: List[str] = None) -> bytes:
                             cell.font = suggest_font
 
                     # Apply specific fill to 'Remaining Allocation (By Region)' if SKU is in npd_sku_list
-                    if col_name == "Remaining Allocation (By Region)" and npd_sku_list is not None:
+                    if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list is not None:
                         sku_col_index = col_map.get("SKU")
                         if sku_col_index is not None:
                             sku_value = row[sku_col_index]
