@@ -115,8 +115,7 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
     SELECT
         calendar_date,
         region,
-        sku,
-        allocation
+        sku
     FROM `{table_id}`
     WHERE sku IN ({sku_list_str})
     AND calendar_date = '2025-12-01'
@@ -459,7 +458,19 @@ def main():
     # Hardcoded Reject List
     MANUAL_REJECT_SKUS = [
         "G2G-252",
-        "G2G-253"
+        "G2G-253",
+        "G2G-27300",
+        "G2G-27301",
+        "G2G-27302",
+        "G2G-27303",
+        "G2G-27304",
+        "G2G-27305",
+        "G2G-29700",
+        "G2G-29701",
+        "G2G-29702",
+        "G2G-29703",
+        "G2G-29704",
+        "G2G-29705"
     ]
 
     LIMITED_SKUS_QTY = [
@@ -595,7 +606,7 @@ def main():
                     ["Separate Sheets (One per Distributor)", "Single Sheet (All Distributors Stacked)"],
                     index=0
                 )
-                
+
                 progress = st.progress(0)
                 # progress.progress(0.1, "Starting data processing...")
                 progress_step = 1.0 / len(po_df["Distributor"].unique())
