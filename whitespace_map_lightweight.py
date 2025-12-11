@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import folium
-import datetime
 from google.cloud import storage
 from google.oauth2 import service_account
 from folium import GeoJsonTooltip
@@ -204,18 +203,14 @@ def create_summary_table(villages_gdf, stores_gdf):
 
     # Define the core columns needed
     summary_cols = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 'store_count']
-    
+
     # Ensure 'store_count' exists and the summary DataFrame is initialized
     if 'store_count' not in villages_gdf.columns:
         villages_gdf['store_count'] = 0
-        
+
     summary_df = villages_gdf[summary_cols + ['store_grade']].copy()
-    
+
     # 1. Standardize and Parse the 'store_grade' column
-    
-    # Convert string representation of dictionary to actual dictionary object if needed.
-    # If the column already contains dicts (as implied by the image), this step might be optional,
-    # but it handles cases where the data might be loaded as strings (e.g., from Parquet/JSON).
     def parse_grade_dict(data):
         if isinstance(data, str) and data:
             # Safely attempt to parse string dictionary, handling empty string as {}
@@ -230,17 +225,15 @@ def create_summary_table(villages_gdf, stores_gdf):
 
     # Apply the parsing function
     summary_df['store_grade_dict'] = summary_df['store_grade'].apply(parse_grade_dict)
-    
+
     # 2. Expand the dictionary into new columns
-    
     # The .apply(pd.Series) method expands the dictionary keys into new columns
     grade_counts_df = summary_df['store_grade_dict'].apply(pd.Series).fillna(0).astype(int)
-    
+
     # 3. Standardize Grade Columns
-    
     all_grades = ['S', 'A', 'B', 'C', 'D', 'Other']
     grade_cols_final = [f"Grade {g}" for g in all_grades]
-    
+
     # Rename the new columns and ensure we have all required columns
     grade_mapping = {g: f"Grade {g}" for g in grade_counts_df.columns}
     grade_counts_df = grade_counts_df.rename(columns=grade_mapping)
@@ -256,20 +249,22 @@ def create_summary_table(villages_gdf, stores_gdf):
         summary_df[col] = summary_df[col].astype(int)
 
     # 6. Final cleanup and sorting
-    
-    # Recalculate 'Number of Stores' from the sum of the new grade columns 
-    # (Optional, but good for data integrity)
     summary_df['Number of Stores'] = summary_df[[col for col in summary_df.columns if col.startswith('Grade ')]].sum(axis=1)
+
+    for col_name in ["Kabupaten", "Kecamatan", "Kelurahan"]:
+        # Check if the column exists and apply title case to all strings
+        if col_name in summary_df.columns:
+            summary_df[col_name] = summary_df[col_name].apply(str.title)
 
     # Reorder columns: Region...Kelurahan, Number of Stores, Grade S, Grade A, etc.
     final_cols_order = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 'Number of Stores'] + \
                        [col for col in grade_cols_final if col in summary_df.columns]
-                       
+
     summary_df = summary_df[final_cols_order].copy()
-    
+
     # Sort by number of stores
     summary_df = summary_df.sort_values('Number of Stores', ascending=False)
-    
+
     return summary_df
 
 # --- Main App Logic ---
@@ -292,10 +287,12 @@ def main():
 
     if selected_region != "--- Select Region ---":
         # Kabupaten selection
-        kabupatens = sorted(region_index[selected_region])
+        kabupaten = sorted(region_index[selected_region])
+        kabupaten_titled = sorted([k.title() for k in kabupaten])
+
         selected_kabupaten = st.selectbox(
             "Select Kabupaten", 
-            ["--- Select Kabupaten ---"] + kabupatens, 
+            ["--- Select Kabupaten ---"] + kabupaten_titled, 
             index=0
         )
 
@@ -319,7 +316,7 @@ def main():
                 metadata = processed_data['metadata']
 
                 st.subheader("📊 Area Statistics")
-                
+
                 # Use 4 columns for the metrics
                 cols = st.columns(4)
 
@@ -440,14 +437,14 @@ def main():
 
                         # 1. Create an in-memory buffer
                         output = BytesIO()
-                        
+
                         # 2. Write the DataFrame to the buffer as an Excel file
                         # Use engine='xlsxwriter' for better compatibility
                         summary_df.to_excel(output, index=False, sheet_name='Summary', engine='xlsxwriter')
-                        
+
                         # 3. Rewind the buffer to the beginning
                         excel_data = output.getvalue()
-                        
+
                         st.download_button(
                             label="📥 Download Excel",
                             data=excel_data, # Pass the bytes data
