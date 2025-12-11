@@ -174,6 +174,7 @@ def create_legend():
     """
     return legend_html
 
+
 def get_distributor_color(brand_string):
     """Determine distributor color based on brand"""
     if pd.isna(brand_string):
@@ -194,23 +195,77 @@ def get_distributor_color(brand_string):
 
 # --- Create Summary Table from Pre-processed Data ---
 def create_summary_table(villages_gdf, stores_gdf):
-    """Create summary table from pre-processed data"""
+    """
+    Creates the summary table by expanding the dictionary in the 
+    'store_grade' column into separate grade count columns (S, A, B, C, D, Other).
+    """
     if villages_gdf.empty:
         return pd.DataFrame()
-    
-    # Check if store_count column exists (from pre-processing)
-    if 'store_count' not in villages_gdf.columns:
-        villages_gdf['store_count'] = 0
-    
-    # Create summary DataFrame
+
+    # Define the core columns needed
     summary_cols = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 'store_count']
     
-    # Add grade columns if they exist
-    grade_cols = [col for col in villages_gdf.columns if col.startswith('grade_')]
-    summary_cols.extend(grade_cols)
+    # Ensure 'store_count' exists and the summary DataFrame is initialized
+    if 'store_count' not in villages_gdf.columns:
+        villages_gdf['store_count'] = 0
+        
+    summary_df = villages_gdf[summary_cols + ['store_grade']].copy()
     
-    summary_df = villages_gdf[summary_cols].copy()
-    summary_df = summary_df.rename(columns={'store_count': 'Number of Stores'})
+    # 1. Standardize and Parse the 'store_grade' column
+    
+    # Convert string representation of dictionary to actual dictionary object if needed.
+    # If the column already contains dicts (as implied by the image), this step might be optional,
+    # but it handles cases where the data might be loaded as strings (e.g., from Parquet/JSON).
+    def parse_grade_dict(data):
+        if isinstance(data, str) and data:
+            # Safely attempt to parse string dictionary, handling empty string as {}
+            try:
+                # Use json.loads or ast.literal_eval depending on data source complexity
+                # Assuming JSON format here
+                return json.loads(data.replace("'", '"')) 
+            except json.JSONDecodeError:
+                return {}
+        # Handles cases where it's already a dict or an empty list/string/None
+        return data if isinstance(data, dict) else {}
+
+    # Apply the parsing function
+    summary_df['store_grade_dict'] = summary_df['store_grade'].apply(parse_grade_dict)
+    
+    # 2. Expand the dictionary into new columns
+    
+    # The .apply(pd.Series) method expands the dictionary keys into new columns
+    grade_counts_df = summary_df['store_grade_dict'].apply(pd.Series).fillna(0).astype(int)
+    
+    # 3. Standardize Grade Columns
+    
+    all_grades = ['S', 'A', 'B', 'C', 'D', 'Other']
+    grade_cols_final = [f"Grade {g}" for g in all_grades]
+    
+    # Rename the new columns and ensure we have all required columns
+    grade_mapping = {g: f"Grade {g}" for g in grade_counts_df.columns}
+    grade_counts_df = grade_counts_df.rename(columns=grade_mapping)
+
+    # 4. Merge/Concatenate the expanded grades back to the main DataFrame
+    summary_df = pd.concat([summary_df.drop(columns=['store_grade', 'store_grade_dict']), grade_counts_df], axis=1)
+
+    # 5. Ensure all required columns exist (fill with 0 if a grade is missing in the entire dataset)
+    for col in grade_cols_final:
+        if col not in summary_df.columns:
+            summary_df[col] = 0
+        # Ensure data type is integer
+        summary_df[col] = summary_df[col].astype(int)
+
+    # 6. Final cleanup and sorting
+    
+    # Recalculate 'Number of Stores' from the sum of the new grade columns 
+    # (Optional, but good for data integrity)
+    summary_df['Number of Stores'] = summary_df[[col for col in summary_df.columns if col.startswith('Grade ')]].sum(axis=1)
+
+    # Reorder columns: Region...Kelurahan, Number of Stores, Grade S, Grade A, etc.
+    final_cols_order = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 'Number of Stores'] + \
+                       [col for col in grade_cols_final if col in summary_df.columns]
+                       
+    summary_df = summary_df[final_cols_order].copy()
     
     # Sort by number of stores
     summary_df = summary_df.sort_values('Number of Stores', ascending=False)
