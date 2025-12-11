@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import folium
+import datetime
 from google.cloud import storage
 from google.oauth2 import service_account
 from folium import GeoJsonTooltip
@@ -279,7 +280,11 @@ def main():
                 with cols[3]:
                     st.metric("Potential Stores", metadata.get('potential_store_count', 0))
 
-                st.caption(f"Last updated: {metadata.get('last_processed', 'Unknown')}")
+                timestamp_str = metadata.get('processing_timestamp', 'Unknown')
+                # Finds the 'T' or the space and takes everything up to the first decimal/plus sign
+                cleaned_time = timestamp_str.split('.')[0].split('+')[0]
+                cleaned_time = cleaned_time.replace('T', ' ')
+                st.caption(f"Last updated: {cleaned_time}")
 
                 # --- Create Map ---
                 # Calculate map center
