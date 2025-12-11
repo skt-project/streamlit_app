@@ -307,16 +307,16 @@ def main():
                     st.error("Failed to load data. Please try again.")
                     return
 
+                villages_gdf = processed_data['villages']
+                stores_gdf = processed_data['stores']
+                distributors_df = processed_data['distributors']
+                potential_df = processed_data['potential_stores']
+
                 # Format geographical columns for consistent display in tooltip and summary table
                 for col_name in ["Kabupaten", "Kecamatan", "Kelurahan"]:
                     if col_name in villages_gdf.columns:
                         # Use .apply(str.title) to convert the text to Title Case
                         villages_gdf[col_name] = villages_gdf[col_name].apply(str.title)
-
-                villages_gdf = processed_data['villages']
-                stores_gdf = processed_data['stores']
-                distributors_df = processed_data['distributors']
-                potential_df = processed_data['potential_stores']
 
                 # Display metadata
                 metadata = processed_data['metadata']
