@@ -53,7 +53,7 @@ def get_bq_client() -> bigquery.Client:
     return bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
 
 
-@st.cache_data(show_spinner="Fetching distributor data from BigQuery...")
+@st.cache_data(ttl=21600, show_spinner="Fetching distributor data from BigQuery...")
 def get_distributor_data() -> List[str]:
     """Fetches unique customer and branch codes from BigQuery."""
     client = get_bq_client()
@@ -74,7 +74,7 @@ def get_distributor_data() -> List[str]:
         return []
 
 
-@st.cache_data(show_spinner="Fetching SKU data from BigQuery...")
+@st.cache_data(ttl=21600, show_spinner="Fetching SKU data from BigQuery...")
 def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
     """
     Fetches SKU data for a given list of SKUs from BigQuery.
@@ -100,7 +100,7 @@ def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(show_spinner="Fetching NPD Allocation data from BigQuery...")
+@st.cache_data(ttl=21600, show_spinner="Fetching NPD Allocation data from BigQuery...")
 def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
     """
     Fetches NPD Allocation data for a given list of SKUs from BigQuery.
@@ -128,7 +128,7 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(show_spinner="Fetching Stock Analysis data from BigQuery...")
+@st.cache_data(ttl=21600, show_spinner="Fetching Stock Analysis data from BigQuery...")
 def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
     """
     Fetches stock and sales data for a given list of SKUs from BigQuery.
@@ -168,7 +168,6 @@ def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-# --- Helper Functions ---
 def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Series) -> pd.Series:
     """
     Calculates Weeks of Inventory (WOI) based on the formula:
@@ -409,6 +408,7 @@ def to_excel_single_sheet(df: pd.DataFrame, npd_sku_list: List[str] = None) -> b
     output.seek(0)
     return output.getvalue()
 
+
 def create_po_template_excel() -> bytes:
     """
     Creates a blank Excel template file with the required headers.
@@ -443,6 +443,7 @@ def create_po_template_excel() -> bytes:
     wb.save(output)
     output.seek(0)
     return output.getvalue()
+
 
 def main():
     st.set_page_config(page_title="PO Simulator", page_icon="🛒", layout="wide")
