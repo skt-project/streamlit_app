@@ -757,11 +757,11 @@ def main():
                             (~result_df["Customer SKU Code"].str.upper().isin(all_npd_sku_list)) &
                             (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
                         ),
-                        # 5. NPD with Allocation
-                        (
-                            (result_df["remaining_allocation_qty_region"] > 0) &
-                            (result_df["PO Qty"] <= result_df["remaining_allocation_qty_region"])
-                        ),
+                        # # 5. NPD with Allocation
+                        # (
+                        #     (result_df["remaining_allocation_qty_region"] > 0) &
+                        #     (result_df["PO Qty"] <= result_df["remaining_allocation_qty_region"])
+                        # ),
                         # 6. Reject if suggested PO is 0 or isin ["STOP PO", "DISCONTINUED", "OOS"]
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0),
                         # 7. PO Qty > Suggested PO Qty (Over-ordering)
@@ -779,7 +779,7 @@ def main():
                         "Reject (Stop by Steve)",
                         "Reject",
                         "Proceed",
-                        "Proceed",
+                        # "Proceed",
                         "Reject",
                         "Reject with suggestion",
                         "Proceed with suggestion",
