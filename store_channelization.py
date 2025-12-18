@@ -550,7 +550,7 @@ with tab2:
                     st.stop()
                 
                 if not all_valid:
-                    st.error("❌ **Validation Failed**: The Excel file does not match the Database store list.")
+                    st.error("❌ **Validation Failed**: The Store in Excel file does not match the Database store list.")
                     st.stop()
                 
                 st.success("✅ All stores validated successfully against Database!")
@@ -568,6 +568,7 @@ with tab2:
                     st.write("Valid options are:", ', '.join(STORE_CHANNEL_OPTIONS))
                     with st.expander("Show rows with invalid store_channel"):
                         st.dataframe(invalid_store_channels[required_cols], use_container_width=True)
+                    st.stop()
                 else:
                     st.success("✅ All store_channel values are valid")
                 
