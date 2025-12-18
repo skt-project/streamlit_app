@@ -568,6 +568,7 @@ with tab2:
                     st.write("Valid options are:", ', '.join(STORE_CHANNEL_OPTIONS))
                     with st.expander("Show rows with invalid store_channel"):
                         st.dataframe(invalid_store_channels[required_cols], use_container_width=True)
+                    st.stop()
                 else:
                     st.success("✅ All store_channel values are valid")
                 
