@@ -76,17 +76,15 @@ def get_available_distributors(region_filter=None):
 def create_excel_with_dropdown(df, region, distributor):
     output = BytesIO()
     
-    # 1. Create a copy and remove the ID column so it's not in the worksheet
+    # 1. Create a copy and remove the ID column
     df_for_excel = df.copy()
     if 'dst_id_g2g' in df_for_excel.columns:
         df_for_excel = df_for_excel.drop(columns=['dst_id_g2g'])
     
-    # Ensure the store_channel column exists for the dropdown
     if 'store_channel' not in df_for_excel.columns:
         df_for_excel['store_channel'] = ""
 
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # 2. Write the cleaned data to the sheet
         df_for_excel.to_excel(writer, index=False, sheet_name='Data Toko')
         
         workbook = writer.book
@@ -95,10 +93,28 @@ def create_excel_with_dropdown(df, region, distributor):
         
         # Formats
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
+        title_fmt = workbook.add_format({'bold': True, 'font_size': 14})
         cell_fmt = workbook.add_format({'border': 1})
+        instruction_fmt = workbook.add_format({'italic': True, 'font_color': 'red'})
 
-        # Metadata Section
-        info_sheet.write(0, 0, "METADATA EXPORT", header_fmt)
+        # --- SECTION 1: INSTRUKSI PENGISIAN ---
+        info_sheet.write(0, 0, "PANDUAN PENGISIAN FILE", title_fmt)
+        
+        instruksi = [
+            "1. Buka sheet 'Data Toko'.",
+            "2. Fokus pada kolom 'store_channel' (kolom terakhir).",
+            "3. Klik pada sel kosong di kolom tersebut dan pilih kategori dari daftar dropdown yang muncul.",
+            "4. JANGAN mengubah data pada kolom lain (cust_id, store_name, dll) agar tidak error saat upload.",
+            "5. JANGAN mengubah nama file ini karena sistem mendeteksi ID Distributor dari nama file.",
+            "6. Setelah selesai, simpan (Save) dan unggah kembali ke aplikasi Streamlit."
+        ]
+        
+        for i, text in enumerate(instruksi):
+            info_sheet.write(i + 2, 0, text)
+
+        # --- SECTION 2: METADATA ---
+        metadata_start_row = 10
+        info_sheet.write(metadata_start_row, 0, "METADATA EXPORT", header_fmt)
         metadata = [
             ['Field', 'Value'],
             ['Region', region],
@@ -107,38 +123,39 @@ def create_excel_with_dropdown(df, region, distributor):
             ['Tanggal Export', datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
         ]
         for r, row in enumerate(metadata):
-            info_sheet.write_row(r + 1, 0, row, cell_fmt)
+            info_sheet.write_row(metadata_start_row + 1 + r, 0, row, cell_fmt)
 
-        # --- Definitions Section ---
-        start_row_def = 8
-        info_sheet.write(start_row_def, 0, "DEFINISI CHANNEL", header_fmt)
-        headers_def = ['Category', 'Channel', 'Kontribusi kosmetik', 'Beauty Advisory', 
-                       'Area display utama', 'Tipe beauty visibility', 'Rekomendasi Produk']
-        
-        definitions_rows = [
-            ['GT', 'Cosmetic Store', '> 50%', 'Ada', 'Rak khusus per brand', 'Backwall, floor display, kasir, banner, billboard', 'Semua SKU'],
-            ['GT', 'Retail/Grocery', '< 50%', 'Tidak ada', 'Rak multi-brand', 'Kasir', 'Cleanser, sunscreen, micellar water, body lotion, and compact powder'],
-            ['GT', 'Pharmacy', '< 5%', 'Tidak ada', 'Rak multi-brand', 'Kasir', 'Acne and sensitive series'],
-            ['Alternative Channel', 'ATC', 'Channel alternatif selain GT dan MT', '', '', '', '']
+        # --- SECTION 3: DEFINISI CHANNEL (In Bahasa Indonesia) ---
+        def_start_row = 17
+        info_sheet.write(def_start_row, 0, "DEFINISI STORE CHANNEL", header_fmt)
+        headers_def = [
+            'Category', 'Channel', 'Kontribusi Kosmetik', 'Beauty Advisory (BA)', 
+            'Area Display Utama', 'Tipe Visibility', 'Rekomendasi Produk'
         ]
         
-        info_sheet.write_row(start_row_def + 1, 0, headers_def, header_fmt)
+        definitions_rows = [
+            ['GT', 'Cosmetic Store', '> 50%', 'Ada', 'Rak khusus per brand', 'Backwall, floor display, kasir', 'Semua SKU'],
+            ['GT', 'Retail/Grocery', '< 50%', 'Tidak ada', 'Rak multi-brand', 'Area Kasir', 'Cleanser, sunscreen, micellar, lotion'],
+            ['GT', 'Pharmacy', '< 5%', 'Tidak ada', 'Rak multi-brand', 'Area Kasir', 'Acne and sensitive series'],
+            ['Alternative', 'ATC', 'Channel alternatif (Non-GT/MT)', '-', '-', '-', '-']
+        ]
+        
+        info_sheet.write_row(def_start_row + 1, 0, headers_def, header_fmt)
         for r, row in enumerate(definitions_rows):
-            info_sheet.write_row(start_row_def + 2 + r, 0, row, cell_fmt)
+            info_sheet.write_row(def_start_row + 2 + r, 0, row, cell_fmt)
 
-        info_sheet.set_column(0, 6, 30)
+        info_sheet.set_column(0, 0, 45) # Width for instruction column
+        info_sheet.set_column(1, 6, 20)
 
         # --- Dropdown Logic ---
-        # Because we dropped 'dst_id_g2g', we MUST find the new index of 'store_channel'
         store_channel_idx = df_for_excel.columns.get_loc('store_channel')
-        
         worksheet.data_validation(1, store_channel_idx, 10000, store_channel_idx, {
             'validate': 'list',
             'source': STORE_CHANNEL_OPTIONS,
-            'input_title': 'Pilih Store Channel',
-            'input_message': 'Pilih: ' + ', '.join(STORE_CHANNEL_OPTIONS),
-            'error_title': 'Input Tidak Valid',
-            'error_message': 'Harap pilih kategori dari daftar dropdown.',
+            'input_title': 'Pilih Channel',
+            'input_message': 'Pilih salah satu: ' + ', '.join(STORE_CHANNEL_OPTIONS),
+            'error_title': 'Input Salah',
+            'error_message': 'Mohon pilih kategori dari daftar dropdown.',
             'show_error': True
         })
         worksheet.set_column(store_channel_idx, store_channel_idx, 25)
