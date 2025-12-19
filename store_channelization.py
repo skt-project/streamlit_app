@@ -21,10 +21,12 @@ def get_credentials():
         master_store_table_path = st.secrets["bigquery_tables"]["master_store_database"]
     except Exception:
         SERVICE_ACCOUNT_FILE = r'C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json'
-        credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
+        credentials = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE
+            )
         master_store_table_path = "skintific-data-warehouse.gt_schema.master_store_database_basis"
     return credentials, master_store_table_path
-
+    
 @st.cache_data(ttl=3600)
 def load_store_data(region_filter, distributor_filter):
     credentials, master_store_table_path = get_credentials()
