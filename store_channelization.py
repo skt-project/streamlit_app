@@ -19,19 +19,19 @@ def get_credentials():
             "client_x509_cert_url": gcp_secrets["client_x509_cert_url"]
         })
         master_store_table_path = st.secrets["bigquery_tables"]["master_store_database"]
-        staging_table_path = st.secrets["bigquery_tables"]["staging_table"]  # Add this line
+        staging_table_path = st.secrets["bigquery_tables"]["staging_table"]
     except Exception:
         SERVICE_ACCOUNT_FILE = r'C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json'
         credentials = service_account.Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE
             )
         master_store_table_path = "skintific-data-warehouse.gt_schema.master_store_database_basis"
-        staging_table_path = "skintific-data-warehouse.gt_schema.store_channel_staging"  # Add this line
-    return credentials, master_store_table_path, staging_table_path  # Update return
+        staging_table_path = "skintific-data-warehouse.gt_schema.store_channel_staging"
+    return credentials, master_store_table_path, staging_table_path
     
 @st.cache_data(ttl=3600)
 def load_store_data(region_filter, distributor_filter):
-    credentials, master_store_table_path = get_credentials()
+    credentials, master_store_table_path, _ = get_credentials()  # FIXED: unpack 3 values
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
     where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL)"
     if region_filter and region_filter != "Semua Region":
@@ -50,7 +50,7 @@ def load_store_data(region_filter, distributor_filter):
     return df, credentials, dst_id
 
 def get_available_regions():
-    credentials, master_store_table_path = get_credentials()
+    credentials, master_store_table_path, _ = get_credentials()  # FIXED: unpack 3 values
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
     query = f"""
         SELECT DISTINCT region FROM `{master_store_table_path}`
@@ -61,7 +61,7 @@ def get_available_regions():
     return ["Semua Region"] + regions_df['region'].tolist()
 
 def get_available_distributors(region_filter=None):
-    credentials, master_store_table_path = get_credentials()
+    credentials, master_store_table_path, _ = get_credentials()  # FIXED: unpack 3 values
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
     
     where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL) AND distributor_g2g IS NOT NULL"
@@ -218,7 +218,6 @@ if st.button("Export", type="primary"):
             display_df = store_df[['customer_category', 'region', 'distributor_g2g', 'cust_id', 'reference_id_g2g', 'store_name', 'store_channel']]
             st.dataframe(display_df.head(6), use_container_width=True)
             
-            # ← FIXED: Proper unpacking
             excel_output = create_excel_with_dropdown(store_df, selected_region, selected_distributor)
             filename = f"toko_{selected_region.replace(' ','_')}_{selected_distributor.replace(' ','_')}_DST{dst_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             st.download_button("📥 Unduh File Excel", excel_output.getvalue(), filename, 
@@ -364,8 +363,8 @@ if uploaded_file:
                 st.success("✅ Semua validasi berhasil!")
                 if st.button("Upload", type="primary"):
                     with st.spinner("Mengunggah..."):
-                        credentials, _ = get_credentials()
-                        success, message = insert_to_bigquery(updated_df, credentials, staging_table, upload_dst_id)
+                        credentials, _, staging_table_path = get_credentials()  # FIXED: unpack 3 values and use staging_table_path
+                        success, message = insert_to_bigquery(updated_df, credentials, staging_table_path, upload_dst_id)
                     if success:
                         st.success(f"✅ {message}")
                         st.balloons()
