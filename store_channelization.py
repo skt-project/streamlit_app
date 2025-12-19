@@ -19,13 +19,15 @@ def get_credentials():
             "client_x509_cert_url": gcp_secrets["client_x509_cert_url"]
         })
         master_store_table_path = st.secrets["bigquery_tables"]["master_store_database"]
+        staging_table_path = st.secrets["bigquery_tables"]["staging_table"]  # Add this line
     except Exception:
         SERVICE_ACCOUNT_FILE = r'C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json'
         credentials = service_account.Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE
             )
         master_store_table_path = "skintific-data-warehouse.gt_schema.master_store_database_basis"
-    return credentials, master_store_table_path
+        staging_table_path = "skintific-data-warehouse.gt_schema.store_channel_staging"  # Add this line
+    return credentials, master_store_table_path, staging_table_path  # Update return
     
 @st.cache_data(ttl=3600)
 def load_store_data(region_filter, distributor_filter):
