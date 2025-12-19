@@ -167,6 +167,36 @@ def create_excel_with_dropdown(df, region, distributor):
     output.seek(0)
     return output
 
+def check_duplicate_cust_ids(df, credentials, staging_table_path):
+    """Check if any cust_id from the dataframe already exists in staging table"""
+    try:
+        client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+        
+        # Get all cust_ids from the upload dataframe
+        upload_cust_ids = df['cust_id'].tolist()
+        
+        # Query staging table to check for existing cust_ids
+        cust_ids_str = "', '".join(upload_cust_ids)
+        query = f"""
+            SELECT DISTINCT cust_id, store_name, region, distributor_g2g, upload_timestamp
+            FROM `{staging_table_path}`
+            WHERE cust_id IN ('{cust_ids_str}')
+        """
+        
+        existing_df = client.query(query).to_dataframe()
+        
+        if not existing_df.empty:
+            return True, existing_df  # Duplicates found
+        else:
+            return False, None  # No duplicates
+            
+    except Exception as e:
+        # If table doesn't exist yet, that's fine - no duplicates
+        if "Not found" in str(e):
+            return False, None
+        else:
+            raise e
+
 def insert_to_bigquery(df, credentials, table_name, dst_id):
     try:
         client = bigquery.Client(credentials=credentials, project=credentials.project_id)
@@ -181,7 +211,7 @@ def insert_to_bigquery(df, credentials, table_name, dst_id):
         df['dst_id_g2g'] = dst_id
         upload_df = df[['cust_id', 'reference_id_g2g', 'store_name', 'customer_category', 'region', 
                         'distributor_g2g', 'dst_id_g2g', 'store_channel', 'upload_timestamp']]
-        job_config = bigquery.LoadJobConfig(schema=schema, write_disposition="WRITE_TRUNCATE")
+        job_config = bigquery.LoadJobConfig(schema=schema, write_disposition="WRITE_APPEND")
         job = client.load_table_from_dataframe(upload_df, table_name, job_config=job_config)
         job.result()
         return True, f"Berhasil memuat {len(upload_df)} baris ke {table_name}"
@@ -317,7 +347,8 @@ if uploaded_file:
                 if empty.any():
                     error_log.append(f"❌ {empty.sum()} baris dengan store_channel kosong")
                     error_data['empty_channel'] = updated_df[empty]
-                 # Check for duplicate cust_ids in staging table
+
+                # Check for duplicate cust_ids in staging table
                 with st.spinner("Memeriksa duplikasi di staging table..."):
                     credentials, _, staging_table_path = get_credentials()
                     has_duplicates, duplicate_df = check_duplicate_cust_ids(updated_df, credentials, staging_table_path)
@@ -356,6 +387,14 @@ if uploaded_file:
                         
                         if 'empty_channel' in error_data:
                             all_errors.append(prep_error_df(error_data['empty_channel'], "CHANNEL KOSONG"))
+                        
+                        if 'duplicate_staging' in error_data:
+                            temp_df = error_data['duplicate_staging'].copy()
+                            # Format upload_timestamp to be more readable
+                            if 'upload_timestamp' in temp_df.columns:
+                                temp_df['upload_timestamp'] = pd.to_datetime(temp_df['upload_timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                            temp_df['Issue_Type'] = "SUDAH ADA DI STAGING"
+                            all_errors.append(temp_df)
 
                         if all_errors:
                             # Merge all problematic rows into one table
