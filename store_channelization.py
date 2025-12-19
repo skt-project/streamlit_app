@@ -317,6 +317,14 @@ if uploaded_file:
                 if empty.any():
                     error_log.append(f"❌ {empty.sum()} baris dengan store_channel kosong")
                     error_data['empty_channel'] = updated_df[empty]
+                 # Check for duplicate cust_ids in staging table
+                with st.spinner("Memeriksa duplikasi di staging table..."):
+                    credentials, _, staging_table_path = get_credentials()
+                    has_duplicates, duplicate_df = check_duplicate_cust_ids(updated_df, credentials, staging_table_path)
+                    
+                    if has_duplicates:
+                        error_log.append(f"❌ {len(duplicate_df)} toko sudah ada di staging table (duplikasi cust_id)")
+                        error_data['duplicate_staging'] = duplicate_df
 
                 # --- Error Reporting (CONSOLIDATED TABLE) ---
                 if error_log:
