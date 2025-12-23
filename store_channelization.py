@@ -26,21 +26,21 @@ def get_credentials():
             SERVICE_ACCOUNT_FILE
             )
         master_store_table_path = "skintific-data-warehouse.gt_schema.master_store_database_basis"
-        staging_table_path = "skintific-data-warehouse.gt_schema.store_channel_staging"
+        staging_table_path = "skintific-data-warehouse.staging.gt_store_channel_staging"
     return credentials, master_store_table_path, staging_table_path
     
 @st.cache_data(ttl=3600)
 def load_store_data(region_filter, distributor_filter):
     credentials, master_store_table_path, _ = get_credentials()  # FIXED: unpack 3 values
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
-    where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL)"
+    where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL OR customer_category = '')"
     if region_filter and region_filter != "Semua Region":
         where_clause += f" AND region = '{region_filter}'"
     if distributor_filter and distributor_filter != "Semua Distributor":
         where_clause += f" AND UPPER(distributor_g2g) = '{distributor_filter.upper()}'"
     query = f"""
-        SELECT customer_category, region, UPPER(distributor_g2g) AS distributor_g2g, 
-               dst_id_g2g, cust_id, reference_id_g2g, store_name
+        SELECT customer_category, region, UPPER(distributor_g2g) AS distributor, 
+               dst_id_g2g, cust_id, reference_id_g2g AS reference_id, store_name
         FROM `{master_store_table_path}` {where_clause}
         ORDER BY region, distributor_g2g, cust_id
     """
@@ -178,7 +178,7 @@ def check_duplicate_cust_ids(df, credentials, staging_table_path):
         # Query staging table to check for existing cust_ids
         cust_ids_str = "', '".join(upload_cust_ids)
         query = f"""
-            SELECT DISTINCT cust_id, store_name, region, distributor_g2g, upload_timestamp
+            SELECT DISTINCT cust_id, store_name, region, distributor, upload_timestamp
             FROM `{staging_table_path}`
             WHERE cust_id IN ('{cust_ids_str}')
         """
@@ -201,16 +201,16 @@ def insert_to_bigquery(df, credentials, table_name, dst_id):
     try:
         client = bigquery.Client(credentials=credentials, project=credentials.project_id)
         schema = [
-            bigquery.SchemaField("cust_id", "STRING"), bigquery.SchemaField("reference_id_g2g", "STRING"),
+            bigquery.SchemaField("cust_id", "STRING"), bigquery.SchemaField("reference_id", "STRING"),
             bigquery.SchemaField("store_name", "STRING"), bigquery.SchemaField("customer_category", "STRING"),
-            bigquery.SchemaField("region", "STRING"), bigquery.SchemaField("distributor_g2g", "STRING"),
+            bigquery.SchemaField("region", "STRING"), bigquery.SchemaField("distributor", "STRING"),
             bigquery.SchemaField("dst_id_g2g", "STRING"), bigquery.SchemaField("store_channel", "STRING"),
             bigquery.SchemaField("upload_timestamp", "TIMESTAMP")
         ]
         df['upload_timestamp'] = datetime.now()
         df['dst_id_g2g'] = dst_id
-        upload_df = df[['cust_id', 'reference_id_g2g', 'store_name', 'customer_category', 'region', 
-                        'distributor_g2g', 'dst_id_g2g', 'store_channel', 'upload_timestamp']]
+        upload_df = df[['cust_id', 'reference_id', 'store_name', 'customer_category', 'region', 
+                        'distributor', 'dst_id_g2g', 'store_channel', 'upload_timestamp']]
         job_config = bigquery.LoadJobConfig(schema=schema, write_disposition="WRITE_APPEND")
         job = client.load_table_from_dataframe(upload_df, table_name, job_config=job_config)
         job.result()
@@ -245,7 +245,7 @@ if st.button("Export", type="primary"):
             st.success(f"✅ Ditemukan {len(store_df)} toko | DST ID: {dst_id}")
             store_df['store_channel'] = ""
             # Display preview
-            display_df = store_df[['customer_category', 'region', 'distributor_g2g', 'cust_id', 'reference_id_g2g', 'store_name', 'store_channel']]
+            display_df = store_df[['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel']]
             st.dataframe(display_df.head(6), use_container_width=True)
             
             excel_output = create_excel_with_dropdown(store_df, selected_region, selected_distributor)
@@ -287,7 +287,7 @@ if uploaded_file:
             file_distributor = None
         
         # 3. Basic Column Validation
-        required_cols = ['customer_category', 'region', 'distributor_g2g', 'cust_id', 'reference_id_g2g', 'store_name', 'store_channel']
+        required_cols = ['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel']
         missing_cols = [col for col in required_cols if col not in updated_df.columns]
         
         if missing_cols:
@@ -298,7 +298,7 @@ if uploaded_file:
         else:
             # 4. Consistency Validation
             unique_regions = updated_df['region'].dropna().unique()
-            unique_distributors = updated_df['distributor_g2g'].dropna().unique()
+            unique_distributors = updated_df['distributor'].dropna().unique()
             
             if len(unique_regions) > 1:
                 error_log.append(f"❌ File berisi {len(unique_regions)} region berbeda. Hanya boleh 1.")
