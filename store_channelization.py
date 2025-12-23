@@ -354,7 +354,7 @@ if uploaded_file:
                     has_duplicates, duplicate_df = check_duplicate_cust_ids(updated_df, credentials, staging_table_path)
                     
                     if has_duplicates:
-                        error_log.append(f"❌ {len(duplicate_df)} toko sudah ada di staging table (duplikasi cust_id)")
+                        error_log.append(f"❌ {len(duplicate_df)} toko sudah ada di database (duplikasi cust_id)")
                         error_data['duplicate_staging'] = duplicate_df
 
                 # --- Error Reporting (CONSOLIDATED TABLE) ---
@@ -393,7 +393,7 @@ if uploaded_file:
                             # Format upload_timestamp to be more readable
                             if 'upload_timestamp' in temp_df.columns:
                                 temp_df['upload_timestamp'] = pd.to_datetime(temp_df['upload_timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
-                            temp_df['Issue_Type'] = "SUDAH ADA DI STAGING"
+                            temp_df['Issue_Type'] = "SUDAH ADA DI DATABASE"
                             all_errors.append(temp_df)
 
                         if all_errors:
