@@ -178,7 +178,7 @@ def check_duplicate_cust_ids(df, credentials, staging_table_path):
         # Query staging table to check for existing cust_ids
         cust_ids_str = "', '".join(upload_cust_ids)
         query = f"""
-            SELECT DISTINCT cust_id, store_name, region, distributor_g2g as distributor, upload_timestamp
+            SELECT DISTINCT cust_id, store_name, region, distributor, upload_timestamp
             FROM `{staging_table_path}`
             WHERE cust_id IN ('{cust_ids_str}')
         """
