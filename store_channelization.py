@@ -413,7 +413,7 @@ if uploaded_file:
                         credentials, _, staging_table_path = get_credentials()  # FIXED: unpack 3 values and use staging_table_path
                         success, message = insert_to_bigquery(updated_df, credentials, staging_table_path, upload_dst_id)
                     if success:
-                        st.success(f"✅ {message}")
+                        st.success(f"✅ Upload berhasil!")
                         st.snow()
                     else:
                         st.error(f"❌ Gagal: {message}")
