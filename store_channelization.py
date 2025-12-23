@@ -141,7 +141,7 @@ def create_excel_with_dropdown(df, region, distributor):
             ['GT', 'Cosmetic Store', '> 50%', 'Ada', 'Rak khusus per brand', 'Backwall, floor display, kasir', 'Semua SKU'],
             ['GT', 'Retail/Grocery', '< 50%', 'Tidak ada', 'Rak multi-brand', 'Area Kasir', 'Cleanser, sunscreen, micellar, lotion'],
             ['GT', 'Pharmacy', '< 5%', 'Tidak ada', 'Rak multi-brand', 'Area Kasir', 'Acne and sensitive series'],
-            ['Alternative', 'ATC', 'Channel alternatif (Non-GT/MT)', '-', '-', '-', '-']
+            ['GT', 'ATC', 'Channel alternatif (Non-GT/MT)', '-', '-', '-', '-']
         ]
         
         info_sheet.write_row(def_start_row + 1, 0, headers_def, header_fmt)
