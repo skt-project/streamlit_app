@@ -414,7 +414,6 @@ if uploaded_file:
                         success, message = insert_to_bigquery(updated_df, credentials, staging_table_path, upload_dst_id)
                     if success:
                         st.success(f"✅ Upload berhasil!")
-                        st.snow()
                     else:
                         st.error(f"❌ Gagal: {message}")
 
