@@ -349,7 +349,7 @@ if uploaded_file:
                     error_data['empty_channel'] = updated_df[empty]
 
                 # Check for duplicate cust_ids in staging table
-                with st.spinner("Memeriksa duplikasi di staging table..."):
+                with st.spinner("Memeriksa duplikasi di database..."):
                     credentials, _, staging_table_path = get_credentials()
                     has_duplicates, duplicate_df = check_duplicate_cust_ids(updated_df, credentials, staging_table_path)
                     
@@ -414,7 +414,7 @@ if uploaded_file:
                         success, message = insert_to_bigquery(updated_df, credentials, staging_table_path, upload_dst_id)
                     if success:
                         st.success(f"✅ {message}")
-                        st.balloons()
+                        st.snow()
                     else:
                         st.error(f"❌ Gagal: {message}")
 
