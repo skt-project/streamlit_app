@@ -40,7 +40,8 @@ def load_store_data(region_filter, distributor_filter):
         where_clause += f" AND UPPER(distributor_g2g) = '{distributor_filter.upper()}'"
     query = f"""
         SELECT customer_category, region, UPPER(distributor_g2g) AS distributor, 
-               dst_id_g2g, cust_id, reference_id_g2g AS reference_id, store_name
+               dst_id_g2g, cust_id, reference_id_g2g AS reference_id, store_name,
+               customer_type
         FROM `{master_store_table_path}` {where_clause}
         ORDER BY region, distributor_g2g, cust_id
     """
@@ -88,6 +89,14 @@ def create_excel_with_dropdown(df, region, distributor):
     if 'store_channel' not in df_for_excel.columns:
         df_for_excel['store_channel'] = ""
     
+    # For MTI records, populate store_channel with customer_type
+    mti_mask = df_for_excel['customer_category'] == 'MTI'
+    df_for_excel.loc[mti_mask, 'store_channel'] = df_for_excel.loc[mti_mask, 'customer_type'].fillna("")
+    
+    # Remove customer_type column from export as it's only for internal use
+    if 'customer_type' in df_for_excel.columns:
+        df_for_excel = df_for_excel.drop(columns=['customer_type'])
+    
     # Add remarks column
     if 'remarks' not in df_for_excel.columns:
         df_for_excel['remarks'] = ""
@@ -104,6 +113,8 @@ def create_excel_with_dropdown(df, region, distributor):
         title_fmt = workbook.add_format({'bold': True, 'font_size': 14})
         cell_fmt = workbook.add_format({'border': 1})
         instruction_fmt = workbook.add_format({'italic': True, 'font_color': 'red'})
+        wrap_fmt = workbook.add_format({'text_wrap': True})  # Format for text wrap
+        mti_highlight_fmt = workbook.add_format({'bg_color': '#FFE699', 'text_wrap': True})  # Yellow highlight for MTI store_channel
 
         # --- SECTION 1: INSTRUKSI PENGISIAN ---
         info_sheet.write(0, 0, "PANDUAN PENGISIAN FILE", title_fmt)
@@ -111,11 +122,12 @@ def create_excel_with_dropdown(df, region, distributor):
         instruksi = [
             "1. Buka sheet 'Data Toko'.",
             "2. Fokus pada kolom 'store_channel' (kolom kedua terakhir) dan 'remarks' (kolom terakhir).",
-            "3. Untuk 'store_channel': Klik pada sel kosong dan pilih kategori dari daftar dropdown yang muncul.",
-            "4. Untuk 'remarks': Isi dengan catatan/keterangan tambahan jika diperlukan (opsional, free text).",
-            "5. JANGAN mengubah data pada kolom lain (cust_id, store_name, dll) agar tidak error saat upload.",
-            "6. JANGAN mengubah nama file ini karena sistem mendeteksi ID Distributor dari nama file.",
-            "7. Setelah selesai, simpan (Save) dan unggah kembali ke aplikasi Streamlit."
+            "3. Untuk 'store_channel': Klik pada cell kosong dan pilih kategori dari daftar dropdown yang muncul.",
+            "4. PENTING: cell dengan WARNA KUNING pada kolom store_channel (MTI) sudah otomatis terisi dan TIDAK PERLU diisi ulang.",
+            "5. Untuk 'remarks': Isi dengan catatan/keterangan tambahan jika diperlukan (opsional, free text).",
+            "6. Kolom lain seperti customer_category, region, distributor, dst dapat diedit jika diperlukan.",
+            "7. JANGAN mengubah nama file ini karena sistem mendeteksi ID Distributor dari nama file.",
+            "8. Setelah selesai, simpan (Save) dan unggah kembali ke aplikasi Streamlit."
         ]
         
         for i, text in enumerate(instruksi):
@@ -158,21 +170,52 @@ def create_excel_with_dropdown(df, region, distributor):
 
         # --- Dropdown Logic for store_channel ---
         store_channel_idx = df_for_excel.columns.get_loc('store_channel')
-        worksheet.data_validation(1, store_channel_idx, 10000, store_channel_idx, {
-            'validate': 'list',
-            'source': STORE_CHANNEL_OPTIONS,
-            'input_title': 'Pilih Channel',
-            'input_message': 'Pilih salah satu: ' + ', '.join(STORE_CHANNEL_OPTIONS),
-            'error_title': 'Input Salah',
-            'error_message': 'Mohon pilih kategori dari daftar dropdown.',
-            'show_error': True
-        })
-        worksheet.set_column(store_channel_idx, store_channel_idx, 25)
+        region_idx = df_for_excel.columns.get_loc('region')
+        distributor_idx = df_for_excel.columns.get_loc('distributor')
+        store_name_idx = df_for_excel.columns.get_loc('store_name')
+        
+        # Apply text wrap format and highlight MTI rows
+        for row_idx in range(len(df_for_excel)):
+            excel_row = row_idx + 1
+            is_mti = df_for_excel.iloc[row_idx]['customer_category'] == 'MTI'
+            
+            for col_idx in range(len(df_for_excel.columns)):
+                # Apply text wrap format for region, distributor, and store_name columns
+                if col_idx in [region_idx, distributor_idx, store_name_idx]:
+                    worksheet.write(excel_row, col_idx, df_for_excel.iloc[row_idx, col_idx], wrap_fmt)
+        
+        # Now handle store_channel column specifically
+        for row_idx in range(len(df_for_excel)):
+            excel_row = row_idx + 1
+            is_mti = df_for_excel.iloc[row_idx]['customer_category'] == 'MTI'
+            
+            if is_mti:
+                # Highlight MTI store_channel cells in yellow (already filled, no need to edit)
+                worksheet.write(excel_row, store_channel_idx, df_for_excel.iloc[row_idx]['store_channel'], mti_highlight_fmt)
+            else:
+                # Apply dropdown validation for non-MTI store_channel
+                worksheet.data_validation(excel_row, store_channel_idx, excel_row, store_channel_idx, {
+                    'validate': 'list',
+                    'source': STORE_CHANNEL_OPTIONS,
+                    'input_title': 'Pilih Channel',
+                    'input_message': 'Pilih salah satu: ' + ', '.join(STORE_CHANNEL_OPTIONS),
+                    'error_title': 'Input Salah',
+                    'error_message': 'Mohon pilih kategori dari daftar dropdown.',
+                    'show_error': True
+                })
+        
+        # Set column widths
+        worksheet.set_column(0, 0, 18)  # customer_category
+        worksheet.set_column(1, 1, 15)  # region
+        worksheet.set_column(2, 2, 20)  # distributor
+        worksheet.set_column(3, 3, 15)  # cust_id
+        worksheet.set_column(4, 4, 15)  # reference_id
+        worksheet.set_column(5, 5, 30)  # store_name
+        worksheet.set_column(store_channel_idx, store_channel_idx, 25)  # store_channel
         
         # --- Set column width for remarks ---
         remarks_idx = df_for_excel.columns.get_loc('remarks')
         worksheet.set_column(remarks_idx, remarks_idx, 40)
-        
     output.seek(0)
     return output
 
@@ -263,9 +306,15 @@ if st.button("Export", type="primary"):
             st.warning("Tidak ada toko ditemukan")
         else:
             st.success(f"✅ Ditemukan {len(store_df)} toko | DST ID: {dst_id}")
+            
+            # For MTI records, populate store_channel with customer_type
             store_df['store_channel'] = ""
+            mti_mask = store_df['customer_category'] == 'MTI'
+            store_df.loc[mti_mask, 'store_channel'] = store_df.loc[mti_mask, 'customer_type'].fillna("")
+            
             store_df['remarks'] = ""
-            # Display preview
+            
+            # Display preview (exclude customer_type from display)
             display_df = store_df[['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel', 'remarks']]
             st.dataframe(display_df.head(6), use_container_width=True)
             
@@ -361,18 +410,19 @@ if uploaded_file:
                         error_log.append(f"❌ {len(extra_in_excel)} toko di Excel TIDAK ADA di database")
                         error_data['extra_stores'] = updated_df[updated_df['cust_id'].isin(extra_in_excel)]
 
-                # Invalid value validation
-                invalid = updated_df[(~updated_df['store_channel'].isin(STORE_CHANNEL_OPTIONS)) & 
-                                    (updated_df['store_channel'].notna()) & (updated_df['store_channel'] != '')]
+                # Invalid value validation - allow any value for MTI
+                non_mti_df = updated_df[updated_df['customer_category'] != 'MTI']
+                invalid = non_mti_df[(~non_mti_df['store_channel'].isin(STORE_CHANNEL_OPTIONS)) & 
+                                    (non_mti_df['store_channel'].notna()) & (non_mti_df['store_channel'] != '')]
                 if not invalid.empty:
-                    error_log.append(f"❌ {len(invalid)} baris dengan store_channel tidak valid")
+                    error_log.append(f"❌ {len(invalid)} baris dengan store_channel tidak valid (tidak termasuk MTI)")
                     error_data['invalid_channel'] = invalid
 
-                # Empty value validation
-                empty = updated_df['store_channel'].isna() | (updated_df['store_channel'] == '')
+                # Empty value validation - exclude MTI from this check
+                empty = non_mti_df['store_channel'].isna() | (non_mti_df['store_channel'] == '')
                 if empty.any():
-                    error_log.append(f"❌ {empty.sum()} baris dengan store_channel kosong")
-                    error_data['empty_channel'] = updated_df[empty]
+                    error_log.append(f"❌ {empty.sum()} baris dengan store_channel kosong (tidak termasuk MTI)")
+                    error_data['empty_channel'] = non_mti_df[empty]
 
                 # Check for duplicate cust_ids in staging table
                 with st.spinner("Memeriksa duplikasi di database..."):
