@@ -5,7 +5,7 @@ from google.oauth2 import service_account
 from io import BytesIO
 from datetime import datetime
 
-STORE_CHANNEL_OPTIONS = ["Cosmetic Store", "Retail/Grocery", "Pharmacy", "ATC"]
+STORE_CHANNEL_OPTIONS = ["Cosmetic Store", "Retail", "Pharmacy", "ATC"]
 
 def get_credentials():
     try:
@@ -31,9 +31,9 @@ def get_credentials():
     
 @st.cache_data(ttl=3600)
 def load_store_data(region_filter, distributor_filter):
-    credentials, master_store_table_path, _ = get_credentials()  # FIXED: unpack 3 values
+    credentials, master_store_table_path, _ = get_credentials()
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
-    where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL OR customer_category = '')"
+    where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL OR customer_category = '' OR customer_category = 'MTI')"
     if region_filter and region_filter != "Semua Region":
         where_clause += f" AND region = '{region_filter}'"
     if distributor_filter and distributor_filter != "Semua Distributor":
@@ -50,7 +50,7 @@ def load_store_data(region_filter, distributor_filter):
     return df, credentials, dst_id
 
 def get_available_regions():
-    credentials, master_store_table_path, _ = get_credentials()  # FIXED: unpack 3 values
+    credentials, master_store_table_path, _ = get_credentials()
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
     query = f"""
         SELECT DISTINCT region FROM `{master_store_table_path}`
@@ -61,7 +61,7 @@ def get_available_regions():
     return ["Semua Region"] + regions_df['region'].tolist()
 
 def get_available_distributors(region_filter=None):
-    credentials, master_store_table_path, _ = get_credentials()  # FIXED: unpack 3 values
+    credentials, master_store_table_path, _ = get_credentials()
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
     
     where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL) AND distributor_g2g IS NOT NULL"
@@ -87,6 +87,10 @@ def create_excel_with_dropdown(df, region, distributor):
     
     if 'store_channel' not in df_for_excel.columns:
         df_for_excel['store_channel'] = ""
+    
+    # Add remarks column
+    if 'remarks' not in df_for_excel.columns:
+        df_for_excel['remarks'] = ""
 
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_for_excel.to_excel(writer, index=False, sheet_name='Data Toko')
@@ -106,18 +110,19 @@ def create_excel_with_dropdown(df, region, distributor):
         
         instruksi = [
             "1. Buka sheet 'Data Toko'.",
-            "2. Fokus pada kolom 'store_channel' (kolom terakhir).",
-            "3. Klik pada sel kosong di kolom tersebut dan pilih kategori dari daftar dropdown yang muncul.",
-            "4. JANGAN mengubah data pada kolom lain (cust_id, store_name, dll) agar tidak error saat upload.",
-            "5. JANGAN mengubah nama file ini karena sistem mendeteksi ID Distributor dari nama file.",
-            "6. Setelah selesai, simpan (Save) dan unggah kembali ke aplikasi Streamlit."
+            "2. Fokus pada kolom 'store_channel' (kolom kedua terakhir) dan 'remarks' (kolom terakhir).",
+            "3. Untuk 'store_channel': Klik pada sel kosong dan pilih kategori dari daftar dropdown yang muncul.",
+            "4. Untuk 'remarks': Isi dengan catatan/keterangan tambahan jika diperlukan (opsional, free text).",
+            "5. JANGAN mengubah data pada kolom lain (cust_id, store_name, dll) agar tidak error saat upload.",
+            "6. JANGAN mengubah nama file ini karena sistem mendeteksi ID Distributor dari nama file.",
+            "7. Setelah selesai, simpan (Save) dan unggah kembali ke aplikasi Streamlit."
         ]
         
         for i, text in enumerate(instruksi):
             info_sheet.write(i + 2, 0, text)
 
         # --- SECTION 2: METADATA ---
-        metadata_start_row = 10
+        metadata_start_row = 11
         info_sheet.write(metadata_start_row, 0, "METADATA EXPORT", header_fmt)
         metadata = [
             ['Field', 'Value'],
@@ -130,7 +135,7 @@ def create_excel_with_dropdown(df, region, distributor):
             info_sheet.write_row(metadata_start_row + 1 + r, 0, row, cell_fmt)
 
         # --- SECTION 3: DEFINISI CHANNEL (In Bahasa Indonesia) ---
-        def_start_row = 17
+        def_start_row = 18
         info_sheet.write(def_start_row, 0, "DEFINISI STORE CHANNEL", header_fmt)
         headers_def = [
             'Category', 'Channel', 'Kontribusi Kosmetik', 'Beauty Advisory (BA)', 
@@ -139,7 +144,7 @@ def create_excel_with_dropdown(df, region, distributor):
         
         definitions_rows = [
             ['GT', 'Cosmetic Store', '> 50%', 'Ada', 'Rak khusus per brand', 'Backwall, floor display, kasir', 'Semua SKU'],
-            ['GT', 'Retail/Grocery', '< 50%', 'Tidak ada', 'Rak multi-brand', 'Area Kasir', 'Cleanser, sunscreen, micellar, lotion'],
+            ['GT', 'Retail', '< 50%', 'Tidak ada', 'Rak multi-brand', 'Area Kasir', 'Cleanser, sunscreen, micellar, lotion'],
             ['GT', 'Pharmacy', '< 5%', 'Tidak ada', 'Rak multi-brand', 'Area Kasir', 'Acne and sensitive series'],
             ['GT', 'ATC', 'Channel alternatif (Non-GT/MT)', '-', '-', '-', '-']
         ]
@@ -151,7 +156,7 @@ def create_excel_with_dropdown(df, region, distributor):
         info_sheet.set_column(0, 0, 45) # Width for instruction column
         info_sheet.set_column(1, 6, 20)
 
-        # --- Dropdown Logic ---
+        # --- Dropdown Logic for store_channel ---
         store_channel_idx = df_for_excel.columns.get_loc('store_channel')
         worksheet.data_validation(1, store_channel_idx, 10000, store_channel_idx, {
             'validate': 'list',
@@ -163,6 +168,10 @@ def create_excel_with_dropdown(df, region, distributor):
             'show_error': True
         })
         worksheet.set_column(store_channel_idx, store_channel_idx, 25)
+        
+        # --- Set column width for remarks ---
+        remarks_idx = df_for_excel.columns.get_loc('remarks')
+        worksheet.set_column(remarks_idx, remarks_idx, 40)
         
     output.seek(0)
     return output
@@ -201,16 +210,27 @@ def insert_to_bigquery(df, credentials, table_name, dst_id):
     try:
         client = bigquery.Client(credentials=credentials, project=credentials.project_id)
         schema = [
-            bigquery.SchemaField("cust_id", "STRING"), bigquery.SchemaField("reference_id", "STRING"),
-            bigquery.SchemaField("store_name", "STRING"), bigquery.SchemaField("customer_category", "STRING"),
-            bigquery.SchemaField("region", "STRING"), bigquery.SchemaField("distributor", "STRING"),
-            bigquery.SchemaField("dst_id_g2g", "STRING"), bigquery.SchemaField("store_channel", "STRING"),
+            bigquery.SchemaField("cust_id", "STRING"), 
+            bigquery.SchemaField("reference_id", "STRING"),
+            bigquery.SchemaField("store_name", "STRING"), 
+            bigquery.SchemaField("customer_category", "STRING"),
+            bigquery.SchemaField("region", "STRING"), 
+            bigquery.SchemaField("distributor", "STRING"),
+            bigquery.SchemaField("dst_id_g2g", "STRING"), 
+            bigquery.SchemaField("store_channel", "STRING"),
+            bigquery.SchemaField("remarks", "STRING"),
             bigquery.SchemaField("upload_timestamp", "TIMESTAMP")
         ]
         df['upload_timestamp'] = datetime.now()
         df['dst_id_g2g'] = dst_id
+        
+        # Ensure remarks column exists and handle null values
+        if 'remarks' not in df.columns:
+            df['remarks'] = ""
+        df['remarks'] = df['remarks'].fillna("")
+        
         upload_df = df[['cust_id', 'reference_id', 'store_name', 'customer_category', 'region', 
-                        'distributor', 'dst_id_g2g', 'store_channel', 'upload_timestamp']]
+                        'distributor', 'dst_id_g2g', 'store_channel', 'remarks', 'upload_timestamp']]
         job_config = bigquery.LoadJobConfig(schema=schema, write_disposition="WRITE_APPEND")
         job = client.load_table_from_dataframe(upload_df, table_name, job_config=job_config)
         job.result()
@@ -244,8 +264,9 @@ if st.button("Export", type="primary"):
         else:
             st.success(f"✅ Ditemukan {len(store_df)} toko | DST ID: {dst_id}")
             store_df['store_channel'] = ""
+            store_df['remarks'] = ""
             # Display preview
-            display_df = store_df[['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel']]
+            display_df = store_df[['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel', 'remarks']]
             st.dataframe(display_df.head(6), use_container_width=True)
             
             excel_output = create_excel_with_dropdown(store_df, selected_region, selected_distributor)
@@ -287,7 +308,7 @@ if uploaded_file:
             file_distributor = None
         
         # 3. Basic Column Validation
-        required_cols = ['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel']
+        required_cols = ['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel', 'remarks']
         missing_cols = [col for col in required_cols if col not in updated_df.columns]
         
         if missing_cols:
@@ -296,6 +317,11 @@ if uploaded_file:
             st.error("Gagal memproses: DST ID tidak ditemukan dalam nama file.")
             st.stop()
         else:
+            # Ensure remarks column exists and handle null values
+            if 'remarks' not in updated_df.columns:
+                updated_df['remarks'] = ""
+            updated_df['remarks'] = updated_df['remarks'].fillna("")
+            
             # 4. Consistency Validation
             unique_regions = updated_df['region'].dropna().unique()
             unique_distributors = updated_df['distributor'].dropna().unique()
@@ -410,7 +436,7 @@ if uploaded_file:
                 st.success("✅ Semua validasi berhasil!")
                 if st.button("Upload", type="primary"):
                     with st.spinner("Mengunggah..."):
-                        credentials, _, staging_table_path = get_credentials()  # FIXED: unpack 3 values and use staging_table_path
+                        credentials, _, staging_table_path = get_credentials()
                         success, message = insert_to_bigquery(updated_df, credentials, staging_table_path, upload_dst_id)
                     if success:
                         st.success(f"✅ Upload berhasil!")
