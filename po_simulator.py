@@ -494,6 +494,7 @@ def main():
             1.  **Reject**: The SKU is rejected if any of these conditions are met:
                 * It is on the **regional rejection list** (Stop by Steve), unless the region is allowed to order.
                 * It is on the **manual rejection list** (Stop by Steve).
+                * The **Remaining Allocation (By Region)** is **less than 0** (Negative Allocation).
                 * The **Current WOI** is too high (Exceeded the WOI Standard).
                 * The PO quantity is **greater than** the suggested PO quantity (over-ordering) -> **Reject with Suggestion**.
 
@@ -503,7 +504,8 @@ def main():
                 * It's a new product (NPD) with remaining region allocation **greater than 0**, and the PO quantity is **less than or equal to** the remaining allocation by region.
                 * It has no historical trend data, and the supply control status is **not** "STOP PO," "DISCONTINUED," or "OOS."
 
-            3.  **Additional Suggestion**: The SKU is marked as an "Additional Suggestion" if it was not on the original PO but was **suggested by the system**.
+            3.  **Additional Suggestion**: The SKU is marked as an "Additional Suggestion" if:
+                * It was not on the original PO but was **suggested by the system**.
             
             4.  **Suggested WOI (OH + IT + Suggested Qty + ST Projection until EOM)**: The suggested WOI is calculated based on the total stock + Suggested Qty + ST Projection until end of month
             """)
@@ -733,9 +735,11 @@ def main():
                     conditions = [
                         # Addtional: New condition for PO Qty > MAX_QTY_LIMIT for specific SKUs
                         (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > MAX_QTY_LIMIT),
-                        # 1. New condition for additional suggested SKUs
+                        # 1. Reject if Remaining Allocation is less than 0
+                        (result_df["remaining_allocation_qty_region"] < 0),
+                        # 2. New condition for additional suggested SKUs
                         (result_df["is_po_sku"] == False),
-                        # 2. Hardcoded Reject
+                        # 3. Hardcoded Reject
                         result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
                         # 3. Reject if the supply control status are ["STOP PO", "DISCONTINUED", "OOS"]
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
@@ -764,6 +768,7 @@ def main():
                     # Corresponding values
                     choices = [
                         f"Reject (Exceeds Qty Limit of {MAX_QTY_LIMIT})",
+                        "Reject (Negative Allocation)",
                         "Additional Suggestion",
                         "Reject (Stop by Steve)",
                         "Reject",
