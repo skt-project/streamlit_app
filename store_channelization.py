@@ -32,24 +32,48 @@ def get_credentials():
 @st.cache_data(ttl=3600)
 def load_store_data(region_filter, distributor_filter):
     credentials, master_store_table_path, _ = get_credentials()
+    # FIX: Define client BEFORE using it
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
-    where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL OR customer_category = '' OR customer_category = 'MTI')"
-    if region_filter and region_filter != "Semua Region":
-        where_clause += f" AND region = '{region_filter}'"
-    if distributor_filter and distributor_filter != "Semua Distributor":
-        where_clause += f" AND UPPER(distributor_g2g) = '{distributor_filter.upper()}'"
-    query = f"""
+    
+    # Base query with parameterized WHERE clause
+    base_query = f"""
         SELECT customer_category, region, UPPER(distributor_g2g) AS distributor, 
                dst_id_g2g, cust_id, reference_id_g2g AS reference_id, store_name,
                customer_type
-        FROM `{master_store_table_path}` {where_clause}
-        ORDER BY region, distributor_g2g, cust_id
+        FROM `{master_store_table_path}`
+        WHERE (customer_category = 'GT' OR customer_category IS NULL OR customer_category = '' OR customer_category = 'MTI')
     """
-    df = client.query(query).to_dataframe()
+    
+    query_params = []
+    
+    # Use parameterized queries to prevent SQL injection
+    if region_filter and region_filter != "Semua Region":
+        base_query += " AND region = @region"
+        query_params.append(bigquery.ScalarQueryParameter("region", "STRING", region_filter))
+    
+    if distributor_filter and distributor_filter != "Semua Distributor":
+        base_query += " AND UPPER(distributor_g2g) = @distributor"
+        query_params.append(bigquery.ScalarQueryParameter("distributor", "STRING", distributor_filter.upper()))
+    
+    base_query += " ORDER BY region, distributor_g2g, cust_id"
+    
+    job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+    df = client.query(base_query, job_config=job_config).to_dataframe()
+    
     df['customer_category'] = df['customer_category'].fillna('GT')
-    dst_id = df['dst_id_g2g'].iloc[0] if not df.empty and 'dst_id_g2g' in df.columns else 'UNKNOWN'
+    
+    # Validate dst_id consistency
+    if not df.empty and 'dst_id_g2g' in df.columns:
+        unique_dst_ids = df['dst_id_g2g'].dropna().unique()
+        if len(unique_dst_ids) > 1:
+            st.warning(f"⚠️ Ditemukan {len(unique_dst_ids)} DST ID berbeda dalam data: {', '.join(unique_dst_ids)}")
+        dst_id = unique_dst_ids[0] if len(unique_dst_ids) > 0 else 'UNKNOWN'
+    else:
+        dst_id = 'UNKNOWN'
+    
     return df, credentials, dst_id
 
+@st.cache_data(ttl=3600)
 def get_available_regions():
     credentials, master_store_table_path, _ = get_credentials()
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
@@ -61,6 +85,7 @@ def get_available_regions():
     regions_df = client.query(query).to_dataframe()
     return ["Semua Region"] + regions_df['region'].tolist()
 
+@st.cache_data(ttl=3600)
 def get_available_distributors(region_filter=None):
     credentials, master_store_table_path, _ = get_credentials()
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
@@ -93,10 +118,6 @@ def create_excel_with_dropdown(df, region, distributor):
     mti_mask = df_for_excel['customer_category'] == 'MTI'
     df_for_excel.loc[mti_mask, 'store_channel'] = df_for_excel.loc[mti_mask, 'customer_type'].fillna("")
     
-    # Remove customer_type column from export as it's only for internal use
-    if 'customer_type' in df_for_excel.columns:
-        df_for_excel = df_for_excel.drop(columns=['customer_type'])
-    
     # Add remarks column
     if 'remarks' not in df_for_excel.columns:
         df_for_excel['remarks'] = ""
@@ -125,7 +146,7 @@ def create_excel_with_dropdown(df, region, distributor):
             "3. Untuk 'store_channel': Klik pada cell kosong dan pilih kategori dari daftar dropdown yang muncul.",
             "4. PENTING: cell dengan WARNA KUNING pada kolom store_channel (MTI) sudah otomatis terisi dan TIDAK PERLU diisi ulang.",
             "5. Untuk 'remarks': Isi dengan catatan/keterangan tambahan jika diperlukan (opsional, free text).",
-            "6. Kolom lain seperti customer_category, region, distributor, dst dapat diedit jika diperlukan.",
+            "6. 6. JANGAN mengubah kolom: customer_category, region, distributor, cust_id, reference_id, customer_type.",
             "7. JANGAN mengubah nama file ini karena sistem mendeteksi ID Distributor dari nama file.",
             "8. Setelah selesai, simpan (Save) dan unggah kembali ke aplikasi Streamlit."
         ]
@@ -219,6 +240,20 @@ def create_excel_with_dropdown(df, region, distributor):
     output.seek(0)
     return output
 
+def check_internal_duplicates(df):
+    """Check for duplicate cust_ids within the uploaded file itself"""
+    duplicate_mask = df.duplicated(subset=['cust_id'], keep=False)
+    if duplicate_mask.any():
+        duplicates = df[duplicate_mask].sort_values('cust_id')
+        return True, duplicates
+    return False, None
+
+    # Use it in validation:
+    has_internal_dupes, internal_dupes_df = check_internal_duplicates(updated_df)
+    if has_internal_dupes:
+        error_log.append(f"❌ {len(internal_dupes_df)} cust_id duplikat ditemukan dalam file")
+        error_data['internal_duplicates'] = internal_dupes_df
+
 def check_duplicate_cust_ids(df, credentials, staging_table_path):
     """Check if any cust_id from the dataframe already exists in staging table"""
     try:
@@ -277,7 +312,7 @@ def insert_to_bigquery(df, credentials, table_name, dst_id):
         job_config = bigquery.LoadJobConfig(schema=schema, write_disposition="WRITE_APPEND")
         job = client.load_table_from_dataframe(upload_df, table_name, job_config=job_config)
         job.result()
-        return True, f"Berhasil memuat {len(upload_df)} baris ke {table_name}"
+        return True, f"Berhasil Upload ke Database"
     except Exception as e:
         return False, str(e)
 
@@ -328,17 +363,49 @@ st.markdown("---")
 st.header("📤 Upload File yang Sudah Diisi")
 st.info("⚠️ **PENTING**: File harus untuk SATU region dan distributor saja. Jangan gabungkan beberapa distributor.")
 
+# Initialize session state
+if 'validation_passed' not in st.session_state:
+    st.session_state.validation_passed = False
+if 'validated_df' not in st.session_state:
+    st.session_state.validated_df = None
+if 'upload_dst_id' not in st.session_state:
+    st.session_state.upload_dst_id = None
+if 'upload_region' not in st.session_state:
+    st.session_state.upload_region = None
+if 'upload_distributor' not in st.session_state:
+    st.session_state.upload_distributor = None
+if 'last_uploaded_file' not in st.session_state:
+    st.session_state.last_uploaded_file = None
+
 uploaded_file = st.file_uploader("Upload file Excel", type=["xlsx"])
 
+# Reset state when new file is uploaded
 if uploaded_file:
+    if st.session_state.last_uploaded_file != uploaded_file.name:
+        st.session_state.validation_passed = False
+        st.session_state.validated_df = None
+        st.session_state.upload_dst_id = None
+        st.session_state.upload_region = None
+        st.session_state.upload_distributor = None
+        st.session_state.last_uploaded_file = uploaded_file.name
+
+if uploaded_file and not st.session_state.validation_passed:
     error_log = []
     error_data = {}
+    
+    # Initialize variables BEFORE try block
+    updated_df = None
+    upload_dst_id = None
+    upload_region = None
+    upload_distributor = None
+    file_region = None
+    file_distributor = None
+    
     try:
         updated_df = pd.read_excel(uploaded_file, sheet_name='Data Toko')
         
-        # 1. Parse filename as the SOLE SOURCE for dst_id
+        # 1. Parse filename
         filename = uploaded_file.name
-        upload_dst_id = None
         if '_DST' in filename:
             try:
                 upload_dst_id = filename.split('_DST')[1].split('_')[0]
@@ -347,7 +414,7 @@ if uploaded_file:
         else:
             error_log.append("❌ Nama file tidak mengandung tag '_DST'. Gunakan file asli hasil ekspor.")
 
-        # 2. Extract Metadata (Region & Distributor)
+        # 2. Extract Metadata
         try:
             info_sheet = pd.read_excel(uploaded_file, sheet_name='Panduan & Metadata')
             file_region = info_sheet[info_sheet['Field'] == 'Region']['Value'].values[0] if 'Region' in info_sheet['Field'].values else None
@@ -357,7 +424,7 @@ if uploaded_file:
             file_distributor = None
         
         # 3. Basic Column Validation
-        required_cols = ['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'store_channel', 'remarks']
+        required_cols = ['customer_category', 'region', 'distributor', 'cust_id', 'reference_id', 'store_name', 'customer_type', 'store_channel', 'remarks']
         missing_cols = [col for col in required_cols if col not in updated_df.columns]
         
         if missing_cols:
@@ -371,7 +438,13 @@ if uploaded_file:
                 updated_df['remarks'] = ""
             updated_df['remarks'] = updated_df['remarks'].fillna("")
             
-            # 4. Consistency Validation
+            # 4. Check for internal duplicates
+            has_internal_dupes, internal_dupes_df = check_internal_duplicates(updated_df)
+            if has_internal_dupes:
+                error_log.append(f"❌ {len(internal_dupes_df)} cust_id duplikat ditemukan dalam file yang diunggah")
+                error_data['internal_duplicates'] = internal_dupes_df
+            
+            # 5. Consistency Validation
             unique_regions = updated_df['region'].dropna().unique()
             unique_distributors = updated_df['distributor'].dropna().unique()
             
@@ -391,10 +464,7 @@ if uploaded_file:
                 
                 st.success(f"✅ Identitas File: Region={upload_region}, Distributor={upload_distributor}, DST_ID={upload_dst_id}")
                 
-                # 5. Row Content Validation
-                total = len(updated_df)
-                
-                # Database Cross-Check
+                # 6. Database Cross-Check
                 with st.spinner("Validasi terhadap database..."):
                     bq_df, credentials_check, _ = load_store_data(upload_region, upload_distributor)
                     bq_ids = set(bq_df['cust_id'])
@@ -410,21 +480,23 @@ if uploaded_file:
                         error_log.append(f"❌ {len(extra_in_excel)} toko di Excel TIDAK ADA di database")
                         error_data['extra_stores'] = updated_df[updated_df['cust_id'].isin(extra_in_excel)]
 
-                # Invalid value validation - allow any value for MTI
+                # 7. Non-MTI Store Channel Validation
                 non_mti_df = updated_df[updated_df['customer_category'] != 'MTI']
+                
+                # Invalid channel values
                 invalid = non_mti_df[(~non_mti_df['store_channel'].isin(STORE_CHANNEL_OPTIONS)) & 
                                     (non_mti_df['store_channel'].notna()) & (non_mti_df['store_channel'] != '')]
                 if not invalid.empty:
                     error_log.append(f"❌ {len(invalid)} baris dengan store_channel tidak valid (tidak termasuk MTI)")
                     error_data['invalid_channel'] = invalid
 
-                # Empty value validation - exclude MTI from this check
+                # Empty channel values
                 empty = non_mti_df['store_channel'].isna() | (non_mti_df['store_channel'] == '')
                 if empty.any():
                     error_log.append(f"❌ {empty.sum()} baris dengan store_channel kosong (tidak termasuk MTI)")
                     error_data['empty_channel'] = non_mti_df[empty]
 
-                # Check for duplicate cust_ids in staging table
+                # 8. Check for duplicates in staging table
                 with st.spinner("Memeriksa duplikasi di database..."):
                     credentials, _, staging_table_path = get_credentials()
                     has_duplicates, duplicate_df = check_duplicate_cust_ids(updated_df, credentials, staging_table_path)
@@ -433,7 +505,7 @@ if uploaded_file:
                         error_log.append(f"❌ {len(duplicate_df)} toko sudah ada di database (duplikasi cust_id)")
                         error_data['duplicate_staging'] = duplicate_df
 
-                # --- Error Reporting (CONSOLIDATED TABLE) ---
+                # --- Error Reporting ---
                 if error_log:
                     st.error("### ⚠️ LOG KESALAHAN VALIDASI")
                     for idx, msg in enumerate(error_log, 1):
@@ -444,7 +516,7 @@ if uploaded_file:
                         st.subheader("📋 Detail Baris Bermasalah")
                         
                         all_errors = []
-                        # Helper to copy and drop dst_id_g2g if it exists
+                        
                         def prep_error_df(df, issue_label):
                             temp_df = df.copy()
                             if 'dst_id_g2g' in temp_df.columns:
@@ -452,6 +524,9 @@ if uploaded_file:
                             temp_df['Issue_Type'] = issue_label
                             return temp_df
 
+                        if 'internal_duplicates' in error_data:
+                            all_errors.append(prep_error_df(error_data['internal_duplicates'], "DUPLIKAT DALAM FILE"))
+                        
                         if 'missing_stores' in error_data:
                             all_errors.append(prep_error_df(error_data['missing_stores'], "HILANG DI EXCEL"))
                         
@@ -466,35 +541,51 @@ if uploaded_file:
                         
                         if 'duplicate_staging' in error_data:
                             temp_df = error_data['duplicate_staging'].copy()
-                            # Format upload_timestamp to be more readable
                             if 'upload_timestamp' in temp_df.columns:
                                 temp_df['upload_timestamp'] = pd.to_datetime(temp_df['upload_timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
                             temp_df['Issue_Type'] = "SUDAH ADA DI DATABASE"
                             all_errors.append(temp_df)
 
                         if all_errors:
-                            # Merge all problematic rows into one table
                             report_df = pd.concat(all_errors, ignore_index=True)
-                            
-                            # Move 'Issue_Type' to the first column for better visibility
                             cols = ['Issue_Type'] + [c for c in report_df.columns if c != 'Issue_Type']
                             st.dataframe(report_df[cols], use_container_width=True)
                     
                     st.stop()
                 
-                # 6. Final Submission
+                # Validation Success
                 st.success("✅ Semua validasi berhasil!")
-                if st.button("Upload", type="primary"):
-                    with st.spinner("Mengunggah..."):
-                        credentials, _, staging_table_path = get_credentials()
-                        success, message = insert_to_bigquery(updated_df, credentials, staging_table_path, upload_dst_id)
-                    if success:
-                        st.success(f"✅ Upload berhasil!")
-                    else:
-                        st.error(f"❌ Gagal: {message}")
+                st.session_state.validation_passed = True
+                st.session_state.validated_df = updated_df
+                st.session_state.upload_dst_id = upload_dst_id
+                st.session_state.upload_region = upload_region
+                st.session_state.upload_distributor = upload_distributor
 
     except Exception as e:
         st.error(f"❌ Terjadi kesalahan saat membaca file: {str(e)}")
+
+# Show upload button ONLY if validation passed
+if st.session_state.validation_passed:
+    
+    if st.button("Upload", type="primary"):
+        with st.spinner("Mengunggah..."):
+            credentials, _, staging_table_path = get_credentials()
+            success, message = insert_to_bigquery(
+                st.session_state.validated_df, 
+                credentials, 
+                staging_table_path, 
+                st.session_state.upload_dst_id
+            )
+        if success:
+            st.success(f"✅ {message}")
+            # Reset state after successful upload
+            st.session_state.validation_passed = False
+            st.session_state.validated_df = None
+            st.session_state.upload_dst_id = None
+            st.session_state.upload_region = None
+            st.session_state.upload_distributor = None
+        else:
+            st.error(f"❌ Gagal: {message}")
 
 st.markdown("---")
 st.caption("Store Channelization App")
