@@ -9,6 +9,9 @@ from folium import GeoJsonTooltip
 from streamlit_folium import st_folium
 from io import BytesIO
 import json
+import ast
+import os
+from datetime import datetime
 
 # --- Streamlit App Config ---
 st.set_page_config(layout="wide")
@@ -47,10 +50,10 @@ def get_gcs_client():
             "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
         })
         BUCKET_NAME = st.secrets["gcs"]["data"]
-    except Exception:
-        # Local fallback
+    except Exception as e:
+        # Local fallback with environment variable
         credentials = service_account.Credentials.from_service_account_file(
-            r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
+            r"C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json"
         )
         BUCKET_NAME = "public_skintific_storage"
     
@@ -99,6 +102,11 @@ def load_processed_data(_gcs_client, bucket_name, region, kabupaten):
         if village_blob.exists():
             village_bytes = village_blob.download_as_bytes()
             villages_gdf = gpd.read_parquet(BytesIO(village_bytes))
+            
+            # Validate CRS
+            if villages_gdf.crs is None:
+                st.warning("Village data has no CRS, assuming EPSG:4326")
+                villages_gdf.set_crs(epsg=4326, inplace=True)
         else:
             st.warning(f"No village data found for {region}/{kabupaten}")
             return None
@@ -150,7 +158,8 @@ def create_legend():
     <div style="position: fixed; 
                 bottom: 50px; left: 50px; width: 260px; 
                 border:2px solid grey; z-index:9999; font-size:14px;
-                background-color:darkgray; opacity:0.9;">
+                background-color:darkgray; opacity:0.9;
+                max-height: 80vh; overflow-y: auto;">
     &nbsp; <b>Map Legend</b> <br>
     &nbsp; <i style="background:#d2af13; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (With stores) <br>
     &nbsp; <i style="background:darkred; border: 1px solid black; width: 10px; height: 10px; display: inline-block;"></i> Gold Tier (No stores)<br>
@@ -201,65 +210,85 @@ def create_summary_table(villages_gdf, stores_gdf):
     if villages_gdf.empty:
         return pd.DataFrame()
 
-    # Define the core columns needed
-    summary_cols = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 'store_count']
+    # Validate required columns exist
+    required_cols = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan']
+    missing_cols = [col for col in required_cols if col not in villages_gdf.columns]
+    if missing_cols:
+        st.error(f"Missing required columns: {missing_cols}")
+        return pd.DataFrame()
 
-    # Ensure 'store_count' exists and the summary DataFrame is initialized
+    # Ensure 'store_count' exists
     if 'store_count' not in villages_gdf.columns:
         villages_gdf['store_count'] = 0
 
-    summary_df = villages_gdf[summary_cols + ['store_grade']].copy()
+    # Check if store_grade column exists
+    if 'store_grade' not in villages_gdf.columns:
+        st.warning("'store_grade' column not found. Creating default summary.")
+        summary_cols = required_cols + ['store_count']
+        summary_df = villages_gdf[summary_cols].copy()
+        # Add empty grade columns
+        for grade in ['S', 'A', 'B', 'C', 'D', 'Other']:
+            summary_df[f'Grade {grade}'] = 0
+    else:
+        summary_cols = required_cols + ['store_count', 'store_grade']
+        summary_df = villages_gdf[summary_cols].copy()
 
-    # 1. Standardize and Parse the 'store_grade' column
-    def parse_grade_dict(data):
-        if isinstance(data, str) and data:
-            # Safely attempt to parse string dictionary, handling empty string as {}
-            try:
-                # Use json.loads or ast.literal_eval depending on data source complexity
-                # Assuming JSON format here
-                return json.loads(data.replace("'", '"')) 
-            except json.JSONDecodeError:
+        # 1. Standardize and Parse the 'store_grade' column
+        def parse_grade_dict(data):
+            if data is None or data == '' or (isinstance(data, str) and data.strip() == ''):
                 return {}
-        # Handles cases where it's already a dict or an empty list/string/None
-        return data if isinstance(data, dict) else {}
+            
+            if isinstance(data, dict):
+                return data
+            
+            if isinstance(data, str):
+                try:
+                    # Try JSON parsing first
+                    return json.loads(data)
+                except json.JSONDecodeError:
+                    try:
+                        # Try Python literal evaluation
+                        return ast.literal_eval(data)
+                    except (ValueError, SyntaxError):
+                        st.warning(f"Could not parse grade data: {data[:50]}...")
+                        return {}
+            
+            return {}
 
-    # Apply the parsing function
-    summary_df['store_grade_dict'] = summary_df['store_grade'].apply(parse_grade_dict)
+        # Apply the parsing function
+        summary_df['store_grade_dict'] = summary_df['store_grade'].apply(parse_grade_dict)
 
-    # 2. Expand the dictionary into new columns
-    # The .apply(pd.Series) method expands the dictionary keys into new columns
-    grade_counts_df = summary_df['store_grade_dict'].apply(pd.Series).fillna(0).astype(int)
+        # 2. Expand the dictionary into new columns
+        grade_counts_df = summary_df['store_grade_dict'].apply(pd.Series).fillna(0).astype(int)
 
-    # 3. Standardize Grade Columns
-    all_grades = ['S', 'A', 'B', 'C', 'D', 'Other']
-    grade_cols_final = [f"Grade {g}" for g in all_grades]
+        # 3. Standardize Grade Columns
+        all_grades = ['S', 'A', 'B', 'C', 'D', 'Other']
+        grade_cols_final = [f"Grade {g}" for g in all_grades]
 
-    # Rename the new columns and ensure we have all required columns
-    grade_mapping = {g: f"Grade {g}" for g in grade_counts_df.columns}
-    grade_counts_df = grade_counts_df.rename(columns=grade_mapping)
+        # Rename the new columns and ensure we have all required columns
+        grade_mapping = {g: f"Grade {g}" for g in grade_counts_df.columns}
+        grade_counts_df = grade_counts_df.rename(columns=grade_mapping)
 
-    # 4. Merge/Concatenate the expanded grades back to the main DataFrame
-    summary_df = pd.concat([summary_df.drop(columns=['store_grade', 'store_grade_dict']), grade_counts_df], axis=1)
+        # 4. Merge/Concatenate the expanded grades back to the main DataFrame
+        summary_df = pd.concat([summary_df.drop(columns=['store_grade', 'store_grade_dict']), grade_counts_df], axis=1)
 
-    # 5. Ensure all required columns exist (fill with 0 if a grade is missing in the entire dataset)
-    for col in grade_cols_final:
-        if col not in summary_df.columns:
-            summary_df[col] = 0
-        # Ensure data type is integer
-        summary_df[col] = summary_df[col].astype(int)
+        # 5. Ensure all required columns exist
+        for col in grade_cols_final:
+            if col not in summary_df.columns:
+                summary_df[col] = 0
+            summary_df[col] = summary_df[col].astype(int)
 
     # 6. Final cleanup and sorting
-    summary_df['Number of Stores'] = summary_df[[col for col in summary_df.columns if col.startswith('Grade ')]].sum(axis=1)
+    grade_cols = [f"Grade {g}" for g in ['S', 'A', 'B', 'C', 'D', 'Other']]
+    existing_grade_cols = [col for col in grade_cols if col in summary_df.columns]
+    summary_df['Number of Stores'] = summary_df[existing_grade_cols].sum(axis=1)
 
     for col_name in ["Kabupaten", "Kecamatan", "Kelurahan"]:
-        # Check if the column exists and apply title case to all strings
         if col_name in summary_df.columns:
             summary_df[col_name] = summary_df[col_name].apply(str.title)
 
-    # Reorder columns: Region...Kelurahan, Number of Stores, Grade S, Grade A, etc.
-    final_cols_order = ['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 'Number of Stores'] + \
-                       [col for col in grade_cols_final if col in summary_df.columns]
-
+    # Reorder columns
+    final_cols_order = required_cols + ['Number of Stores'] + existing_grade_cols
     summary_df = summary_df[final_cols_order].copy()
 
     # Sort by number of stores
@@ -284,188 +313,200 @@ def main():
     # Region selection
     regions = sorted(region_index.keys())
     selected_region = st.selectbox("Select Region", ["--- Select Region ---"] + regions, index=0)
+    
+    if selected_region == "--- Select Region ---":
+        st.info("Please select a Region to begin.")
+        return
 
-    if selected_region != "--- Select Region ---":
-        # Kabupaten selection
-        kabupaten = sorted(region_index[selected_region])
-        kabupaten_titled = sorted([k.title() for k in kabupaten])
+    # Validate region exists in index
+    if selected_region not in region_index:
+        st.error(f"Region '{selected_region}' not found in index.")
+        return
 
-        selected_kabupaten = st.selectbox(
-            "Select Kabupaten", 
-            ["--- Select Kabupaten ---"] + kabupaten_titled, 
-            index=0
+    # Kabupaten selection
+    kabupaten = sorted(region_index[selected_region])
+    kabupaten_titled = sorted([k.title() for k in kabupaten])
+
+    selected_kabupaten = st.selectbox(
+        "Select Kabupaten", 
+        ["--- Select Kabupaten ---"] + kabupaten_titled, 
+        index=0
+    )
+    
+    if selected_kabupaten == "--- Select Kabupaten ---":
+        st.info("Please select a Kabupaten to view the map.")
+        return
+
+    with st.spinner("Loading map data..."):
+        # Load pre-processed data
+        processed_data = load_processed_data(
+            gcs_client, BUCKET_NAME, selected_region, selected_kabupaten
         )
 
-        if selected_kabupaten != "--- Select Kabupaten ---":
-            with st.spinner("Loading map data..."):
-                # Load pre-processed data
-                processed_data = load_processed_data(
-                    gcs_client, BUCKET_NAME, selected_region, selected_kabupaten
+        if processed_data is None:
+            st.error("Failed to load data. Please try again.")
+            return
+
+        villages_gdf = processed_data['villages']
+        stores_gdf = processed_data['stores']
+        distributors_df = processed_data['distributors']
+        potential_df = processed_data['potential_stores']
+
+        # Format geographical columns for consistent display
+        for col_name in ["Kabupaten", "Kecamatan", "Kelurahan"]:
+            if col_name in villages_gdf.columns:
+                villages_gdf[col_name] = villages_gdf[col_name].apply(str.title)
+
+        # Display metadata
+        metadata = processed_data['metadata']
+
+        st.subheader("📊 Area Statistics")
+
+        # Use 4 columns for the metrics
+        cols = st.columns(4)
+
+        with cols[0]:
+            st.metric("Kelurahan (Villages)", metadata.get('village_count', 0))
+
+        with cols[1]:
+            st.metric("Total Stores", metadata.get('store_count', 0))
+
+        with cols[2]:
+            st.metric("Distributors", metadata.get('distributor_count', 0))
+
+        with cols[3]:
+            st.metric("Potential Stores", metadata.get('potential_store_count', 0))
+
+        # Format timestamp properly
+        timestamp_str = metadata.get('processing_timestamp', 'Unknown')
+        try:
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            formatted_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+        except (ValueError, AttributeError):
+            formatted_time = timestamp_str.split('.')[0].split('+')[0].replace('T', ' ')
+        st.caption(f"Last updated: {formatted_time}")
+
+        # --- Create Map ---
+        if not villages_gdf.empty:
+            # Calculate accurate map center
+            try:
+                if villages_gdf.crs and villages_gdf.crs != 'EPSG:4326':
+                    gdf_wgs84 = villages_gdf.to_crs(epsg=4326)
+                else:
+                    gdf_wgs84 = villages_gdf
+                
+                union_geom = gdf_wgs84.geometry.unary_union
+                centroid = union_geom.centroid
+                center = [centroid.y, centroid.x]
+            except Exception as e:
+                st.warning(f"Error calculating map center: {e}")
+                # Fallback to bounds center
+                bounds = villages_gdf.total_bounds
+                center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+            
+            m = folium.Map(location=center, zoom_start=11, tiles="CartoDB positron")
+
+            # Style function
+            def style_function(feature):
+                nielsen_tier = feature['properties'].get('Nielsen Tier', '')
+                has_store = feature['properties'].get('store_count', 0) > 0
+
+                if nielsen_tier == "Gold":
+                    fill_color = "#d2af13" if has_store else "darkred"
+                else:
+                    fill_color = "#61615F"
+
+                return {
+                    "fillColor": fill_color,
+                    "color": "black",
+                    "weight": 1,
+                    "fillOpacity": 0.7,
+                }
+
+            # Add villages GeoJSON
+            folium.GeoJson(
+                villages_gdf,
+                name=f"{selected_kabupaten} Villages",
+                style_function=style_function,
+                tooltip=GeoJsonTooltip(
+                    fields=['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 
+                           'Nielsen Tier', 'store_count'],
+                    aliases=['Region:', 'Kabupaten:', 'Kecamatan:', 'Kelurahan:', 
+                            'Nielsen Tier:', 'Store Count:'],
+                    localize=True
                 )
+            ).add_to(m)
 
-                if processed_data is None:
-                    st.error("Failed to load data. Please try again.")
-                    return
+            # Add store markers
+            if stores_gdf is not None and not stores_gdf.empty:
+                for _, store in stores_gdf.iterrows():
+                    grade = store.get('store_grade', 'Other')
+                    color = STORE_GRADE_COLORS.get(grade, STORE_GRADE_COLORS['Other'])
 
-                villages_gdf = processed_data['villages']
-                stores_gdf = processed_data['stores']
-                distributors_df = processed_data['distributors']
-                potential_df = processed_data['potential_stores']
-
-                # Format geographical columns for consistent display in tooltip and summary table
-                for col_name in ["Kabupaten", "Kecamatan", "Kelurahan"]:
-                    if col_name in villages_gdf.columns:
-                        # Use .apply(str.title) to convert the text to Title Case
-                        villages_gdf[col_name] = villages_gdf[col_name].apply(str.title)
-
-                # Display metadata
-                metadata = processed_data['metadata']
-
-                st.subheader("📊 Area Statistics")
-
-                # Use 4 columns for the metrics
-                cols = st.columns(4)
-
-                with cols[0]:
-                    st.metric("Kelurahan (Villages)", metadata.get('village_count', 0))
-
-                with cols[1]:
-                    st.metric("Total Stores", metadata.get('store_count', 0))
-
-                with cols[2]:
-                    st.metric("Distributors", metadata.get('distributor_count', 0))
-
-                with cols[3]:
-                    st.metric("Potential Stores", metadata.get('potential_store_count', 0))
-
-                timestamp_str = metadata.get('processing_timestamp', 'Unknown')
-                # Finds the 'T' or the space and takes everything up to the first decimal/plus sign
-                cleaned_time = timestamp_str.split('.')[0].split('+')[0]
-                cleaned_time = cleaned_time.replace('T', ' ')
-                st.caption(f"Last updated: {cleaned_time}")
-
-                # --- Create Map ---
-                # Calculate map center
-                if not villages_gdf.empty:
-                    # 1. Reproject to a suitable projected CRS (e.g., Mercator EPSG:3857) for accurate calculation
-                    villages_projected = villages_gdf.to_crs(epsg=3857) 
-
-                    # 2. Calculate the accurate centroid coordinates in the Projected CRS
-                    center_projected = villages_projected.geometry.centroid
-
-                    # 3. Convert the center point back to Lat/Lon for Folium map initialization
-                    center_gcs = center_projected.to_crs(villages_gdf.crs) 
-
-                    # 4. Use the coordinates for the map center
-                    center = [center_gcs.y.mean(), center_gcs.x.mean()]
-                    m = folium.Map(location=center, zoom_start=11, tiles="CartoDB positron")
-
-                    # Style function
-                    def style_function(feature):
-                        nielsen_tier = feature['properties'].get('Nielsen Tier', '')
-                        has_store = feature['properties'].get('store_count', 0) > 0
-
-                        if nielsen_tier == "Gold":
-                            fill_color = "#d2af13" if has_store else "darkred"
-                        else:
-                            fill_color = "#61615F"
-
-                        return {
-                            "fillColor": fill_color,
-                            "color": "black",
-                            "weight": 1,
-                            "fillOpacity": 0.7,
-                        }
-
-                    # Add villages GeoJSON
-                    folium.GeoJson(
-                        villages_gdf,
-                        name=f"{selected_kabupaten} Villages",
-                        style_function=style_function,
-                        tooltip=GeoJsonTooltip(
-                            fields=['Region', 'Kabupaten', 'Kecamatan', 'Kelurahan', 
-                                   'Nielsen Tier', 'store_count'],
-                            aliases=['Region:', 'Kabupaten:', 'Kecamatan:', 'Kelurahan:', 
-                                    'Nielsen Tier:', 'Store Count:'],
-                            localize=True
-                        )
+                    folium.CircleMarker(
+                        location=[store['latitude'], store['longitude']],
+                        radius=6,
+                        color='black',
+                        weight=1,
+                        fill=True,
+                        fill_color=color,
+                        fill_opacity=1.0,
+                        tooltip=f"Store: {store.get('cust_id', 'N/A')} - {store.get('store_name', 'N/A')} (Grade: {grade})"
                     ).add_to(m)
 
-                    # Add store markers
-                    if stores_gdf is not None and not stores_gdf.empty:
-                        for _, store in stores_gdf.iterrows():
-                            grade = store.get('store_grade', 'Other')
-                            color = STORE_GRADE_COLORS.get(grade, STORE_GRADE_COLORS['Other'])
+            # Add distributor markers
+            if distributors_df is not None and not distributors_df.empty:
+                for _, dist in distributors_df.iterrows():
+                    color = get_distributor_color(dist.get('Brand'))
+                    folium.Marker(
+                        location=[dist['Latitude'], dist['Longitude']],
+                        icon=folium.Icon(color=color, icon="diamond", prefix="fa"),
+                        tooltip=f"Distributor: {dist.get('Distributor Name', 'N/A')}"
+                    ).add_to(m)
 
-                            folium.CircleMarker(
-                                location=[store['latitude'], store['longitude']],
-                                radius=6,
-                                color='black',
-                                weight=1,
-                                fill=True,
-                                fill_color=color,
-                                fill_opacity=1.0,
-                                tooltip=f"Store: {store['cust_id']} - {store['store_name']} (Grade: {grade})"
-                            ).add_to(m)
+            # Add potential store markers
+            if potential_df is not None and not potential_df.empty:
+                for _, pot in potential_df.iterrows():
+                    folium.Marker(
+                        location=[pot['latitude'], pot['longitude']],
+                        icon=folium.Icon(color="cadetblue", icon="shopping-cart", prefix="fa"),
+                        tooltip=f"Potential Store: {pot.get('name', 'N/A')}"
+                    ).add_to(m)
 
-                    # Add distributor markers
-                    if distributors_df is not None and not distributors_df.empty:
-                        for _, dist in distributors_df.iterrows():
-                            color = get_distributor_color(dist.get('Brand'))
-                            folium.Marker(
-                                location=[dist['Latitude'], dist['Longitude']],
-                                icon=folium.Icon(color=color, icon="diamond", prefix="fa"),
-                                tooltip=f"Distributor: {dist.get('Distributor Name', 'N/A')}"
-                            ).add_to(m)
+            # Add legend and layer control
+            m.get_root().html.add_child(folium.Element(create_legend()))
+            folium.LayerControl().add_to(m)
 
-                    # Add potential store markers
-                    if potential_df is not None and not potential_df.empty:
-                        for _, pot in potential_df.iterrows():
-                            folium.Marker(
-                                location=[pot['latitude'], pot['longitude']],
-                                icon=folium.Icon(color="cadetblue", icon="shopping-cart", prefix="fa"),
-                                tooltip=f"Potential Store: {pot['name']}"
-                            ).add_to(m)
+            # Display map
+            st_map = st_folium(m, width=1200, height=700, returned_objects=[])
 
-                    # Add legend and layer control
-                    m.get_root().html.add_child(folium.Element(create_legend()))
-                    folium.LayerControl().add_to(m)
+            # --- Display Summary Table ---
+            st.subheader("📊 Area Summary")
+            summary_df = create_summary_table(villages_gdf, stores_gdf)
 
-                    # Display map
-                    st_map = st_folium(m, width=1200, height=700, returned_objects=[])
+            if not summary_df.empty:
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-                    # --- Display Summary Table ---
-                    st.subheader("📊 Area Summary")
-                    summary_df = create_summary_table(villages_gdf, stores_gdf)
+                # Create Excel download
+                output = BytesIO()
+                
+                try:
+                    summary_df.to_excel(output, index=False, sheet_name='Summary', engine='xlsxwriter')
+                    excel_data = output.getvalue()
 
-                    if not summary_df.empty:
-                        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                    st.download_button(
+                        label="📥 Download Excel",
+                        data=excel_data,
+                        file_name=f"summary_{selected_region}_{selected_kabupaten}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                except Exception as e:
+                    st.error(f"Error creating Excel file: {e}")
+            else:
+                st.info("No summary data available.")
 
-                        # 1. Create an in-memory buffer
-                        output = BytesIO()
-
-                        # 2. Write the DataFrame to the buffer as an Excel file
-                        # Use engine='xlsxwriter' for better compatibility
-                        summary_df.to_excel(output, index=False, sheet_name='Summary', engine='xlsxwriter')
-
-                        # 3. Rewind the buffer to the beginning
-                        excel_data = output.getvalue()
-
-                        st.download_button(
-                            label="📥 Download Excel",
-                            data=excel_data, # Pass the bytes data
-                            file_name=f"summary_{selected_region}_{selected_kabupaten}.xlsx", # Change file extension
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" # Change MIME type
-                        )
-                    else:
-                        st.info("No summary data available.")
-
-                else:
-                    st.warning("No village data available for the selected area.")
         else:
-            st.info("Please select a Kabupaten to view the map.")
-    else:
-        st.info("Please select a Region to begin.")
+            st.warning("No village data available for the selected area.")
 
 if __name__ == "__main__":
     main()
