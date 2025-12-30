@@ -25,7 +25,7 @@ def get_credentials():
         credentials = service_account.Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE
             )
-        master_store_table_path = "skintific-data-warehouse.gt_schema.master_store_database_basis"
+        master_store_table_path = "skintific-data-warehouse.staging.master_store_database_basis_for_channelization"
         staging_table_path = "skintific-data-warehouse.staging.gt_store_channel_staging"
     return credentials, master_store_table_path, staging_table_path
     
