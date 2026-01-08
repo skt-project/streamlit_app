@@ -460,7 +460,9 @@ def main():
     MANUAL_REJECT_SKUS = [
         "G2G-252",
         "G2G-253",
-        "G2G-2113"
+        "G2G-2113",
+        "G2G-29700",
+        "G2G-29705"
     ]
 
     LIMITED_SKUS_QTY = [
