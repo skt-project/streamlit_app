@@ -456,32 +456,33 @@ def main():
     # Create tabs
     tab1, tab2 = st.tabs(["📖 Guide & Rules", "🔍 Simulation & Results"])
 
-    # Hardcoded Reject List
-    MANUAL_REJECT_SKUS = [
-    "G2G-252",
-    "G2G-253",
-    "G2G-29700",
-    "G2G-27300",
-    "G2G-29705",
-    "G2G-224",
-    "G2G-247",
-    "G2G-225",
-    "G2G-226",
-    "G2G-228",
-    "G2G-74",
-    "G2G-186",
-    "G2G-202",
-    "G2G-840",
-    "G2G-844",
-    "G2G-841",
-    "G2G-800",
-    "G2G-213",
-    "G2G-217",
-    "G2G-27305"
-]
-
-    LIMITED_SKUS_QTY = [
+    # Hardcoded Reject List with specific remarks
+    MANUAL_REJECT_SKUS_APPROVAL = ["G2G-252", "G2G-253"]  # Need approval email
+    MANUAL_REJECT_SKUS_NO_TOLERANCE = [
+        "G2G-29700",
+        "G2G-27300",
+        "G2G-29705",
+        "G2G-224",
+        "G2G-247",
+        "G2G-225",
+        "G2G-226",
+        "G2G-228",
+        "G2G-74",
+        "G2G-186",
+        "G2G-202",
+        "G2G-840",
+        "G2G-844",
+        "G2G-841",
+        "G2G-800",
+        "G2G-213",
+        "G2G-217",
+        "G2G-27305"
     ]
+    
+    # Combined list for checking
+    MANUAL_REJECT_SKUS = MANUAL_REJECT_SKUS_APPROVAL + MANUAL_REJECT_SKUS_NO_TOLERANCE
+
+    LIMITED_SKUS_QTY = []
     MAX_QTY_LIMIT = 500
 
     # Additional rejected SKUs based on region rules
@@ -510,7 +511,9 @@ def main():
 
             1.  **Reject**: The SKU is rejected if any of these conditions are met:
                 * It is on the **regional rejection list** (Stop by Steve), unless the region is allowed to order.
-                * It is on the **manual rejection list** (Stop by Steve).
+                * It is on the **manual rejection list** (Stop by Steve) with specific remarks:
+                    * **Need approval email**: G2G-252, G2G-253
+                    * **No tolerance to open**: All other manually rejected SKUs
                 * The **Remaining Allocation (By Region)** is **less than 0** (Negative Allocation).
                 * The **Current WOI** is too high (Exceeded the WOI Standard).
                 * The PO quantity is **greater than** the suggested PO quantity (over-ordering) -> **Reject with Suggestion**.
@@ -530,11 +533,15 @@ def main():
         # Display Manual Rejection SKUs in an expander
         st.header("Manual Rejection SKUs")
         with st.expander("🚫 List of SKUs that are manually rejected by Steve"):
-            st.dataframe(pd.DataFrame(MANUAL_REJECT_SKUS, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))    
-
-        # Display Rejected SKUs by Region in a separate expander
-        # with st.expander("🌏 List of Rejected SKUs by Region (Reject for 'Sulawesi 1', 'Southern Sumatera 1', 'Central Java', 'West Kalimantan')"):
-        #     st.dataframe(pd.DataFrame(REJECTED_SKUS_2, columns=["SKU"]).sort_values(by="SKU").reset_index(drop=True))
+            # Create DataFrame with SKU and Remark columns
+            reject_data = []
+            for sku in MANUAL_REJECT_SKUS_APPROVAL:
+                reject_data.append({"SKU": sku, "Remark": "Need approval email"})
+            for sku in MANUAL_REJECT_SKUS_NO_TOLERANCE:
+                reject_data.append({"SKU": sku, "Remark": "No tolerance to open"})
+            
+            reject_df = pd.DataFrame(reject_data).sort_values(by="SKU").reset_index(drop=True)
+            st.dataframe(reject_df)
 
     with tab2:
         st.header("1. Download PO Template")
@@ -617,7 +624,6 @@ def main():
                 )
 
                 progress = st.progress(0)
-                # progress.progress(0.1, "Starting data processing...")
                 progress_step = 1.0 / len(po_df["Distributor"].unique())
 
                 # Master list to collect all NPD SKUs across all distributors
@@ -672,7 +678,6 @@ def main():
                     # Merge uploaded PO data with BigQuery SKU data
                     # Use a left merge to keep all SKUs from the uploaded file
                     result_df = pd.merge(result_df, sku_data_df, on="Customer SKU Code", how="outer")
-                    # progress.progress(0.3, "Data merged successfully")
 
                     result_sku_list = result_df["Customer SKU Code"].unique().tolist()
 
@@ -745,40 +750,35 @@ def main():
                         0,
                         result_df["avg_weekly_st_lm_qty"],
                     )
-                    # progress.progress(0.6, "Calculations completed")
 
                     # Conditions for np.select
-
                     conditions = [
-                        # Addtional: New condition for PO Qty > MAX_QTY_LIMIT for specific SKUs
+                        # Additional: New condition for PO Qty > MAX_QTY_LIMIT for specific SKUs
                         (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > MAX_QTY_LIMIT),
                         # 1. Reject if Remaining Allocation is less than 0
                         (result_df["remaining_allocation_qty_region"] < 0),
                         # 2. New condition for additional suggested SKUs
                         (result_df["is_po_sku"] == False),
-                        # 3. Hardcoded Reject
-                        result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS),
-                        # 3. Reject if the supply control status are ["STOP PO", "DISCONTINUED", "OOS"]
+                        # 3. Hardcoded Reject - Need Approval Email
+                        result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_APPROVAL),
+                        # 4. Hardcoded Reject - No Tolerance
+                        result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_NO_TOLERANCE),
+                        # 5. Reject if the supply control status are ["STOP PO", "DISCONTINUED", "OOS"]
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
-                        # 4. Proceed (ST LM = 0) -> NPD or there's no ST for LM
+                        # 6. Proceed (ST LM = 0) -> NPD or there's no ST for LM
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
                             (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
                             (~result_df["Customer SKU Code"].str.upper().isin(all_npd_sku_list)) &
                             (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
                         ),
-                        # # 5. NPD with Allocation
-                        # (
-                        #     (result_df["remaining_allocation_qty_region"] > 0) &
-                        #     (result_df["PO Qty"] <= result_df["remaining_allocation_qty_region"])
-                        # ),
-                        # 6. Reject if suggested PO is 0 or isin ["STOP PO", "DISCONTINUED", "OOS"]
+                        # 7. Reject if suggested PO is 0 or isin ["STOP PO", "DISCONTINUED", "OOS"]
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                        # 7. PO Qty > Suggested PO Qty (Over-ordering)
+                        # 8. PO Qty > Suggested PO Qty (Over-ordering)
                         (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                        # 8. PO Qty < Suggested PO Qty (Under-ordering)
+                        # 9. PO Qty < Suggested PO Qty (Under-ordering)
                         (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                        # 9. PO Qty = Suggested PO Qty (Exact Match)
+                        # 10. PO Qty = Suggested PO Qty (Exact Match)
                         (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
                     ]
 
@@ -787,10 +787,10 @@ def main():
                         f"Reject (Exceeds Qty Limit of {MAX_QTY_LIMIT})",
                         "Reject (Negative Allocation)",
                         "Additional Suggestion",
-                        "Reject (Stop by Steve)",
+                        "Reject (Stop by Steve - Need approval email)",
+                        "Reject (Stop by Steve - No tolerance to open)",
                         "Reject",
                         "Proceed",
-                        # "Proceed",
                         "Reject",
                         "Reject with suggestion",
                         "Proceed with suggestion",
@@ -798,11 +798,9 @@ def main():
                     ]
 
                     # Apply the conditions to create the 'Remark' column
-                    # The last choice "Proceed" catches the case PO Qty = Suggested PO Qty
                     result_df["Remark"] = np.select(
                         conditions, choices, default="N/A (Missing Data)"
                     )
-                    # progress.progress(0.9, "Rules applied")
 
                     new_column_names = {
                         "distributor_name": "Distributor",
@@ -824,9 +822,6 @@ def main():
 
                     # Rename the columns in the DataFrame
                     result_df.rename(columns=new_column_names, inplace=True)
-
-                    # result_df = apply_sku_rejection_rules(REJECTED_SKUS_1, result_df, REGION_LIST_1, False)
-                    # result_df = apply_sku_rejection_rules(REJECTED_SKUS_2, result_df, REGION_LIST_2, True)
 
                     # Sort the DataFrame: user SKUs first, then suggested SKUs
                     result_df.sort_values(
@@ -898,9 +893,6 @@ def main():
                     display_dfs.append(result_df)
 
                 progress.progress(1.0, "Processing complete")
-
-                # --- Download Button ---
-                xlsx_data = to_excel_with_styling(excel_dfs, all_npd_sku_list)
 
                 # --- Download Button (Conditional Logic) ---
                 if output_format == "Single Sheet (All Distributors Stacked)":
