@@ -21,7 +21,7 @@ credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
 
 PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = "gt_schema"
-STORE_TABLE = "skt_top_20_store_list"
+STORE_TABLE = st.secrets["bigquery"]["store_table"]
 OUTPUT_TABLE = st.secrets["bigquery"]["output_table"]
 
 BUCKET_NAME = st.secrets["gcs"]["bucket_name"]
