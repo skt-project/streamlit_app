@@ -105,7 +105,7 @@ if store_df.empty:
 # UI FILTER
 # ------------------------------------
 
-st.subheader("📊 PO Suggestion (Reference Only)")
+st.subheader("📊 PO Suggestion")
 
 po_df = load_po_suggestion()
 
@@ -148,7 +148,7 @@ with st.expander("🔍 Lihat PO Suggestion", expanded=True):
         hide_index=True
     )
 
-    st.caption("📌 Data ini hanya sebagai referensi sebelum input stock opname")
+    st.caption("📌 Data ini adalah referensi sebelum input stock opname")
 
 st.title("📦Store Stock Form")
 
@@ -192,7 +192,7 @@ if store_select != "-":
 
     st.metric("Total Qty", total_qty)
 
-    uploaded_files = st.file_uploader("Upload Dokumen", type=["jpg","png","jpeg","pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload Dokumen (Opsional)", type=["jpg","png","jpeg","pdf"], accept_multiple_files=True)
 
     if st.button("🚀 Submit"):
         if total_qty == 0:
