@@ -152,18 +152,18 @@ with st.expander("🔍 Lihat PO Suggestion", expanded=True):
 
 st.title("📦Store Stock Form")
 
-region = st.selectbox("Region", ["-"] + sorted(store_df["region"].unique()))
+region = st.selectbox("Region", ["Pilih Region"] + sorted(store_df["region"].unique()))
 df_region = store_df[store_df["region"] == region] if region != "-" else pd.DataFrame()
 
-spv = st.selectbox("SPV", ["-"] + sorted(df_region["spv"].dropna().unique())) if not df_region.empty else "-"
+spv = st.selectbox("SPV", ["Pilih SPV"] + sorted(df_region["spv"].dropna().unique())) if not df_region.empty else "-"
 df_spv = df_region[df_region["spv"] == spv] if spv != "-" else pd.DataFrame()
 
-dist = st.selectbox("Distributor", ["-"] + sorted(df_spv["dist_name"].dropna().unique())) if not df_spv.empty else "-"
+dist = st.selectbox("Distributor", ["Pilih Distributor"] + sorted(df_spv["dist_name"].dropna().unique())) if not df_spv.empty else "-"
 df_dist = df_spv[df_spv["dist_name"] == dist] if dist != "-" else pd.DataFrame()
 
 store_select = st.selectbox(
     "Store",
-    ["-"] + df_dist.apply(lambda r: f"{r['store_id_st']} - {r['store_name']}", axis=1).tolist()
+    ["Pilih Store"] + df_dist.apply(lambda r: f"{r['store_id_st']} - {r['store_name']}", axis=1).tolist()
 ) if not df_dist.empty else "-"
 
 # ------------------------------------
