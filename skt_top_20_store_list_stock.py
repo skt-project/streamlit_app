@@ -11,7 +11,7 @@ from io import BytesIO
 # ------------------------------------
 # Page Config
 # ------------------------------------
-st.set_page_config(page_title="Store Stock Opname", layout="wide")
+st.set_page_config(page_title="Store Stock Form", layout="wide")
 jakarta_tz = timezone("Asia/Jakarta")
 
 # ------------------------------------
@@ -25,6 +25,7 @@ PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = st.secrets["bigquery"]["dataset"]
 STORE_TABLE = st.secrets["bigquery"]["store_table"]
 OUTPUT_TABLE = st.secrets["bigquery"]["output_table"]
+PO_SUGGESTION_TABLE = "skt_top20_po_suggestion"
 
 BUCKET_NAME = st.secrets["gcs"]["bucket_name"]
 FOLDER_PREFIX = st.secrets["gcs"]["folder_prefix"]
@@ -75,6 +76,22 @@ def load_store():
         FROM `{PROJECT_ID}.{DATASET}.{STORE_TABLE}`
         WHERE brand IS NOT NULL
     """
+def load_po_suggestion():
+    query = f"""
+        SELECT
+            type,
+            region,
+            spv,
+            customer_id,
+            customer_name,
+            customer_group,
+            sku_code,
+            sku_name,
+            qty,
+            st
+        FROM `{PROJECT_ID}.{DATASET}.{PO_SUGGESTION_TABLE}`
+        ORDER BY region, spv, customer_name
+    """
     return bq_client.query(query).to_dataframe()
 
 store_df = load_store()
@@ -82,7 +99,53 @@ store_df = load_store()
 # ------------------------------------
 # UI FILTER
 # ------------------------------------
-st.title("📦Store Stock Opname")
+
+st.subheader("📊 PO Suggestion (Reference Only)")
+
+po_df = load_po_suggestion()
+
+with st.expander("🔍 Lihat PO Suggestion", expanded=True):
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        filter_region = st.multiselect(
+            "Filter Region",
+            sorted(po_df["region"].unique())
+        )
+
+    with col2:
+        filter_spv = st.multiselect(
+            "Filter SPV",
+            sorted(po_df["spv"].unique())
+        )
+
+    with col3:
+        filter_customer = st.multiselect(
+            "Filter Customer",
+            sorted(po_df["customer_name"].unique())
+        )
+
+    filtered_po = po_df.copy()
+
+    if filter_region:
+        filtered_po = filtered_po[filtered_po["region"].isin(filter_region)]
+
+    if filter_spv:
+        filtered_po = filtered_po[filtered_po["spv"].isin(filter_spv)]
+
+    if filter_customer:
+        filtered_po = filtered_po[filtered_po["customer_name"].isin(filter_customer)]
+
+    st.dataframe(
+        filtered_po,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.caption("📌 Data ini hanya sebagai referensi sebelum input stock opname")
+
+st.title("📦Store Stock Form")
 
 region = st.selectbox("Region", ["-"] + sorted(store_df["region"].unique()))
 df_region = store_df[store_df["region"] == region] if region != "-" else pd.DataFrame()
@@ -167,7 +230,7 @@ if store_select != "-":
             if errors:
                 st.error(errors)
             else:
-                st.success("🎉 Stock Opname Berhasil")
+                st.success("🎉 Stock Submit Berhasil")
 
                 result_df = pd.DataFrame(records)
                 st.dataframe(result_df)
