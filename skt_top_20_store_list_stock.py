@@ -5,6 +5,8 @@ from datetime import datetime
 from google.oauth2 import service_account
 from google.cloud import bigquery, storage
 from pendulum import timezone, now
+from io import BytesIO
+
 
 # ------------------------------------
 # Page Config
@@ -166,6 +168,26 @@ if store_select != "-":
                 st.error(errors)
             else:
                 st.success("🎉 Stock Opname Berhasil")
-                st.dataframe(pd.DataFrame(records))
+
+                result_df = pd.DataFrame(records)
+                st.dataframe(result_df)
+
+                # ------------------------------------
+                # Download Excel
+                # ------------------------------------
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                    result_df.to_excel(writer, index=False, sheet_name="stock_opname")
+
+                output.seek(0)
+
+                filename = f"stock_opname_{store_id}_{submission_id[:8]}.xlsx"
+
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=output,
+                    file_name=filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 else:
     st.info("Pilih Region → SPV → Distributor → Store")
