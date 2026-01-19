@@ -163,7 +163,7 @@ df_dist = df_spv[df_spv["dist_name"] == dist] if dist != "-" else pd.DataFrame()
 
 store_select = st.selectbox(
     "Store",
-    ["Pilih Store"] + df_dist.apply(lambda r: f"{r['store_id_st']} - {r['store_name']}", axis=1).tolist()
+    ["-"] + df_dist.apply(lambda r: f"{r['store_id_st']} - {r['store_name']}", axis=1).tolist()
 ) if not df_dist.empty else "-"
 
 # ------------------------------------
