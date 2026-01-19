@@ -76,6 +76,7 @@ def load_store():
         FROM `{PROJECT_ID}.{DATASET}.{STORE_TABLE}`
         WHERE brand IS NOT NULL
     """
+    return bq_client.query(query).to_dataframe()
 def load_po_suggestion():
     query = f"""
         SELECT
@@ -95,6 +96,10 @@ def load_po_suggestion():
     return bq_client.query(query).to_dataframe()
 
 store_df = load_store()
+
+if store_df.empty:
+    st.error("❌ Store master kosong / tidak ditemukan")
+    st.stop()
 
 # ------------------------------------
 # UI FILTER
