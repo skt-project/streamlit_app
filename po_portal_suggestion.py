@@ -263,6 +263,8 @@ if uploaded_file:
         "feedback_qty"
     ]
 
+    df_upload = df_upload.where(pd.notna(df_upload), None)
+
     records = df_upload[final_cols].to_dict("records")
 
     # --------------------------------------------------
@@ -272,7 +274,8 @@ if uploaded_file:
         errors = bq_client.insert_rows_json(
             f"{PROJECT_ID}.{DATASET}.{FEEDBACK_TABLE}",
             records,
-            row_ids=[None] * len(records)
+            row_ids=[None] * len(records),
+            skip_invalid_rows=True
         )
 
         if errors:
@@ -280,4 +283,3 @@ if uploaded_file:
             st.json(errors)
         else:
             st.success("✅ Feedback successfully submitted")
-            st.dataframe(df_upload, use_container_width=True)
