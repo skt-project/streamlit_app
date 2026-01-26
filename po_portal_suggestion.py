@@ -186,11 +186,15 @@ if uploaded_file:
         st.error(f"❌ Missing columns: {missing}")
         st.stop()
 
-    raw_feedback = df_upload["feedback_qty"].astype(str).str.strip()
+    raw_feedback = (
+        df_upload["feedback_qty"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
 
     invalid_mask = (
-        raw_feedback.notna()
-        & raw_feedback.ne("")
+        raw_feedback.ne("")   # kosong DIIZINKAN
         & ~raw_feedback.str.match(r"^\d+(,\d+)*$")
     )
 
