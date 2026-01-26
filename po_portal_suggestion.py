@@ -71,13 +71,13 @@ with st.expander("🔍 Filter", expanded=True):
     with col1:
         filter_region = st.multiselect(
             "Region",
-            sorted(po_df["region"].unique())
+            sorted(po_df["region"].dropna().unique())
         )
 
     with col2:
         filter_distributor = st.multiselect(
             "Distributor",
-            sorted(po_df["distributor_branch"].unique())
+            sorted(po_df["distributor_branch"].dropna().unique())
         )
 
     filtered_df = po_df.copy()
@@ -148,17 +148,50 @@ if uploaded_file:
         "feedback_qty"
     ]
 
-    missing_cols = [c for c in required_cols if c not in df_upload.columns]
-
-    if missing_cols:
-        st.error(f"❌ Missing columns: {missing_cols}")
+    missing = [c for c in required_cols if c not in df_upload.columns]
+    if missing:
+        st.error(f"❌ Missing columns: {missing}")
         st.stop()
 
-    df_upload = df_upload[df_upload["feedback_qty"].notna()]
-    df_upload["feedback_qty"] = df_upload["feedback_qty"].astype(int)
+    # ------------------------------------
+    # CLEAN NUMERIC DATA (CRITICAL)
+    # ------------------------------------
+    int_cols = [
+        "current_stock_friday",
+        "in_transit_stock",
+        "total_stock",
+        "moq",
+        "standard_woi",
+        "avg_weekly_st_l3m",
+        "avg_weekly_st_lm",
+        "si_target",
+        "ideal_weekly_po_qty",
+        "max_weekly_po_qty",
+        "min_weekly_po_qty",
+        "feedback_qty"
+    ]
 
+    float_cols = ["current_woi"]
+
+    for col in int_cols:
+        df_upload[col] = (
+            pd.to_numeric(df_upload[col], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+
+    for col in float_cols:
+        df_upload[col] = (
+            pd.to_numeric(df_upload[col], errors="coerce")
+            .fillna(0.0)
+            .astype(float)
+        )
+
+    # ------------------------------------
+    # ADD SUBMISSION METADATA
+    # ------------------------------------
     submission_id = str(uuid.uuid4())
-    submitted_at = now(jakarta_tz).to_datetime_string()
+    submitted_at = now(jakarta_tz).naive()  # BigQuery-safe DATETIME
 
     df_upload["submission_id"] = submission_id
     df_upload["submitted_at"] = submitted_at
@@ -189,13 +222,17 @@ if uploaded_file:
 
     records = df_upload[final_cols].to_dict("records")
 
+    # ------------------------------------
+    # INSERT TO BIGQUERY
+    # ------------------------------------
     errors = bq_client.insert_rows_json(
         f"{PROJECT_ID}.{DATASET}.{FEEDBACK_TABLE}",
-        records
+        records,
+        row_ids=[None] * len(records)
     )
 
     if errors:
         st.error(errors)
     else:
-        st.success("✅ Feedback successfully submitted")
+        st.success("✅ Feedback successfully submitted to BigQuery")
         st.dataframe(df_upload, use_container_width=True)
