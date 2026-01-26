@@ -230,7 +230,11 @@ if uploaded_file:
     # ADD SUBMISSION METADATA
     # --------------------------------------------------
     submission_id = str(uuid.uuid4())
-    submitted_at = now("Asia/Jakarta").to_datetime_string()
+    submitted_at = (
+        now("Asia/Jakarta")
+        .naive()
+        .format("YYYY-MM-DD HH:mm:ss")
+    )
 
     df_upload["submission_id"] = submission_id
     df_upload["submitted_at"] = submitted_at
