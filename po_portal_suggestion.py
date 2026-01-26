@@ -212,11 +212,15 @@ if uploaded_file:
     # ADD SUBMISSION METADATA
     # ------------------------------------
     submission_id = str(uuid.uuid4())
-    submitted_at = now(jakarta_tz).naive()
-
+    submitted_at = (
+        now(jakarta_tz)
+        .naive()
+        .isoformat(sep=" ")
+    )
+    
     df_upload["submission_id"] = submission_id
     df_upload["submitted_at"] = submitted_at
-
+    
     final_cols = [
         "submission_id",
         "submitted_at",
