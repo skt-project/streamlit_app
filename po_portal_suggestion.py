@@ -2,19 +2,18 @@ import streamlit as st
 import pandas as pd
 import uuid
 from io import BytesIO
-from pendulum import timezone, now
+from pendulum import now
 from google.oauth2 import service_account
 from google.cloud import bigquery
 
-# ------------------------------------
+# --------------------------------------------------
 # Page Config
-# ------------------------------------
+# --------------------------------------------------
 st.set_page_config(page_title="PO Portal Suggestion", layout="wide")
-jakarta_tz = timezone("Asia/Jakarta")
 
-# ------------------------------------
+# --------------------------------------------------
 # BigQuery Client
-# ------------------------------------
+# --------------------------------------------------
 gcp_secrets = dict(st.secrets["connections"]["bigquery"])
 gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
 
@@ -22,14 +21,18 @@ credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
 
 PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = st.secrets["bigquery"]["dataset"]
+
 PO_TABLE = "po_portal_suggestion"
 FEEDBACK_TABLE = "po_portal_feedback"
 
-bq_client = bigquery.Client(credentials=credentials, project=PROJECT_ID)
+bq_client = bigquery.Client(
+    credentials=credentials,
+    project=PROJECT_ID
+)
 
-# ------------------------------------
+# --------------------------------------------------
 # Load PO Suggestion
-# ------------------------------------
+# --------------------------------------------------
 @st.cache_data(ttl=600)
 def load_po_suggestion():
     query = f"""
@@ -53,76 +56,85 @@ def load_po_suggestion():
             max_weekly_po_qty,
             min_weekly_po_qty
         FROM `{PROJECT_ID}.{DATASET}.{PO_TABLE}`
-        ORDER BY region, distributor_branch, product_name
     """
-    return bq_client.query(query).to_dataframe()
+    df = bq_client.query(query).to_dataframe()
+
+    # normalize text columns (IMPORTANT for filters)
+    for col in ["region", "distributor_branch"]:
+        df[col] = df[col].astype(str).str.strip()
+
+    return df
+
 
 po_df = load_po_suggestion()
 
 st.title("📦 PO Portal Suggestion")
 
-# ------------------------------------
-# Filters (CASCADING)
-# ------------------------------------
+# --------------------------------------------------
+# FILTERS (CASCADED)
+# --------------------------------------------------
 with st.expander("🔍 Filter", expanded=True):
 
     col1, col2 = st.columns(2)
 
-    # ---- REGION FILTER ----
-    with col1:
-        region_options = sorted(po_df["region"].dropna().unique())
-        filter_region = st.multiselect(
-            "Region",
-            options=region_options
-        )
+    # REGION FILTER
+    region_options = sorted(po_df["region"].dropna().unique())
+    selected_regions = col1.multiselect(
+        "Region",
+        options=region_options
+    )
 
-    # ---- APPLY REGION FILTER FIRST ----
-    if filter_region:
-        region_filtered_df = po_df[
-            po_df["region"].isin(filter_region)
-        ]
-    else:
-        region_filtered_df = po_df.copy()
-
-    # ---- DISTRIBUTOR FILTER (DEPENDS ON REGION) ----
-    with col2:
-        distributor_options = sorted(
-            region_filtered_df["distributor_branch"]
+    # DISTRIBUTOR FILTER (DEPEND ON REGION)
+    if selected_regions:
+        distributor_options = (
+            po_df[po_df["region"].isin(selected_regions)]
+            ["distributor_branch"]
             .dropna()
             .unique()
         )
+    else:
+        distributor_options = po_df["distributor_branch"].dropna().unique()
 
-        filter_distributor = st.multiselect(
-            "Distributor",
-            options=distributor_options
-        )
+    distributor_options = sorted(distributor_options)
 
-    # ---- FINAL FILTERING ----
-    filtered_df = region_filtered_df.copy()
+    selected_distributors = col2.multiselect(
+        "Distributor",
+        options=distributor_options
+    )
 
-    if filter_distributor:
-        filtered_df = filtered_df[
-            filtered_df["distributor_branch"].isin(filter_distributor)
-        ]
+# --------------------------------------------------
+# APPLY FILTER
+# --------------------------------------------------
+filtered_df = po_df.copy()
 
-# ------------------------------------
-# Prepare Download Data
-# ------------------------------------
-download_df = filtered_df.copy()
-download_df["feedback_qty"] = ""
+if selected_regions:
+    filtered_df = filtered_df[
+        filtered_df["region"].isin(selected_regions)
+    ]
+
+if selected_distributors:
+    filtered_df = filtered_df[
+        filtered_df["distributor_branch"].isin(selected_distributors)
+    ]
+
+# --------------------------------------------------
+# DISPLAY TABLE
+# --------------------------------------------------
+display_df = filtered_df.copy()
+display_df["feedback_qty"] = ""
 
 st.dataframe(
-    download_df,
+    display_df,
     use_container_width=True,
     hide_index=True
 )
 
-# ------------------------------------
-# Download Excel
-# ------------------------------------
+# --------------------------------------------------
+# DOWNLOAD EXCEL
+# --------------------------------------------------
 output = BytesIO()
 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-    download_df.to_excel(writer, index=False, sheet_name="po_suggestion")
+    display_df.to_excel(writer, index=False, sheet_name="po_suggestion")
 
 output.seek(0)
 
@@ -133,9 +145,9 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
-# ------------------------------------
-# Upload Feedback
-# ------------------------------------
+# --------------------------------------------------
+# UPLOAD FEEDBACK
+# --------------------------------------------------
 st.divider()
 st.subheader("📤 Upload Feedback")
 
@@ -174,9 +186,9 @@ if uploaded_file:
         st.error(f"❌ Missing columns: {missing}")
         st.stop()
 
-    # ------------------------------------
-    # CLEAN NUMERIC DATA
-    # ------------------------------------
+    # --------------------------------------------------
+    # CLEAN NUMERIC DATA (EXCEL SAFE)
+    # --------------------------------------------------
     int_cols = [
         "current_stock_friday",
         "in_transit_stock",
@@ -196,31 +208,33 @@ if uploaded_file:
 
     for col in int_cols:
         df_upload[col] = (
-            pd.to_numeric(df_upload[col], errors="coerce")
+            df_upload[col]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .pipe(pd.to_numeric, errors="coerce")
             .fillna(0)
-            .astype(int)
+            .astype("int64")
         )
 
     for col in float_cols:
         df_upload[col] = (
-            pd.to_numeric(df_upload[col], errors="coerce")
+            df_upload[col]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .pipe(pd.to_numeric, errors="coerce")
             .fillna(0.0)
-            .astype(float)
+            .astype("float64")
         )
 
-    # ------------------------------------
+    # --------------------------------------------------
     # ADD SUBMISSION METADATA
-    # ------------------------------------
+    # --------------------------------------------------
     submission_id = str(uuid.uuid4())
-    submitted_at = (
-        now(jakarta_tz)
-        .naive()
-        .isoformat(sep=" ")
-    )
-    
+    submitted_at = now("Asia/Jakarta").to_datetime_string()
+
     df_upload["submission_id"] = submission_id
     df_upload["submitted_at"] = submitted_at
-    
+
     final_cols = [
         "submission_id",
         "submitted_at",
@@ -247,17 +261,19 @@ if uploaded_file:
 
     records = df_upload[final_cols].to_dict("records")
 
-    # ------------------------------------
+    # --------------------------------------------------
     # INSERT TO BIGQUERY
-    # ------------------------------------
-    errors = bq_client.insert_rows_json(
-        f"{PROJECT_ID}.{DATASET}.{FEEDBACK_TABLE}",
-        records,
-        row_ids=[None] * len(records)
-    )
+    # --------------------------------------------------
+    if st.button("Submit Feedback"):
+        errors = bq_client.insert_rows_json(
+            f"{PROJECT_ID}.{DATASET}.{FEEDBACK_TABLE}",
+            records,
+            row_ids=[None] * len(records)
+        )
 
-    if errors:
-        st.error(errors)
-    else:
-        st.success("✅ Feedback successfully submitted to BigQuery")
-        st.dataframe(df_upload, use_container_width=True)
+        if errors:
+            st.error("❌ Failed to insert feedback")
+            st.json(errors)
+        else:
+            st.success("✅ Feedback successfully submitted")
+            st.dataframe(df_upload, use_container_width=True)
