@@ -263,8 +263,16 @@ if uploaded_file:
         "feedback_qty"
     ]
 
+    df_upload["feedback_qty"] = (
+        df_upload["feedback_qty"]
+        .fillna(0)
+        .astype(int)
+    )
+
+    # Convert other NaN values to None for BigQuery
     df_upload = df_upload.where(pd.notna(df_upload), None)
 
+    # Prepare payload
     records = df_upload[final_cols].to_dict("records")
 
     # --------------------------------------------------
