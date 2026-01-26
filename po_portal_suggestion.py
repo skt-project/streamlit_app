@@ -193,8 +193,11 @@ if uploaded_file:
         .str.strip()
     )
 
+    # hilangkan .0 di belakang angka (hasil dari Excel)
+    raw_feedback = raw_feedback.str.replace(r"\.0$", "", regex=True)
+
     invalid_mask = (
-        raw_feedback.ne("")   # kosong DIIZINKAN
+        raw_feedback.ne("")   # kosong tetap boleh
         & ~raw_feedback.str.match(r"^\d+(,\d+)*$")
     )
 
