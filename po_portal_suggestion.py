@@ -82,21 +82,8 @@ with st.expander("🔍 Filter", expanded=True):
     selected_regions = col1.multiselect(
         "Region",
         options=region_options,
-        key="region_filter"
+        close_on_select=True
     )
-    if "prev_region" not in st.session_state:
-        st.session_state.prev_region = []
-
-    if "prev_distributor" not in st.session_state:
-        st.session_state.prev_distributor = []
-
-    if (
-        st.session_state.region_filter != st.session_state.prev_region
-        or st.session_state.distributor_filter != st.session_state.prev_distributor
-    ):
-        st.session_state.prev_region = st.session_state.region_filter.copy()
-        st.session_state.prev_distributor = st.session_state.distributor_filter.copy()
-        st.rerun()
 
     # DISTRIBUTOR FILTER (DEPEND ON REGION)
     if selected_regions:
@@ -113,8 +100,7 @@ with st.expander("🔍 Filter", expanded=True):
 
     selected_distributors = col2.multiselect(
         "Distributor",
-        options=distributor_options,
-        key="distributor_filter"
+        options=distributor_options
     )
 
 # --------------------------------------------------
