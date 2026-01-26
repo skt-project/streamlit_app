@@ -526,6 +526,7 @@ def main():
 
             3.  **Additional Suggestion**: The SKU is marked as an "Additional Suggestion" if:
                 * It was not on the original PO but was **suggested by the system**.
+                * **Note**: SKUs that would be rejected are automatically filtered out from suggestions.
             
             4.  **Suggested WOI (OH + IT + Suggested Qty + ST Projection until EOM)**: The suggested WOI is calculated based on the total stock + Suggested Qty + ST Projection until end of month
             """)
@@ -726,6 +727,35 @@ def main():
                     result_df = result_df[
                         (result_df["PO Qty"] > 0) | (result_df["buffer_plan_by_lm_qty_adj"] > 0)
                     ]
+
+                    # ===== ENHANCED REJECTION LOGIC FOR SUGGESTED SKUs =====
+                    # Exclude suggested SKUs that would be rejected based on any rejection criteria
+                    suggested_skus_mask = result_df["is_po_sku"] == False
+
+                    # Build exclusion conditions for suggested SKUs
+                    exclude_suggested = (
+                        # 1. Manual rejection list - Need Approval Email
+                        (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_APPROVAL)) |
+                        
+                        # 2. Manual rejection list - No Tolerance
+                        (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_NO_TOLERANCE)) |
+                        
+                        # 3. Negative remaining allocation
+                        (result_df["remaining_allocation_qty_region"] < 0) |
+                        
+                        # 4. Supply control status is STOP PO, DISCONTINUED, OOS, or UNAVAILABLE
+                        (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) |
+                        
+                        # 5. Limited SKUs exceeding max quantity limit
+                        (
+                            (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & 
+                            (result_df["buffer_plan_by_lm_qty_adj"] > MAX_QTY_LIMIT)
+                        )
+                    )
+
+                    # Apply the filter: Remove suggested SKUs that meet any exclusion criteria
+                    result_df = result_df[~(suggested_skus_mask & exclude_suggested)]
+                    # ===== END ENHANCED REJECTION LOGIC =====
 
                     # Add distributor_name column
                     result_df["distributor_name"] = distributor_name
