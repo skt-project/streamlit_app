@@ -186,6 +186,27 @@ if uploaded_file:
         st.error(f"❌ Missing columns: {missing}")
         st.stop()
 
+    raw_feedback = df_upload["feedback_qty"].astype(str).str.strip()
+
+    invalid_mask = (
+        raw_feedback.notna()
+        & raw_feedback.ne("")
+        & ~raw_feedback.str.match(r"^\d+(,\d+)*$")
+    )
+
+    if invalid_mask.any():
+        invalid_rows = df_upload.loc[
+            invalid_mask,
+            ["region", "distributor_branch", "product_id", "product_name", "feedback_qty"]
+        ]
+
+        st.error("❌ Upload gagal: feedback_qty hanya boleh berisi ANGKA")
+        st.warning("Baris berikut mengandung huruf atau simbol:")
+
+        st.dataframe(invalid_rows, use_container_width=True)
+
+        st.stop()
+
     # --------------------------------------------------
     # CLEAN NUMERIC DATA (EXCEL SAFE)
     # --------------------------------------------------
