@@ -59,6 +59,21 @@ def load_po_suggestion():
 
 po_df = load_po_suggestion()
 
+# ------------------------------------
+# 🔑 NORMALIZE STRING COLUMNS (CRITICAL FIX)
+# ------------------------------------
+str_cols = [
+    "sku_status",
+    "brand",
+    "region",
+    "distributor_branch",
+    "product_id",
+    "product_name"
+]
+
+for col in str_cols:
+    po_df[col] = po_df[col].astype(str).str.strip().str.upper()
+
 st.title("📦 PO Portal Suggestion")
 
 # ------------------------------------
@@ -71,22 +86,28 @@ with st.expander("🔍 Filter", expanded=True):
     with col1:
         filter_region = st.multiselect(
             "Region",
-            sorted(po_df["region"].dropna().unique())
+            options=sorted(po_df["region"].dropna().unique())
         )
 
     with col2:
         filter_distributor = st.multiselect(
             "Distributor",
-            sorted(po_df["distributor_branch"].dropna().unique())
+            options=sorted(po_df["distributor_branch"].dropna().unique())
         )
 
     filtered_df = po_df.copy()
 
     if filter_region:
-        filtered_df = filtered_df[filtered_df["region"].isin(filter_region)]
+        filter_region = [r.strip().upper() for r in filter_region]
+        filtered_df = filtered_df[
+            filtered_df["region"].isin(filter_region)
+        ]
 
     if filter_distributor:
-        filtered_df = filtered_df[filtered_df["distributor_branch"].isin(filter_distributor)]
+        filter_distributor = [d.strip().upper() for d in filter_distributor]
+        filtered_df = filtered_df[
+            filtered_df["distributor_branch"].isin(filter_distributor)
+        ]
 
 # ------------------------------------
 # Prepare Download Data
@@ -94,7 +115,11 @@ with st.expander("🔍 Filter", expanded=True):
 download_df = filtered_df.copy()
 download_df["feedback_qty"] = ""
 
-st.dataframe(download_df, use_container_width=True, hide_index=True)
+st.dataframe(
+    download_df,
+    use_container_width=True,
+    hide_index=True
+)
 
 # ------------------------------------
 # Download Excel
@@ -154,7 +179,7 @@ if uploaded_file:
         st.stop()
 
     # ------------------------------------
-    # CLEAN NUMERIC DATA (CRITICAL)
+    # CLEAN NUMERIC DATA
     # ------------------------------------
     int_cols = [
         "current_stock_friday",
@@ -191,7 +216,7 @@ if uploaded_file:
     # ADD SUBMISSION METADATA
     # ------------------------------------
     submission_id = str(uuid.uuid4())
-    submitted_at = now(jakarta_tz).naive()  # BigQuery-safe DATETIME
+    submitted_at = now(jakarta_tz).naive()
 
     df_upload["submission_id"] = submission_id
     df_upload["submitted_at"] = submitted_at
