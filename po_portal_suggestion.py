@@ -81,8 +81,7 @@ with st.expander("🔍 Filter", expanded=True):
     region_options = sorted(po_df["region"].dropna().unique())
     selected_regions = col1.multiselect(
         "Region",
-        options=region_options,
-        close_on_select=True
+        options=region_options
     )
 
     # DISTRIBUTOR FILTER (DEPEND ON REGION)
