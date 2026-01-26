@@ -59,52 +59,48 @@ def load_po_suggestion():
 
 po_df = load_po_suggestion()
 
-# ------------------------------------
-# 🔑 NORMALIZE STRING COLUMNS (CRITICAL FIX)
-# ------------------------------------
-str_cols = [
-    "sku_status",
-    "brand",
-    "region",
-    "distributor_branch",
-    "product_id",
-    "product_name"
-]
-
-for col in str_cols:
-    po_df[col] = po_df[col].astype(str).str.strip().str.upper()
-
 st.title("📦 PO Portal Suggestion")
 
 # ------------------------------------
-# Filters
+# Filters (CASCADING)
 # ------------------------------------
 with st.expander("🔍 Filter", expanded=True):
 
     col1, col2 = st.columns(2)
 
+    # ---- REGION FILTER ----
     with col1:
+        region_options = sorted(po_df["region"].dropna().unique())
         filter_region = st.multiselect(
             "Region",
-            options=sorted(po_df["region"].dropna().unique())
+            options=region_options
         )
 
+    # ---- APPLY REGION FILTER FIRST ----
+    if filter_region:
+        region_filtered_df = po_df[
+            po_df["region"].isin(filter_region)
+        ]
+    else:
+        region_filtered_df = po_df.copy()
+
+    # ---- DISTRIBUTOR FILTER (DEPENDS ON REGION) ----
     with col2:
+        distributor_options = sorted(
+            region_filtered_df["distributor_branch"]
+            .dropna()
+            .unique()
+        )
+
         filter_distributor = st.multiselect(
             "Distributor",
-            options=sorted(po_df["distributor_branch"].dropna().unique())
+            options=distributor_options
         )
 
-    filtered_df = po_df.copy()
-
-    if filter_region:
-        filter_region = [r.strip().upper() for r in filter_region]
-        filtered_df = filtered_df[
-            filtered_df["region"].isin(filter_region)
-        ]
+    # ---- FINAL FILTERING ----
+    filtered_df = region_filtered_df.copy()
 
     if filter_distributor:
-        filter_distributor = [d.strip().upper() for d in filter_distributor]
         filtered_df = filtered_df[
             filtered_df["distributor_branch"].isin(filter_distributor)
         ]
