@@ -17,34 +17,15 @@ from google.oauth2 import service_account
 # BigQuery Configuration
 # =========================
 try:
-    # Use Streamlit secrets if available
+    # Use Streamlit secrets
     gcp_secrets = st.secrets["connections"]["bigquery"]
     
-    # Get the private key
-    private_key = gcp_secrets["private_key"]
-    
-    # Check if it's already a valid private key (starts with -----BEGIN)
-    if not private_key.startswith("-----BEGIN"):
-        # It's base64 encoded, try to decode it
-        try:
-            # Add padding if necessary
-            missing_padding = len(private_key) % 4
-            if missing_padding:
-                private_key += '=' * (4 - missing_padding)
-            
-            private_key = base64.b64decode(private_key).decode("utf-8")
-        except Exception as decode_error:
-            st.error(f"Failed to decode private key: {decode_error}")
-            st.info("The private key might already be in plain text format. Trying to use it directly...")
-            # Use it as-is if decoding fails
-            pass
-    
-    # Create credentials
+    # Create credentials directly (no decoding needed for plain text)
     credentials = service_account.Credentials.from_service_account_info({
         "type": gcp_secrets["type"],
         "project_id": gcp_secrets["project_id"],
         "private_key_id": gcp_secrets["private_key_id"],
-        "private_key": private_key,
+        "private_key": gcp_secrets["private_key"],  # Use directly, no decoding
         "client_email": gcp_secrets["client_email"],
         "client_id": gcp_secrets["client_id"],
         "auth_uri": gcp_secrets["auth_uri"],
@@ -60,20 +41,8 @@ try:
 
 except Exception as e:
     st.error(f"❌ Failed to initialize BigQuery client: {e}")
-    st.error(f"Error type: {type(e).__name__}")
-    
-    # Show helpful debugging info
     import traceback
-    st.error(f"Full traceback:\n```\n{traceback.format_exc()}\n```")
-    
-    st.info("""
-    **Troubleshooting Tips:**
-    1. Check if your `private_key` in Streamlit secrets is properly formatted
-    2. If it's base64 encoded, ensure it's valid base64
-    3. If it's plain text, it should start with `-----BEGIN PRIVATE KEY-----`
-    4. Make sure all required fields are present in your secrets configuration
-    """)
-    
+    st.error(f"Traceback:\n```\n{traceback.format_exc()}\n```")
     st.stop()
 
 
