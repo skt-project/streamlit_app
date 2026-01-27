@@ -40,6 +40,7 @@ def load_po_suggestion():
             sku_status,
             brand,
             region,
+            distributor_company,
             distributor_branch,
             product_id,
             product_name,
@@ -52,6 +53,11 @@ def load_po_suggestion():
             avg_weekly_st_lm,
             current_woi,
             si_target,
+            assortment,
+            stock_wh_qty,
+            avg_weekly_st_mtd,
+            avg_weekly_so_mtd,
+            recomended_qty,
             ideal_weekly_po_qty,
             max_weekly_po_qty,
             min_weekly_po_qty
@@ -59,8 +65,7 @@ def load_po_suggestion():
     """
     df = bq_client.query(query).to_dataframe()
 
-    # normalize text columns (IMPORTANT for filters)
-    for col in ["region", "distributor_branch"]:
+    for col in ["region", "distributor_branch", "distributor_company"]:
         df[col] = df[col].astype(str).str.strip()
 
     return df
@@ -163,6 +168,7 @@ if uploaded_file:
         "sku_status",
         "brand",
         "region",
+        "distributor_company",
         "distributor_branch",
         "product_id",
         "product_name",
@@ -175,6 +181,11 @@ if uploaded_file:
         "avg_weekly_st_lm",
         "current_woi",
         "si_target",
+        "assortment",
+        "stock_wh_qty",
+        "avg_weekly_st_mtd",
+        "avg_weekly_so_mtd",
+        "recomended_qty",
         "ideal_weekly_po_qty",
         "max_weekly_po_qty",
         "min_weekly_po_qty",
@@ -217,7 +228,7 @@ if uploaded_file:
     # --------------------------------------------------
     # CLEAN NUMERIC DATA (EXCEL SAFE)
     # --------------------------------------------------
-    int_cols = [
+    INT_COLS = [
         "current_stock_friday",
         "in_transit_stock",
         "total_stock",
@@ -226,33 +237,33 @@ if uploaded_file:
         "avg_weekly_st_l3m",
         "avg_weekly_st_lm",
         "si_target",
+        "stock_wh_qty",
+        "recomended_qty",
         "ideal_weekly_po_qty",
         "max_weekly_po_qty",
         "min_weekly_po_qty",
         "feedback_qty"
     ]
 
-    float_cols = ["current_woi"]
+    FLOAT_COLS = [
+        "current_woi",
+        "avg_weekly_st_mtd",
+        "avg_weekly_so_mtd"
+    ]
 
-    for col in int_cols:
-        df_upload[col] = (
-            df_upload[col]
-            .astype(str)
-            .str.replace(",", "", regex=False)
-            .pipe(pd.to_numeric, errors="coerce")
-            .fillna(0)
-            .astype("int64")
-        )
+    def clean_numeric(df, cols, dtype):
+        for col in cols:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .pipe(pd.to_numeric, errors="coerce")
+                .fillna(0)
+                .astype(dtype)
+            )
 
-    for col in float_cols:
-        df_upload[col] = (
-            df_upload[col]
-            .astype(str)
-            .str.replace(",", "", regex=False)
-            .pipe(pd.to_numeric, errors="coerce")
-            .fillna(0.0)
-            .astype("float64")
-        )
+    clean_numeric(df_upload, INT_COLS, "int64")
+    clean_numeric(df_upload, FLOAT_COLS, "float64")
 
     # --------------------------------------------------
     # ADD SUBMISSION METADATA
@@ -268,11 +279,10 @@ if uploaded_file:
     df_upload["submitted_at"] = submitted_at
 
     final_cols = [
-        "submission_id",
-        "submitted_at",
         "sku_status",
         "brand",
         "region",
+        "distributor_company",
         "distributor_branch",
         "product_id",
         "product_name",
@@ -285,10 +295,17 @@ if uploaded_file:
         "avg_weekly_st_lm",
         "current_woi",
         "si_target",
+        "assortment",
+        "stock_wh_qty",
+        "avg_weekly_st_mtd",
+        "avg_weekly_so_mtd",
+        "recomended_qty",
         "ideal_weekly_po_qty",
         "max_weekly_po_qty",
         "min_weekly_po_qty",
-        "feedback_qty"
+        "feedback_qty",
+        "submission_id",
+        "submitted_at"
     ]
 
     df_upload["feedback_qty"] = (
