@@ -17,15 +17,27 @@ from google.oauth2 import service_account
 # BigQuery Configuration
 # =========================
 # Use Streamlit secrets if available, fallback to local path
+# =========================
+# BigQuery Configuration
+# =========================
+# Use Streamlit secrets if available, fallback to local path
 try:
     # Use Streamlit secrets if available
     gcp_secrets = st.secrets["connections"]["bigquery"]
-    private_key = base64.b64decode(
-        gcp_secrets["private_key"]
-    ).decode("utf-8")
-
-    st.code(private_key)
-    st.stop()
+    
+    # Get the private key and decode it
+    private_key_b64 = gcp_secrets["private_key"]
+    
+    # Add padding if necessary
+    missing_padding = len(private_key_b64) % 4
+    if missing_padding:
+        private_key_b64 += '=' * (4 - missing_padding)
+    
+    private_key = base64.b64decode(private_key_b64).decode("utf-8")
+    
+    # REMOVE OR COMMENT OUT THESE DEBUG LINES:
+    # st.code(private_key)
+    # st.stop()
 
     credentials = service_account.Credentials.from_service_account_info({
         "type": gcp_secrets["type"],
@@ -42,17 +54,12 @@ try:
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
+    BQ_TABLE = st.secrets["bigquery"]["table"]  # Add this if not present
 
 except Exception as e:
     st.error(f"❌ Failed to initialize BigQuery client: {e}")
+    st.error(f"Error details: {str(e)}")
     st.stop()
-
-    GCP_PROJECT_ID = "skintific-data-warehouse"
-    BQ_DATASET = "rsa"
-    BQ_TABLE = "stock_analysis"
-    credentials = service_account.Credentials.from_service_account_file(
-        GCP_CREDENTIALS_PATH
-    )
 
 
 @st.cache_resource(show_spinner=False)
