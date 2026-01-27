@@ -38,7 +38,6 @@ try:
     BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
 except Exception:
     # Fallback for local testing if secrets are not configured
-    #GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "rsa"
     BQ_TABLE = "stock_analysis"
