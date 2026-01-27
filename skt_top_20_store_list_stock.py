@@ -22,10 +22,9 @@ gcp_secrets = st.secrets["connections"]["bigquery"]
 private_key = gcp_secrets["private_key"].replace("\\n", "\n")
 st.write(st.secrets["connections"]["bigquery"]["private_key"][:40])
 
-credentials = service_account.Credentials.from_service_account_info({
-    **gcp_secrets,
-    "private_key": private_key,
-})
+credentials = service_account.Credentials.from_service_account_info(
+    st.secrets["connections"]["bigquery"]
+)
 
 PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = st.secrets["bigquery"]["dataset"]
