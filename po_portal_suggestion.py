@@ -80,35 +80,68 @@ st.title("📦 PO Portal Suggestion")
 # --------------------------------------------------
 with st.expander("🔍 Filter", expanded=True):
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
+    # ---------------------------
     # REGION FILTER
-    region_options = sorted(po_df["region"].dropna().unique())
+    # ---------------------------
+    region_options = sorted(
+        po_df["region"].dropna().unique()
+    )
+
     selected_regions = col1.multiselect(
         "Region",
         options=region_options
     )
 
-    # DISTRIBUTOR BRANCH FILTER (DEPEND ON REGION)
+    # ---------------------------
+    # DISTRIBUTOR COMPANY FILTER
+    # (depends on Region)
+    # ---------------------------
     if selected_regions:
-        distributor_branch_options = (
+        company_options = (
             po_df[po_df["region"].isin(selected_regions)]
-            ["distributor_branch"]
+            ["distributor_company"]
             .dropna()
             .unique()
         )
     else:
-        distributor_branch_options = (
-            po_df["distributor_branch"]
+        company_options = (
+            po_df["distributor_company"]
             .dropna()
             .unique()
         )
 
-    distributor_branch_options = sorted(distributor_branch_options)
+    company_options = sorted(company_options)
 
-    selected_distributor_branches = col2.multiselect(
+    selected_companies = col2.multiselect(
+        "Distributor Company",
+        options=company_options
+    )
+
+    # ---------------------------
+    # DISTRIBUTOR BRANCH FILTER
+    # (depends on Region + Company)
+    # ---------------------------
+    temp_df = po_df.copy()
+
+    if selected_regions:
+        temp_df = temp_df[temp_df["region"].isin(selected_regions)]
+
+    if selected_companies:
+        temp_df = temp_df[temp_df["distributor_company"].isin(selected_companies)]
+
+    branch_options = (
+        temp_df["distributor_branch"]
+        .dropna()
+        .unique()
+    )
+
+    branch_options = sorted(branch_options)
+
+    selected_branches = col3.multiselect(
         "Distributor Branch",
-        options=distributor_branch_options
+        options=branch_options
     )
 
 # --------------------------------------------------
@@ -121,9 +154,14 @@ if selected_regions:
         filtered_df["region"].isin(selected_regions)
     ]
 
-if selected_distributor_branches:
+if selected_companies:
     filtered_df = filtered_df[
-        filtered_df["distributor_branch"].isin(selected_distributor_branches)
+        filtered_df["distributor_company"].isin(selected_companies)
+    ]
+
+if selected_branches:
+    filtered_df = filtered_df[
+        filtered_df["distributor_branch"].isin(selected_branches)
     ]
 
 # --------------------------------------------------
