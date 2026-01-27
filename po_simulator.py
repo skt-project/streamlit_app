@@ -2,6 +2,7 @@ import io
 import streamlit as st
 import pandas as pd
 import numpy as np
+import base64
 from typing import List
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -19,7 +20,9 @@ from google.oauth2 import service_account
 try:
     gcp_secrets = st.secrets["connections"]["bigquery"]
 
-    private_key = gcp_secrets["private_key"].replace("\\n", "\n")
+    private_key = base64.b64decode(
+        gcp_secrets["private_key"]
+    ).decode("utf-8")
 
     credentials = service_account.Credentials.from_service_account_info(
         {
@@ -42,10 +45,14 @@ try:
 
 except KeyError as e:
     st.error(f"❌ Missing BigQuery secret key: {e}")
+    st.write(private_key.splitlines()[0])
+    st.write(private_key.splitlines()[-1])
     st.stop()
 
 except Exception as e:
     st.error(f"❌ Failed to initialize BigQuery client: {e}")
+    st.write(private_key.splitlines()[0])
+    st.write(private_key.splitlines()[-1])
     st.stop()
 
     GCP_PROJECT_ID = "skintific-data-warehouse"
