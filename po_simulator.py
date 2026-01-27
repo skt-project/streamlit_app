@@ -18,30 +18,24 @@ from google.oauth2 import service_account
 # =========================
 # Use Streamlit secrets if available, fallback to local path
 try:
+    # Use Streamlit secrets if available
     gcp_secrets = st.secrets["connections"]["bigquery"]
-
-    private_key = base64.b64decode(
-        gcp_secrets["private_key"]
-    ).decode("utf-8")
-
-    credentials = service_account.Credentials.from_service_account_info(
-        {
-            "type": gcp_secrets["type"],
-            "project_id": gcp_secrets["project_id"],
-            "private_key_id": gcp_secrets["private_key_id"],
-            "private_key": private_key,
-            "client_email": gcp_secrets["client_email"],
-            "client_id": gcp_secrets["client_id"],
-            "auth_uri": gcp_secrets["auth_uri"],
-            "token_uri": gcp_secrets["token_uri"],
-            "auth_provider_x509_cert_url": gcp_secrets["auth_provider_x509_cert_url"],
-            "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
-        }
-    )
-
+    private_key = gcp_secrets["private_key"].replace("\\n", "\n")
+    credentials = service_account.Credentials.from_service_account_info({
+        "type": gcp_secrets["type"],
+        "project_id": gcp_secrets["project_id"],
+        "private_key_id": gcp_secrets["private_key_id"],
+        "private_key": private_key,
+        "client_email": gcp_secrets["client_email"],
+        "client_id": gcp_secrets["client_id"],
+        "auth_uri": gcp_secrets["auth_uri"],
+        "token_uri": gcp_secrets["token_uri"],
+        "auth_provider_x509_cert_url": gcp_secrets["auth_provider_x509_cert_url"],
+        "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
+    })
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
-    BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
+    BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
 
 except KeyError as e:
     st.error(f"❌ Missing BigQuery secret key: {e}")
