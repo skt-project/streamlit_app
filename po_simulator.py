@@ -18,7 +18,9 @@ from google.oauth2 import service_account
 # Use Streamlit secrets if available, fallback to local path
 try:
     gcp_secrets = st.secrets["connections"]["bigquery"]
+
     private_key = gcp_secrets["private_key"].replace("\\n", "\n")
+
     credentials = service_account.Credentials.from_service_account_info(
         {
             "type": gcp_secrets["type"],
@@ -33,12 +35,19 @@ try:
             "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
         }
     )
+
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
-except Exception as e:
-    st.error("BigQuery credentials are not configured.")
+
+except KeyError as e:
+    st.error(f"❌ Missing BigQuery secret key: {e}")
     st.stop()
+
+except Exception as e:
+    st.error(f"❌ Failed to initialize BigQuery client: {e}")
+    st.stop()
+
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "rsa"
     BQ_TABLE = "stock_analysis"
