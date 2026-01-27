@@ -20,7 +20,13 @@ from google.oauth2 import service_account
 try:
     # Use Streamlit secrets if available
     gcp_secrets = st.secrets["connections"]["bigquery"]
-    private_key = gcp_secrets["private_key"].replace("\\n", "\n")
+    private_key = base64.b64decode(
+        gcp_secrets["private_key"]
+    ).decode("utf-8")
+
+    st.code(private_key)
+    st.stop()
+
     credentials = service_account.Credentials.from_service_account_info({
         "type": gcp_secrets["type"],
         "project_id": gcp_secrets["project_id"],
