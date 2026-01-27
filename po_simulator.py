@@ -36,8 +36,7 @@ try:
     
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
-    BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
-    BQ_TABLE = st.secrets["bigquery"].get("table", "stock_analysis")
+    BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
 
 except Exception as e:
     st.error(f"❌ Failed to initialize BigQuery client: {e}")
