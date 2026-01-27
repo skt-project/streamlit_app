@@ -750,10 +750,7 @@ def main():
                         (
                             (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & 
                             (result_df["buffer_plan_by_lm_qty_adj"] > MAX_QTY_LIMIT)
-                        ) |
-                        
-                        # 6. Suggested PO quantity is 0 (no buffer needed)
-                        (result_df["buffer_plan_by_lm_qty_adj"] == 0)
+                        )
                     )
 
                     # Apply the filter: Remove suggested SKUs that meet any exclusion criteria
