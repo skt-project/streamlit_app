@@ -18,15 +18,13 @@ jakarta_tz = timezone("Asia/Jakarta")
 # Secrets & Client
 # ------------------------------------
 gcp_secrets = st.secrets["connections"]["bigquery"]
-
-private_key = gcp_secrets["private_key"].replace("\\n", "\n")
 st.write(
     st.secrets["connections"]["bigquery"]["private_key"]
     .startswith("-----BEGIN PRIVATE KEY-----\n")
 )
 
 credentials = service_account.Credentials.from_service_account_info(
-    st.secrets["connections"]["bigquery"]
+    gcp_secrets
 )
 
 PROJECT_ID = st.secrets["bigquery"]["project"]
