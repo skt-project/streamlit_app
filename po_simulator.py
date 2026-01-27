@@ -17,10 +17,6 @@ from google.oauth2 import service_account
 # BigQuery Configuration
 # =========================
 # Use Streamlit secrets if available, fallback to local path
-# =========================
-# BigQuery Configuration
-# =========================
-# Use Streamlit secrets if available, fallback to local path
 try:
     # Use Streamlit secrets if available
     gcp_secrets = st.secrets["connections"]["bigquery"]
@@ -28,14 +24,15 @@ try:
     # Get the private key and decode it
     private_key_b64 = gcp_secrets["private_key"]
     
-    # Add padding if necessary
+    # Add padding if necessary for base64 decoding
     missing_padding = len(private_key_b64) % 4
     if missing_padding:
         private_key_b64 += '=' * (4 - missing_padding)
     
+    # Decode the private key
     private_key = base64.b64decode(private_key_b64).decode("utf-8")
     
-    # REMOVE OR COMMENT OUT THESE DEBUG LINES:
+    # REMOVE THESE DEBUG LINES - they're causing the app to stop
     # st.code(private_key)
     # st.stop()
 
@@ -51,14 +48,21 @@ try:
         "auth_provider_x509_cert_url": gcp_secrets["auth_provider_x509_cert_url"],
         "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
     })
+    
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
-    BQ_TABLE = st.secrets["bigquery"]["table"]  # Add this if not present
+    BQ_TABLE = st.secrets["bigquery"].get("table", "stock_analysis")  # Add this with default value
 
 except Exception as e:
     st.error(f"❌ Failed to initialize BigQuery client: {e}")
+    st.error(f"Error type: {type(e).__name__}")
     st.error(f"Error details: {str(e)}")
+    
+    # Show more debugging info
+    import traceback
+    st.error(f"Traceback: {traceback.format_exc()}")
+    
     st.stop()
 
 
