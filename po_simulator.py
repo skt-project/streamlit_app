@@ -16,26 +16,30 @@ from google.oauth2 import service_account
 # =========================
 # BigQuery Configuration
 # =========================
-# Use Streamlit secrets if available, fallback to local path
 try:
     # Use Streamlit secrets if available
     gcp_secrets = st.secrets["connections"]["bigquery"]
     
-    # Get the private key and decode it
-    private_key_b64 = gcp_secrets["private_key"]
+    # Get the private key
+    private_key = gcp_secrets["private_key"]
     
-    # Add padding if necessary for base64 decoding
-    missing_padding = len(private_key_b64) % 4
-    if missing_padding:
-        private_key_b64 += '=' * (4 - missing_padding)
+    # Check if it's already a valid private key (starts with -----BEGIN)
+    if not private_key.startswith("-----BEGIN"):
+        # It's base64 encoded, try to decode it
+        try:
+            # Add padding if necessary
+            missing_padding = len(private_key) % 4
+            if missing_padding:
+                private_key += '=' * (4 - missing_padding)
+            
+            private_key = base64.b64decode(private_key).decode("utf-8")
+        except Exception as decode_error:
+            st.error(f"Failed to decode private key: {decode_error}")
+            st.info("The private key might already be in plain text format. Trying to use it directly...")
+            # Use it as-is if decoding fails
+            pass
     
-    # Decode the private key
-    private_key = base64.b64decode(private_key_b64).decode("utf-8")
-    
-    # REMOVE THESE DEBUG LINES - they're causing the app to stop
-    # st.code(private_key)
-    # st.stop()
-
+    # Create credentials
     credentials = service_account.Credentials.from_service_account_info({
         "type": gcp_secrets["type"],
         "project_id": gcp_secrets["project_id"],
@@ -52,16 +56,23 @@ try:
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
-    BQ_TABLE = st.secrets["bigquery"].get("table", "stock_analysis")  # Add this with default value
+    BQ_TABLE = st.secrets["bigquery"].get("table", "stock_analysis")
 
 except Exception as e:
     st.error(f"❌ Failed to initialize BigQuery client: {e}")
     st.error(f"Error type: {type(e).__name__}")
-    st.error(f"Error details: {str(e)}")
     
-    # Show more debugging info
+    # Show helpful debugging info
     import traceback
-    st.error(f"Traceback: {traceback.format_exc()}")
+    st.error(f"Full traceback:\n```\n{traceback.format_exc()}\n```")
+    
+    st.info("""
+    **Troubleshooting Tips:**
+    1. Check if your `private_key` in Streamlit secrets is properly formatted
+    2. If it's base64 encoded, ensure it's valid base64
+    3. If it's plain text, it should start with `-----BEGIN PRIVATE KEY-----`
+    4. Make sure all required fields are present in your secrets configuration
+    """)
     
     st.stop()
 
