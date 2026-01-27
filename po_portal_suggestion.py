@@ -89,22 +89,26 @@ with st.expander("🔍 Filter", expanded=True):
         options=region_options
     )
 
-    # DISTRIBUTOR FILTER (DEPEND ON REGION)
+    # DISTRIBUTOR BRANCH FILTER (DEPEND ON REGION)
     if selected_regions:
-        distributor_options = (
+        distributor_branch_options = (
             po_df[po_df["region"].isin(selected_regions)]
             ["distributor_branch"]
             .dropna()
             .unique()
         )
     else:
-        distributor_options = po_df["distributor_branch"].dropna().unique()
+        distributor_branch_options = (
+            po_df["distributor_branch"]
+            .dropna()
+            .unique()
+        )
 
-    distributor_options = sorted(distributor_options)
+    distributor_branch_options = sorted(distributor_branch_options)
 
-    selected_distributors = col2.multiselect(
-        "Distributor",
-        options=distributor_options
+    selected_distributor_branches = col2.multiselect(
+        "Distributor Branch",
+        options=distributor_branch_options
     )
 
 # --------------------------------------------------
@@ -117,9 +121,9 @@ if selected_regions:
         filtered_df["region"].isin(selected_regions)
     ]
 
-if selected_distributors:
+if selected_distributor_branches:
     filtered_df = filtered_df[
-        filtered_df["distributor_branch"].isin(selected_distributors)
+        filtered_df["distributor_branch"].isin(selected_distributor_branches)
     ]
 
 # --------------------------------------------------
