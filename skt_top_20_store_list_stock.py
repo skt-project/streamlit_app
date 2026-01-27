@@ -17,19 +17,10 @@ jakarta_tz = timezone("Asia/Jakarta")
 # ------------------------------------
 # Secrets & Client
 # ------------------------------------
-raw_gcp = st.secrets["connections"]["bigquery"]
-clean_key = raw_gcp["private_key"].replace("\\n", "\n")
-
-# Rebuild the dict manually to ensure it is "Clean" for the library
-auth_info = {
-    "type": raw_gcp["type"],
-    "project_id": raw_gcp["project_id"],
-    "private_key_id": raw_gcp["private_key_id"],
-    "private_key": clean_key,
-    "client_email": raw_gcp["client_email"],
-    "token_uri": raw_gcp["token_uri"],
-}
-credentials = service_account.Credentials.from_service_account_info(auth_info)
+gcp_secrets = dict(st.secrets["connections"]["bigquery"])
+credentials = service_account.Credentials.from_service_account_info(
+    st.secrets["connections"]["bigquery"]
+)
 
 PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = st.secrets["bigquery"]["dataset"]
