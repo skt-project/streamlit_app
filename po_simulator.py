@@ -16,13 +16,7 @@ from google.oauth2 import service_account
 # BigQuery Configuration
 # =========================
 # Use Streamlit secrets if available, fallback to local path
-credentials = None
-GCP_PROJECT_ID = None
-BQ_DATASET = None
-BQ_TABLE = None
-
 try:
-    # Try to load from Streamlit secrets (for cloud deployment)
     gcp_secrets = st.secrets["connections"]["bigquery"]
     private_key = gcp_secrets["private_key"].replace("\\n", "\n")
     credentials = service_account.Credentials.from_service_account_info(
@@ -42,31 +36,15 @@ try:
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
-except Exception as e:
+except Exception:
     # Fallback for local testing if secrets are not configured
-    import os
     GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
-    
-    # Only try to load local credentials if the file exists
-    if os.path.exists(GCP_CREDENTIALS_PATH):
-        credentials = service_account.Credentials.from_service_account_file(
-            GCP_CREDENTIALS_PATH
-        )
-        GCP_PROJECT_ID = "skintific-data-warehouse"
-        BQ_DATASET = "rsa"
-        BQ_TABLE = "stock_analysis"
-    else:
-        # No credentials available
-        st.error("""
-        ⚠️ **BigQuery credentials not configured!**
-        
-        Please configure your credentials in one of these ways:
-        1. Add credentials to Streamlit secrets (for cloud deployment)
-        2. Place your service account JSON file at the local path (for local development)
-        
-        The app cannot run without proper BigQuery credentials.
-        """)
-        st.stop()
+    GCP_PROJECT_ID = "skintific-data-warehouse"
+    BQ_DATASET = "rsa"
+    BQ_TABLE = "stock_analysis"
+    credentials = service_account.Credentials.from_service_account_file(
+        GCP_CREDENTIALS_PATH
+    )
 
 
 @st.cache_resource(show_spinner=False)
@@ -548,7 +526,6 @@ def main():
 
             3.  **Additional Suggestion**: The SKU is marked as an "Additional Suggestion" if:
                 * It was not on the original PO but was **suggested by the system**.
-                * **Note**: SKUs that would be rejected are automatically filtered out from suggestions.
             
             4.  **Suggested WOI (OH + IT + Suggested Qty + ST Projection until EOM)**: The suggested WOI is calculated based on the total stock + Suggested Qty + ST Projection until end of month
             """)
@@ -749,38 +726,6 @@ def main():
                     result_df = result_df[
                         (result_df["PO Qty"] > 0) | (result_df["buffer_plan_by_lm_qty_adj"] > 0)
                     ]
-
-                    # ===== ENHANCED REJECTION LOGIC FOR SUGGESTED SKUs =====
-                    # Exclude suggested SKUs that would be rejected based on any rejection criteria
-                    suggested_skus_mask = result_df["is_po_sku"] == False
-
-                    # Build exclusion conditions for suggested SKUs
-                    exclude_suggested = (
-                        # 1. Manual rejection list - Need Approval Email
-                        (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_APPROVAL)) |
-                        
-                        # 2. Manual rejection list - No Tolerance
-                        (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_NO_TOLERANCE)) |
-                        
-                        # 3. Negative remaining allocation
-                        (result_df["remaining_allocation_qty_region"] < 0) |
-                        
-                        # 4. Supply control status is STOP PO, DISCONTINUED, OOS, or UNAVAILABLE
-                        (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) |
-                        
-                        # 5. Limited SKUs exceeding max quantity limit
-                        (
-                            (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & 
-                            (result_df["buffer_plan_by_lm_qty_adj"] > MAX_QTY_LIMIT)
-                        ) |
-                        
-                        # 6. Suggested PO quantity is 0 (no buffer needed)
-                        (result_df["buffer_plan_by_lm_qty_adj"] == 0)
-                    )
-
-                    # Apply the filter: Remove suggested SKUs that meet any exclusion criteria
-                    result_df = result_df[~(suggested_skus_mask & exclude_suggested)]
-                    # ===== END ENHANCED REJECTION LOGIC =====
 
                     # Add distributor_name column
                     result_df["distributor_name"] = distributor_name
