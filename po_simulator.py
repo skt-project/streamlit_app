@@ -16,7 +16,13 @@ from google.oauth2 import service_account
 # BigQuery Configuration
 # =========================
 # Use Streamlit secrets if available, fallback to local path
+credentials = None
+GCP_PROJECT_ID = None
+BQ_DATASET = None
+BQ_TABLE = None
+
 try:
+    # Try to load from Streamlit secrets (for cloud deployment)
     gcp_secrets = st.secrets["connections"]["bigquery"]
     private_key = gcp_secrets["private_key"].replace("\\n", "\n")
     credentials = service_account.Credentials.from_service_account_info(
@@ -36,15 +42,31 @@ try:
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
-except Exception:
+except Exception as e:
     # Fallback for local testing if secrets are not configured
+    import os
     GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
-    GCP_PROJECT_ID = "skintific-data-warehouse"
-    BQ_DATASET = "rsa"
-    BQ_TABLE = "stock_analysis"
-    credentials = service_account.Credentials.from_service_account_file(
-        GCP_CREDENTIALS_PATH
-    )
+    
+    # Only try to load local credentials if the file exists
+    if os.path.exists(GCP_CREDENTIALS_PATH):
+        credentials = service_account.Credentials.from_service_account_file(
+            GCP_CREDENTIALS_PATH
+        )
+        GCP_PROJECT_ID = "skintific-data-warehouse"
+        BQ_DATASET = "rsa"
+        BQ_TABLE = "stock_analysis"
+    else:
+        # No credentials available
+        st.error("""
+        ⚠️ **BigQuery credentials not configured!**
+        
+        Please configure your credentials in one of these ways:
+        1. Add credentials to Streamlit secrets (for cloud deployment)
+        2. Place your service account JSON file at the local path (for local development)
+        
+        The app cannot run without proper BigQuery credentials.
+        """)
+        st.stop()
 
 
 @st.cache_resource(show_spinner=False)
@@ -750,7 +772,10 @@ def main():
                         (
                             (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & 
                             (result_df["buffer_plan_by_lm_qty_adj"] > MAX_QTY_LIMIT)
-                        )
+                        ) |
+                        
+                        # 6. Suggested PO quantity is 0 (no buffer needed)
+                        (result_df["buffer_plan_by_lm_qty_adj"] == 0)
                     )
 
                     # Apply the filter: Remove suggested SKUs that meet any exclusion criteria
