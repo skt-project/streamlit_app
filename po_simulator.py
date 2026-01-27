@@ -37,16 +37,8 @@ try:
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
 
-except KeyError as e:
-    st.error(f"❌ Missing BigQuery secret key: {e}")
-    st.write(private_key.splitlines()[0])
-    st.write(private_key.splitlines()[-1])
-    st.stop()
-
 except Exception as e:
     st.error(f"❌ Failed to initialize BigQuery client: {e}")
-    st.write(private_key.splitlines()[0])
-    st.write(private_key.splitlines()[-1])
     st.stop()
 
     GCP_PROJECT_ID = "skintific-data-warehouse"
