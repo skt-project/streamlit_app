@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import pytz
 from google.oauth2 import service_account
 from google.cloud import bigquery
 import io
@@ -725,12 +726,22 @@ except Exception as e:
 # Header
 # ---------------------------
 # Format last execution time for display
+jkt_tz = pytz.timezone('Asia/Jakarta')
+now_jkt = datetime.now(jkt_tz)
+
 if last_exec_time:
+    # Ensure last_exec_time is also localized to JKT for accurate subtraction
+    if last_exec_time.tzinfo is None:
+        last_exec_time = jkt_tz.localize(last_exec_time)
+    
     sync_time_str = last_exec_time.strftime("%I:%M %p")
     sync_date_str = last_exec_time.strftime("%b %d, %Y")
-    time_since_sync = datetime.now() - last_exec_time
-    hours_since = int(time_since_sync.total_seconds() / 3600)
-    minutes_since = int((time_since_sync.total_seconds() % 3600) / 60)
+    
+    # Calculate difference
+    time_since_sync = now_jkt - last_exec_time
+    total_seconds = int(time_since_sync.total_seconds())
+    hours_since = total_seconds // 3600
+    minutes_since = (total_seconds % 3600) // 60
     
     if hours_since > 0:
         sync_status = f"Last Sync: {sync_time_str} ({hours_since}h {minutes_since}m ago)"
@@ -738,7 +749,7 @@ if last_exec_time:
         sync_status = f"Last Sync: {sync_time_str} ({minutes_since}m ago)"
 else:
     sync_status = "Syncing data..."
-    sync_time_str = datetime.now().strftime("%I:%M %p")
+    sync_time_str = now_jkt.strftime("%I:%M %p")
 
 st.markdown(f"""
 <div class="main-header">
