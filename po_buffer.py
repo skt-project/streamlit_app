@@ -836,6 +836,7 @@ with title_col:
         f"""
         <div style="padding-top: 5px;">
             <span style="font-size:0.95rem; font-weight:600;">🏪 Store Selection</span>
+            <span style="font-size:0.8rem; color:gray; margin-left:5px;">({selected_count} selected)</span>
         </div>
         """,
         unsafe_allow_html=True
@@ -972,7 +973,7 @@ for i, (idx, row) in enumerate(filtered_stores.iterrows()):
     """, unsafe_allow_html=True)
 
     # 2. Metrics & Buttons as Columns
-    m1, m2, m3, m4, btn_print, btn_download = st.columns([2, 2.5, 2, 2.5, 1.2, 1.5])
+    m1, m2, m3, m4, btn_download = st.columns([2, 2.5, 2, 2.5, 1.5])
 
     with m1:
         st.markdown(f'<div class="metric-group"><span class="metric-label">Branch</span><span class="metric-value">{row["region"]}</span></div>', unsafe_allow_html=True)
@@ -999,28 +1000,6 @@ for i, (idx, row) in enumerate(filtered_stores.iterrows()):
         'region': row['region'],
         'address': '-'
     }
-
-    # --- PRINT BUTTON ---
-    with btn_print:
-        st.markdown('<div style="padding-top: 0.5rem;"></div>', unsafe_allow_html=True)
-        # Create unique ID for this button
-        button_id = f"print_btn_{row['store_code']}_{i}"
-        st.markdown(f"""
-            <button onclick="window.print()" 
-                    style="width: 100%;
-                           background: #5b6abf;
-                           color: white;
-                           border: none;
-                           padding: 0.65rem 1.5rem;
-                           border-radius: 8px;
-                           font-weight: 600;
-                           cursor: pointer;
-                           transition: all 0.2s;"
-                    onmouseover="this.style.background='#4a5aa0'; this.style.boxShadow='0 4px 8px rgba(91,106,191,0.3)'"
-                    onmouseout="this.style.background='#5b6abf'; this.style.boxShadow='none'">
-                🖨️ Print
-            </button>
-        """, unsafe_allow_html=True)
 
     # --- DOWNLOAD BUTTON ---
     with btn_download:
