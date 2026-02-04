@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#d8a7a7"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+base = "light"  # This forces the Light Theme
