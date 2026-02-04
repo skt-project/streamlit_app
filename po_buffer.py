@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import pytz
 from google.oauth2 import service_account
 from google.cloud import bigquery
 import io
@@ -726,22 +725,12 @@ except Exception as e:
 # Header
 # ---------------------------
 # Format last execution time for display
-jkt_tz = pytz.timezone('Asia/Jakarta')
-now_jkt = datetime.now(jkt_tz)
-
 if last_exec_time:
-    # Ensure last_exec_time is also localized to JKT for accurate subtraction
-    if last_exec_time.tzinfo is None:
-        last_exec_time = jkt_tz.localize(last_exec_time)
-    
     sync_time_str = last_exec_time.strftime("%I:%M %p")
     sync_date_str = last_exec_time.strftime("%b %d, %Y")
-    
-    # Calculate difference
-    time_since_sync = now_jkt - last_exec_time
-    total_seconds = int(time_since_sync.total_seconds())
-    hours_since = total_seconds // 3600
-    minutes_since = (total_seconds % 3600) // 60
+    time_since_sync = datetime.now() - last_exec_time
+    hours_since = int(time_since_sync.total_seconds() / 3600)
+    minutes_since = int((time_since_sync.total_seconds() % 3600) / 60)
     
     if hours_since > 0:
         sync_status = f"Last Sync: {sync_time_str} ({hours_since}h {minutes_since}m ago)"
@@ -749,7 +738,7 @@ if last_exec_time:
         sync_status = f"Last Sync: {sync_time_str} ({minutes_since}m ago)"
 else:
     sync_status = "Syncing data..."
-    sync_time_str = now_jkt.strftime("%I:%M %p")
+    sync_time_str = datetime.now().strftime("%I:%M %p")
 
 st.markdown(f"""
 <div class="main-header">
@@ -847,6 +836,7 @@ with title_col:
         f"""
         <div style="padding-top: 5px;">
             <span style="font-size:0.95rem; font-weight:600;">🏪 Store Selection</span>
+            <span style="font-size:0.8rem; color:gray; margin-left:5px;">({selected_count} selected)</span>
         </div>
         """,
         unsafe_allow_html=True
@@ -983,7 +973,7 @@ for i, (idx, row) in enumerate(filtered_stores.iterrows()):
     """, unsafe_allow_html=True)
 
     # 2. Metrics & Buttons as Columns
-    m1, m2, m3, m4, btn_print, btn_download = st.columns([2, 2.5, 2, 2.5, 1.2, 1.5])
+    m1, m2, m3, m4, btn_download = st.columns([2, 2.5, 2, 2.5, 1.5])
 
     with m1:
         st.markdown(f'<div class="metric-group"><span class="metric-label">Branch</span><span class="metric-value">{row["region"]}</span></div>', unsafe_allow_html=True)
@@ -1010,28 +1000,6 @@ for i, (idx, row) in enumerate(filtered_stores.iterrows()):
         'region': row['region'],
         'address': '-'
     }
-
-    # --- PRINT BUTTON ---
-    with btn_print:
-        st.markdown('<div style="padding-top: 0.5rem;"></div>', unsafe_allow_html=True)
-        # Create unique ID for this button
-        button_id = f"print_btn_{row['store_code']}_{i}"
-        st.markdown(f"""
-            <button onclick="window.print()" 
-                    style="width: 100%;
-                           background: #5b6abf;
-                           color: white;
-                           border: none;
-                           padding: 0.65rem 1.5rem;
-                           border-radius: 8px;
-                           font-weight: 600;
-                           cursor: pointer;
-                           transition: all 0.2s;"
-                    onmouseover="this.style.background='#4a5aa0'; this.style.boxShadow='0 4px 8px rgba(91,106,191,0.3)'"
-                    onmouseout="this.style.background='#5b6abf'; this.style.boxShadow='none'">
-                🖨️ Print
-            </button>
-        """, unsafe_allow_html=True)
 
     # --- DOWNLOAD BUTTON ---
     with btn_download:
