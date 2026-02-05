@@ -88,6 +88,7 @@ def load_po_tracking():
         WHERE distributor_name LIKE '%KARYA ANANDA SUKSES%'
     """
     df = bq_client.query(query).to_dataframe()
+    df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
     return df
 
 po_df = load_po_suggestion()
@@ -234,7 +235,7 @@ selected_dist = colA.multiselect(
 )
 
 date_range = colB.date_input(
-    "Order Date Range",
+    "Order Date",
     value=None,
     format="YYYY/MM/DD"
 )
