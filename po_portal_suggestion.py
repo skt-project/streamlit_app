@@ -78,12 +78,12 @@ def load_po_tracking():
     query = """
         SELECT
             order_date,
+            distributor_name,
             customer_order_no,
             sku,
             product_name,
             order_qty,
-            subtotal,
-            distributor_name
+            subtotal
         FROM `dms.gt_po_tracking_all_mv`
         WHERE distributor_name LIKE '%KARYA ANANDA SUKSES%'
     """
