@@ -223,8 +223,9 @@ tracking_df = load_po_tracking()
 # -------------------------
 # FILTERS
 # -------------------------
-colA, colB = st.columns(2)
+colA, colB, colC = st.columns(3)
 
+# distributor filter
 dist_options = sorted(
     tracking_df["distributor_name"].dropna().unique()
 )
@@ -234,7 +235,18 @@ selected_dist = colA.multiselect(
     options=dist_options
 )
 
-date_range = colB.date_input(
+# order filter
+order_options = sorted(
+    tracking_df["customer_order_no"].dropna().unique()
+)
+
+selected_orders = colB.multiselect(
+    "Customer Order No",
+    options=order_options
+)
+
+# date filter
+date_range = colC.date_input(
     "Order Date",
     value=None,
     format="YYYY/MM/DD"
@@ -248,6 +260,11 @@ filtered_tracking = tracking_df.copy()
 if selected_dist:
     filtered_tracking = filtered_tracking[
         filtered_tracking["distributor_name"].isin(selected_dist)
+    ]
+
+if selected_orders:
+    filtered_tracking = filtered_tracking[
+        filtered_tracking["customer_order_no"].isin(selected_orders)
     ]
 
 if date_range:
