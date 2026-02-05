@@ -180,23 +180,29 @@ def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Seri
 def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame, regions: List[str], is_in: bool) -> pd.DataFrame:
     """
     Auto-rejects specific SKUs based on a provided list and region rules.
+    
+    Args:
+        sku_list: List of SKUs to apply rules to
+        df: DataFrame containing the data
+        regions: List of allowed regions
+        is_in: If False, only allow SKUs in the specified regions (reject all others)
+               If True, reject SKUs in the specified regions
     """
-    # Convert regions list to lowercase for case-insensitive matching
-    regions_lower = [r.lower() for r in regions]
+    # Convert regions list to uppercase for case-insensitive matching
+    regions_upper = [r.upper() for r in regions]
 
     # Create the rejection condition
-    # If is_in = False, then only allow for the regions in the list
+    # If is_in = False, then only allow for the regions in the list (reject all others)
     if not is_in:
         # Rejects if SKU is in the sku_list AND region is NOT in the regions list
-        condition = (df["SKU"].isin(sku_list)) & (~df["region"].str.lower().isin(regions_lower))
+        condition = (df["SKU"].isin(sku_list)) & (~df["region"].str.upper().isin(regions_upper))
     else:
         # Rejects if SKU is in the sku_list AND region is in the regions list
-        condition = (df["SKU"].isin(sku_list)) & (df["region"].str.lower().isin(regions_lower))
+        condition = (df["SKU"].isin(sku_list)) & (df["region"].str.upper().isin(regions_upper))
 
     # Apply the rejection logic
     df.loc[condition, "Remark"] = "Reject (Stop by Steve)"
 
-    st.info("Rejection rules for specific SKUs applied.")
     return df
 
 
@@ -483,9 +489,18 @@ def main():
     LIMITED_SKUS_QTY = []
     MAX_QTY_LIMIT = 500
 
-    # Additional rejected SKUs based on region rules
-    REJECTED_SKUS_1 = []
-    REGION_LIST_1 = []
+    # Regional rejection rules for specific SKUs
+    # These SKUs are ONLY allowed in the specified regions
+    # All other regions will be rejected
+    REJECTED_SKUS_1 = ["G2G-29700", "G2G-27300"]
+    REGION_LIST_1 = [
+        "Central Sumatera",
+        "Northern Sumatera", 
+        "Jakarta (Csa)",
+        "West Kalimantan",
+        "South Kalimantan",
+        "East Kalimantan"
+    ]
 
     REJECTED_SKUS_2 = []
     REGION_LIST_2 = []
@@ -541,6 +556,19 @@ def main():
             
             reject_df = pd.DataFrame(reject_data).sort_values(by="SKU").reset_index(drop=True)
             st.dataframe(reject_df)
+
+        # Display Regional Rejection Rules
+        if REJECTED_SKUS_1:
+            st.header("Regional Rejection Rules")
+            with st.expander("🌍 SKUs with Regional Restrictions"):
+                st.markdown(f"""
+                **SKUs: {', '.join(REJECTED_SKUS_1)}**
+                
+                These SKUs are **ONLY allowed** in the following regions:
+                """)
+                for region in REGION_LIST_1:
+                    st.markdown(f"- {region}")
+                st.markdown("**All other regions will be automatically rejected.**")
 
     with tab2:
         st.header("1. Download PO Template")
@@ -754,6 +782,15 @@ def main():
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0)
                     )
 
+                    # NEW: Add regional rejection for suggested SKUs
+                    if REJECTED_SKUS_1:
+                        regions_upper_1 = [r.upper() for r in REGION_LIST_1]
+                        regional_reject_1 = (
+                            (result_df["Customer SKU Code"].isin(REJECTED_SKUS_1)) & 
+                            (~result_df["region"].str.upper().isin(regions_upper_1))
+                        )
+                        exclude_suggested = exclude_suggested | regional_reject_1
+
                     # Apply the filter: Remove suggested SKUs that meet any exclusion criteria
                     result_df = result_df[~(suggested_skus_mask & exclude_suggested)]
                     # ===== END ENHANCED REJECTION LOGIC =====
@@ -832,6 +869,23 @@ def main():
                     result_df["Remark"] = np.select(
                         conditions, choices, default="N/A (Missing Data)"
                     )
+
+                    # Apply regional rejection rules for SKUs on the PO
+                    if REJECTED_SKUS_1:
+                        result_df = apply_sku_rejection_rules(
+                            REJECTED_SKUS_1, 
+                            result_df, 
+                            REGION_LIST_1, 
+                            is_in=False  # False means: only allow in these regions, reject all others
+                        )
+
+                    if REJECTED_SKUS_2:
+                        result_df = apply_sku_rejection_rules(
+                            REJECTED_SKUS_2, 
+                            result_df, 
+                            REGION_LIST_2, 
+                            is_in=False
+                        )
 
                     new_column_names = {
                         "distributor_name": "Distributor",
