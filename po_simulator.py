@@ -870,23 +870,6 @@ def main():
                         conditions, choices, default="N/A (Missing Data)"
                     )
 
-                    # Apply regional rejection rules for SKUs on the PO
-                    if REJECTED_SKUS_1:
-                        result_df = apply_sku_rejection_rules(
-                            REJECTED_SKUS_1, 
-                            result_df, 
-                            REGION_LIST_1, 
-                            is_in=False  # False means: only allow in these regions, reject all others
-                        )
-
-                    if REJECTED_SKUS_2:
-                        result_df = apply_sku_rejection_rules(
-                            REJECTED_SKUS_2, 
-                            result_df, 
-                            REGION_LIST_2, 
-                            is_in=False
-                        )
-
                     new_column_names = {
                         "distributor_name": "Distributor",
                         "Customer SKU Code": "SKU",
@@ -907,6 +890,23 @@ def main():
 
                     # Rename the columns in the DataFrame
                     result_df.rename(columns=new_column_names, inplace=True)
+
+                    # Apply regional rejection rules for SKUs on the PO (after column renaming)
+                    if REJECTED_SKUS_1:
+                        result_df = apply_sku_rejection_rules(
+                            REJECTED_SKUS_1, 
+                            result_df, 
+                            REGION_LIST_1, 
+                            is_in=False  # False means: only allow in these regions, reject all others
+                        )
+
+                    if REJECTED_SKUS_2:
+                        result_df = apply_sku_rejection_rules(
+                            REJECTED_SKUS_2, 
+                            result_df, 
+                            REGION_LIST_2, 
+                            is_in=False
+                        )
 
                     # Sort the DataFrame: user SKUs first, then suggested SKUs
                     result_df.sort_values(
