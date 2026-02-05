@@ -235,7 +235,8 @@ selected_dist = colA.multiselect(
 
 date_range = colB.date_input(
     "Order Date Range",
-    value=None
+    value=None,
+    format="YYYY/MM/DD"
 )
 
 # -------------------------
@@ -248,12 +249,19 @@ if selected_dist:
         filtered_tracking["distributor_name"].isin(selected_dist)
     ]
 
-if date_range and len(date_range) == 2:
-    start, end = date_range
-    filtered_tracking = filtered_tracking[
-        (filtered_tracking["order_date"] >= pd.to_datetime(start)) &
-        (filtered_tracking["order_date"] <= pd.to_datetime(end))
-    ]
+if isinstance(date_range, (list, tuple)):
+    if len(date_range) == 2:
+        start, end = date_range
+    elif len(date_range) == 1:
+        start = end = date_range[0]
+    else:
+        start = end = None
+
+    if start:
+        filtered_tracking = filtered_tracking[
+            (filtered_tracking["order_date"] >= pd.to_datetime(start)) &
+            (filtered_tracking["order_date"] <= pd.to_datetime(end))
+        ]
 
 # -------------------------
 # DISPLAY
