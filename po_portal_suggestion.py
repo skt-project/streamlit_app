@@ -273,8 +273,11 @@ if date_range:
 # -------------------------
 # DISPLAY
 # -------------------------
+display_tracking = filtered_tracking.copy()
+display_tracking["order_date"] = display_tracking["order_date"].dt.date
+
 st.dataframe(
-    filtered_tracking,
+    display_tracking,
     use_container_width=True,
     hide_index=True
 )
@@ -285,7 +288,7 @@ st.dataframe(
 tracking_output = BytesIO()
 
 with pd.ExcelWriter(tracking_output, engine="xlsxwriter") as writer:
-    filtered_tracking.to_excel(
+    display_tracking.to_excel(
         writer,
         index=False,
         sheet_name="po_tracking"
