@@ -70,6 +70,25 @@ def load_po_suggestion():
 
     return df
 
+# --------------------------------------------------
+# Load PO Tracking Data
+# --------------------------------------------------
+@st.cache_data(ttl=600)
+def load_po_tracking():
+    query = """
+        SELECT
+            order_date,
+            customer_order_no,
+            sku,
+            product_name,
+            order_qty,
+            subtotal,
+            distributor_name
+        FROM `dms.gt_po_tracking_all_mv`
+        WHERE distributor_name LIKE '%KARYA ANANDA SUKSES%'
+    """
+    df = bq_client.query(query).to_dataframe()
+    return df
 
 po_df = load_po_suggestion()
 
@@ -189,6 +208,80 @@ st.download_button(
     label="📥 Download PO Suggestion (Excel)",
     data=output,
     file_name="po_portal_suggestion.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+# ==================================================
+# PO TRACKING SECTION
+# ==================================================
+st.divider()
+st.header("📊 PO Tracking Data")
+
+tracking_df = load_po_tracking()
+
+# -------------------------
+# FILTERS
+# -------------------------
+colA, colB = st.columns(2)
+
+dist_options = sorted(
+    tracking_df["distributor_name"].dropna().unique()
+)
+
+selected_dist = colA.multiselect(
+    "Distributor Name",
+    options=dist_options
+)
+
+date_range = colB.date_input(
+    "Order Date Range",
+    value=None
+)
+
+# -------------------------
+# APPLY FILTER
+# -------------------------
+filtered_tracking = tracking_df.copy()
+
+if selected_dist:
+    filtered_tracking = filtered_tracking[
+        filtered_tracking["distributor_name"].isin(selected_dist)
+    ]
+
+if date_range and len(date_range) == 2:
+    start, end = date_range
+    filtered_tracking = filtered_tracking[
+        (filtered_tracking["order_date"] >= pd.to_datetime(start)) &
+        (filtered_tracking["order_date"] <= pd.to_datetime(end))
+    ]
+
+# -------------------------
+# DISPLAY
+# -------------------------
+st.dataframe(
+    filtered_tracking,
+    use_container_width=True,
+    hide_index=True
+)
+
+# -------------------------
+# DOWNLOAD EXCEL
+# -------------------------
+tracking_output = BytesIO()
+
+with pd.ExcelWriter(tracking_output, engine="xlsxwriter") as writer:
+    filtered_tracking.to_excel(
+        writer,
+        index=False,
+        sheet_name="po_tracking"
+    )
+
+tracking_output.seek(0)
+
+st.download_button(
+    label="📥 Download PO Tracking (Excel)",
+    data=tracking_output,
+    file_name="po_tracking.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
