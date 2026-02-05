@@ -83,6 +83,7 @@ def load_po_tracking():
             sku,
             product_name,
             order_qty,
+            unit_price,
             subtotal
         FROM `dms.gt_po_tracking_all_mv`
         WHERE distributor_name LIKE '%KARYA ANANDA SUKSES%'
