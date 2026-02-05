@@ -250,18 +250,24 @@ if selected_dist:
         filtered_tracking["distributor_name"].isin(selected_dist)
     ]
 
-if isinstance(date_range, (list, tuple)):
-    if len(date_range) == 2:
-        start, end = date_range
-    elif len(date_range) == 1:
-        start = end = date_range[0]
+if date_range:
+
+    # single date selected
+    if not isinstance(date_range, (list, tuple)):
+        start = end = pd.to_datetime(date_range)
+
+    # range selected
+    elif len(date_range) == 2:
+        start = pd.to_datetime(date_range[0])
+        end = pd.to_datetime(date_range[1])
+
     else:
         start = end = None
 
-    if start:
+    if start is not None:
         filtered_tracking = filtered_tracking[
-            (filtered_tracking["order_date"] >= pd.to_datetime(start)) &
-            (filtered_tracking["order_date"] <= pd.to_datetime(end))
+            (filtered_tracking["order_date"] >= start) &
+            (filtered_tracking["order_date"] <= end)
         ]
 
 # -------------------------
