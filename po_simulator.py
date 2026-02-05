@@ -459,8 +459,6 @@ def main():
     # Hardcoded Reject List with specific remarks
     MANUAL_REJECT_SKUS_APPROVAL = ["G2G-252", "G2G-253"]  # Need approval email
     MANUAL_REJECT_SKUS_NO_TOLERANCE = [
-        "G2G-29700",
-        "G2G-27300",
         "G2G-29705",
         "G2G-224",
         "G2G-247",
