@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import pytz
+from datetime import datetime, timedelta
 from google.oauth2 import service_account
 from google.cloud import bigquery
 import io
@@ -9,7 +10,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 # Page config
 st.set_page_config(
@@ -279,77 +280,92 @@ st.markdown("""
 
 """, unsafe_allow_html=True)
 
-import io
-import pandas as pd
-from datetime import datetime
-from reportlab.lib.pagesizes import portrait, A4
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+# ---------------------------
+# PDF Generation Functions (Portrait & Merged Columns)
+# ---------------------------
+def generate_po_pdf(store_info, store_detail, brand_name="Glad2Glow"):
+    buffer = io.BytesIO()
 
-# ---------------------------
-# PDF Generation Functions
-# ---------------------------
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=portrait(A4),
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25
+    )
+
+    styles = getSampleStyleSheet()
+
+    elements = generate_store_page_elements(
+        store_data=store_info,
+        sku_data=store_detail,
+        styles=styles,
+        brand_name=brand_name
+    )
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
 def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2Glow"):
-    """Generate PDF elements for a single store"""
     elements = []
-    
-    # --- Unified Style for Table (Updated to 10pt) ---
-    table_font_size = 10
-    
+
+    # --- Styles ---
+    table_font_size = 8.5
+
     cell_style = ParagraphStyle(
         'TableCell',
         parent=styles['Normal'],
         fontSize=table_font_size,
         leading=table_font_size + 2,
-        alignment=TA_LEFT,
+        alignment=TA_CENTER,
         wordWrap='LTR'
     )
 
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=24,
+        fontSize=22,
         textColor=colors.HexColor('#D8A7A7'),
         alignment=TA_CENTER,
-        spaceAfter=15
+        spaceAfter=10
     )
-    
+
     # --- Header ---
     elements.append(Paragraph(brand_name, title_style))
     elements.append(Paragraph("<b>📋 FORMULIR PEMBELIAN (PO)</b>", styles['Heading2']))
-    elements.append(Spacer(1, 10))
-    
-    # --- Store Information (Widened for Landscape) ---
-    store_info = [
+    elements.append(Spacer(1, 8))
+
+    # --- Store Information ---
+    store_info_data = [
         [f"Toko: {store_data['store_name']}", f"Kode: {store_data['store_code']}"],
         [f"Region: {store_data.get('region', '-')}", f"Distributor: {store_data.get('distributor_g2g', '-')}"],
-        [f"Tanggal Cetak: {datetime.now().strftime('%d %b %Y')}", "Salesman: _________________"]
+        [f"Tgl: {datetime.now().strftime('%d/%b/%Y')}", "Sales: _________________"]
     ]
-    
-    info_table = Table(store_info, colWidths=[5*inch, 5*inch])
+
+    info_table = Table(store_info_data, colWidths=[4.0 * inch, 3.5 * inch])
     info_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     elements.append(info_table)
-    elements.append(Spacer(1, 15))
-    
-    # --- Summary Metrics ---
+    elements.append(Spacer(1, 10))
+
+    # --- Summary ---
     total_out_of_stock = len(sku_data[sku_data['actual_stock'] == 0])
     total_suggested = int(sku_data['buffer_plan_ver2'].sum())
     total_value = sku_data['buffer_plan_value_ver2'].sum()
-    
-    summary_data = [
-        ["SKU HABIS", "SARAN QTY (PCS)", "EST. NILAI ORDER"],
-        [str(total_out_of_stock), str(total_suggested), f"Rp {total_value:,.0f}"]
-    ]
-    
-    summary_table = Table(summary_data, colWidths=[3.3*inch, 3.3*inch, 3.4*inch])
+
+    summary_table = Table(
+        [
+            ["SKU HABIS", "SARAN QTY", "EST. NILAI ORDER"],
+            [str(total_out_of_stock), str(total_suggested), f"Rp {total_value:,.0f}"]
+        ],
+        colWidths=[2.5 * inch] * 3
+    )
+
     summary_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#E74C3C')),
         ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#27AE60')),
@@ -357,54 +373,71 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 1), (-1, 1), 18),
+        ('FONTSIZE', (0, 1), (-1, 1), 14),
         ('GRID', (0, 0), (-1, -1), 1, colors.white),
     ]))
+
     elements.append(summary_table)
-    elements.append(Spacer(1, 20))
-    
-    # --- Product Table (9 Columns, Landscape Spacing) ---
+    elements.append(Spacer(1, 15))
+
+    # --- Product Table ---
     table_data = [
-        ["Kode", "Nama Produk", "Stok\nToko", "Prioritas\nOrder", 
-         "Prinsipal\nStok", "Distributor\nStok", "Saran\n(Qty)", "Nilai Order\n(Rp)", "Order\nAktual"]
+        ["SKU / Produk", "Stok\nToko", "SO\nBulanan",
+         "Dist.\nStok", "Saran\n(Qty)", "Nilai Order\n(Rp)", "Order\nAktual"]
     ]
-    
-    stock_date_val = sku_data['stock_date'].iloc[0] if 'stock_date' in sku_data.columns and not sku_data.empty else "-"
-    stock_date_str = stock_date_val.strftime('%d %b %Y') if isinstance(stock_date_val, datetime) else str(stock_date_val)
+
+    dist_stock_map = {
+        "Stok Tersedia": "Ada",
+        "Stok Menipis": "Menipis"
+    }
+
+    stock_date_val = sku_data['stock_date'].iloc[0] if not sku_data.empty else "-"
+    stock_date_str = (
+        stock_date_val.strftime('%d %b %Y')
+        if isinstance(stock_date_val, datetime)
+        else str(stock_date_val)
+    )
 
     for _, row in sku_data.iterrows():
-        actual_stock = 0 if pd.isna(row['actual_stock']) else int(row['actual_stock'])
-        buffer_qty = 0 if pd.isna(row['buffer_plan_ver2']) else int(row['buffer_plan_ver2'])
-        buffer_val = 0 if pd.isna(row['buffer_plan_value_ver2']) else int(row['buffer_plan_value_ver2'])
-        
-        life_cycle = str(row.get('product_life_cycle', '')).lower()
-        prinsipal_status = 'Berhenti' if 'discontinued' in life_cycle else 'Tersedia'
-        
+        buffer_qty = int(row['buffer_plan_ver2']) if not pd.isna(row['buffer_plan_ver2']) else 0
+        if buffer_qty == 0:
+            continue
+
+        actual_stock = int(row['actual_stock']) if not pd.isna(row['actual_stock']) else 0
+        buffer_val = int(row['buffer_plan_value_ver2']) if not pd.isna(row['buffer_plan_value_ver2']) else 0
+
+        prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
+        merged_product = Paragraph(
+            f"<b>{row['product_code']}</b><br/>{row['product_name']}",
+            prod_style
+        )
+
+        raw_dist_stock = str(row.get('status_stok_distributor', '-'))
+        dist_stock_display = dist_stock_map.get(raw_dist_stock, raw_dist_stock)
+
+        value_style = ParagraphStyle('ValStyle', parent=cell_style, alignment=TA_RIGHT)
+
         table_data.append([
-            str(row['product_code']),
-            Paragraph(str(row['product_name']), cell_style),
+            merged_product,
             str(actual_stock),
-            Paragraph(str(row.get('Prioritas_Pemesanan', '-')), cell_style),
-            Paragraph(prinsipal_status, cell_style),
-            Paragraph(str(row.get('status_stok_distributor', '-')), cell_style),
+            str(row.get('SO_Bulanan', '-')),
+            Paragraph(dist_stock_display, cell_style),
             str(buffer_qty),
-            f"{buffer_val:,}",
-            "_______" 
+            Paragraph(f"{buffer_val:,}", value_style),
+            "____"   # Order Aktual
         ])
-    
-    # Adjusted widths for Landscape A4 (Total ~10.5 usable inches)
+
+    # --- Column widths (Order Aktual tightened) ---
     col_widths = [
-        0.8*inch, # Kode
-        2.8*inch, # Nama Produk (much wider for readability)
-        0.7*inch, # Stok Toko
-        1.0*inch, # Prioritas
-        1.0*inch, # Prinsipal
-        0.8*inch, # Dist
-        0.8*inch, # Saran
-        1.4*inch, # Nilai
-        1.2*inch  # Order Aktual
+        2.30 * inch,  # SKU / Produk
+        0.50 * inch,  # Stok Toko
+        0.60 * inch,  # SO Bulanan
+        0.75 * inch,  # Dist. Stok
+        0.65 * inch,  # Saran Qty
+        1.20 * inch,  # Nilai Order
+        0.95 * inch   # Order Aktual (fits 4 digits neatly)
     ]
-    
+
     product_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     product_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
@@ -413,74 +446,52 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), table_font_size),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('ALIGN', (1, 1), (1, -1), 'LEFT'),
-        ('ALIGN', (7, 1), (7, -1), 'RIGHT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+
+        # Extra writing comfort for Order Aktual only
+        ('TOPPADDING', (-1, 1), (-1, -1), 8),
+        ('BOTTOMPADDING', (-1, 1), (-1, -1), 8),
+
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+         [colors.white, colors.HexColor('#F8F9FA')]),
     ]))
+
     elements.append(product_table)
-    
-    # --- KeepTogether Approval Section ---
-    footer_elements = []
-    footer_elements.append(Spacer(1, 15))
-    footer_elements.append(Paragraph(f"<b>Data stok toko terakhir diperbarui: {stock_date_str}</b>", styles['Normal']))
-    footer_elements.append(Spacer(1, 10))
-    footer_elements.append(Paragraph("Catatan: ________________________________________________________________________________________________________________________", styles['Normal']))
-    footer_elements.append(Spacer(1, 25))
-    
-    approval_data = [
-        ["Diajukan Oleh (Salesman),", "Disetujui Oleh (Store Manager),", "Diterima Oleh (Distributor),"],
-        ["", "", ""], 
-        ["", "", ""], 
-        ["( ________________________ )", "( ________________________ )", "( ________________________ )"],
-        [f"Tgl: ____/____/____", f"Tgl: ____/____/____", f"Tgl: ____/____/____"]
-    ]
-    
-    sig_table = Table(approval_data, colWidths=[3.5*inch, 3.5*inch, 3.5*inch])
-    sig_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 1), (-1, 2), 30), 
-    ]))
-    footer_elements.append(sig_table)
-    
-    elements.append(KeepTogether(footer_elements))
-    
-    # Timestamp
     elements.append(Spacer(1, 10))
-    elements.append(Paragraph(f"<i>* System Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}</i>", styles['Italic']))
-    
+    elements.append(Paragraph(
+        f"<b>Data stok toko terakhir diperbarui: {stock_date_str}</b>",
+        styles['Normal']
+    ))
+    elements.append(Spacer(1, 10))
+    elements.append(Paragraph(
+        f"<i>* System Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}</i>",
+        styles['Italic']
+    ))
+
     return elements
 
-def generate_po_pdf(store_data, sku_data, brand_name="Glad2Glow"):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
-    )
-    styles = getSampleStyleSheet()
-    elements = generate_store_page_elements(store_data, sku_data, styles, brand_name)
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
+
 
 def generate_multi_store_pdf(stores_data, df_inventory_buffer, brand_name="Glad2Glow"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=landscape(A4),
-        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
+        pagesize=portrait(A4),
+        rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25
     )
     elements = []
     styles = getSampleStyleSheet()
     
     for idx, (_, store_row) in enumerate(stores_data.iterrows()):
         store_detail = df_inventory_buffer[df_inventory_buffer['store_code'] == store_row['store_code']].copy()
+        
+        # Skip this store if total buffer_plan_ver2 is 0
+        if store_detail['buffer_plan_ver2'].sum() == 0:
+            continue
+            
         store_info = {
             'store_code': store_row['store_code'],
             'store_name': store_row['store_name'],
@@ -558,48 +569,95 @@ def get_bigquery_client():
 # ---------------------------
 # Stored Procedure Execution
 # ---------------------------
-def execute_stored_procedure():
-    """Execute the inventory buffer stored procedure"""
+# ---------------------------
+# Stored Procedure Execution
+# (REFRESH BASED ON last_updated_jkt)
+# ---------------------------
+
+def get_jkt_now():
+    """Get current time in Jakarta (timezone-aware)"""
+    return datetime.now(pytz.timezone("Asia/Jakarta"))
+
+@st.cache_data(ttl=60)
+def get_inventory_last_updated_jkt():
+    """
+    Read last_updated_jkt and correctly convert to Asia/Jakarta
+    Handles both UTC and naive datetimes safely
+    """
     client = get_bigquery_client()
     query = """
-    CALL `skintific-data-warehouse.rsa.inventory_buffer_sp`();
+        SELECT
+            MAX(last_updated_jkt) AS last_updated_jkt
+        FROM `skintific-data-warehouse.rsa.inventory_buffer`
     """
+
+    try:
+        df = client.query(query).to_dataframe()
+
+        if df.empty or pd.isna(df.loc[0, "last_updated_jkt"]):
+            return None
+
+        ts = df.loc[0, "last_updated_jkt"]
+        jkt_tz = pytz.timezone("Asia/Jakarta")
+
+        # Case 1: BigQuery returned naive datetime → ASSUME UTC
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=pytz.UTC)
+
+        # Convert to Jakarta time
+        return ts.astimezone(jkt_tz)
+
+    except Exception as e:
+        st.error(f"❌ Failed to read last_updated_jkt: {e}")
+        return None
+
+
+
+def execute_stored_procedure():
+    """Execute inventory buffer stored procedure"""
+    client = get_bigquery_client()
+    query = "CALL `skintific-data-warehouse.rsa.inventory_buffer_sp`();"
+
     try:
         job = client.query(query)
-        job.result()  # Wait for the job to complete
-        return True, datetime.now()
+        job.result()
+        return True
     except Exception as e:
-        st.error(f"Error executing stored procedure: {e}")
-        return False, None
+        st.error(f"❌ Error executing stored procedure: {e}")
+        return False
+
 
 def check_and_execute_sp():
-    """Check if stored procedure needs to be executed (every 2 hours)"""
-    # Initialize session state for last execution time
-    if 'last_sp_execution' not in st.session_state:
-        st.session_state.last_sp_execution = None
-    
-    current_time = datetime.now()
-    
-    # Check if we need to execute (first time or more than 2 hours)
-    should_execute = False
-    
-    if st.session_state.last_sp_execution is None:
-        should_execute = True
-    else:
-        time_diff = current_time - st.session_state.last_sp_execution
-        if time_diff.total_seconds() >= 7200:  # 2 hours = 7200 seconds
-            should_execute = True
-    
-    if should_execute:
-        with st.spinner("🔄 Updating inventory data..."):
-            success, exec_time = execute_stored_procedure()
-            if success:
-                st.session_state.last_sp_execution = exec_time
-                # Clear cached data to force reload
+    """
+    Auto refresh rule:
+    - Uses last_updated_jkt from inventory_buffer
+    - Refresh if data is older than 2 hours
+    """
+    now_jkt = get_jkt_now()
+    last_updated_jkt = get_inventory_last_updated_jkt()
+
+    # First-time / empty table scenario
+    if last_updated_jkt is None:
+        with st.spinner("🔄 Initializing inventory data..."):
+            if execute_stored_procedure():
                 st.cache_data.clear()
-                return exec_time
-    
-    return st.session_state.last_sp_execution
+                st.toast("Inventory initialized", icon="✅")
+                return get_inventory_last_updated_jkt()
+        return None
+
+    # Time difference
+    time_diff = now_jkt - last_updated_jkt
+    should_refresh = time_diff.total_seconds() >= 7200  # 2 hours
+
+    if should_refresh:
+        with st.spinner("🔄 Updating inventory buffer (scheduled refresh)..."):
+            if execute_stored_procedure():
+                st.cache_data.clear()
+                st.toast("Inventory refreshed", icon="✅")
+                return get_inventory_last_updated_jkt()
+
+    return last_updated_jkt
+
 
 # ---------------------------
 # Data Loading Functions
@@ -614,12 +672,14 @@ def load_store_summary():
         store_code,
         store_name,
         distributor_g2g AS distributor,
+        MAX(stock_date) stock_date,
         COUNT(product_code) AS total_skus,
         SUM(buffer_plan_ver2) AS total_buffer_qty,
         SUM(buffer_plan_value_ver2) AS est_order_value,
         SUM(actual_stock) AS current_stock_qty
     FROM `skintific-data-warehouse.rsa.inventory_buffer`
     GROUP BY region, store_code, store_name, distributor
+    HAVING SUM(buffer_plan_ver2) > 0
     """
 
     df = client.query(query).to_dataframe()
@@ -664,18 +724,17 @@ def load_inventory_buffer_data():
         buffer_plan_ver2,
         buffer_plan_value,
         buffer_plan_value_ver2,
-        Prioritas_Pemesanan
+        SO_Bulanan
     FROM `skintific-data-warehouse.rsa.inventory_buffer`
     ORDER BY 
         region,
         store_name,
-        Prioritas_Pemesanan,
+        SO_Bulanan,
         buffer_plan_value_ver2 DESC
     """
     
     df = client.query(query).to_dataframe()
     return df
-
 
 
 # ---------------------------
@@ -690,6 +749,16 @@ for key, default in {
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
+if "sp_checked" not in st.session_state:
+    st.session_state.sp_checked = False
+
+if not st.session_state.sp_checked:
+    last_exec_time = check_and_execute_sp()
+    st.session_state.sp_checked = True
+else:
+    last_exec_time = get_inventory_last_updated_jkt()
+
 
 
 
@@ -720,25 +789,34 @@ except Exception as e:
     
     st.warning("⚠️ Running in demo mode with sample data...")
     
-  
+def get_display_timestamp():
+    return last_exec_time.strftime("%d %b %Y, %H:%M WIB") if last_exec_time else "-"
+
 # ---------------------------
 # Header
 # ---------------------------
 # Format last execution time for display
 if last_exec_time:
+    # last_exec_time is already in JKT from the function above
     sync_time_str = last_exec_time.strftime("%I:%M %p")
     sync_date_str = last_exec_time.strftime("%b %d, %Y")
-    time_since_sync = datetime.now() - last_exec_time
-    hours_since = int(time_since_sync.total_seconds() / 3600)
-    minutes_since = int((time_since_sync.total_seconds() % 3600) / 60)
+    
+    # Calculate time since last sync
+    now_jkt = get_jkt_now()
+    time_since_sync = now_jkt - last_exec_time
+    
+    seconds = int(time_since_sync.total_seconds())
+    hours_since = seconds // 3600
+    minutes_since = (seconds % 3600) // 60
     
     if hours_since > 0:
-        sync_status = f"Last Sync: {sync_time_str} ({hours_since}h {minutes_since}m ago)"
+        sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
     else:
-        sync_status = f"Last Sync: {sync_time_str} ({minutes_since}m ago)"
+        sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
 else:
     sync_status = "Syncing data..."
-    sync_time_str = datetime.now().strftime("%I:%M %p")
+    sync_time_str = get_jkt_now().strftime("%I:%M %p")
+
 
 st.markdown(f"""
 <div class="main-header">
@@ -926,7 +1004,7 @@ if len(filtered_stores) > 1:
         with st.spinner(f"Sedang memproses PDF untuk {len(filtered_stores)} toko..."):
             pdf_buffer = generate_multi_store_pdf(filtered_stores, df_inventory_buffer, brand_name="Glad2Glow")
             
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+            timestamp = last_exec_time.strftime("%Y-%m-%d_%H%M_WIB")
             filename = f"PO_Bulk_{len(filtered_stores)}_Stores_{timestamp}.pdf"
             
             st.download_button(
@@ -979,7 +1057,7 @@ for i, (idx, row) in enumerate(filtered_stores.iterrows()):
         st.markdown(f'<div class="metric-group"><span class="metric-label">Branch</span><span class="metric-value">{row["region"]}</span></div>', unsafe_allow_html=True)
     
     with m2:
-        st.markdown(f'<div class="metric-group"><span class="metric-label">🗓️ Last Stock Update</span><span class="metric-value">{datetime.now().strftime("%Y-%m-%d %H:%M")}</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-group"><span class="metric-label">🗓️ Last Stock Update</span><span class="metric-value">{row["stock_date"]}</span></div>', unsafe_allow_html=True)
     
     with m3:
         st.markdown(f'<div class="metric-group"><span class="metric-label">Total SKUs</span><span class="metric-value">{int(row["total_skus"])} products</span></div>', unsafe_allow_html=True)
