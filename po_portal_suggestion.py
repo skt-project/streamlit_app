@@ -70,6 +70,27 @@ def load_po_suggestion():
 
     return df
 
+# --------------------------------------------------
+# Load PO Tracking Data
+# --------------------------------------------------
+@st.cache_data(ttl=600)
+def load_po_tracking():
+    query = """
+        SELECT
+            order_date,
+            distributor_name,
+            customer_order_no,
+            sku,
+            product_name,
+            order_qty,
+            unit_price,
+            subtotal
+        FROM `dms.gt_po_tracking_all_mv`
+        WHERE distributor_name LIKE '%KARYA ANANDA SUKSES%'
+    """
+    df = bq_client.query(query).to_dataframe()
+    df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
+    return df
 
 po_df = load_po_suggestion()
 
@@ -189,6 +210,114 @@ st.download_button(
     label="📥 Download PO Suggestion (Excel)",
     data=output,
     file_name="po_portal_suggestion.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+# ==================================================
+# PO TRACKING SECTION
+# ==================================================
+st.divider()
+st.header("📊 PO Tracking Data")
+
+tracking_df = load_po_tracking()
+
+# -------------------------
+# FILTERS
+# -------------------------
+colA, colB, colC = st.columns(3)
+
+# distributor filter
+dist_options = sorted(
+    tracking_df["distributor_name"].dropna().unique()
+)
+
+selected_dist = colA.multiselect(
+    "Distributor Name",
+    options=dist_options
+)
+
+# order filter
+order_options = sorted(
+    tracking_df["customer_order_no"].dropna().unique()
+)
+
+selected_orders = colB.multiselect(
+    "Customer Order No",
+    options=order_options
+)
+
+# date filter
+date_range = colC.date_input(
+    "Order Date",
+    value=None,
+    format="YYYY/MM/DD"
+)
+
+# -------------------------
+# APPLY FILTER
+# -------------------------
+filtered_tracking = tracking_df.copy()
+
+if selected_dist:
+    filtered_tracking = filtered_tracking[
+        filtered_tracking["distributor_name"].isin(selected_dist)
+    ]
+
+if selected_orders:
+    filtered_tracking = filtered_tracking[
+        filtered_tracking["customer_order_no"].isin(selected_orders)
+    ]
+
+if date_range:
+
+    # single date selected
+    if not isinstance(date_range, (list, tuple)):
+        start = end = pd.to_datetime(date_range)
+
+    # range selected
+    elif len(date_range) == 2:
+        start = pd.to_datetime(date_range[0])
+        end = pd.to_datetime(date_range[1])
+
+    else:
+        start = end = None
+
+    if start is not None:
+        filtered_tracking = filtered_tracking[
+            (filtered_tracking["order_date"] >= start) &
+            (filtered_tracking["order_date"] <= end)
+        ]
+
+# -------------------------
+# DISPLAY
+# -------------------------
+display_tracking = filtered_tracking.copy()
+display_tracking["order_date"] = display_tracking["order_date"].dt.date
+
+st.dataframe(
+    display_tracking,
+    use_container_width=True,
+    hide_index=True
+)
+
+# -------------------------
+# DOWNLOAD EXCEL
+# -------------------------
+tracking_output = BytesIO()
+
+with pd.ExcelWriter(tracking_output, engine="xlsxwriter") as writer:
+    display_tracking.to_excel(
+        writer,
+        index=False,
+        sheet_name="po_tracking"
+    )
+
+tracking_output.seek(0)
+
+st.download_button(
+    label="📥 Download PO Tracking (Excel)",
+    data=tracking_output,
+    file_name="po_tracking.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 

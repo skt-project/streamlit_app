@@ -18,10 +18,7 @@ Features:
 import streamlit as st
 import pandas as pd
 import pytz
-import logging
-import sys
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Tuple
 from google.oauth2 import service_account
 from google.cloud import bigquery
 from google.api_core import exceptions as google_exceptions
@@ -32,55 +29,6 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-class Config:
-    """Application configuration constants"""
-    APP_TITLE = "PO Suggestion Tool"
-    APP_ICON = "📦"
-    VERSION = "2.0.0"
-    BRAND_NAME = "Glad2Glow"
-    
-    # BigQuery Configuration
-    BQ_PROJECT = "skintific-data-warehouse"
-    BQ_DATASET = "rsa"
-    BQ_TABLE = "inventory_buffer"
-    BQ_STORED_PROC = f"`{BQ_PROJECT}.{BQ_DATASET}.inventory_buffer_sp`"
-    
-    # Timing Configuration
-    CACHE_TTL_SECONDS = 600  # 10 minutes
-    REFRESH_INTERVAL_SECONDS = 7200  # 2 hours
-    
-    # Priority Thresholds
-    PRIORITY_HIGH_THRESHOLD = 5_000_000
-    PRIORITY_MEDIUM_THRESHOLD = 2_000_000
-    
-    # Timezone
-    TIMEZONE = "Asia/Jakarta"
-
-# ============================================================================
-# LOGGING SETUP
-# ============================================================================
-
-def setup_logging():
-    """Configure application logging"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-    return logging.getLogger(__name__)
-
-logger = setup_logging()
-
-# ============================================================================
-# PAGE CONFIGURATION
-# ============================================================================
 
 st.set_page_config(
     page_title=Config.APP_TITLE,
@@ -287,81 +235,40 @@ def _load_from_local_file() -> Tuple:
     
     return credentials, project_id
 
-# ============================================================================
-# TIME UTILITIES
-# ============================================================================
+# ---------------------------
+# PDF Generation Functions (Portrait & Merged Columns)
+# ---------------------------
+def generate_po_pdf(store_info, store_detail, brand_name="Glad2Glow"):
+    buffer = io.BytesIO()
 
-def get_jkt_now() -> datetime:
-    """Get current time in Jakarta timezone"""
-    return datetime.now(pytz.timezone(Config.TIMEZONE))
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=portrait(A4),
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25
+    )
 
-def format_jkt_time(dt: datetime, format_str: str = "%d %b %Y, %H:%M WIB") -> str:
-    """Format datetime in Jakarta timezone"""
-    if dt is None:
-        return "-"
-    
-    jkt_tz = pytz.timezone(Config.TIMEZONE)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=pytz.UTC)
-    
-    dt_jkt = dt.astimezone(jkt_tz)
-    return dt_jkt.strftime(format_str)
+    styles = getSampleStyleSheet()
 
-# ============================================================================
-# PDF GENERATION FUNCTIONS
-# ============================================================================
+    elements = generate_store_page_elements(
+        store_data=store_info,
+        sku_data=store_detail,
+        styles=styles,
+        brand_name=brand_name
+    )
 
-def generate_po_pdf(
-    store_info: Dict,
-    store_detail: pd.DataFrame,
-    brand_name: str = Config.BRAND_NAME
-) -> io.BytesIO:
-    """
-    Generate PO PDF for a single store
-    
-    Args:
-        store_info: Store metadata dictionary
-        store_detail: DataFrame with product details
-        brand_name: Brand name for PDF header
-        
-    Returns:
-        BytesIO: PDF file buffer
-    """
-    try:
-        logger.info(f"Generating PDF for store: {store_info['store_code']}")
-        
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=portrait(A4),
-            rightMargin=25,
-            leftMargin=25,
-            topMargin=25,
-            bottomMargin=25
-        )
-        
-        styles = getSampleStyleSheet()
-        elements = _generate_store_page_elements(store_info, store_detail, styles, brand_name)
-        
-        doc.build(elements)
-        buffer.seek(0)
-        
-        logger.info(f"✓ PDF generated successfully for {store_info['store_code']}")
-        return buffer
-        
-    except Exception as e:
-        logger.error(f"Failed to generate PDF for {store_info.get('store_code', 'unknown')}: {str(e)}")
-        raise
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
-def _generate_store_page_elements(
-    store_data: Dict,
-    sku_data: pd.DataFrame,
-    styles,
-    brand_name: str
-) -> List:
-    """Generate PDF elements for a store page"""
+def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2Glow"):
+    """Generate PDF elements for a single store in Portrait with optimized narrow columns"""
     elements = []
-    table_font_size = 8.5
+    
+    # --- Styles ---
+    table_font_size = 8.5 # Slightly smaller to ensure 3-digit numbers and text fit comfortably
     
     # Define styles
     cell_style = ParagraphStyle(
@@ -387,14 +294,14 @@ def _generate_store_page_elements(
     elements.append(Paragraph("<b>📋 FORMULIR PEMBELIAN (PO)</b>", styles['Heading2']))
     elements.append(Spacer(1, 8))
     
-    # Store Information
+    # --- Store Information ---
     store_info_data = [
         [f"Toko: {store_data['store_name']}", f"Kode: {store_data['store_code']}"],
         [f"Region: {store_data.get('region', '-')}", f"Distributor: {store_data.get('distributor_g2g', '-')}"],
         [f"Tgl: {datetime.now().strftime('%d/%b/%Y')}", "Sales: _________________"]
     ]
     
-    info_table = Table(store_info_data, colWidths=[4.0 * inch, 3.5 * inch])
+    info_table = Table(store_info_data, colWidths=[4.0*inch, 3.5*inch])
     info_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
         ('FONTSIZE', (0, 0), (-1, -1), 10),
@@ -408,14 +315,12 @@ def _generate_store_page_elements(
     total_suggested = int(sku_data['buffer_plan_ver2'].sum())
     total_value = sku_data['buffer_plan_value_ver2'].sum()
     
-    summary_table = Table(
-        [
-            ["SKU HABIS", "SARAN QTY", "EST. NILAI ORDER"],
-            [str(total_out_of_stock), str(total_suggested), f"Rp {total_value:,.0f}"]
-        ],
-        colWidths=[2.5 * inch] * 3
-    )
+    summary_data = [
+        ["SKU HABIS", "SARAN QTY", "EST. NILAI ORDER"],
+        [str(total_out_of_stock), str(total_suggested), f"Rp {total_value:,.0f}"]
+    ]
     
+    summary_table = Table(summary_data, colWidths=[2.5*inch, 2.5*inch, 2.5*inch])
     summary_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#E74C3C')),
         ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#27AE60')),
@@ -430,10 +335,10 @@ def _generate_store_page_elements(
     elements.append(summary_table)
     elements.append(Spacer(1, 15))
     
-    # Product Table
+    # --- Product Table Header (Shortened for narrow columns) ---
     table_data = [
-        ["SKU / Produk", "Stok\nToko", "SO\nBulanan",
-         "Dist.\nStok", "Saran\n(Qty)", "Nilai Order\n(Rp)", "Order\nAktual"]
+        ["SKU / Produk", "Stok\nToko", "SO\nBln", 
+         "Prins.\nStok", "Dist.\nStok", "Saran\n(Qty)", "Nilai Order\n(Rp)", "Order\nAktual"]
     ]
     
     dist_stock_map = {
@@ -465,21 +370,42 @@ def _generate_store_page_elements(
         raw_dist_stock = str(row.get('status_stok_distributor', '-'))
         dist_stock_display = dist_stock_map.get(raw_dist_stock, raw_dist_stock)
         
+        if buffer_qty == 0:
+            continue
+        
+        # Product Column Style (Left Aligned)
+        prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
+        merged_product = Paragraph(f"<b>{row['product_code']}</b><br/>{row['product_name']}", prod_style)
+        
+        life_cycle = str(row.get('product_life_cycle', '')).lower()
+        prinsipal_status = 'Disc.' if 'discontinued' in life_cycle else 'Avail.'
+        
         value_style = ParagraphStyle('ValStyle', parent=cell_style, alignment=TA_RIGHT)
+        value_text = Paragraph(f"{buffer_val:,}", value_style)
+        
+        distributor_stock = Paragraph(str(row.get('status_stok_distributor', '-')), cell_style)
         
         table_data.append([
             merged_product,
             str(actual_stock),
             str(row.get('SO_Bulanan', '-')),
-            Paragraph(dist_stock_display, cell_style),
+            prinsipal_status,
+            distributor_stock,
             str(buffer_qty),
-            Paragraph(f"{buffer_val:,}", value_style),
-            "____"
+            value_text,
+            "____" 
         ])
     
+    # --- COLUMN WIDTHS (A4 Portrait = ~7.5 inches usable) ---
     col_widths = [
-        2.30 * inch, 0.50 * inch, 0.60 * inch, 0.75 * inch,
-        0.65 * inch, 1.20 * inch, 0.95 * inch
+        2.10 * inch, # SKU / Produk
+        0.45 * inch, # Stok Toko (Narrow)
+        0.45 * inch, # SO Bln (Narrow)
+        0.60 * inch, # Prins. Stok
+        0.60 * inch, # Dist. Stok
+        0.60 * inch, # Saran (Qty)
+        1.20 * inch, # Nilai Order
+        1.50 * inch  # Order Aktual (Widest for handwriting)
     ]
     
     product_table = Table(table_data, colWidths=col_widths, repeatRows=1)
@@ -494,13 +420,16 @@ def _generate_store_page_elements(
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('TOPPADDING', (-1, 1), (-1, -1), 8),
-        ('BOTTOMPADDING', (-1, 1), (-1, -1), 8),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1),
-         [colors.white, colors.HexColor('#F8F9FA')]),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
     ]))
-    
     elements.append(product_table)
+    
+    # --- Footer ---
+    footer_elements = []
+    footer_elements.append(Spacer(1, 10))
+    footer_elements.append(Paragraph(f"<b>Data stok toko terakhir diperbarui: {stock_date_str}</b>", styles['Normal']))
+    elements.append(KeepTogether(footer_elements))
+    
     elements.append(Spacer(1, 10))
     elements.append(Paragraph(
         f"<b>Data stok toko terakhir diperbarui: {stock_date_str}</b>",
@@ -514,168 +443,193 @@ def _generate_store_page_elements(
     
     return elements
 
-def generate_multi_store_pdf(
-    stores_data: pd.DataFrame,
-    df_inventory_buffer: pd.DataFrame,
-    brand_name: str = Config.BRAND_NAME
-) -> io.BytesIO:
-    """
-    Generate combined PDF for multiple stores
+def generate_multi_store_pdf(stores_data, df_inventory_buffer, brand_name="Glad2Glow"):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=portrait(A4),
+        rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25
+    )
+    elements = []
+    styles = getSampleStyleSheet()
     
-    Args:
-        stores_data: DataFrame with store summary data
-        df_inventory_buffer: DataFrame with inventory details
-        brand_name: Brand name for PDF header
+    for idx, (_, store_row) in enumerate(stores_data.iterrows()):
+        store_detail = df_inventory_buffer[df_inventory_buffer['store_code'] == store_row['store_code']].copy()
         
-    Returns:
-        BytesIO: Combined PDF file buffer
-    """
-    try:
-        logger.info(f"Generating multi-store PDF for {len(stores_data)} stores")
-        
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=portrait(A4),
-            rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25
-        )
-        elements = []
-        styles = getSampleStyleSheet()
-        
-        stores_included = 0
-        for idx, (_, store_row) in enumerate(stores_data.iterrows()):
-            store_detail = df_inventory_buffer[
-                df_inventory_buffer['store_code'] == store_row['store_code']
-            ].copy()
+        # Skip this store if total buffer_plan_ver2 is 0
+        if store_detail['buffer_plan_ver2'].sum() == 0:
+            continue
             
-            if store_detail['buffer_plan_ver2'].sum() == 0:
-                continue
-            
-            store_info = {
-                'store_code': store_row['store_code'],
-                'store_name': store_row['store_name'],
-                'distributor_g2g': store_row.get('distributor', '-'),
-                'region': store_row.get('region', '-'),
-            }
-            
-            store_elements = _generate_store_page_elements(store_info, store_detail, styles, brand_name)
-            elements.extend(store_elements)
-            
-            if stores_included < len(stores_data) - 1:
-                elements.append(PageBreak())
-            
-            stores_included += 1
-        
-        doc.build(elements)
-        buffer.seek(0)
-        
-        logger.info(f"✓ Multi-store PDF generated successfully ({stores_included} stores)")
-        return buffer
-        
-    except Exception as e:
-        logger.error(f"Failed to generate multi-store PDF: {str(e)}")
-        raise
+        store_info = {
+            'store_code': store_row['store_code'],
+            'store_name': store_row['store_name'],
+            'distributor_g2g': store_row.get('distributor', '-'),
+            'region': store_row.get('region', '-'),
+        }
+        store_elements = generate_store_page_elements(store_info, store_detail, styles, brand_name)
+        elements.extend(store_elements)
+        if idx < len(stores_data) - 1:
+            elements.append(PageBreak())
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
-# ============================================================================
-# DATA LOADING FUNCTIONS
-# ============================================================================
+# ---------------------------
+# BigQuery Setup
+# ---------------------------
+@st.cache_resource
+def get_bigquery_client():
+    """Initialize BigQuery client with credentials"""
+    try:
+        # Try Streamlit secrets first (for cloud deployment)
+        gcp_secrets = st.secrets["connections"]["bigquery"]
+        if "private_key" in gcp_secrets:
+            gcp_secrets = dict(gcp_secrets)
+            gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
+        credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
+        project_id = gcp_secrets.get("project_id") or st.secrets["bigquery"].get("project")
+        return bigquery.Client(credentials=credentials, project=project_id)
+    except Exception as e1:
+        try:
+            # Try alternative Streamlit secrets structure
+            gcp_secrets = st.secrets["bigquery"]
+            if "private_key" in gcp_secrets:
+                gcp_secrets = dict(gcp_secrets)
+                gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
+            credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
+            project_id = gcp_secrets.get("project_id") or gcp_secrets.get("project")
+            return bigquery.Client(credentials=credentials, project=project_id)
+        except Exception as e2:
+            try:
+                # Fallback to local credentials file
+                credentials_path = "skintific-data-warehouse-ea77119e2e7a.json"
+                
+                import os
+                if not os.path.exists(credentials_path):
+                    possible_paths = [
+                        r"D:\script\skintific-data-warehouse-ea77119e2e7a.json",
+                        r"C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json",
+                        "credentials.json",
+                        "../credentials.json"
+                    ]
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            credentials_path = path
+                            break
+                
+                credentials = service_account.Credentials.from_service_account_file(credentials_path)
+                project_id = "skintific-data-warehouse"
+                return bigquery.Client(credentials=credentials, project=project_id)
+            except Exception as e3:
+                error_msg = f"""
+                Failed to initialize BigQuery client. Tried:
+                1. Streamlit secrets (connections.bigquery): {str(e1)[:100]}
+                2. Streamlit secrets (bigquery): {str(e2)[:100]}
+                3. Local credentials file: {str(e3)[:100]}
+                
+                Please ensure either:
+                - .streamlit/secrets.toml is configured with BigQuery credentials
+                - Local credentials JSON file exists in the project directory
+                """
+                raise RuntimeError(error_msg)
+
+# ---------------------------
+# Stored Procedure Execution
+# ---------------------------
+# ---------------------------
+# Stored Procedure Execution
+# (REFRESH BASED ON last_updated_jkt)
+# ---------------------------
+
+def get_jkt_now():
+    """Get current time in Jakarta (timezone-aware)"""
+    return datetime.now(pytz.timezone("Asia/Jakarta"))
 
 @st.cache_data(ttl=60)
-def get_inventory_last_updated_jkt() -> Optional[datetime]:
+def get_inventory_last_updated_jkt():
     """
-    Get last update timestamp from inventory buffer table
-    
-    Returns:
-        datetime: Last update time in Jakarta timezone, or None if unavailable
+    Read last_updated_jkt and correctly convert to Asia/Jakarta
+    Handles both UTC and naive datetimes safely
     """
+    client = get_bigquery_client()
+    query = """
+        SELECT
+            MAX(last_updated_jkt) AS last_updated_jkt
+        FROM `skintific-data-warehouse.rsa.inventory_buffer`
+    """
+
     try:
-        client = get_bigquery_client()
-        query = f"""
-            SELECT MAX(last_updated_jkt) AS last_updated_jkt
-            FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
-        """
-        
         df = client.query(query).to_dataframe()
-        
+
         if df.empty or pd.isna(df.loc[0, "last_updated_jkt"]):
-            logger.warning("No last_updated_jkt value found in database")
             return None
-        
+
         ts = df.loc[0, "last_updated_jkt"]
-        jkt_tz = pytz.timezone(Config.TIMEZONE)
-        
-        # Handle naive datetime (assume UTC)
+        jkt_tz = pytz.timezone("Asia/Jakarta")
+
+        # Case 1: BigQuery returned naive datetime → ASSUME UTC
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=pytz.UTC)
-        
-        result = ts.astimezone(jkt_tz)
-        logger.info(f"Last inventory update: {format_jkt_time(result)}")
-        return result
-        
+
+        # Convert to Jakarta time
+        return ts.astimezone(jkt_tz)
+
     except Exception as e:
-        logger.error(f"Failed to get last_updated_jkt: {str(e)}")
+        st.error(f"❌ Failed to read last_updated_jkt: {e}")
         return None
 
-def execute_stored_procedure() -> bool:
-    """
-    Execute inventory buffer stored procedure
-    
-    Returns:
-        bool: True if successful, False otherwise
-    """
+
+
+def execute_stored_procedure():
+    """Execute inventory buffer stored procedure"""
+    client = get_bigquery_client()
+    query = "CALL `skintific-data-warehouse.rsa.inventory_buffer_sp`();"
+
     try:
         logger.info("Executing stored procedure...")
         client = get_bigquery_client()
         query = f"CALL {Config.BQ_STORED_PROC}();"
         
         job = client.query(query)
-        job.result()  # Wait for completion
-        
-        logger.info("✓ Stored procedure executed successfully")
+        job.result()
         return True
-        
-    except google_exceptions.GoogleAPIError as e:
-        logger.error(f"BigQuery API error during stored procedure execution: {str(e)}")
-        st.error(f"❌ Database error: {str(e)}")
-        return False
     except Exception as e:
-        logger.error(f"Unexpected error executing stored procedure: {str(e)}")
-        st.error(f"❌ Error executing stored procedure: {str(e)}")
+        st.error(f"❌ Error executing stored procedure: {e}")
         return False
 
-def check_and_execute_sp() -> Optional[datetime]:
+
+def check_and_execute_sp():
     """
-    Check if stored procedure needs to run and execute if necessary
-    
-    Returns:
-        datetime: Last update timestamp after check/execution
+    Auto refresh rule:
+    - Uses last_updated_jkt from inventory_buffer
+    - Refresh if data is older than 2 hours
     """
     now_jkt = get_jkt_now()
     last_updated_jkt = get_inventory_last_updated_jkt()
-    
-    # First-time initialization
+
+    # First-time / empty table scenario
     if last_updated_jkt is None:
-        logger.info("First-time initialization detected")
         with st.spinner("🔄 Initializing inventory data..."):
             if execute_stored_procedure():
                 st.cache_data.clear()
                 st.toast("Inventory initialized", icon="✅")
                 return get_inventory_last_updated_jkt()
         return None
-    
-    # Check if refresh needed
+
+    # Time difference
     time_diff = now_jkt - last_updated_jkt
-    should_refresh = time_diff.total_seconds() >= Config.REFRESH_INTERVAL_SECONDS
-    
+    should_refresh = time_diff.total_seconds() >= 7200  # 2 hours
+
     if should_refresh:
-        logger.info(f"Auto-refresh triggered (last update: {format_jkt_time(last_updated_jkt)})")
         with st.spinner("🔄 Updating inventory buffer (scheduled refresh)..."):
             if execute_stored_procedure():
                 st.cache_data.clear()
                 st.toast("Inventory refreshed", icon="✅")
                 return get_inventory_last_updated_jkt()
-    
+
     return last_updated_jkt
+
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
@@ -701,22 +655,18 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         GROUP BY store_code
     )
     SELECT
-        ib.store_code,
-        ANY_VALUE(ib.store_name) AS store_name,
-        ANY_VALUE(ib.region) AS region,
-        ANY_VALUE(ib.distributor_g2g) AS distributor,
-        ls.latest_stock_date AS stock_date,
-        COUNT(DISTINCT ib.product_code) AS total_skus,
-        SUM(ib.buffer_plan_ver2) AS total_buffer_qty,
-        SUM(ib.buffer_plan_value_ver2) AS est_order_value
-    FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
-    JOIN latest_stock ls
-      ON ib.store_code = ls.store_code
-     AND ib.stock_date = ls.latest_stock_date
-    {where_sql}
-    GROUP BY ib.store_code, ls.latest_stock_date
-    HAVING total_buffer_qty > 0
-    ORDER BY est_order_value DESC
+        region,
+        store_code,
+        store_name,
+        distributor_g2g AS distributor,
+        stock_date,
+        COUNT(product_code) AS total_skus,
+        SUM(buffer_plan_ver2) AS total_buffer_qty,
+        SUM(buffer_plan_value_ver2) AS est_order_value,
+        SUM(actual_stock) AS current_stock_qty
+    FROM `skintific-data-warehouse.rsa.inventory_buffer`
+    GROUP BY region, store_code, store_name, distributor, stock_date
+    HAVING SUM(buffer_plan_ver2) > 0
     """
 
     df = client.query(query).to_dataframe()
@@ -745,11 +695,38 @@ def load_inventory_buffer_data() -> pd.DataFrame:
     """
     Load full inventory buffer data from BigQuery
     
-    Returns:
-        pd.DataFrame: Complete inventory buffer data
-        
-    Raises:
-        Exception: If query fails
+    query = """
+    SELECT 
+        store_code,
+        product_code,
+        product_life_cycle,
+        assortment,
+        inner_pcs,
+        price_for_store,
+        product_name,
+        actual_stock,
+        stock_date,
+        avg_daily_qty,
+        days_of_inventory,
+        standard_doi,
+        id_st,
+        distributor_g2g,
+        region,
+        store_name,
+        address,
+        stok_distributor,
+        status_stok_distributor,
+        buffer_plan,
+        buffer_plan_ver2,
+        buffer_plan_value,
+        buffer_plan_value_ver2,
+        SO_Bulanan
+    FROM `skintific-data-warehouse.rsa.inventory_buffer`
+    ORDER BY 
+        region,
+        store_name,
+        SO_Bulanan,
+        buffer_plan_value_ver2 DESC
     """
     try:
         logger.info("Loading inventory buffer data...")
@@ -801,110 +778,98 @@ def init_session_state():
 
 init_session_state()
 
-# ============================================================================
-# MAIN APPLICATION
-# ============================================================================
+# ---------------------------
+# Session State Init (Cascading Filters)
+# ---------------------------
+for key, default in {
+    "prev_region": None,
+    "prev_distributor": None,
+    "region_select": "All",
+    "distributor_select": "All",
+    "store_select": [],
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-def main():
-    """Main application entry point"""
+if "sp_checked" not in st.session_state:
+    st.session_state.sp_checked = False
+
+if not st.session_state.sp_checked:
+    last_exec_time = check_and_execute_sp()
+    st.session_state.sp_checked = True
+else:
+    last_exec_time = get_inventory_last_updated_jkt()
+
+
+
+
+# ---------------------------
+# Load Data
+# ---------------------------
+df_inventory_buffer = None
+df_store_summary = None
+df_master_store = None
+
+# Execute stored procedure if needed (every 2 hours)
+last_exec_time = check_and_execute_sp()
+
+try:
+    with st.spinner("🔄 Loading data from BigQuery..."):
+        df_store_summary = load_store_summary()
+        df_master_store = df_store_summary
+        df_inventory_buffer = load_inventory_buffer_data()
+
+except Exception as e:
+    st.error(f"❌ Error loading data: {e}")
+    st.info("💡 Make sure the stored procedure has been executed and credentials are configured correctly.")
     
-    # Check and execute stored procedure if needed
-    if not st.session_state.sp_checked:
-        last_exec_time = check_and_execute_sp()
-        st.session_state.sp_checked = True
+    with st.expander("🔍 Debug Information"):
+        st.code(str(e))
+        import traceback
+        st.code(traceback.format_exc())
+    
+    st.warning("⚠️ Running in demo mode with sample data...")
+    
+def get_display_timestamp():
+    return last_exec_time.strftime("%d %b %Y, %H:%M WIB") if last_exec_time else "-"
+
+# ---------------------------
+# Header
+# ---------------------------
+# Format last execution time for display
+if last_exec_time:
+    # last_exec_time is already in JKT from the function above
+    sync_time_str = last_exec_time.strftime("%I:%M %p")
+    sync_date_str = last_exec_time.strftime("%b %d, %Y")
+    
+    # Calculate time since last sync
+    now_jkt = get_jkt_now()
+    time_since_sync = now_jkt - last_exec_time
+    
+    seconds = int(time_since_sync.total_seconds())
+    hours_since = seconds // 3600
+    minutes_since = (seconds % 3600) // 60
+    
+    if hours_since > 0:
+        sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
     else:
-        last_exec_time = get_inventory_last_updated_jkt()
-    
-    # Load data
-    try:
-        with st.spinner("🔄 Loading data from BigQuery..."):
-            df_store_summary = load_store_summary_filtered(
-                selected_region,
-                selected_distributor
-            )
-            df_inventory_buffer = load_inventory_buffer_data()
-            
-    except Exception as e:
-        st.error(f"❌ Error loading data: {str(e)}")
-        st.info("💡 Please check your BigQuery connection and credentials.")
-        
-        with st.expander("🔍 Debug Information"):
-            st.code(str(e))
-            import traceback
-            st.code(traceback.format_exc())
-        
-        logger.error(f"Application stopped due to data loading error: {str(e)}")
-        st.stop()
-    
-    # Render header
-    render_header(last_exec_time)
-    
-    # Safety check
-    if df_store_summary is None or df_inventory_buffer is None:
-        st.error("❌ No data available. Please check your BigQuery connection.")
-        st.stop()
-    
-    # Render filters and get selections
-    selected_region, selected_distributor, selected_stores = render_filters(
-        df_inventory_buffer
-    )
-    
-    # Filter data
-    filtered_stores = (
-    filtered_stores
-    .sort_values("est_order_value", ascending=False)
-    .drop_duplicates(subset=["store_code"], keep="first")
-    )
+        sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
+else:
+    sync_status = "Syncing data..."
+    sync_time_str = get_jkt_now().strftime("%I:%M %p")
 
-    
-    # Render bulk download section
-    if len(filtered_stores) > 1:
-        render_bulk_download(filtered_stores, df_inventory_buffer, last_exec_time)
-    
-    # Show active filters
-    render_active_filters(selected_distributor, selected_stores)
-    
-    # Render store list
-    render_store_list(filtered_stores, df_inventory_buffer)
-    
-    # Render footer
-    render_footer()
 
-# ============================================================================
-# UI RENDERING FUNCTIONS
-# ============================================================================
-
-def render_header(last_exec_time: Optional[datetime]):
-    """Render application header with sync status"""
-    if last_exec_time:
-        sync_time_str = last_exec_time.strftime("%I:%M %p")
-        now_jkt = get_jkt_now()
-        time_since_sync = now_jkt - last_exec_time
-        
-        seconds = int(time_since_sync.total_seconds())
-        hours_since = seconds // 3600
-        minutes_since = (seconds % 3600) // 60
-        
-        if hours_since > 0:
-            sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
-        else:
-            sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
-    else:
-        sync_status = "Syncing data..."
-    
-    st.markdown(f"""
-    <div class="main-header">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-            <div>
-                <h1>{Config.APP_ICON} {Config.APP_TITLE}</h1>
-                <p>Data-Driven Purchase Order Recommendations (Inventory Buffer)</p>
-                <p style="font-size: 0.75rem; opacity: 0.8; margin-top: 0.5rem;">v{Config.VERSION}</p>
-            </div>
-            <div style="text-align: right;">
-                <div class="sync-status">
-                    <span class="sync-dot"></span>
-                    <span>{sync_status}</span>
-                </div>
+st.markdown(f"""
+<div class="main-header">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <h1>📦 PO Suggestion Tool</h1>
+            <p>Data-Driven Purchase Order Recommendations (Inventory Buffer)</p>
+        </div>
+        <div style="text-align: right;">
+            <div class="sync-status">
+                <span class="sync-dot"></span>
+                <span>{sync_status}</span>
             </div>
         </div>
     </div>
@@ -1081,39 +1046,27 @@ def render_bulk_download(
         type="primary"
     ):
         with st.spinner(f"Sedang memproses PDF untuk {len(filtered_stores)} toko..."):
-            try:
-                pdf_buffer = generate_multi_store_pdf(
-                    filtered_stores,
-                    df_inventory_buffer,
-                    brand_name=Config.BRAND_NAME
-                )
-                
-                timestamp = format_jkt_time(last_exec_time or get_jkt_now(), "%Y-%m-%d_%H%M_WIB")
-                filename = f"PO_Bulk_{len(filtered_stores)}_Stores_{timestamp}.pdf"
-                
-                st.download_button(
-                    label=f"📥 Klik di Sini untuk Mengunduh PDF ({len(filtered_stores)} Toko)",
-                    data=pdf_buffer,
-                    file_name=filename,
-                    mime="application/pdf",
-                    key="dl_multi_pdf",
-                    use_container_width=True
-                )
-                
-                logger.info(f"Bulk PDF generated: {filename}")
-                
-            except Exception as e:
-                st.error(f"❌ Failed to generate bulk PDF: {str(e)}")
-                logger.error(f"Bulk PDF generation failed: {str(e)}")
-    
+            pdf_buffer = generate_multi_store_pdf(filtered_stores, df_inventory_buffer, brand_name="Glad2Glow")
+            
+            timestamp = last_exec_time.strftime("%Y-%m-%d_%H%M_WIB")
+            filename = f"PO_Bulk_{len(filtered_stores)}_Stores_{timestamp}.pdf"
+            
+            st.download_button(
+                label=f"📥 Klik di Sini untuk Mengunduh PDF ({len(filtered_stores)} Toko)",
+                data=pdf_buffer,
+                file_name=filename,
+                mime="application/pdf",
+                key="dl_multi_pdf",
+                use_container_width=True
+            )
     st.markdown("---")
 
 def render_active_filters(selected_distributor: str, selected_stores: List[str]):
     """Render active filters display"""
     active_filters = []
     
-    if selected_distributor != "All":
-        active_filters.append(f"🏪 {selected_distributor}")
+    with m2:
+        st.markdown(f'<div class="metric-group"><span class="metric-label">🗓️ Last Stock Update</span><span class="metric-value">{row["stock_date"]}</span></div>', unsafe_allow_html=True)
     
     if selected_stores:
         active_filters.append(f"🎯 {len(selected_stores)} specific store(s)")
@@ -1252,16 +1205,13 @@ def render_footer():
     </div>
     """, unsafe_allow_html=True)
 
-# ============================================================================
-# APPLICATION ENTRY POINT
-# ============================================================================
-
-if __name__ == "__main__":
-    try:
-        logger.info(f"Starting {Config.APP_TITLE} v{Config.VERSION}")
-        main()
-        logger.info("Application rendered successfully")
-    except Exception as e:
-        logger.critical(f"Critical application error: {str(e)}", exc_info=True)
-        st.error(f"❌ Critical Error: {str(e)}")
-        st.info("Please contact support if this issue persists.")
+# ---------------------------
+# Footer
+# ---------------------------
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #94a3b8; font-size: 0.85rem; padding: 1rem;">
+    💡 PO suggestions are automatically calculated based on 2-month sales data, DOI standards, and stock levels<br>
+    📊 Data source: <code>skintific-data-warehouse.rsa.inventory_buffer</code>
+</div>
+""", unsafe_allow_html=True)
