@@ -678,10 +678,8 @@ def check_and_execute_sp() -> Optional[datetime]:
     return last_updated_jkt
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
-def load_store_summary_filtered(
-    selected_region: str = "All",
-    selected_distributor: str = "All"
-) -> pd.DataFrame:
+@st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
+def load_store_summary_filtered(selected_region="All", selected_distributor="All") -> pd.DataFrame:
     client = get_bigquery_client()
 
     filters = []
@@ -695,18 +693,28 @@ def load_store_summary_filtered(
         where_sql = "WHERE " + " AND ".join(filters)
 
     query = f"""
+    WITH latest_stock AS (
+        SELECT
+            store_code,
+            MAX(stock_date) AS latest_stock_date
+        FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
+        GROUP BY store_code
+    )
     SELECT
-        store_code,
-        ANY_VALUE(region) AS region,
-        ANY_VALUE(store_name) AS store_name,
-        ANY_VALUE(distributor_g2g) AS distributor,
-        MAX(stock_date) AS stock_date,
-        COUNT(DISTINCT product_code) AS total_skus,
-        SUM(buffer_plan_ver2) AS total_buffer_qty,
-        SUM(buffer_plan_value_ver2) AS est_order_value
-    FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
+        ib.store_code,
+        ANY_VALUE(ib.store_name) AS store_name,
+        ANY_VALUE(ib.region) AS region,
+        ANY_VALUE(ib.distributor_g2g) AS distributor,
+        ls.latest_stock_date AS stock_date,
+        COUNT(DISTINCT ib.product_code) AS total_skus,
+        SUM(ib.buffer_plan_ver2) AS total_buffer_qty,
+        SUM(ib.buffer_plan_value_ver2) AS est_order_value
+    FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
+    JOIN latest_stock ls
+      ON ib.store_code = ls.store_code
+     AND ib.stock_date = ls.latest_stock_date
     {where_sql}
-    GROUP BY store_code
+    GROUP BY ib.store_code, ls.latest_stock_date
     HAVING total_buffer_qty > 0
     ORDER BY est_order_value DESC
     """
@@ -722,6 +730,7 @@ def load_store_summary_filtered(
 
     df["priority"] = df["est_order_value"].apply(classify_priority)
     return df
+
 
         
     # except google_exceptions.GoogleAPIError as e:
