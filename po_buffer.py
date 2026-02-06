@@ -841,12 +841,12 @@ def main():
     )
     
     # Filter data
-    filtered_stores = apply_filters(
-        df_store_summary,
-        selected_region,
-        selected_distributor,
-        selected_stores
+    filtered_stores = (
+    filtered_stores
+    .sort_values("est_order_value", ascending=False)
+    .drop_duplicates(subset=["store_code"], keep="first")
     )
+
     
     # Render bulk download section
     if len(filtered_stores) > 1:
@@ -962,7 +962,23 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
             df_filtered_stores["distributor_g2g"] == selected_distributor
         ]
     
-    store_options = sorted(df_filtered_stores["store_name"].dropna().unique())
+    store_options = (
+    df_filtered_stores[["store_code", "store_name"]]
+    .drop_duplicates()
+    .assign(label=lambda x: x["store_code"] + " - " + x["store_name"])
+    .sort_values("label")
+    )
+
+    selected_stores = st.multiselect(
+        "Store Selection",
+        options=store_options["store_code"].tolist(),
+        format_func=lambda x: store_options.set_index("store_code").loc[x, "label"],
+        default=st.session_state.store_select,
+        placeholder="Select one or more stores…",
+        label_visibility="collapsed",
+        key="store_select"
+    )
+
     
     # Store selection header with buttons
     title_col, btn_col1, btn_col2 = st.columns([6, 1.2, 1], gap="small")
@@ -1001,38 +1017,29 @@ def apply_filters(
     selected_distributor: str,
     selected_stores: List[str]
 ) -> pd.DataFrame:
-    """
-    Apply filters to store summary data
-    
-    Args:
-        df_store_summary: Store summary DataFrame
-        selected_region: Selected region filter
-        selected_distributor: Selected distributor filter
-        selected_stores: List of selected store names
-        
-    Returns:
-        pd.DataFrame: Filtered and sorted store data
-    """
     filtered = df_store_summary.copy()
-    
+
     if selected_region != "All":
         filtered = filtered[filtered["region"] == selected_region]
-    
+
     if selected_distributor != "All":
         filtered = filtered[filtered["distributor"] == selected_distributor]
-    
+
     if selected_stores:
-        filtered = filtered[filtered["store_name"].isin(selected_stores)]
-    
-    # Sort by priority and order value
+        filtered = filtered[filtered["store_code"].isin(selected_stores)]
+
     priority_order = {"High": 0, "Medium": 1, "Low": 2}
     filtered["priority_rank"] = filtered["priority"].map(priority_order)
-    filtered = filtered.sort_values(
-        by=["priority_rank", "est_order_value"],
-        ascending=[True, False]
-    ).drop(columns="priority_rank")
-    
+
+    filtered = (
+        filtered
+        .sort_values(["priority_rank", "est_order_value"], ascending=[True, False])
+        .drop_duplicates(subset=["store_code"])
+        .drop(columns="priority_rank")
+    )
+
     return filtered
+
 
 def render_bulk_download(
     filtered_stores: pd.DataFrame,
@@ -1133,8 +1140,15 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
         """, unsafe_allow_html=True)
         return
     
-    for idx, row in filtered_stores.iterrows():
-        unique_key = row['store_code']
+    filtered_stores = (
+        filtered_stores
+        .sort_values("est_order_value", ascending=False)
+        .drop_duplicates(subset=["store_code"], keep="first")
+    )
+
+    for _, row in filtered_stores.iterrows():
+        unique_key = row["store_code"]
+
         
         # Store header
         st.markdown(f"""
