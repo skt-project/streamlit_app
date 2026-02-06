@@ -987,6 +987,8 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
         label_visibility="collapsed",
         key="store_select"
     )
+    
+    return selected_region, selected_distributor, selected_stores
 
     
     # Store selection header with buttons
