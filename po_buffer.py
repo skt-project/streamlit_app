@@ -806,69 +806,56 @@ init_session_state()
 # ============================================================================
 
 def main():
-    """Main application entry point"""
-    
     # Check and execute stored procedure if needed
     if not st.session_state.sp_checked:
         last_exec_time = check_and_execute_sp()
         st.session_state.sp_checked = True
     else:
         last_exec_time = get_inventory_last_updated_jkt()
-    
-    # Load data
+
     try:
         with st.spinner("🔄 Loading data from BigQuery..."):
-            df_store_summary = load_store_summary_filtered(
-                selected_region,
-                selected_distributor
-            )
+            # 1️⃣ Load base inventory data FIRST
             df_inventory_buffer = load_inventory_buffer_data()
-            
+
     except Exception as e:
-        st.error(f"❌ Error loading data: {str(e)}")
-        st.info("💡 Please check your BigQuery connection and credentials.")
-        
-        with st.expander("🔍 Debug Information"):
-            st.code(str(e))
-            import traceback
-            st.code(traceback.format_exc())
-        
-        logger.error(f"Application stopped due to data loading error: {str(e)}")
+        st.error(f"❌ Error loading inventory data: {str(e)}")
         st.stop()
-    
-    # Render header
+
+    # Header
     render_header(last_exec_time)
-    
-    # Safety check
-    if df_store_summary is None or df_inventory_buffer is None:
-        st.error("❌ No data available. Please check your BigQuery connection.")
-        st.stop()
-    
-    # Render filters and get selections
+
+    # 2️⃣ Render filters → NOW variables exist
     selected_region, selected_distributor, selected_stores = render_filters(
         df_inventory_buffer
     )
-    
-    # Filter data
-    filtered_stores = (
-    filtered_stores
-    .sort_values("est_order_value", ascending=False)
-    .drop_duplicates(subset=["store_code"], keep="first")
+
+    try:
+        # 3️⃣ Load store summary using selected filters
+        df_store_summary = load_store_summary_filtered(
+            selected_region,
+            selected_distributor
+        )
+    except Exception as e:
+        st.error(f"❌ Error loading store summary: {str(e)}")
+        st.stop()
+
+    # 4️⃣ Apply store-level filters
+    filtered_stores = apply_filters(
+        df_store_summary,
+        selected_region,
+        selected_distributor,
+        selected_stores
     )
 
-    
-    # Render bulk download section
+    # Bulk download
     if len(filtered_stores) > 1:
         render_bulk_download(filtered_stores, df_inventory_buffer, last_exec_time)
-    
-    # Show active filters
+
     render_active_filters(selected_distributor, selected_stores)
-    
-    # Render store list
     render_store_list(filtered_stores, df_inventory_buffer)
-    
-    # Render footer
     render_footer()
+
 
 # ============================================================================
 # UI RENDERING FUNCTIONS
@@ -1149,11 +1136,11 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
         """, unsafe_allow_html=True)
         return
     
-    filtered_stores = (
-        filtered_stores
-        .sort_values("est_order_value", ascending=False)
-        .drop_duplicates(subset=["store_code"], keep="first")
-    )
+    # filtered_stores = (
+    #     filtered_stores
+    #     .sort_values("est_order_value", ascending=False)
+    #     .drop_duplicates(subset=["store_code"], keep="first")
+    # )
 
     for _, row in filtered_stores.iterrows():
         unique_key = row["store_code"]
