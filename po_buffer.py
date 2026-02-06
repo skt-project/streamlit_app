@@ -1,26 +1,101 @@
+"""
+PO Suggestion Tool - Production Release
+========================================
+Version: 2.0.0
+Last Updated: 2024-02-06
+
+A production-ready Streamlit application for generating Purchase Order suggestions
+based on inventory buffer analysis from BigQuery.
+
+Features:
+- Automated inventory refresh (2-hour intervals)
+- Multi-store PDF generation
+- Advanced filtering and selection
+- Real-time data synchronization
+- Comprehensive error handling and logging
+"""
+
 import streamlit as st
 import pandas as pd
 import pytz
+import logging
+import sys
 from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Tuple
 from google.oauth2 import service_account
 from google.cloud import bigquery
+from google.api_core import exceptions as google_exceptions
 import io
-from reportlab.lib.pagesizes import A4, portrait, landscape
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak, KeepTogether
+from reportlab.lib.pagesizes import A4, portrait
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
-# Page config
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+class Config:
+    """Application configuration constants"""
+    APP_TITLE = "PO Suggestion Tool"
+    APP_ICON = "📦"
+    VERSION = "2.0.0"
+    BRAND_NAME = "Glad2Glow"
+    
+    # BigQuery Configuration
+    BQ_PROJECT = "skintific-data-warehouse"
+    BQ_DATASET = "rsa"
+    BQ_TABLE = "inventory_buffer"
+    BQ_STORED_PROC = f"`{BQ_PROJECT}.{BQ_DATASET}.inventory_buffer_sp`"
+    
+    # Timing Configuration
+    CACHE_TTL_SECONDS = 600  # 10 minutes
+    REFRESH_INTERVAL_SECONDS = 7200  # 2 hours
+    
+    # Priority Thresholds
+    PRIORITY_HIGH_THRESHOLD = 5_000_000
+    PRIORITY_MEDIUM_THRESHOLD = 2_000_000
+    
+    # Timezone
+    TIMEZONE = "Asia/Jakarta"
+
+# ============================================================================
+# LOGGING SETUP
+# ============================================================================
+
+def setup_logging():
+    """Configure application logging"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
+
+# ============================================================================
+# PAGE CONFIGURATION
+# ============================================================================
+
 st.set_page_config(
-    page_title="PO Suggestion Tool",
-    page_icon="📦",
-    layout="wide"
+    page_title=Config.APP_TITLE,
+    page_icon=Config.APP_ICON,
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for styling
-st.markdown("""
+# ============================================================================
+# CUSTOM CSS (Consolidated)
+# ============================================================================
+
+def load_custom_css():
+    """Load custom CSS styling"""
+    st.markdown("""
 <style>
     /* Hide default streamlit elements */
     #MainMenu {visibility: hidden;}
@@ -70,27 +145,6 @@ st.markdown("""
         gap: 0.5rem;
     }
     
-    /* Horizontal Store Card Layout */
-    .store-card-horizontal {
-        background: #0b1220;
-        padding: 1rem 1.5rem;
-        border-bottom: 1px solid #1e293b;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .store-main-info {
-        flex: 2;
-    }
-
-    .store-metrics {
-        flex: 3;
-        display: flex;
-        justify-content: space-around;
-        align-items: center;
-    }
-
     .metric-group {
         display: flex;
         flex-direction: column;
@@ -113,97 +167,6 @@ st.markdown("""
     .value-blue {
         color: #3b82f6;
     }
-            
-   /* =========================
-   Store Card – Dark Theme
-   ========================= */
-
-.store-card {
-    background: #0f172a; /* deep slate */
-    border-radius: 14px;
-    padding: 1.6rem;
-    margin-bottom: 1.2rem;
-    border: 1px solid #1e293b;
-    box-shadow: 0 0 0 1px rgba(255,255,255,0.02);
-    transition: all 0.25s ease;
-}
-
-
-/* =========================
-   Header
-   ========================= */
-.store-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 1.1rem;
-}
-
-.store-name {
-    font-size: 1.45rem;  
-    font-weight: 900;     
-    color: #ffffff;     
-    margin-bottom: 0.35rem;
-    letter-spacing: 0.2px;
-}
-
-
-.store-code {
-    background: #1e293b;
-    color: #f8fafc;            /* brighter */
-    padding: 0.35rem 1rem;
-    border-radius: 999px;
-    font-size: 0.85rem;        /* ⬆ bigger */
-    font-weight: 800;
-}
-
-/* =========================
-   Store Info Grid
-   ========================= */
-.store-info {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1.2rem;
-    margin-top: 1.2rem;
-    padding-top: 1.2rem;
-    border-top: 1px solid #1e293b;
-}
-
-.info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-}
-
-/* Labels = soft but readable */
-.info-label {
-    font-size: 1.2rem;         /* ⬆ bigger */
-    color: #cbd5f5;            /* brighter muted */
-    text-transform: uppercase;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-}
-
-/* Values = high contrast */
-.info-value {
-    font-size: 1.2rem;        /* ⬆ noticeably bigger */
-    color: #ffffff;            /* max contrast */
-    font-weight: 700;
-    line-height: 1.4;
-}
-
-/* Highlighted values */
-.value-highlight {
-    color: #f472b6;            /* brighter pink */
-    font-size: 1.2rem;         /* ⬆ bigger */
-    font-weight: 900;
-}
-
-.store-card {
-    background: #0b1220;       /* slightly darker for contrast */
-    border-radius: 16px;
-    padding: 1.8rem;           /* ⬆ more breathing room */
-}
     
     /* Streamlit button override */
     .stButton > button {
@@ -230,90 +193,177 @@ st.markdown("""
     .stDownloadButton > button:hover {
         background: #059669 !important;
     }
-    
-    /* Priority badge styling */
-    .priority-high {
-        background: #ef4444;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    
-    .priority-urgent {
-        background: #dc2626;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    
-    .priority-standard {
-        background: #f59e0b;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    
-    .priority-low {
-        background: #64748b;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    
-    .subtitle {
-        color: #64748b;
-        font-size: 0.9rem;
-        margin-top: -0.5rem;
-        margin-bottom: 1.5rem;
-    }
-    
 </style>
-
-
 """, unsafe_allow_html=True)
 
-# ---------------------------
-# PDF Generation Functions (Portrait & Merged Columns)
-# ---------------------------
-def generate_po_pdf(store_info, store_detail, brand_name="Glad2Glow"):
-    buffer = io.BytesIO()
+load_custom_css()
 
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=portrait(A4),
-        rightMargin=25,
-        leftMargin=25,
-        topMargin=25,
-        bottomMargin=25
-    )
+# ============================================================================
+# BIGQUERY CLIENT INITIALIZATION
+# ============================================================================
 
-    styles = getSampleStyleSheet()
+@st.cache_resource
+def get_bigquery_client() -> bigquery.Client:
+    """
+    Initialize BigQuery client with credentials
+    
+    Returns:
+        bigquery.Client: Authenticated BigQuery client
+        
+    Raises:
+        RuntimeError: If credentials cannot be loaded from any source
+    """
+    logger.info("Initializing BigQuery client...")
+    
+    # Try multiple credential sources in order of preference
+    credential_sources = [
+        ("Streamlit secrets (connections.bigquery)", lambda: _load_from_streamlit_secrets("connections")),
+        ("Streamlit secrets (bigquery)", lambda: _load_from_streamlit_secrets("bigquery")),
+        ("Local credentials file", _load_from_local_file),
+    ]
+    
+    for source_name, loader_func in credential_sources:
+        try:
+            logger.info(f"Attempting to load credentials from: {source_name}")
+            credentials, project_id = loader_func()
+            client = bigquery.Client(credentials=credentials, project=project_id)
+            logger.info(f"✓ Successfully initialized BigQuery client using {source_name}")
+            return client
+        except Exception as e:
+            logger.warning(f"Failed to load from {source_name}: {str(e)[:200]}")
+            continue
+    
+    # If all sources failed
+    error_msg = """
+    ❌ Failed to initialize BigQuery client from all sources.
+    
+    Please configure credentials using one of these methods:
+    1. Streamlit Cloud: Add secrets in .streamlit/secrets.toml
+    2. Local Development: Place credentials JSON file in project directory
+    
+    See documentation for setup instructions.
+    """
+    logger.error(error_msg)
+    raise RuntimeError(error_msg)
 
-    elements = generate_store_page_elements(
-        store_data=store_info,
-        sku_data=store_detail,
-        styles=styles,
-        brand_name=brand_name
-    )
+def _load_from_streamlit_secrets(key: str) -> Tuple:
+    """Load credentials from Streamlit secrets"""
+    if key == "connections":
+        gcp_secrets = dict(st.secrets["connections"]["bigquery"])
+    else:
+        gcp_secrets = dict(st.secrets[key])
+    
+    # Fix private key formatting
+    if "private_key" in gcp_secrets:
+        gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
+    
+    credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
+    project_id = gcp_secrets.get("project_id") or gcp_secrets.get("project") or Config.BQ_PROJECT
+    
+    return credentials, project_id
 
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
+def _load_from_local_file() -> Tuple:
+    """Load credentials from local file"""
+    import os
+    
+    possible_paths = [
+        "skintific-data-warehouse-ea77119e2e7a.json",
+        "credentials.json",
+        "../credentials.json",
+        os.path.expanduser("~/credentials.json"),
+    ]
+    
+    credentials_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            credentials_path = path
+            break
+    
+    if not credentials_path:
+        raise FileNotFoundError("No credentials file found in expected locations")
+    
+    credentials = service_account.Credentials.from_service_account_file(credentials_path)
+    project_id = Config.BQ_PROJECT
+    
+    return credentials, project_id
 
-def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2Glow"):
+# ============================================================================
+# TIME UTILITIES
+# ============================================================================
+
+def get_jkt_now() -> datetime:
+    """Get current time in Jakarta timezone"""
+    return datetime.now(pytz.timezone(Config.TIMEZONE))
+
+def format_jkt_time(dt: datetime, format_str: str = "%d %b %Y, %H:%M WIB") -> str:
+    """Format datetime in Jakarta timezone"""
+    if dt is None:
+        return "-"
+    
+    jkt_tz = pytz.timezone(Config.TIMEZONE)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=pytz.UTC)
+    
+    dt_jkt = dt.astimezone(jkt_tz)
+    return dt_jkt.strftime(format_str)
+
+# ============================================================================
+# PDF GENERATION FUNCTIONS
+# ============================================================================
+
+def generate_po_pdf(
+    store_info: Dict,
+    store_detail: pd.DataFrame,
+    brand_name: str = Config.BRAND_NAME
+) -> io.BytesIO:
+    """
+    Generate PO PDF for a single store
+    
+    Args:
+        store_info: Store metadata dictionary
+        store_detail: DataFrame with product details
+        brand_name: Brand name for PDF header
+        
+    Returns:
+        BytesIO: PDF file buffer
+    """
+    try:
+        logger.info(f"Generating PDF for store: {store_info['store_code']}")
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=portrait(A4),
+            rightMargin=25,
+            leftMargin=25,
+            topMargin=25,
+            bottomMargin=25
+        )
+        
+        styles = getSampleStyleSheet()
+        elements = _generate_store_page_elements(store_info, store_detail, styles, brand_name)
+        
+        doc.build(elements)
+        buffer.seek(0)
+        
+        logger.info(f"✓ PDF generated successfully for {store_info['store_code']}")
+        return buffer
+        
+    except Exception as e:
+        logger.error(f"Failed to generate PDF for {store_info.get('store_code', 'unknown')}: {str(e)}")
+        raise
+
+def _generate_store_page_elements(
+    store_data: Dict,
+    sku_data: pd.DataFrame,
+    styles,
+    brand_name: str
+) -> List:
+    """Generate PDF elements for a store page"""
     elements = []
-
-    # --- Styles ---
     table_font_size = 8.5
-
+    
+    # Define styles
     cell_style = ParagraphStyle(
         'TableCell',
         parent=styles['Normal'],
@@ -322,7 +372,7 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         alignment=TA_CENTER,
         wordWrap='LTR'
     )
-
+    
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
@@ -331,19 +381,19 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         alignment=TA_CENTER,
         spaceAfter=10
     )
-
-    # --- Header ---
+    
+    # Header
     elements.append(Paragraph(brand_name, title_style))
     elements.append(Paragraph("<b>📋 FORMULIR PEMBELIAN (PO)</b>", styles['Heading2']))
     elements.append(Spacer(1, 8))
-
-    # --- Store Information ---
+    
+    # Store Information
     store_info_data = [
         [f"Toko: {store_data['store_name']}", f"Kode: {store_data['store_code']}"],
         [f"Region: {store_data.get('region', '-')}", f"Distributor: {store_data.get('distributor_g2g', '-')}"],
         [f"Tgl: {datetime.now().strftime('%d/%b/%Y')}", "Sales: _________________"]
     ]
-
+    
     info_table = Table(store_info_data, colWidths=[4.0 * inch, 3.5 * inch])
     info_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
@@ -352,12 +402,12 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
     ]))
     elements.append(info_table)
     elements.append(Spacer(1, 10))
-
-    # --- Summary ---
+    
+    # Summary
     total_out_of_stock = len(sku_data[sku_data['actual_stock'] == 0])
     total_suggested = int(sku_data['buffer_plan_ver2'].sum())
     total_value = sku_data['buffer_plan_value_ver2'].sum()
-
+    
     summary_table = Table(
         [
             ["SKU HABIS", "SARAN QTY", "EST. NILAI ORDER"],
@@ -365,7 +415,7 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         ],
         colWidths=[2.5 * inch] * 3
     )
-
+    
     summary_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#E74C3C')),
         ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#27AE60')),
@@ -376,47 +426,47 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         ('FONTSIZE', (0, 1), (-1, 1), 14),
         ('GRID', (0, 0), (-1, -1), 1, colors.white),
     ]))
-
+    
     elements.append(summary_table)
     elements.append(Spacer(1, 15))
-
-    # --- Product Table ---
+    
+    # Product Table
     table_data = [
         ["SKU / Produk", "Stok\nToko", "SO\nBulanan",
          "Dist.\nStok", "Saran\n(Qty)", "Nilai Order\n(Rp)", "Order\nAktual"]
     ]
-
+    
     dist_stock_map = {
         "Stok Tersedia": "Ada",
         "Stok Menipis": "Menipis"
     }
-
+    
     stock_date_val = sku_data['stock_date'].iloc[0] if not sku_data.empty else "-"
     stock_date_str = (
         stock_date_val.strftime('%d %b %Y')
         if isinstance(stock_date_val, datetime)
         else str(stock_date_val)
     )
-
+    
     for _, row in sku_data.iterrows():
         buffer_qty = int(row['buffer_plan_ver2']) if not pd.isna(row['buffer_plan_ver2']) else 0
         if buffer_qty == 0:
             continue
-
+        
         actual_stock = int(row['actual_stock']) if not pd.isna(row['actual_stock']) else 0
         buffer_val = int(row['buffer_plan_value_ver2']) if not pd.isna(row['buffer_plan_value_ver2']) else 0
-
+        
         prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
         merged_product = Paragraph(
             f"<b>{row['product_code']}</b><br/>{row['product_name']}",
             prod_style
         )
-
+        
         raw_dist_stock = str(row.get('status_stok_distributor', '-'))
         dist_stock_display = dist_stock_map.get(raw_dist_stock, raw_dist_stock)
-
+        
         value_style = ParagraphStyle('ValStyle', parent=cell_style, alignment=TA_RIGHT)
-
+        
         table_data.append([
             merged_product,
             str(actual_stock),
@@ -424,20 +474,14 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
             Paragraph(dist_stock_display, cell_style),
             str(buffer_qty),
             Paragraph(f"{buffer_val:,}", value_style),
-            "____"   # Order Aktual
+            "____"
         ])
-
-    # --- Column widths (Order Aktual tightened) ---
+    
     col_widths = [
-        2.30 * inch,  # SKU / Produk
-        0.50 * inch,  # Stok Toko
-        0.60 * inch,  # SO Bulanan
-        0.75 * inch,  # Dist. Stok
-        0.65 * inch,  # Saran Qty
-        1.20 * inch,  # Nilai Order
-        0.95 * inch   # Order Aktual (fits 4 digits neatly)
+        2.30 * inch, 0.50 * inch, 0.60 * inch, 0.75 * inch,
+        0.65 * inch, 1.20 * inch, 0.95 * inch
     ]
-
+    
     product_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     product_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
@@ -450,15 +494,12 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-
-        # Extra writing comfort for Order Aktual only
         ('TOPPADDING', (-1, 1), (-1, -1), 8),
         ('BOTTOMPADDING', (-1, 1), (-1, -1), 8),
-
         ('ROWBACKGROUNDS', (0, 1), (-1, -1),
          [colors.white, colors.HexColor('#F8F9FA')]),
     ]))
-
+    
     elements.append(product_table)
     elements.append(Spacer(1, 10))
     elements.append(Paragraph(
@@ -470,518 +511,536 @@ def generate_store_page_elements(store_data, sku_data, styles, brand_name="Glad2
         f"<i>* System Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}</i>",
         styles['Italic']
     ))
-
+    
     return elements
 
-
-
-def generate_multi_store_pdf(stores_data, df_inventory_buffer, brand_name="Glad2Glow"):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=portrait(A4),
-        rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25
-    )
-    elements = []
-    styles = getSampleStyleSheet()
+def generate_multi_store_pdf(
+    stores_data: pd.DataFrame,
+    df_inventory_buffer: pd.DataFrame,
+    brand_name: str = Config.BRAND_NAME
+) -> io.BytesIO:
+    """
+    Generate combined PDF for multiple stores
     
-    for idx, (_, store_row) in enumerate(stores_data.iterrows()):
-        store_detail = df_inventory_buffer[df_inventory_buffer['store_code'] == store_row['store_code']].copy()
+    Args:
+        stores_data: DataFrame with store summary data
+        df_inventory_buffer: DataFrame with inventory details
+        brand_name: Brand name for PDF header
         
-        # Skip this store if total buffer_plan_ver2 is 0
-        if store_detail['buffer_plan_ver2'].sum() == 0:
-            continue
-            
-        store_info = {
-            'store_code': store_row['store_code'],
-            'store_name': store_row['store_name'],
-            'distributor_g2g': store_row.get('distributor', '-'),
-            'region': store_row.get('region', '-'),
-        }
-        store_elements = generate_store_page_elements(store_info, store_detail, styles, brand_name)
-        elements.extend(store_elements)
-        if idx < len(stores_data) - 1:
-            elements.append(PageBreak())
-    
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
-
-# ---------------------------
-# BigQuery Setup
-# ---------------------------
-@st.cache_resource
-def get_bigquery_client():
-    """Initialize BigQuery client with credentials"""
+    Returns:
+        BytesIO: Combined PDF file buffer
+    """
     try:
-        # Try Streamlit secrets first (for cloud deployment)
-        gcp_secrets = st.secrets["connections"]["bigquery"]
-        if "private_key" in gcp_secrets:
-            gcp_secrets = dict(gcp_secrets)
-            gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
-        credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
-        project_id = gcp_secrets.get("project_id") or st.secrets["bigquery"].get("project")
-        return bigquery.Client(credentials=credentials, project=project_id)
-    except Exception as e1:
-        try:
-            # Try alternative Streamlit secrets structure
-            gcp_secrets = st.secrets["bigquery"]
-            if "private_key" in gcp_secrets:
-                gcp_secrets = dict(gcp_secrets)
-                gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
-            credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
-            project_id = gcp_secrets.get("project_id") or gcp_secrets.get("project")
-            return bigquery.Client(credentials=credentials, project=project_id)
-        except Exception as e2:
-            try:
-                # Fallback to local credentials file
-                credentials_path = "skintific-data-warehouse-ea77119e2e7a.json"
-                
-                import os
-                if not os.path.exists(credentials_path):
-                    possible_paths = [
-                        r"D:\script\skintific-data-warehouse-ea77119e2e7a.json",
-                        r"C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json",
-                        "credentials.json",
-                        "../credentials.json"
-                    ]
-                    for path in possible_paths:
-                        if os.path.exists(path):
-                            credentials_path = path
-                            break
-                
-                credentials = service_account.Credentials.from_service_account_file(credentials_path)
-                project_id = "skintific-data-warehouse"
-                return bigquery.Client(credentials=credentials, project=project_id)
-            except Exception as e3:
-                error_msg = f"""
-                Failed to initialize BigQuery client. Tried:
-                1. Streamlit secrets (connections.bigquery): {str(e1)[:100]}
-                2. Streamlit secrets (bigquery): {str(e2)[:100]}
-                3. Local credentials file: {str(e3)[:100]}
-                
-                Please ensure either:
-                - .streamlit/secrets.toml is configured with BigQuery credentials
-                - Local credentials JSON file exists in the project directory
-                """
-                raise RuntimeError(error_msg)
+        logger.info(f"Generating multi-store PDF for {len(stores_data)} stores")
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=portrait(A4),
+            rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25
+        )
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        stores_included = 0
+        for idx, (_, store_row) in enumerate(stores_data.iterrows()):
+            store_detail = df_inventory_buffer[
+                df_inventory_buffer['store_code'] == store_row['store_code']
+            ].copy()
+            
+            if store_detail['buffer_plan_ver2'].sum() == 0:
+                continue
+            
+            store_info = {
+                'store_code': store_row['store_code'],
+                'store_name': store_row['store_name'],
+                'distributor_g2g': store_row.get('distributor', '-'),
+                'region': store_row.get('region', '-'),
+            }
+            
+            store_elements = _generate_store_page_elements(store_info, store_detail, styles, brand_name)
+            elements.extend(store_elements)
+            
+            if stores_included < len(stores_data) - 1:
+                elements.append(PageBreak())
+            
+            stores_included += 1
+        
+        doc.build(elements)
+        buffer.seek(0)
+        
+        logger.info(f"✓ Multi-store PDF generated successfully ({stores_included} stores)")
+        return buffer
+        
+    except Exception as e:
+        logger.error(f"Failed to generate multi-store PDF: {str(e)}")
+        raise
 
-# ---------------------------
-# Stored Procedure Execution
-# ---------------------------
-# ---------------------------
-# Stored Procedure Execution
-# (REFRESH BASED ON last_updated_jkt)
-# ---------------------------
-
-def get_jkt_now():
-    """Get current time in Jakarta (timezone-aware)"""
-    return datetime.now(pytz.timezone("Asia/Jakarta"))
+# ============================================================================
+# DATA LOADING FUNCTIONS
+# ============================================================================
 
 @st.cache_data(ttl=60)
-def get_inventory_last_updated_jkt():
+def get_inventory_last_updated_jkt() -> Optional[datetime]:
     """
-    Read last_updated_jkt and correctly convert to Asia/Jakarta
-    Handles both UTC and naive datetimes safely
+    Get last update timestamp from inventory buffer table
+    
+    Returns:
+        datetime: Last update time in Jakarta timezone, or None if unavailable
     """
-    client = get_bigquery_client()
-    query = """
-        SELECT
-            MAX(last_updated_jkt) AS last_updated_jkt
-        FROM `skintific-data-warehouse.rsa.inventory_buffer`
-    """
-
     try:
+        client = get_bigquery_client()
+        query = f"""
+            SELECT MAX(last_updated_jkt) AS last_updated_jkt
+            FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
+        """
+        
         df = client.query(query).to_dataframe()
-
+        
         if df.empty or pd.isna(df.loc[0, "last_updated_jkt"]):
+            logger.warning("No last_updated_jkt value found in database")
             return None
-
+        
         ts = df.loc[0, "last_updated_jkt"]
-        jkt_tz = pytz.timezone("Asia/Jakarta")
-
-        # Case 1: BigQuery returned naive datetime → ASSUME UTC
+        jkt_tz = pytz.timezone(Config.TIMEZONE)
+        
+        # Handle naive datetime (assume UTC)
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=pytz.UTC)
-
-        # Convert to Jakarta time
-        return ts.astimezone(jkt_tz)
-
+        
+        result = ts.astimezone(jkt_tz)
+        logger.info(f"Last inventory update: {format_jkt_time(result)}")
+        return result
+        
     except Exception as e:
-        st.error(f"❌ Failed to read last_updated_jkt: {e}")
+        logger.error(f"Failed to get last_updated_jkt: {str(e)}")
         return None
 
-
-
-def execute_stored_procedure():
-    """Execute inventory buffer stored procedure"""
-    client = get_bigquery_client()
-    query = "CALL `skintific-data-warehouse.rsa.inventory_buffer_sp`();"
-
+def execute_stored_procedure() -> bool:
+    """
+    Execute inventory buffer stored procedure
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
     try:
+        logger.info("Executing stored procedure...")
+        client = get_bigquery_client()
+        query = f"CALL {Config.BQ_STORED_PROC}();"
+        
         job = client.query(query)
-        job.result()
+        job.result()  # Wait for completion
+        
+        logger.info("✓ Stored procedure executed successfully")
         return True
+        
+    except google_exceptions.GoogleAPIError as e:
+        logger.error(f"BigQuery API error during stored procedure execution: {str(e)}")
+        st.error(f"❌ Database error: {str(e)}")
+        return False
     except Exception as e:
-        st.error(f"❌ Error executing stored procedure: {e}")
+        logger.error(f"Unexpected error executing stored procedure: {str(e)}")
+        st.error(f"❌ Error executing stored procedure: {str(e)}")
         return False
 
-
-def check_and_execute_sp():
+def check_and_execute_sp() -> Optional[datetime]:
     """
-    Auto refresh rule:
-    - Uses last_updated_jkt from inventory_buffer
-    - Refresh if data is older than 2 hours
+    Check if stored procedure needs to run and execute if necessary
+    
+    Returns:
+        datetime: Last update timestamp after check/execution
     """
     now_jkt = get_jkt_now()
     last_updated_jkt = get_inventory_last_updated_jkt()
-
-    # First-time / empty table scenario
+    
+    # First-time initialization
     if last_updated_jkt is None:
+        logger.info("First-time initialization detected")
         with st.spinner("🔄 Initializing inventory data..."):
             if execute_stored_procedure():
                 st.cache_data.clear()
                 st.toast("Inventory initialized", icon="✅")
                 return get_inventory_last_updated_jkt()
         return None
-
-    # Time difference
+    
+    # Check if refresh needed
     time_diff = now_jkt - last_updated_jkt
-    should_refresh = time_diff.total_seconds() >= 7200  # 2 hours
-
+    should_refresh = time_diff.total_seconds() >= Config.REFRESH_INTERVAL_SECONDS
+    
     if should_refresh:
+        logger.info(f"Auto-refresh triggered (last update: {format_jkt_time(last_updated_jkt)})")
         with st.spinner("🔄 Updating inventory buffer (scheduled refresh)..."):
             if execute_stored_procedure():
                 st.cache_data.clear()
                 st.toast("Inventory refreshed", icon="✅")
                 return get_inventory_last_updated_jkt()
-
+    
     return last_updated_jkt
 
-
-# ---------------------------
-# Data Loading Functions
-# ---------------------------
-@st.cache_data(ttl=600)
-def load_store_summary():
-    client = get_bigquery_client()
-
-    query = """
-    SELECT
-        region,
-        store_code,
-        store_name,
-        distributor_g2g AS distributor,
-        MAX(stock_date) stock_date,
-        COUNT(product_code) AS total_skus,
-        SUM(buffer_plan_ver2) AS total_buffer_qty,
-        SUM(buffer_plan_value_ver2) AS est_order_value,
-        SUM(actual_stock) AS current_stock_qty
-    FROM `skintific-data-warehouse.rsa.inventory_buffer`
-    GROUP BY region, store_code, store_name, distributor
-    HAVING SUM(buffer_plan_ver2) > 0
+@st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
+def load_store_summary() -> pd.DataFrame:
     """
-
-    df = client.query(query).to_dataframe()
-
-    def priority(v):
-        if v > 5_000_000:
-            return "High"
-        elif v > 2_000_000:
-            return "Medium"
-        return "Low"
-
-    df["priority"] = df["est_order_value"].apply(priority)
-    return df
-
-@st.cache_data(ttl=600)
-def load_inventory_buffer_data():
-    """Load full inventory buffer data from BigQuery"""
-    client = get_bigquery_client()
+    Load store summary data from BigQuery
     
-    query = """
-    SELECT 
-        store_code,
-        product_code,
-        product_life_cycle,
-        assortment,
-        inner_pcs,
-        price_for_store,
-        product_name,
-        actual_stock,
-        stock_date,
-        avg_daily_qty,
-        days_of_inventory,
-        standard_doi,
-        id_st,
-        distributor_g2g,
-        region,
-        store_name,
-        address,
-        stok_distributor,
-        status_stok_distributor,
-        buffer_plan,
-        buffer_plan_ver2,
-        buffer_plan_value,
-        buffer_plan_value_ver2,
-        SO_Bulanan
-    FROM `skintific-data-warehouse.rsa.inventory_buffer`
-    ORDER BY 
-        region,
-        store_name,
-        SO_Bulanan,
-        buffer_plan_value_ver2 DESC
+    Returns:
+        pd.DataFrame: Store summary with aggregated metrics
+        
+    Raises:
+        Exception: If query fails
     """
+    try:
+        logger.info("Loading store summary data...")
+        client = get_bigquery_client()
+        
+        query = f"""
+        WITH store_agg AS (
+            SELECT
+                store_code,
+                MAX(region) AS region,
+                MAX(store_name) AS store_name,
+                MAX(distributor_g2g) AS distributor,
+                MAX(stock_date) AS stock_date,
+                COUNT(DISTINCT product_code) AS total_skus,
+                SUM(buffer_plan_ver2) AS total_buffer_qty,
+                SUM(buffer_plan_value_ver2) AS est_order_value,
+                SUM(actual_stock) AS current_stock_qty
+            FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
+            GROUP BY store_code
+        )
+        SELECT *
+        FROM store_agg
+        WHERE total_buffer_qty > 0
+        ORDER BY store_code
+        """
+        
+        df = client.query(query).to_dataframe()
+        
+        # Add priority classification
+        def classify_priority(value):
+            if value > Config.PRIORITY_HIGH_THRESHOLD:
+                return "High"
+            elif value > Config.PRIORITY_MEDIUM_THRESHOLD:
+                return "Medium"
+            return "Low"
+        
+        df["priority"] = df["est_order_value"].apply(classify_priority)
+        
+        logger.info(f"✓ Loaded {len(df)} stores from summary")
+        return df
+        
+    except google_exceptions.GoogleAPIError as e:
+        logger.error(f"BigQuery API error loading store summary: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to load store summary: {str(e)}")
+        raise
+
+@st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
+def load_inventory_buffer_data() -> pd.DataFrame:
+    """
+    Load full inventory buffer data from BigQuery
     
-    df = client.query(query).to_dataframe()
-    return df
+    Returns:
+        pd.DataFrame: Complete inventory buffer data
+        
+    Raises:
+        Exception: If query fails
+    """
+    try:
+        logger.info("Loading inventory buffer data...")
+        client = get_bigquery_client()
+        
+        query = f"""
+        SELECT 
+            store_code, product_code, product_life_cycle, assortment,
+            inner_pcs, price_for_store, product_name, actual_stock,
+            stock_date, avg_daily_qty, days_of_inventory, standard_doi,
+            id_st, distributor_g2g, region, store_name, address,
+            stok_distributor, status_stok_distributor, buffer_plan,
+            buffer_plan_ver2, buffer_plan_value, buffer_plan_value_ver2,
+            SO_Bulanan
+        FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
+        ORDER BY region, store_name, SO_Bulanan, buffer_plan_value_ver2 DESC
+        """
+        
+        df = client.query(query).to_dataframe()
+        
+        logger.info(f"✓ Loaded {len(df)} inventory records")
+        return df
+        
+    except google_exceptions.GoogleAPIError as e:
+        logger.error(f"BigQuery API error loading inventory data: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to load inventory data: {str(e)}")
+        raise
 
+# ============================================================================
+# SESSION STATE INITIALIZATION
+# ============================================================================
 
-# ---------------------------
-# Session State Init (Cascading Filters)
-# ---------------------------
-for key, default in {
-    "prev_region": None,
-    "prev_distributor": None,
-    "region_select": "All",
-    "distributor_select": "All",
-    "store_select": [],
-}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
-
-if "sp_checked" not in st.session_state:
-    st.session_state.sp_checked = False
-
-if not st.session_state.sp_checked:
-    last_exec_time = check_and_execute_sp()
-    st.session_state.sp_checked = True
-else:
-    last_exec_time = get_inventory_last_updated_jkt()
-
-
-
-
-# ---------------------------
-# Load Data
-# ---------------------------
-df_inventory_buffer = None
-df_store_summary = None
-df_master_store = None
-
-# Execute stored procedure if needed (every 2 hours)
-last_exec_time = check_and_execute_sp()
-
-try:
-    with st.spinner("🔄 Loading data from BigQuery..."):
-        df_store_summary = load_store_summary()
-        df_master_store = df_store_summary
-        df_inventory_buffer = load_inventory_buffer_data()
-
-except Exception as e:
-    st.error(f"❌ Error loading data: {e}")
-    st.info("💡 Make sure the stored procedure has been executed and credentials are configured correctly.")
+def init_session_state():
+    """Initialize Streamlit session state variables"""
+    defaults = {
+        "prev_region": None,
+        "prev_distributor": None,
+        "region_select": "All",
+        "distributor_select": "All",
+        "store_select": [],
+        "sp_checked": False,
+    }
     
-    with st.expander("🔍 Debug Information"):
-        st.code(str(e))
-        import traceback
-        st.code(traceback.format_exc())
-    
-    st.warning("⚠️ Running in demo mode with sample data...")
-    
-def get_display_timestamp():
-    return last_exec_time.strftime("%d %b %Y, %H:%M WIB") if last_exec_time else "-"
+    for key, default_value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
 
-# ---------------------------
-# Header
-# ---------------------------
-# Format last execution time for display
-if last_exec_time:
-    # last_exec_time is already in JKT from the function above
-    sync_time_str = last_exec_time.strftime("%I:%M %p")
-    sync_date_str = last_exec_time.strftime("%b %d, %Y")
+init_session_state()
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+def main():
+    """Main application entry point"""
     
-    # Calculate time since last sync
-    now_jkt = get_jkt_now()
-    time_since_sync = now_jkt - last_exec_time
-    
-    seconds = int(time_since_sync.total_seconds())
-    hours_since = seconds // 3600
-    minutes_since = (seconds % 3600) // 60
-    
-    if hours_since > 0:
-        sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
+    # Check and execute stored procedure if needed
+    if not st.session_state.sp_checked:
+        last_exec_time = check_and_execute_sp()
+        st.session_state.sp_checked = True
     else:
-        sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
-else:
-    sync_status = "Syncing data..."
-    sync_time_str = get_jkt_now().strftime("%I:%M %p")
+        last_exec_time = get_inventory_last_updated_jkt()
+    
+    # Load data
+    try:
+        with st.spinner("🔄 Loading data from BigQuery..."):
+            df_store_summary = load_store_summary()
+            df_inventory_buffer = load_inventory_buffer_data()
+            
+    except Exception as e:
+        st.error(f"❌ Error loading data: {str(e)}")
+        st.info("💡 Please check your BigQuery connection and credentials.")
+        
+        with st.expander("🔍 Debug Information"):
+            st.code(str(e))
+            import traceback
+            st.code(traceback.format_exc())
+        
+        logger.error(f"Application stopped due to data loading error: {str(e)}")
+        st.stop()
+    
+    # Render header
+    render_header(last_exec_time)
+    
+    # Safety check
+    if df_store_summary is None or df_inventory_buffer is None:
+        st.error("❌ No data available. Please check your BigQuery connection.")
+        st.stop()
+    
+    # Render filters and get selections
+    selected_region, selected_distributor, selected_stores = render_filters(
+        df_inventory_buffer
+    )
+    
+    # Filter data
+    filtered_stores = apply_filters(
+        df_store_summary,
+        selected_region,
+        selected_distributor,
+        selected_stores
+    )
+    
+    # Render bulk download section
+    if len(filtered_stores) > 1:
+        render_bulk_download(filtered_stores, df_inventory_buffer, last_exec_time)
+    
+    # Show active filters
+    render_active_filters(selected_distributor, selected_stores)
+    
+    # Render store list
+    render_store_list(filtered_stores, df_inventory_buffer)
+    
+    # Render footer
+    render_footer()
 
+# ============================================================================
+# UI RENDERING FUNCTIONS
+# ============================================================================
 
-st.markdown(f"""
-<div class="main-header">
-    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-        <div>
-            <h1>📦 PO Suggestion Tool</h1>
-            <p>Data-Driven Purchase Order Recommendations (Inventory Buffer)</p>
-        </div>
-        <div style="text-align: right;">
-            <div class="sync-status">
-                <span class="sync-dot"></span>
-                <span>{sync_status}</span>
+def render_header(last_exec_time: Optional[datetime]):
+    """Render application header with sync status"""
+    if last_exec_time:
+        sync_time_str = last_exec_time.strftime("%I:%M %p")
+        now_jkt = get_jkt_now()
+        time_since_sync = now_jkt - last_exec_time
+        
+        seconds = int(time_since_sync.total_seconds())
+        hours_since = seconds // 3600
+        minutes_since = (seconds % 3600) // 60
+        
+        if hours_since > 0:
+            sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
+        else:
+            sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
+    else:
+        sync_status = "Syncing data..."
+    
+    st.markdown(f"""
+    <div class="main-header">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <h1>{Config.APP_ICON} {Config.APP_TITLE}</h1>
+                <p>Data-Driven Purchase Order Recommendations (Inventory Buffer)</p>
+                <p style="font-size: 0.75rem; opacity: 0.8; margin-top: 0.5rem;">v{Config.VERSION}</p>
+            </div>
+            <div style="text-align: right;">
+                <div class="sync-status">
+                    <span class="sync-dot"></span>
+                    <span>{sync_status}</span>
+                </div>
             </div>
         </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
-# ---------------------------
-# Safety Check
-# ---------------------------
-if df_inventory_buffer is None or df_store_summary is None:
-    st.error("❌ No data available. Please check your BigQuery connection.")
-    st.stop()
+    """, unsafe_allow_html=True)
 
-# ---------------------------
-# Filter Selection (UX Friendly – Vertical Flow)
-# ---------------------------
-# st.markdown('<div class="selection-box">', unsafe_allow_html=True)
-# st.markdown('<div class="selection-title">📍 Filter Selection</div>', unsafe_allow_html=True)
-
-# ---------- REGION & DISTRIBUTOR ----------
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown(
-        '<div class="selection-title" style="font-size:0.9rem;">📍 Region</div>',
-        unsafe_allow_html=True
-    )
-    regions = ["All"] + sorted(df_inventory_buffer["region"].dropna().unique())
-    selected_region = st.selectbox(
-        "Region",
-        regions,
-        label_visibility="collapsed",
-        key="region_select"
-    )
-
-with col2:
-    st.markdown(
-        '<div class="selection-title" style="font-size:0.9rem;">🏢 Distributor</div>',
-        unsafe_allow_html=True
-    )
-    df_f1 = df_inventory_buffer.copy()
-    if selected_region != "All":
-        df_f1 = df_f1[df_f1["region"] == selected_region]
-
-    distributors = ["All"] + sorted(df_f1["distributor_g2g"].dropna().unique())
-    selected_distributor = st.selectbox(
-        "Distributor",
-        distributors,
-        label_visibility="collapsed",
-        key="distributor_select"
-    )
-
-# ---------- RESET STORE WHEN UPPER FILTER CHANGES ----------
-if (
-    st.session_state.prev_region != selected_region
-    or st.session_state.prev_distributor != selected_distributor
-):
-    st.session_state.store_select = []
-
-st.session_state.prev_region = selected_region
-st.session_state.prev_distributor = selected_distributor
-
-st.markdown("<hr style='margin:1rem 0; opacity:0.3;'>", unsafe_allow_html=True)
-
-# ---------- STORE SELECTION ----------
-# Ensure session state is initialized
-if "store_select" not in st.session_state:
-    st.session_state.store_select = []
-
-# Filter store options logic
-df_f2 = df_f1.copy()
-if selected_distributor != "All":
-    df_f2 = df_f2[df_f2["distributor_g2g"] == selected_distributor]
-
-store_options = sorted(df_f2["store_name"].dropna().unique())
-selected_count = len(st.session_state.store_select)
-
-# Unified Header Row: Title | Select All | Clear
-# Adjusting the ratio to [6, 1.2, 1] to keep buttons tight on the right
-title_col, btn_col1, btn_col2 = st.columns([6, 1.2, 1], gap="small")
-
-with title_col:
-    st.markdown(
-        f"""
-        <div style="padding-top: 5px;">
-            <span style="font-size:0.95rem; font-weight:600;">🏪 Store Selection</span>
-            <span style="font-size:0.8rem; color:gray; margin-left:5px;">({selected_count} selected)</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-with btn_col1:
-    if st.button("Select All", key="all_btn", use_container_width=True):
-        st.session_state.store_select = store_options
-        st.rerun()
-
-with btn_col2:
-    if st.button("Clear", key="clr_btn", use_container_width=True):
+def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[str]]:
+    """
+    Render filter controls and return selections
+    
+    Args:
+        df_inventory_buffer: Full inventory data
+        
+    Returns:
+        Tuple of (selected_region, selected_distributor, selected_stores)
+    """
+    col1, col2 = st.columns(2)
+    
+    # Region filter
+    with col1:
+        st.markdown(
+            '<div class="selection-title" style="font-size:0.9rem;">📍 Region</div>',
+            unsafe_allow_html=True
+        )
+        regions = ["All"] + sorted(df_inventory_buffer["region"].dropna().unique())
+        selected_region = st.selectbox(
+            "Region",
+            regions,
+            label_visibility="collapsed",
+            key="region_select"
+        )
+    
+    # Distributor filter
+    with col2:
+        st.markdown(
+            '<div class="selection-title" style="font-size:0.9rem;">🏢 Distributor</div>',
+            unsafe_allow_html=True
+        )
+        df_filtered = df_inventory_buffer.copy()
+        if selected_region != "All":
+            df_filtered = df_filtered[df_filtered["region"] == selected_region]
+        
+        distributors = ["All"] + sorted(df_filtered["distributor_g2g"].dropna().unique())
+        selected_distributor = st.selectbox(
+            "Distributor",
+            distributors,
+            label_visibility="collapsed",
+            key="distributor_select"
+        )
+    
+    # Reset store selection when upper filters change
+    if (st.session_state.prev_region != selected_region or
+        st.session_state.prev_distributor != selected_distributor):
         st.session_state.store_select = []
-        st.rerun()
+    
+    st.session_state.prev_region = selected_region
+    st.session_state.prev_distributor = selected_distributor
+    
+    st.markdown("<hr style='margin:1rem 0; opacity:0.3;'>", unsafe_allow_html=True)
+    
+    # Store filter
+    df_filtered_stores = df_filtered.copy()
+    if selected_distributor != "All":
+        df_filtered_stores = df_filtered_stores[
+            df_filtered_stores["distributor_g2g"] == selected_distributor
+        ]
+    
+    store_options = sorted(df_filtered_stores["store_name"].dropna().unique())
+    
+    # Store selection header with buttons
+    title_col, btn_col1, btn_col2 = st.columns([6, 1.2, 1], gap="small")
+    
+    with title_col:
+        st.markdown(
+            '<div style="padding-top: 5px;"><span style="font-size:0.95rem; font-weight:600;">🏪 Store Selection</span></div>',
+            unsafe_allow_html=True
+        )
+    
+    with btn_col1:
+        if st.button("Select All", key="all_btn", use_container_width=True):
+            st.session_state.store_select = store_options
+            st.rerun()
+    
+    with btn_col2:
+        if st.button("Clear", key="clr_btn", use_container_width=True):
+            st.session_state.store_select = []
+            st.rerun()
+    
+    # Store multiselect
+    selected_stores = st.multiselect(
+        "Store Selection",
+        options=store_options,
+        default=st.session_state.store_select,
+        placeholder="Select one or more stores…",
+        label_visibility="collapsed",
+        key="store_select"
+    )
+    
+    return selected_region, selected_distributor, selected_stores
 
-# Multiselect Widget
-# We use the 'store_select' key directly to link it to the button actions
-selected_stores = st.multiselect(
-    "Store Selection",
-    options=store_options,
-    default=st.session_state.store_select,
-    placeholder="Select one or more stores…",
-    label_visibility="collapsed",
-    key="store_multiselect_widget"
-)
-
-# Update the session state with the current selection from the widget
-st.session_state.store_select = selected_stores
-
-# ---------------------------
-# Final Data Filtering (SINGLE SOURCE OF TRUTH)
-# ---------------------------
-filtered_stores = df_store_summary.copy()
-
-if selected_region != "All":
-    filtered_stores = filtered_stores[
-        filtered_stores["region"] == selected_region
-    ]
-
-if selected_distributor != "All":
-    filtered_stores = filtered_stores[
-        filtered_stores["distributor"] == selected_distributor
-    ]
-
-if selected_stores:
-    filtered_stores = filtered_stores[
-        filtered_stores["store_name"].isin(selected_stores)
-    ]
-
-# Priority sorting
-priority_order = {"High": 0, "Medium": 1, "Low": 2}
-filtered_stores["priority_rank"] = filtered_stores["priority"].map(priority_order)
-
-filtered_stores = (
-    filtered_stores
-    .sort_values(
+def apply_filters(
+    df_store_summary: pd.DataFrame,
+    selected_region: str,
+    selected_distributor: str,
+    selected_stores: List[str]
+) -> pd.DataFrame:
+    """
+    Apply filters to store summary data
+    
+    Args:
+        df_store_summary: Store summary DataFrame
+        selected_region: Selected region filter
+        selected_distributor: Selected distributor filter
+        selected_stores: List of selected store names
+        
+    Returns:
+        pd.DataFrame: Filtered and sorted store data
+    """
+    filtered = df_store_summary.copy()
+    
+    if selected_region != "All":
+        filtered = filtered[filtered["region"] == selected_region]
+    
+    if selected_distributor != "All":
+        filtered = filtered[filtered["distributor"] == selected_distributor]
+    
+    if selected_stores:
+        filtered = filtered[filtered["store_name"].isin(selected_stores)]
+    
+    # Sort by priority and order value
+    priority_order = {"High": 0, "Medium": 1, "Low": 2}
+    filtered["priority_rank"] = filtered["priority"].map(priority_order)
+    filtered = filtered.sort_values(
         by=["priority_rank", "est_order_value"],
         ascending=[True, False]
-    )
-    .drop(columns="priority_rank")
-)
+    ).drop(columns="priority_rank")
+    
+    return filtered
 
-
-# ---------------------------
-# Multi-Store PDF Download Button (Full Width Version)
-# ---------------------------
-if len(filtered_stores) > 1:
+def render_bulk_download(
+    filtered_stores: pd.DataFrame,
+    df_inventory_buffer: pd.DataFrame,
+    last_exec_time: Optional[datetime]
+):
+    """Render bulk download section for multiple stores"""
     st.markdown("---")
     
     st.markdown(f"""
@@ -1000,125 +1059,187 @@ if len(filtered_stores) > 1:
     </div>
     """, unsafe_allow_html=True)
     
-    if st.button("📄 Generate Combined PDF for All Selected Stores", key="multi_pdf_btn", use_container_width=True, type="primary"):
+    if st.button(
+        "📄 Generate Combined PDF for All Selected Stores",
+        key="multi_pdf_btn",
+        use_container_width=True,
+        type="primary"
+    ):
         with st.spinner(f"Sedang memproses PDF untuk {len(filtered_stores)} toko..."):
-            pdf_buffer = generate_multi_store_pdf(filtered_stores, df_inventory_buffer, brand_name="Glad2Glow")
-            
-            timestamp = last_exec_time.strftime("%Y-%m-%d_%H%M_WIB")
-            filename = f"PO_Bulk_{len(filtered_stores)}_Stores_{timestamp}.pdf"
-            
-            st.download_button(
-                label=f"📥 Klik di Sini untuk Mengunduh PDF ({len(filtered_stores)} Toko)",
-                data=pdf_buffer,
-                file_name=filename,
-                mime="application/pdf",
-                key="dl_multi_pdf",
-                use_container_width=True
-            )
+            try:
+                pdf_buffer = generate_multi_store_pdf(
+                    filtered_stores,
+                    df_inventory_buffer,
+                    brand_name=Config.BRAND_NAME
+                )
+                
+                timestamp = format_jkt_time(last_exec_time or get_jkt_now(), "%Y-%m-%d_%H%M_WIB")
+                filename = f"PO_Bulk_{len(filtered_stores)}_Stores_{timestamp}.pdf"
+                
+                st.download_button(
+                    label=f"📥 Klik di Sini untuk Mengunduh PDF ({len(filtered_stores)} Toko)",
+                    data=pdf_buffer,
+                    file_name=filename,
+                    mime="application/pdf",
+                    key="dl_multi_pdf",
+                    use_container_width=True
+                )
+                
+                logger.info(f"Bulk PDF generated: {filename}")
+                
+            except Exception as e:
+                st.error(f"❌ Failed to generate bulk PDF: {str(e)}")
+                logger.error(f"Bulk PDF generation failed: {str(e)}")
+    
     st.markdown("---")
 
-# ---------------------------
-# Show active filters
-# ---------------------------
-active_filters = []
-if selected_distributor != "All":
-    active_filters.append(f"🏪 {selected_distributor}")
-if selected_stores:
-    active_filters.append(f"🎯 {len(selected_stores)} specific store(s)")
+def render_active_filters(selected_distributor: str, selected_stores: List[str]):
+    """Render active filters display"""
+    active_filters = []
+    
+    if selected_distributor != "All":
+        active_filters.append(f"🏪 {selected_distributor}")
+    
+    if selected_stores:
+        active_filters.append(f"🎯 {len(selected_stores)} specific store(s)")
+    
+    if active_filters:
+        st.markdown(f"""
+        <div style="background: #f8fafc; padding: 0.75rem 1rem; border-radius: 8px; 
+                    margin-bottom: 1rem; border-left: 4px solid #667eea;">
+            <span style="color: #64748b; font-size: 0.85rem; font-weight: 600;">Active Filters: </span>
+            <span style="color: #334155; font-size: 0.85rem;">{' • '.join(active_filters)}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-if active_filters:
-    st.markdown(f"""
-    <div style="background: #f8fafc; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; border-left: 4px solid #667eea;">
-        <span style="color: #64748b; font-size: 0.85rem; font-weight: 600;">Active Filters: </span>
-        <span style="color: #334155; font-size: 0.85rem;">{' • '.join(active_filters)}</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ---------------------------
-# Display Store Cards (Horizontal UI)
-# ---------------------------
-st.markdown(f"### Store List ({len(filtered_stores)} stores)")
-st.markdown('<p style="color: #64748b; font-size: 0.85rem; margin-top: -1rem;">PO suggestions prioritized by sales velocity - from most sold to less sold items</p>', unsafe_allow_html=True)
-
-# Use enumerate to get a unique numeric 'i'
-for i, (idx, row) in enumerate(filtered_stores.iterrows()):
-    # 1. Store Title & Code
-    st.markdown(f"""
+def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.DataFrame):
+    """Render list of stores with download buttons"""
+    st.markdown(f"### Store List ({len(filtered_stores)} stores)")
+    st.markdown(
+        '<p style="color: #64748b; font-size: 0.85rem; margin-top: -1rem;">'
+        'PO suggestions prioritized by sales velocity - from most sold to less sold items</p>',
+        unsafe_allow_html=True
+    )
+    
+    if len(filtered_stores) == 0:
+        st.markdown("""
+        <div style="text-align: center; padding: 4rem 2rem; color: #94a3b8;">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">🔍</div>
+            <h3 style="color: #64748b;">No stores found</h3>
+            <p>No stores match your current filters.</p>
+            <p style="font-size: 0.85rem; margin-top: 1rem;">
+                Try adjusting your filters or selecting "All" in some dropdowns
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+    
+    for idx, row in filtered_stores.iterrows():
+        unique_key = row['store_code']
+        
+        # Store header
+        st.markdown(f"""
         <div style="display: flex; align-items: center; gap: 10px; margin-top: 1.5rem; margin-bottom: 0.5rem;">
             <span style="font-size: 1.15rem; font-weight: 700; color: #1e293b;">{row['store_name']}</span>
-            <span style="background: #f1f5f9; color: #64748b; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">{row['store_code']}</span>
+            <span style="background: #f1f5f9; color: #64748b; padding: 2px 10px; 
+                         border-radius: 12px; font-size: 0.75rem; font-weight: 600;">
+                {row['store_code']}
+            </span>
         </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        
+        # Metrics and download button
+        m1, m2, m3, m4, btn_download = st.columns([2, 2.5, 2, 2.5, 1.5])
+        
+        with m1:
+            st.markdown(
+                f'<div class="metric-group">'
+                f'<span class="metric-label">Branch</span>'
+                f'<span class="metric-value">{row["region"]}</span></div>',
+                unsafe_allow_html=True
+            )
+        
+        with m2:
+            st.markdown(
+                f'<div class="metric-group">'
+                f'<span class="metric-label">🗓️ Last Stock Update</span>'
+                f'<span class="metric-value">{row["stock_date"]}</span></div>',
+                unsafe_allow_html=True
+            )
+        
+        with m3:
+            st.markdown(
+                f'<div class="metric-group">'
+                f'<span class="metric-label">Total SKUs</span>'
+                f'<span class="metric-value">{int(row["total_skus"])} products</span></div>',
+                unsafe_allow_html=True
+            )
+        
+        with m4:
+            order_value = f"Rp {row['est_order_value']/1000000:.1f}M"
+            st.markdown(
+                f'<div class="metric-group">'
+                f'<span class="metric-label">Est. Order Value</span>'
+                f'<span class="metric-value value-blue">{order_value}</span></div>',
+                unsafe_allow_html=True
+            )
+        
+        # Download button
+        with btn_download:
+            st.markdown('<div style="padding-top: 0.5rem;"></div>', unsafe_allow_html=True)
+            
+            try:
+                store_detail = df_inventory_buffer[
+                    df_inventory_buffer['store_code'] == row['store_code']
+                ].copy()
+                
+                store_info = {
+                    'store_code': row['store_code'],
+                    'store_name': row['store_name'],
+                    'distributor_g2g': row['distributor'],
+                    'region': row['region'],
+                    'address': '-'
+                }
+                
+                pdf_buffer = generate_po_pdf(store_info, store_detail, brand_name=Config.BRAND_NAME)
+                
+                st.download_button(
+                    label="📄 Download PDF",
+                    data=pdf_buffer,
+                    file_name=f"PO_{row['store_code']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    key=f"dl_pdf_{unique_key}",
+                    use_container_width=True
+                )
+                
+            except Exception as e:
+                st.error(f"Error generating PDF: {str(e)}")
+                logger.error(f"PDF generation failed for {unique_key}: {str(e)}")
+        
+        st.markdown('<hr style="margin: 1rem 0; border: none; border-top: 1px solid #f1f5f9;">', 
+                   unsafe_allow_html=True)
 
-    # 2. Metrics & Buttons as Columns
-    m1, m2, m3, m4, btn_download = st.columns([2, 2.5, 2, 2.5, 1.5])
-
-    with m1:
-        st.markdown(f'<div class="metric-group"><span class="metric-label">Branch</span><span class="metric-value">{row["region"]}</span></div>', unsafe_allow_html=True)
-    
-    with m2:
-        st.markdown(f'<div class="metric-group"><span class="metric-label">🗓️ Last Stock Update</span><span class="metric-value">{row["stock_date"]}</span></div>', unsafe_allow_html=True)
-    
-    with m3:
-        st.markdown(f'<div class="metric-group"><span class="metric-label">Total SKUs</span><span class="metric-value">{int(row["total_skus"])} products</span></div>', unsafe_allow_html=True)
-    
-    with m4:
-        order_value = f"Rp {row['est_order_value']/1000000:.1f}M"
-        st.markdown(f'<div class="metric-group"><span class="metric-label">Est. Order Value</span><span class="metric-value value-blue">{order_value}</span></div>', unsafe_allow_html=True)
-
-    # Get store detail data
-    store_detail = df_inventory_buffer[
-        df_inventory_buffer['store_code'] == row['store_code']
-    ].copy()
-    
-    store_info = {
-        'store_code': row['store_code'],
-        'store_name': row['store_name'],
-        'distributor_g2g': row['distributor'],
-        'region': row['region'],
-        'address': '-'
-    }
-
-    # --- DOWNLOAD BUTTON ---
-    with btn_download:
-        st.markdown('<div style="padding-top: 0.5rem;"></div>', unsafe_allow_html=True)
-        # Generate PDF directly
-        pdf_buffer = generate_po_pdf(store_info, store_detail, brand_name="Glad2Glow")
-        st.download_button(
-            label="📄 Download PDF",
-            data=pdf_buffer,
-            file_name=f"PO_{row['store_code']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-            mime="application/pdf",
-            key=f"dl_pdf_{row['store_code']}_{i}",
-            use_container_width=True
-        )
-
-    st.markdown('<hr style="margin: 1rem 0; border: none; border-top: 1px solid #f1f5f9;">', unsafe_allow_html=True)
-
-# ---------------------------
-# Empty State
-# ---------------------------
-if len(filtered_stores) == 0:
-    filter_msg = "No stores match your current filters."
-    if active_filters:
-        filter_msg = f"No stores found with filters: {', '.join(active_filters)}"
-    
+def render_footer():
+    """Render application footer"""
+    st.markdown("---")
     st.markdown(f"""
-    <div style="text-align: center; padding: 4rem 2rem; color: #94a3b8;">
-        <div style="font-size: 4rem; margin-bottom: 1rem;">🔍</div>
-        <h3 style="color: #64748b;">No stores found</h3>
-        <p>{filter_msg}</p>
-        <p style="font-size: 0.85rem; margin-top: 1rem;">Try adjusting your filters or selecting "All" in some dropdowns</p>
+    <div style="text-align: center; color: #94a3b8; font-size: 0.85rem; padding: 1rem;">
+        💡 PO suggestions are automatically calculated based on 2-month sales data, DOI standards, and stock levels<br>
+        📊 Data source: <code>{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}</code><br>
+        <span style="font-size: 0.75rem; opacity: 0.7;">Version {Config.VERSION} | {Config.BRAND_NAME}</span>
     </div>
     """, unsafe_allow_html=True)
 
-# ---------------------------
-# Footer
-# ---------------------------
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #94a3b8; font-size: 0.85rem; padding: 1rem;">
-    💡 PO suggestions are automatically calculated based on 2-month sales data, DOI standards, and stock levels<br>
-    📊 Data source: <code>skintific-data-warehouse.rsa.inventory_buffer</code>
-</div>
-""", unsafe_allow_html=True)
+# ============================================================================
+# APPLICATION ENTRY POINT
+# ============================================================================
+
+if __name__ == "__main__":
+    try:
+        logger.info(f"Starting {Config.APP_TITLE} v{Config.VERSION}")
+        main()
+        logger.info("Application rendered successfully")
+    except Exception as e:
+        logger.critical(f"Critical application error: {str(e)}", exc_info=True)
+        st.error(f"❌ Critical Error: {str(e)}")
+        st.info("Please contact support if this issue persists.")
