@@ -678,62 +678,58 @@ def check_and_execute_sp() -> Optional[datetime]:
     return last_updated_jkt
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
-def load_store_summary() -> pd.DataFrame:
+def load_store_summary_filtered(
+    selected_region: str = "All",
+    selected_distributor: str = "All"
+) -> pd.DataFrame:
+    client = get_bigquery_client()
+
+    filters = []
+    if selected_region != "All":
+        filters.append(f"region = '{selected_region}'")
+    if selected_distributor != "All":
+        filters.append(f"distributor_g2g = '{selected_distributor}'")
+
+    where_sql = ""
+    if filters:
+        where_sql = "WHERE " + " AND ".join(filters)
+
+    query = f"""
+    SELECT
+        store_code,
+        ANY_VALUE(region) AS region,
+        ANY_VALUE(store_name) AS store_name,
+        ANY_VALUE(distributor_g2g) AS distributor,
+        MAX(stock_date) AS stock_date,
+        COUNT(DISTINCT product_code) AS total_skus,
+        SUM(buffer_plan_ver2) AS total_buffer_qty,
+        SUM(buffer_plan_value_ver2) AS est_order_value
+    FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
+    {where_sql}
+    GROUP BY store_code
+    HAVING total_buffer_qty > 0
+    ORDER BY est_order_value DESC
     """
-    Load store summary data from BigQuery
-    
-    Returns:
-        pd.DataFrame: Store summary with aggregated metrics
+
+    df = client.query(query).to_dataframe()
+
+    def classify_priority(val):
+        if val > Config.PRIORITY_HIGH_THRESHOLD:
+            return "High"
+        elif val > Config.PRIORITY_MEDIUM_THRESHOLD:
+            return "Medium"
+        return "Low"
+
+    df["priority"] = df["est_order_value"].apply(classify_priority)
+    return df
+
         
-    Raises:
-        Exception: If query fails
-    """
-    try:
-        logger.info("Loading store summary data...")
-        client = get_bigquery_client()
-        
-        query = f"""
-        WITH store_agg AS (
-            SELECT
-                store_code,
-                MAX(region) AS region,
-                MAX(store_name) AS store_name,
-                MAX(distributor_g2g) AS distributor,
-                MAX(stock_date) AS stock_date,
-                COUNT(DISTINCT product_code) AS total_skus,
-                SUM(buffer_plan_ver2) AS total_buffer_qty,
-                SUM(buffer_plan_value_ver2) AS est_order_value,
-                SUM(actual_stock) AS current_stock_qty
-            FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
-            GROUP BY store_code
-        )
-        SELECT *
-        FROM store_agg
-        WHERE total_buffer_qty > 0
-        ORDER BY store_code
-        """
-        
-        df = client.query(query).to_dataframe()
-        
-        # Add priority classification
-        def classify_priority(value):
-            if value > Config.PRIORITY_HIGH_THRESHOLD:
-                return "High"
-            elif value > Config.PRIORITY_MEDIUM_THRESHOLD:
-                return "Medium"
-            return "Low"
-        
-        df["priority"] = df["est_order_value"].apply(classify_priority)
-        
-        logger.info(f"✓ Loaded {len(df)} stores from summary")
-        return df
-        
-    except google_exceptions.GoogleAPIError as e:
-        logger.error(f"BigQuery API error loading store summary: {str(e)}")
-        raise
-    except Exception as e:
-        logger.error(f"Failed to load store summary: {str(e)}")
-        raise
+    # except google_exceptions.GoogleAPIError as e:
+    #     logger.error(f"BigQuery API error loading store summary: {str(e)}")
+    #     raise
+    # except Exception as e:
+    #     logger.error(f"Failed to load store summary: {str(e)}")
+    #     raise
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
 def load_inventory_buffer_data() -> pd.DataFrame:
@@ -813,7 +809,10 @@ def main():
     # Load data
     try:
         with st.spinner("🔄 Loading data from BigQuery..."):
-            df_store_summary = load_store_summary()
+            df_store_summary = load_store_summary_filtered(
+                selected_region,
+                selected_distributor
+            )
             df_inventory_buffer = load_inventory_buffer_data()
             
     except Exception as e:
