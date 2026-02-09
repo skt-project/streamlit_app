@@ -684,18 +684,19 @@ def check_and_execute_sp() -> Optional[datetime]:
     return last_updated_jkt
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
+@st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
 def load_store_summary_filtered(selected_region="All", selected_distributor="All") -> pd.DataFrame:
     client = get_bigquery_client()
 
     filters = []
     if selected_region != "All":
-        filters.append(f"ib.region = '{selected_region}'")
+        filters.append(f"region = '{selected_region}'")
     if selected_distributor != "All":
-        filters.append(f"ib.distributor_g2g = '{selected_distributor}'")
+        filters.append(f"distributor_g2g = '{selected_distributor}'")
 
     where_sql = ""
     if filters:
-        where_sql = "AND " + " AND ".join(filters)
+        where_sql = "WHERE " + " AND ".join(filters)
 
     query = f"""
     WITH latest_stock AS (
@@ -704,37 +705,25 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
             MAX(stock_date) AS latest_stock_date
         FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
         GROUP BY store_code
-    ),
-    filtered_data AS (
-        -- ✅ First, get only the rows with the latest stock_date per store
-        SELECT
-            ib.store_code,
-            ib.store_name,
-            ib.region,
-            ib.distributor_g2g,
-            ib.product_code,
-            ib.buffer_plan_ver2,
-            ib.buffer_plan_value_ver2,
-            ls.latest_stock_date AS stock_date
-        FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
-        INNER JOIN latest_stock ls
-            ON ib.store_code = ls.store_code
-            AND ib.stock_date = ls.latest_stock_date
-        WHERE ib.buffer_plan_ver2 > 0
-        {where_sql}
     )
-    -- ✅ Then, aggregate by store_code only
     SELECT
-        store_code,
-        ANY_VALUE(store_name) AS store_name,
-        ANY_VALUE(region) AS region,
-        ANY_VALUE(distributor_g2g) AS distributor,
-        ANY_VALUE(stock_date) AS stock_date,
-        COUNT(DISTINCT product_code) AS total_skus,
-        SUM(buffer_plan_ver2) AS total_buffer_qty,
-        SUM(buffer_plan_value_ver2) AS est_order_value
-    FROM filtered_data
-    GROUP BY store_code
+        ib.store_code,
+        ANY_VALUE(ib.store_name) AS store_name,
+        ANY_VALUE(ib.region) AS region,
+        ANY_VALUE(ib.distributor_g2g) AS distributor,
+        ANY_VALUE(ib.stock_date) AS stock_date,
+        -- ✅ Only count SKUs where buffer_plan_ver2 > 0
+        COUNT(DISTINCT CASE WHEN ib.buffer_plan_ver2 > 0 THEN ib.product_code END) AS total_skus,
+        -- ✅ Only sum where buffer_plan_ver2 > 0
+        SUM(CASE WHEN ib.buffer_plan_ver2 > 0 THEN ib.buffer_plan_ver2 ELSE 0 END) AS total_buffer_qty,
+        SUM(CASE WHEN ib.buffer_plan_ver2 > 0 THEN ib.buffer_plan_value_ver2 ELSE 0 END) AS est_order_value
+    FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
+    INNER JOIN latest_stock ls
+        ON ib.store_code = ls.store_code
+        AND ib.stock_date = ls.latest_stock_date
+    {where_sql}
+    GROUP BY ib.store_code
+    HAVING total_buffer_qty > 0
     ORDER BY est_order_value DESC
     """
 
@@ -760,7 +749,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
 def load_inventory_buffer_data() -> pd.DataFrame:
     """
-    Load full inventory buffer data from BigQuery
+    Load full inventory buffer data from BigQuery (latest stock_date only per store)
     
     Returns:
         pd.DataFrame: Complete inventory buffer data
@@ -773,21 +762,31 @@ def load_inventory_buffer_data() -> pd.DataFrame:
         client = get_bigquery_client()
         
         query = f"""
+        WITH latest_stock AS (
+            SELECT
+                store_code,
+                MAX(stock_date) AS latest_stock_date
+            FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
+            GROUP BY store_code
+        )
         SELECT 
-            store_code, product_code, product_life_cycle, assortment,
-            inner_pcs, price_for_store, product_name, actual_stock,
-            stock_date, avg_daily_qty, days_of_inventory, standard_doi,
-            id_st, distributor_g2g, region, store_name, address,
-            stok_distributor, status_stok_distributor, buffer_plan,
-            buffer_plan_ver2, buffer_plan_value, buffer_plan_value_ver2,
-            SO_Bulanan
-        FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
-        ORDER BY region, store_name, SO_Bulanan, buffer_plan_value_ver2 DESC
+            ib.store_code, ib.product_code, ib.product_life_cycle, ib.assortment,
+            ib.inner_pcs, ib.price_for_store, ib.product_name, ib.actual_stock,
+            ib.stock_date, ib.avg_daily_qty, ib.days_of_inventory, ib.standard_doi,
+            ib.id_st, ib.distributor_g2g, ib.region, ib.store_name, ib.address,
+            ib.stok_distributor, ib.status_stok_distributor, ib.buffer_plan,
+            ib.buffer_plan_ver2, ib.buffer_plan_value, ib.buffer_plan_value_ver2,
+            ib.SO_Bulanan
+        FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
+        INNER JOIN latest_stock ls
+            ON ib.store_code = ls.store_code
+            AND ib.stock_date = ls.latest_stock_date
+        ORDER BY ib.region, ib.store_name, ib.SO_Bulanan DESC, ib.buffer_plan_value_ver2 DESC
         """
         
         df = client.query(query).to_dataframe()
         
-        logger.info(f"✓ Loaded {len(df)} inventory records")
+        logger.info(f"✓ Loaded {len(df)} inventory records (latest stock_date only)")
         return df
         
     except google_exceptions.GoogleAPIError as e:
