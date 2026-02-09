@@ -678,7 +678,6 @@ def check_and_execute_sp() -> Optional[datetime]:
     return last_updated_jkt
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
-@st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
 def load_store_summary_filtered(selected_region="All", selected_distributor="All") -> pd.DataFrame:
     client = get_bigquery_client()
 
@@ -964,12 +963,19 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
     .assign(label=lambda x: x["store_code"] + " - " + x["store_name"])
     .sort_values("label")
     )
-
+    
+    # ✅ Filter out invalid store codes from session state
+    valid_store_codes = store_options["store_code"].tolist()
+    default_stores = [
+        s for s in st.session_state.store_select 
+        if s in valid_store_codes
+    ]
+    
     selected_stores = st.multiselect(
         "Store Selection",
-        options=store_options["store_code"].tolist(),
+        options=valid_store_codes,
         format_func=lambda x: store_options.set_index("store_code").loc[x, "label"],
-        default=st.session_state.store_select,
+        default=default_stores,  # ✅ Now using validated defaults
         placeholder="Select one or more stores…",
         label_visibility="collapsed",
         key="store_select"
