@@ -720,7 +720,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         INNER JOIN latest_stock ls
             ON ib.store_code = ls.store_code
             AND ib.stock_date = ls.latest_stock_date
-        WHERE ib.buffer_plan_ver2 > 0  -- ✅ Only products with suggestions
+        WHERE
         {where_sql}
     )
     -- ✅ Then, aggregate by store_code only
