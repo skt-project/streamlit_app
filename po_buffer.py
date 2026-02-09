@@ -411,7 +411,7 @@ def _generate_store_page_elements(
     # ✅ Summary - NOW CALCULATED ON FILTERED DATA
     total_out_of_stock = len(sku_data_filtered[sku_data_filtered['actual_stock'] == 0])
     total_suggested = int(sku_data_filtered['buffer_plan_ver2'].sum())
-    total_value = sku_data_filtered['buffer_plan_value_ver2'].sum()
+    total_value = store_data.get("est_order_value", 0)
     
     summary_table = Table(
         [
@@ -1232,6 +1232,7 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
                     'store_name': row['store_name'],
                     'distributor_g2g': row['distributor'],
                     'region': row['region'],
+                    'est_order_value': row['est_order_value'],
                     'address': '-'
                 }
                 
