@@ -720,7 +720,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         INNER JOIN latest_stock ls
             ON ib.store_code = ls.store_code
             AND ib.stock_date = ls.latest_stock_date
-        WHERE
+        WHERE ib.buffer_plan_ver2 > 0
         {where_sql}
     )
     -- ✅ Then, aggregate by store_code only
@@ -734,8 +734,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         SUM(buffer_plan_ver2) AS total_buffer_qty,
         SUM(buffer_plan_value_ver2) AS est_order_value
     FROM filtered_data
-    GROUP BY store_code  -- ✅ Only group by store_code, not stock_date
-    HAVING total_buffer_qty > 0
+    GROUP BY store_code
     ORDER BY est_order_value DESC
     """
 
