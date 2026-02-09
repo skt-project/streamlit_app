@@ -713,6 +713,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
       ON ib.store_code = ls.store_code
      AND ib.stock_date = ls.latest_stock_date
     {where_sql}
+    WHERE ib.buffer_plan_ver2 > 0  -- ✅ ADD THIS LINE
     GROUP BY ib.store_code, ls.latest_stock_date
     HAVING total_buffer_qty > 0
     ORDER BY est_order_value DESC
