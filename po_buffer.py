@@ -381,7 +381,7 @@ def _generate_store_page_elements(
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=12,
+        fontSize=16,
         textColor=colors.HexColor('#D8A7A7'),
         alignment=TA_CENTER,
         spaceAfter=10
