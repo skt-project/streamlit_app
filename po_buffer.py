@@ -432,8 +432,12 @@ def _generate_store_page_elements(
     # ✅ Summary - NOW CALCULATED ON FILTERED DATA
     total_out_of_stock = len(sku_data_filtered[sku_data_filtered['actual_stock'] == 0])
     total_suggested = int(sku_data_filtered['buffer_plan_ver2'].sum())
-    raw_val = store_data.get("est_order_value", 0)
-    total_value = int(raw_val) if raw_val else 0
+    total_value = int(
+    sku_data_filtered['buffer_plan_value_ver2']
+    .fillna(0)
+    .sum()
+    )
+
 
     
     summary_table = Table(
