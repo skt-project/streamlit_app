@@ -879,21 +879,22 @@ def main():
 
 def render_header(last_exec_time: Optional[datetime]):
     """Render application header with sync status"""
-    if last_exec_time:
-        sync_time_str = last_exec_time.strftime("%I:%M %p")
-        now_jkt = get_jkt_now()
-        time_since_sync = now_jkt - last_exec_time
-        
-        seconds = int(time_since_sync.total_seconds())
-        hours_since = seconds // 3600
-        minutes_since = (seconds % 3600) // 60
-        
-        if hours_since > 0:
-            sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
-        else:
-            sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
+    if last_exec_time and isinstance(last_exec_time, datetime):
+    sync_time_str = last_exec_time.strftime("%I:%M %p")
+    now_jkt = get_jkt_now()
+    time_since_sync = now_jkt - last_exec_time
+
+    seconds = int(time_since_sync.total_seconds())
+    hours_since = seconds // 3600
+    minutes_since = (seconds % 3600) // 60
+
+    if hours_since > 0:
+        sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
     else:
-        sync_status = "Syncing data..."
+        sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
+else:
+    sync_status = "Syncing data..."
+
     
     st.markdown(f"""
     <div class="main-header">
