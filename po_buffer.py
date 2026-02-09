@@ -428,7 +428,7 @@ def _generate_store_page_elements(
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 1), (-1, 1), 14),
+        ('FONTSIZE', (0, 1), (-1, 1), 12),
         ('GRID', (0, 0), (-1, -1), 1, colors.white),
     ]))
     
