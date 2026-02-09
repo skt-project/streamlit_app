@@ -926,6 +926,7 @@ def render_header(last_exec_time: Optional[datetime]):
         seconds = int(time_since_sync.total_seconds())
         hours_since = seconds // 3600
         minutes_since = (seconds % 3600) // 60
+        
             if hours_since > 0:
             sync_status = f"({hours_since}h {minutes_since}m ago)"
         else:
