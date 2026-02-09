@@ -1212,18 +1212,15 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
         
         with m2:
             st.markdown(
-                f'<div class="metric-group">'
-                f'<span class="metric-label">🗓️ Last Stock Update</span>'
-                stock_date_str = (
-                    row["stock_date"].strftime("%d %b %Y")
-                    if isinstance(row["stock_date"], (datetime, pd.Timestamp))
-                    else "-"
-                )
-                
-                f'<span class="metric-value">{stock_date_str}</span>'
-
+                f"""
+                <div class="metric-group">
+                    <span class="metric-label">🗓️ Last Stock Update</span>
+                    <span class="metric-value">{stock_date_str}</span>
+                </div>
+                """,
                 unsafe_allow_html=True
             )
+
         
         with m3:
             st.markdown(
