@@ -1310,7 +1310,6 @@ def render_footer():
     st.markdown(f"""
     <div style="text-align: center; color: #94a3b8; font-size: 0.85rem; padding: 1rem;">
         💡 PO suggestions are automatically calculated based on 2-month sales data, DOI standards, and stock levels<br>
-        📊 Data source: <code>{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}</code><br>
         <span style="font-size: 0.75rem; opacity: 0.7;">Version {Config.VERSION} | {Config.BRAND_NAME}</span>
     </div>
     """, unsafe_allow_html=True)
