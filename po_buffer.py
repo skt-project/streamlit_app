@@ -417,7 +417,9 @@ def _generate_store_page_elements(
     # ✅ Summary - NOW CALCULATED ON FILTERED DATA
     total_out_of_stock = len(sku_data_filtered[sku_data_filtered['actual_stock'] == 0])
     total_suggested = int(sku_data_filtered['buffer_plan_ver2'].sum())
-    total_value = store_data.get("est_order_value", 0)
+    raw_val = store_data.get("est_order_value", 0)
+    total_value = int(raw_val) if raw_val else 0
+
     
     summary_table = Table(
         [
@@ -466,7 +468,14 @@ def _generate_store_page_elements(
     for _, row in sku_data_filtered.iterrows():
         buffer_qty = int(row['buffer_plan_ver2'])  # Already filtered, must be > 0
         actual_stock = int(row['actual_stock']) if not pd.isna(row['actual_stock']) else 0
-        buffer_val = int(row['buffer_plan_value_ver2']) if not pd.isna(row['buffer_plan_value_ver2']) else 0
+        buffer_val = (
+            int(row['buffer_plan_value_ver2'].item())
+            if hasattr(row['buffer_plan_value_ver2'], "item")
+            else int(row['buffer_plan_value_ver2'])
+            if not pd.isna(row['buffer_plan_value_ver2'])
+            else 0
+        )
+
         
         prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
         merged_product = Paragraph(
@@ -1205,7 +1214,14 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
             st.markdown(
                 f'<div class="metric-group">'
                 f'<span class="metric-label">🗓️ Last Stock Update</span>'
-                f'<span class="metric-value">{row["stock_date"]}</span></div>',
+                stock_date_str = (
+                    row["stock_date"].strftime("%d %b %Y")
+                    if isinstance(row["stock_date"], (datetime, pd.Timestamp))
+                    else "-"
+                )
+                
+                f'<span class="metric-value">{stock_date_str}</span>'
+
                 unsafe_allow_html=True
             )
         
