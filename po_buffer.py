@@ -359,9 +359,14 @@ def _generate_store_page_elements(
     styles,
     brand_name: str
 ) -> List:
-    """Generate PDF elements for a store page"""
     elements = []
     table_font_size = 8.5
+    
+    # ✅ FILTER FIRST - Only products with buffer_plan > 0
+    sku_data_filtered = sku_data[
+        (sku_data['buffer_plan_ver2'].notna()) & 
+        (sku_data['buffer_plan_ver2'] > 0)
+    ].copy()
     
     # Define styles
     cell_style = ParagraphStyle(
@@ -403,10 +408,10 @@ def _generate_store_page_elements(
     elements.append(info_table)
     elements.append(Spacer(1, 10))
     
-    # Summary
-    total_out_of_stock = len(sku_data[sku_data['actual_stock'] == 0])
-    total_suggested = int(sku_data['buffer_plan_ver2'].sum())
-    total_value = sku_data['buffer_plan_value_ver2'].sum()
+    # ✅ Summary - NOW CALCULATED ON FILTERED DATA
+    total_out_of_stock = len(sku_data_filtered[sku_data_filtered['actual_stock'] == 0])
+    total_suggested = int(sku_data_filtered['buffer_plan_ver2'].sum())
+    total_value = sku_data_filtered['buffer_plan_value_ver2'].sum()
     
     summary_table = Table(
         [
@@ -441,18 +446,17 @@ def _generate_store_page_elements(
         "Stok Menipis": "Menipis"
     }
     
-    stock_date_val = sku_data['stock_date'].iloc[0] if not sku_data.empty else "-"
+    # ✅ Use filtered data for stock_date too
+    stock_date_val = sku_data_filtered['stock_date'].iloc[0] if not sku_data_filtered.empty else "-"
     stock_date_str = (
         stock_date_val.strftime('%d %b %Y')
         if isinstance(stock_date_val, datetime)
         else str(stock_date_val)
     )
     
-    for _, row in sku_data.iterrows():
-        buffer_qty = int(row['buffer_plan_ver2']) if not pd.isna(row['buffer_plan_ver2']) else 0
-        if buffer_qty == 0:
-            continue
-        
+    # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
+    for _, row in sku_data_filtered.iterrows():
+        buffer_qty = int(row['buffer_plan_ver2'])  # Already filtered, must be > 0
         actual_stock = int(row['actual_stock']) if not pd.isna(row['actual_stock']) else 0
         buffer_val = int(row['buffer_plan_value_ver2']) if not pd.isna(row['buffer_plan_value_ver2']) else 0
         
@@ -476,6 +480,8 @@ def _generate_store_page_elements(
             Paragraph(f"{buffer_val:,}", value_style),
             "____"
         ])
+    
+    # ... rest of the function remains the same
     
     col_widths = [
         2.30 * inch, 0.50 * inch, 0.60 * inch, 0.75 * inch,
@@ -681,15 +687,14 @@ def check_and_execute_sp() -> Optional[datetime]:
 def load_store_summary_filtered(selected_region="All", selected_distributor="All") -> pd.DataFrame:
     client = get_bigquery_client()
 
-    filters = []
+    filters = ["ib.buffer_plan_ver2 > 0"]  # ✅ Always filter zero-buffer items
+    
     if selected_region != "All":
-        filters.append(f"region = '{selected_region}'")
+        filters.append(f"ib.region = '{selected_region}'")
     if selected_distributor != "All":
-        filters.append(f"distributor_g2g = '{selected_distributor}'")
+        filters.append(f"ib.distributor_g2g = '{selected_distributor}'")
 
-    where_sql = ""
-    if filters:
-        where_sql = "WHERE " + " AND ".join(filters)
+    where_sql = "WHERE " + " AND ".join(filters)
 
     query = f"""
     WITH latest_stock AS (
@@ -713,7 +718,6 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
       ON ib.store_code = ls.store_code
      AND ib.stock_date = ls.latest_stock_date
     {where_sql}
-    AND ib.buffer_plan_ver2 > 0  -- ✅ ADD THIS LINE
     GROUP BY ib.store_code, ls.latest_stock_date
     HAVING total_buffer_qty > 0
     ORDER BY est_order_value DESC
