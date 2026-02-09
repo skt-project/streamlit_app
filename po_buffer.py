@@ -926,11 +926,10 @@ def render_header(last_exec_time: Optional[datetime]):
         seconds = int(time_since_sync.total_seconds())
         hours_since = seconds // 3600
         minutes_since = (seconds % 3600) // 60
-    
-        if hours_since > 0:
-            sync_status = f"Last Sync: {sync_time_str} WIB ({hours_since}h {minutes_since}m ago)"
+            if hours_since > 0:
+            sync_status = f"({hours_since}h {minutes_since}m ago)"
         else:
-            sync_status = f"Last Sync: {sync_time_str} WIB ({minutes_since}m ago)"
+            sync_status = f"({minutes_since}m ago)"
     else:
         sync_status = "Syncing data..."
 
