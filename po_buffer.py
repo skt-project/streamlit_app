@@ -306,6 +306,21 @@ def format_jkt_time(dt: datetime, format_str: str = "%d %b %Y, %H:%M WIB") -> st
     
     dt_jkt = dt.astimezone(jkt_tz)
     return dt_jkt.strftime(format_str)
+    
+def safe_str(value, default: str = "-") -> str:
+    """
+    Safely convert any value to string, handling None and NaN
+    
+    Args:
+        value: Any value to convert
+        default: Default string if value is None/NaN
+        
+    Returns:
+        str: String representation or default
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    return str(value)
 
 # ============================================================================
 # PDF GENERATION FUNCTIONS
