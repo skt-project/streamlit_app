@@ -480,6 +480,7 @@ def _generate_store_page_elements(
 
     
     # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
+    # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
     for _, row in sku_data_filtered.iterrows():
         buffer_qty = int(row['buffer_plan_ver2'])  # Already filtered, must be > 0
         actual_stock = int(row['actual_stock']) if not pd.isna(row['actual_stock']) else 0
@@ -490,7 +491,14 @@ def _generate_store_page_elements(
             if not pd.isna(row['buffer_plan_value_ver2'])
             else 0
         )
-
+        
+        # ✅ FIX: Handle NaN in SO_Bulanan - convert to 0 instead of '-'
+        so_bulanan = row.get('SO_Bulanan')
+        so_bulanan_display = (
+            str(int(so_bulanan)) 
+            if pd.notna(so_bulanan) 
+            else "0"
+        )
         
         prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
         merged_product = Paragraph(
@@ -506,13 +514,7 @@ def _generate_store_page_elements(
         table_data.append([
             merged_product,
             str(actual_stock),
-            # ✅ Handle NaN in SO_Bulanan - convert to 0 instead of '-'
-            so_bulanan = row.get('SO_Bulanan')
-            so_bulanan_display = (
-                str(int(so_bulanan)) 
-                if pd.notna(so_bulanan) 
-                else "0"
-            )
+            so_bulanan_display,  # ✅ Use the handled value
             Paragraph(dist_stock_display, cell_style),
             str(buffer_qty),
             Paragraph(f"{buffer_val:,}", value_style),
