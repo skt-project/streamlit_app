@@ -1297,5 +1297,5 @@ if __name__ == "__main__":
         logger.info("Application rendered successfully")
     except Exception as e:
         logger.critical(f"Critical application error: {str(e)}", exc_info=True)
-        st.error(f"❌ Critical Error: {str(e)}")
-        st.info("Please contact support if this issue persists.")
+        #st.error(f"❌ Critical Error: {str(e)}")
+        #st.info("Please contact support if this issue persists.")
