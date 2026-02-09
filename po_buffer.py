@@ -394,10 +394,16 @@ def _generate_store_page_elements(
     
     # Store Information
     store_info_data = [
-        [f"Toko: {store_data['store_name']}", f"Kode: {store_data['store_code']}"],
-        [f"Region: {store_data.get('region', '-')}", f"Distributor: {store_data.get('distributor_g2g', '-')}"],
-        [f"Tgl: {datetime.now().strftime('%d/%b/%Y')}", "Sales: _________________"]
+    [f"Toko: {safe_str(store_data.get('store_name'))}",
+     f"Kode: {safe_str(store_data.get('store_code'))}"],
+
+    [f"Region: {safe_str(store_data.get('region'))}",
+     f"Distributor: {safe_str(store_data.get('distributor_g2g'))}"],
+
+    [f"Tgl: {datetime.now().strftime('%d/%b/%Y')}",
+     "Sales: _________________"]
     ]
+
     
     info_table = Table(store_info_data, colWidths=[4.0 * inch, 3.5 * inch])
     info_table.setStyle(TableStyle([
@@ -447,12 +453,14 @@ def _generate_store_page_elements(
     }
     
     # ✅ Use filtered data for stock_date too
-    stock_date_val = sku_data_filtered['stock_date'].iloc[0] if not sku_data_filtered.empty else "-"
+    stock_date_val = sku_data_filtered['stock_date'].iloc[0] if not sku_data_filtered.empty else None
+
     stock_date_str = (
         stock_date_val.strftime('%d %b %Y')
-        if isinstance(stock_date_val, datetime)
-        else str(stock_date_val)
+        if isinstance(stock_date_val, (datetime, pd.Timestamp))
+        else safe_str(stock_date_val)
     )
+
     
     # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
     for _, row in sku_data_filtered.iterrows():
