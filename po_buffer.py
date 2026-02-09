@@ -433,7 +433,7 @@ def _generate_store_page_elements(
     ]))
     
     elements.append(summary_table)
-    elements.append(Spacer(1, 15))
+    elements.append(Spacer(1, 12))
     
     # Product Table
     table_data = [
