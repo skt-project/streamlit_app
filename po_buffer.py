@@ -506,7 +506,13 @@ def _generate_store_page_elements(
         table_data.append([
             merged_product,
             str(actual_stock),
-            str(row.get('SO_Bulanan', '0')),
+            # ✅ Handle NaN in SO_Bulanan - convert to 0 instead of '-'
+            so_bulanan = row.get('SO_Bulanan')
+            so_bulanan_display = (
+                str(int(so_bulanan)) 
+                if pd.notna(so_bulanan) 
+                else "0"
+            )
             Paragraph(dist_stock_display, cell_style),
             str(buffer_qty),
             Paragraph(f"{buffer_val:,}", value_style),
