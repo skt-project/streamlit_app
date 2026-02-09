@@ -506,7 +506,7 @@ def _generate_store_page_elements(
         table_data.append([
             merged_product,
             str(actual_stock),
-            str(row.get('SO_Bulanan', '-')),
+            str(row.get('SO_Bulanan', '0')),
             Paragraph(dist_stock_display, cell_style),
             str(buffer_qty),
             Paragraph(f"{buffer_val:,}", value_style),
