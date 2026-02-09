@@ -1178,15 +1178,16 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
         """, unsafe_allow_html=True)
         return
     
-    # filtered_stores = (
-    #     filtered_stores
-    #     .sort_values("est_order_value", ascending=False)
-    #     .drop_duplicates(subset=["store_code"], keep="first")
-    # )
-
     for _, row in filtered_stores.iterrows():
         unique_key = row["store_code"]
-
+        
+        # ✅ FIX: Get stock_date_str for THIS store
+        stock_date_val = row.get('stock_date')
+        stock_date_str = (
+            stock_date_val.strftime('%d %b %Y')
+            if isinstance(stock_date_val, (datetime, pd.Timestamp))
+            else str(stock_date_val) if stock_date_val else '-'
+        )
         
         # Store header
         st.markdown(f"""
