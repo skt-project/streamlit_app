@@ -1028,16 +1028,18 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
     
     # ✅ Filter out invalid store codes from session state
     valid_store_codes = store_options["store_code"].tolist()
-    default_stores = [
-        s for s in st.session_state.store_select 
-        if s in valid_store_codes
-    ]
+    
+    # Update session state directly if needed
+    if st.session_state.store_select:
+        st.session_state.store_select = [
+            s for s in st.session_state.store_select 
+            if s in valid_store_codes
+        ]
     
     selected_stores = st.multiselect(
         "Store Selection",
         options=valid_store_codes,
         format_func=lambda x: store_options.set_index("store_code").loc[x, "label"],
-        default=default_stores,  # ✅ Now using validated defaults
         placeholder="Select one or more stores…",
         label_visibility="collapsed",
         key="store_select"
