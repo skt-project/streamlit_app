@@ -118,31 +118,35 @@ def load_po_tracking(company):
                 subtotal
             FROM `dms.gt_po_tracking_all_mv`
         """
-        return bq_client.query(query).to_dataframe()
+        df = bq_client.query(query).to_dataframe()
 
-    query = """
-        SELECT
-            order_date,
-            distributor_name,
-            customer_order_no,
-            sku,
-            product_name,
-            order_qty,
-            unit_price,
-            subtotal
-        FROM `dms.gt_po_tracking_all_mv`
-        WHERE LOWER(distributor_name)
-              LIKE CONCAT('%', LOWER(@company), '%')
-    """
+    else:
+        query = """
+            SELECT
+                order_date,
+                distributor_name,
+                customer_order_no,
+                sku,
+                product_name,
+                order_qty,
+                unit_price,
+                subtotal
+            FROM `dms.gt_po_tracking_all_mv`
+            WHERE LOWER(distributor_name)
+                  LIKE CONCAT('%', LOWER(@company), '%')
+        """
 
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("company", "STRING", company)
-        ]
-    )
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("company", "STRING", company)
+            ]
+        )
 
-    df = bq_client.query(query, job_config=job_config).to_dataframe()
+        df = bq_client.query(query, job_config=job_config).to_dataframe()
+
+    # ✅ move conversion OUTSIDE if/else
     df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
+
     return df
 
 if "logged_in" not in st.session_state:
