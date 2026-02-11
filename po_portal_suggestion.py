@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import uuid
+import bcrypt
 from io import BytesIO
 from pendulum import now
 from google.oauth2 import service_account
@@ -24,6 +25,7 @@ DATASET = st.secrets["bigquery"]["dataset"]
 
 PO_TABLE = "po_portal_suggestion"
 FEEDBACK_TABLE = "po_portal_feedback"
+USER_TABLE = "po_portal_distributor_users"
 
 bq_client = bigquery.Client(
     credentials=credentials,
@@ -33,6 +35,33 @@ bq_client = bigquery.Client(
 # --------------------------------------------------
 # Load PO Suggestion
 # --------------------------------------------------
+def check_login(username, password):
+    query = f"""
+        SELECT distributor_company, password_hash
+        FROM `{PROJECT_ID}.{DATASET}.{USER_TABLE}`
+        WHERE username = @username
+          AND is_active = TRUE
+        LIMIT 1
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("username", "STRING", username)
+        ]
+    )
+
+    df = bq_client.query(query, job_config=job_config).to_dataframe()
+
+    if df.empty:
+        return None
+
+    stored_hash = df.loc[0, "password_hash"].encode()
+
+    if bcrypt.checkpw(password.encode(), stored_hash):
+        return df.loc[0, "distributor_company"]
+
+    return None
+
 @st.cache_data(ttl=600)
 def load_po_suggestion():
     query = f"""
@@ -92,9 +121,39 @@ def load_po_tracking():
     df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
     return df
 
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.title("🔐 Distributor Login")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        company = check_login(username, password)
+
+        if company:
+            st.session_state.logged_in = True
+            st.session_state.distributor_company = company
+            st.rerun()
+        else:
+            st.error("❌ Invalid username or password")
+
+    st.stop()
+
 po_df = load_po_suggestion()
 
+# 🔒 FORCE DATA BY LOGIN (ROW LEVEL SECURITY)
+logged_company = st.session_state["distributor_company"]
+
+po_df = po_df[
+    po_df["distributor_company"] == logged_company
+]
+
 st.title("📦 PO Portal Suggestion")
+
+
 
 # --------------------------------------------------
 # FILTERS (CASCADED)
