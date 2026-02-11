@@ -37,7 +37,7 @@ bq_client = bigquery.Client(
 def check_login(username, password):
 
     query = f"""
-        SELECT distributor_company, password
+        SELECT distributor_company, password_hash
         FROM `{PROJECT_ID}.{DATASET}.{USER_TABLE}`
         WHERE username = @username
           AND is_active = TRUE
@@ -55,7 +55,7 @@ def check_login(username, password):
     if df.empty:
         return None
 
-    stored_password = str(df.loc[0, "password"]).strip()
+    stored_password = str(df.loc[0, "password_hash"]).strip()
 
     if password == stored_password:
         return df.loc[0, "distributor_company"]
