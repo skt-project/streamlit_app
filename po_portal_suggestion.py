@@ -103,21 +103,46 @@ def load_po_suggestion():
 # Load PO Tracking Data
 # --------------------------------------------------
 @st.cache_data(ttl=600)
-def load_po_tracking():
-    query = """
-        SELECT
-            order_date,
-            distributor_name,
-            customer_order_no,
-            sku,
-            product_name,
-            order_qty,
-            unit_price,
-            subtotal
-        FROM `dms.gt_po_tracking_all_mv`
-        WHERE distributor_name LIKE '%KARYA ANANDA SUKSES%'
-    """
-    df = bq_client.query(query).to_dataframe()
+def load_po_tracking(company):
+
+    if company == "Admin":
+        query = """
+            SELECT
+                order_date,
+                distributor_name,
+                customer_order_no,
+                sku,
+                product_name,
+                order_qty,
+                unit_price,
+                subtotal
+            FROM `dms.gt_po_tracking_all_mv`
+        """
+        df = bq_client.query(query).to_dataframe()
+
+    else:
+        query = """
+            SELECT
+                order_date,
+                distributor_name,
+                customer_order_no,
+                sku,
+                product_name,
+                order_qty,
+                unit_price,
+                subtotal
+            FROM `dms.gt_po_tracking_all_mv`
+            WHERE distributor_name = @company
+        """
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("company", "STRING", company)
+            ]
+        )
+
+        df = bq_client.query(query, job_config=job_config).to_dataframe()
+
     df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
     return df
 
@@ -125,7 +150,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("🔐 Distributor Login")
+    st.title("🔐PO Portal Distributor Login")
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
@@ -147,9 +172,13 @@ po_df = load_po_suggestion()
 # 🔒 FORCE DATA BY LOGIN (ROW LEVEL SECURITY)
 logged_company = st.session_state["distributor_company"]
 
-po_df = po_df[
-    po_df["distributor_company"] == logged_company
-]
+st.caption(f"Logged in as: {logged_company}")
+
+# 🔒 Row level security
+if logged_company != "Admin":
+    po_df = po_df[
+        po_df["distributor_company"] == logged_company
+    ]
 
 st.title("📦 PO Portal Suggestion")
 
@@ -278,7 +307,7 @@ st.download_button(
 st.divider()
 st.header("📊 PO Tracking Data")
 
-tracking_df = load_po_tracking()
+tracking_df = load_po_tracking(logged_company)
 
 # -------------------------
 # FILTERS
