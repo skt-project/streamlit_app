@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import uuid
-import bcrypt
 from io import BytesIO
 from pendulum import now
 from google.oauth2 import service_account
@@ -36,8 +35,9 @@ bq_client = bigquery.Client(
 # Load PO Suggestion
 # --------------------------------------------------
 def check_login(username, password):
+
     query = f"""
-        SELECT distributor_company, password_hash
+        SELECT distributor_company, password
         FROM `{PROJECT_ID}.{DATASET}.{USER_TABLE}`
         WHERE username = @username
           AND is_active = TRUE
@@ -55,9 +55,9 @@ def check_login(username, password):
     if df.empty:
         return None
 
-    stored_hash = df.loc[0, "password_hash"].encode()
+    stored_password = str(df.loc[0, "password"]).strip()
 
-    if bcrypt.checkpw(password.encode(), stored_hash):
+    if password == stored_password:
         return df.loc[0, "distributor_company"]
 
     return None
