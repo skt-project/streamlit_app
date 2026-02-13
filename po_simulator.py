@@ -480,7 +480,11 @@ def main():
         "G2G-800",
         "G2G-213",
         "G2G-217",
-        "G2G-27305"
+        "G2G-27305",
+        "G2G-30701",
+        "G2G-30702",
+        "G2G-30703",
+        "G2G-30704"
     ]
     
     # Combined list for checking
