@@ -430,7 +430,7 @@ def _generate_store_page_elements(
     elements.append(Spacer(1, 10))
     
     # ✅ Summary - NOW CALCULATED ON FILTERED DATA
-    total_out_of_stock = len(sku_data_filtered[sku_data_filtered['actual_stock'] == 0])
+    total_out_of_stock = len(sku_data_filtered[sku_data_filtered['estimated_actual_stock_adj'] == 0])
     total_suggested = int(sku_data_filtered['buffer_plan_ver2'].sum())
     total_value = int(
     sku_data_filtered['buffer_plan_value_ver2']
@@ -484,10 +484,9 @@ def _generate_store_page_elements(
 
     
     # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
-    # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
     for _, row in sku_data_filtered.iterrows():
         buffer_qty = int(row['buffer_plan_ver2'])  # Already filtered, must be > 0
-        actual_stock = int(row['actual_stock']) if not pd.isna(row['actual_stock']) else 0
+        actual_stock = int(row['estimated_actual_stock_adj']) if not pd.isna(row['estimated_actual_stock_adj']) else 0
         buffer_val = (
             int(row['buffer_plan_value_ver2'].item())
             if hasattr(row['buffer_plan_value_ver2'], "item")
@@ -506,7 +505,7 @@ def _generate_store_page_elements(
         
         prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
         merged_product = Paragraph(
-            f"<b>{row['product_code']}</b><br/>{row['product_name']}",
+            f"<b>{row['product_code']}</b><br/>{row['product_name']}</b><br/>{row['priority_label']}",
             prod_style
         )
         
@@ -815,7 +814,7 @@ def load_inventory_buffer_data() -> pd.DataFrame:
         )
         SELECT 
             ib.store_code, ib.product_code, ib.product_life_cycle, ib.assortment,
-            ib.inner_pcs, ib.price_for_store, ib.product_name, ib.actual_stock,
+            ib.inner_pcs, ib.price_for_store, ib.product_name, ib.estimated_actual_stock_adj,
             ib.stock_date, ib.avg_daily_qty, ib.days_of_inventory, ib.standard_doi,
             ib.id_st, ib.distributor_g2g, ib.region, ib.store_name, ib.address,
             ib.stok_distributor, ib.status_stok_distributor, ib.buffer_plan,
