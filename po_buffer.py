@@ -504,11 +504,12 @@ def _generate_store_page_elements(
         )
         
         prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
-        priority_label = safe_str(row.get('priority_label', ''))
+        priority_label = safe_str(row.get('priority_label', ''), default='')
+        priority_line = f"<br/>{priority_label}" if priority_label else ""
 
         merged_product = Paragraph(
-            f"<b>{row['product_code']}</b><br/>{row['product_name']}<br/>{priority_label}",
-            prod_style
+            f"<b>{row['product_code']}</b><br/>{row['product_name']}{priority_line}",
+        prod_style
         )
         
         raw_dist_stock = str(row.get('status_stok_distributor', '-'))
