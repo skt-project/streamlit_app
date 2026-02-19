@@ -819,7 +819,7 @@ def load_inventory_buffer_data() -> pd.DataFrame:
             ib.id_st, ib.distributor_g2g, ib.region, ib.store_name, ib.address,
             ib.stok_distributor, ib.status_stok_distributor, ib.buffer_plan,
             ib.buffer_plan_ver2, ib.buffer_plan_value, ib.buffer_plan_value_ver2,
-            ib.SO_Bulanan
+            ib.SO_Bulanan, ib.priority_label 
         FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
         INNER JOIN latest_stock ls
             ON ib.store_code = ls.store_code
