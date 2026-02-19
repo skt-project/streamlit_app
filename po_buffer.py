@@ -505,7 +505,7 @@ def _generate_store_page_elements(
         
         prod_style = ParagraphStyle('ProdStyle', parent=cell_style, alignment=TA_LEFT)
         merged_product = Paragraph(
-            f"<b>{row['product_code']}</b><br/>{row['product_name']}</b><br/>{row['priority_label']}",
+            f"<b>{row['product_code']}</b><br/>{row['product_name']}<br/>{priority_label}",
             prod_style
         )
         
