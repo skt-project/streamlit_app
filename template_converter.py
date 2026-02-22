@@ -160,14 +160,15 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
     followed by product rows.  Column 7 of that header row carries the
     distributor store ID ("Store Code Suggestion").
 
-    Returns a flat DataFrame with columns:
-        Product Code | Product Name | Kuantitas | H.JUAL | JLH SBLM DISC |
-        DISC | JUMLAH | No. TRANSAKSI | ID CUST DISTRIBUTOR | Customer Store Name
+    Returns a flat intermediate DataFrame with columns:
+        Product Code | Product Name | Kuantitas | No. TRANSAKSI | PO Date |
+        ID CUST DISTRIBUTOR | Customer Store Name
     """
     df = pd.read_excel(uploaded_file, sheet_name="TEMPLATE", header=None)
 
     records = []
     current_trans = None
+    current_po_date = None
     current_store_id = None
     current_store_name = None
 
@@ -175,13 +176,19 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
         cell0 = str(row[0]).strip() if pd.notna(row[0]) else ""
 
         # ── Transaction header ────────────────────────────────────────────────
+        # Pattern: "No. Trans : JL/M3-26020183 [ 09-02-2026 ] - ONE MART"
         if "No. Trans :" in cell0:
             match = re.match(
-                r"No\.\s*Trans\s*:\s*(\S+)\s*\[.*?\]\s*-\s*(.+)", cell0
+                r"No\.\s*Trans\s*:\s*(\S+)\s*\[\s*(\d{2}-\d{2}-\d{4})\s*\]\s*-\s*(.+)",
+                cell0,
             )
             if match:
                 current_trans = match.group(1).strip()
-                current_store_name = match.group(2).strip()
+                # Convert DD-MM-YYYY → YYYY-MM-DD to align with master schema
+                current_po_date = pd.to_datetime(
+                    match.group(2), format="%d-%m-%Y"
+                ).strftime("%Y-%m-%d")
+                current_store_name = match.group(3).strip()
 
             col7 = str(row[7]).strip() if pd.notna(row[7]) else ""
             # Leave blank for unregistered stores
@@ -196,23 +203,58 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
                     "Product Code": str(int(cell0)),
                     "Product Name": row[1],
                     "Kuantitas": row[2],
-                    "H.JUAL": row[3],
-                    "JLH SBLM DISC": row[4],
-                    "DISC": row[5],
-                    "JUMLAH": row[6],
                     "No. TRANSAKSI": current_trans,
+                    "PO Date": current_po_date,
                     "ID CUST DISTRIBUTOR": current_store_id,
                     "Customer Store Name": current_store_name,
                 }
             )
 
     result = pd.DataFrame(records)
-
-    # Type cleanup
-    for col in ["Kuantitas", "H.JUAL", "JLH SBLM DISC", "DISC", "JUMLAH"]:
-        result[col] = pd.to_numeric(result[col], errors="coerce")
-
+    result["Kuantitas"] = pd.to_numeric(result["Kuantitas"], errors="coerce")
     return result
+
+
+def map_3m_to_master(
+    cleaned: pd.DataFrame,
+    static_fields: Dict[str, str],
+    brand_prefix: str,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Maps the intermediate 3M cleaned DataFrame to MASTER_SCHEMA, applying
+    static fields and brand/branch prefixes exactly like the standard pipeline.
+
+    Returns (mapped_df, unregistered_stores).
+    """
+    out = pd.DataFrame(index=cleaned.index)
+
+    # ── Fixed first-5 columns from static_fields ─────────────────────────────
+    for col in FIXED_FIRST_5:
+        out[col] = static_fields.get(col, "")
+
+    # Apply brand prefix to Customer Code
+    out["Customer Code"] = brand_prefix + static_fields.get("Customer Code", "")
+
+    # ── Dynamic columns ───────────────────────────────────────────────────────
+    out["PO Date"] = cleaned["PO Date"]
+    out["PO Number"] = cleaned["No. TRANSAKSI"]
+
+    # Customer Store Code = branch_code_prefix + ID CUST DISTRIBUTOR
+    branch_prefix = static_fields.get("Customer Branch Code", "")
+    out["Customer Store Code"] = branch_prefix + cleaned["ID CUST DISTRIBUTOR"].astype(str)
+
+    out["Customer Store Name"] = cleaned["Customer Store Name"]
+    out["Customer SKU Code"] = cleaned["Product Code"]
+    out["Customer SKU Name"] = cleaned["Product Name"]
+    out["Qty"] = cleaned["Kuantitas"]
+
+    # Collect unregistered stores (those whose store ID was blank before prefixing)
+    unregistered = cleaned.loc[
+        cleaned["ID CUST DISTRIBUTOR"] == "", "Customer Store Name"
+    ].unique().tolist()
+
+    out = out[MASTER_SCHEMA]
+    return out, unregistered
 
 
 # =========================
@@ -320,7 +362,16 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     if not uploaded:
         return
 
-    # ── Parse & clean ────────────────────────────────────────────────────────
+    # ── Fetch distributor config (same as standard pipeline) ─────────────────
+    cfg = get_config(dist)
+    if not cfg:
+        st.error(
+            "Configuration for the selected distributor was not found. "
+            "Please contact an administrator."
+        )
+        return
+
+    # ── Parse raw report layout ───────────────────────────────────────────────
     with st.spinner("Parsing 3M report layout…"):
         try:
             cleaned = clean_3m_daily_st(uploaded)
@@ -332,43 +383,52 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         st.warning("No product rows were found in the uploaded file.")
         return
 
-    st.success(f"✅ Extracted **{len(cleaned):,}** product rows from the report.")
-    st.write("Cleaned data preview:")
-    st.dataframe(cleaned.head(10))
-
-    # ── Mapping log ──────────────────────────────────────────────────────────
-    st.subheader("Column Mapping")
-    mapping_info = [
-        {"Output Column": "Product Code",        "Source": "BARCODE (col 0)"},
-        {"Output Column": "Product Name",         "Source": "NAMA PRODUK (col 1)"},
-        {"Output Column": "Kuantitas",            "Source": "QTY (col 2)"},
-        {"Output Column": "H.JUAL",               "Source": "H.JUAL (col 3)"},
-        {"Output Column": "JLH SBLM DISC",        "Source": "JLH SBLM DISC (col 4)"},
-        {"Output Column": "DISC",                 "Source": "DISC (col 5)"},
-        {"Output Column": "JUMLAH",               "Source": "JUMLAH (col 6)"},
-        {"Output Column": "No. TRANSAKSI",        "Source": "Parsed from transaction header"},
-        {"Output Column": "ID CUST DISTRIBUTOR",  "Source": "Store Code Suggestion (col 7)"},
-        {"Output Column": "Customer Store Name",  "Source": "Parsed from transaction header"},
-    ]
-    st.table(pd.DataFrame(mapping_info))
-
-    # ── Unregistered stores summary ──────────────────────────────────────────
-    unregistered = cleaned[cleaned["ID CUST DISTRIBUTOR"] == ""]
-    if not unregistered.empty:
-        unique_unregistered = unregistered["Customer Store Name"].unique()
-        st.warning(
-            f"⚠️ **{len(unique_unregistered)} store(s)** are marked *Not Registered* "
-            "and will have an empty distributor ID:"
-        )
-        st.write(", ".join(sorted(unique_unregistered)))
-
-    # ── Download ─────────────────────────────────────────────────────────────
+    # ── Map to MASTER_SCHEMA ──────────────────────────────────────────────────
     try:
-        xlsx = to_excel_bytes(cleaned, "3M_Cleaned")
+        mapped, unregistered = map_3m_to_master(cleaned, cfg["static_fields"], brand_prefix)
+    except Exception as e:
+        st.error(f"Error mapping to master schema: {e}")
+        return
+
+    st.success(f"Mapped to master schema.")
+    st.write("Converted sample:")
+    st.dataframe(mapped.head())
+
+    # ── Mapping log (mirrors standard pipeline style) ─────────────────────────
+    st.subheader("Mapping Log")
+    st.write("✅ **Successful Mappings:**")
+    branch_prefix = cfg["static_fields"].get("Customer Branch Code", "")
+    mapping_log = [
+        {"Target Column": "Customer Code",        "Source Column": f"PREFIXED({brand_prefix}){cfg['static_fields'].get('Customer Code','')}",  "Status": "Mapped"},
+        {"Target Column": "Customer Name",        "Source Column": cfg["static_fields"].get("Customer Name", ""),                               "Status": "Mapped"},
+        {"Target Column": "Customer Branch Code", "Source Column": cfg["static_fields"].get("Customer Branch Code", ""),                        "Status": "Mapped"},
+        {"Target Column": "Customer Branch Name", "Source Column": cfg["static_fields"].get("Customer Branch Name", ""),                        "Status": "Mapped"},
+        {"Target Column": "Customer Address",     "Source Column": cfg["static_fields"].get("Customer Address", ""),                            "Status": "Mapped"},
+        {"Target Column": "PO Date",              "Source Column": "Parsed from transaction header [DD-MM-YYYY]",                               "Status": "Mapped"},
+        {"Target Column": "PO Number",            "Source Column": "No. TRANSAKSI (transaction header)",                                        "Status": "Mapped"},
+        {"Target Column": "Customer Store Code",  "Source Column": f"PREFIXED({branch_prefix})Store Code Suggestion (col 7)",                   "Status": "Mapped"},
+        {"Target Column": "Customer Store Name",  "Source Column": "Parsed from transaction header",                                            "Status": "Mapped"},
+        {"Target Column": "Customer SKU Code",    "Source Column": "BARCODE (col 0)",                                                           "Status": "Mapped"},
+        {"Target Column": "Customer SKU Name",    "Source Column": "NAMA PRODUK (col 1)",                                                       "Status": "Mapped"},
+        {"Target Column": "Qty",                  "Source Column": "QTY (col 2)",                                                               "Status": "Mapped"},
+    ]
+    st.table(pd.DataFrame(mapping_log))
+
+    # ── Unregistered stores warning ───────────────────────────────────────────
+    if unregistered:
+        st.warning(
+            f"⚠️ **{len(unregistered)} store(s)** are marked *Not Registered* "
+            "and will have an empty Customer Store Code:"
+        )
+        st.write(", ".join(sorted(unregistered)))
+
+    # ── Download (same UX as standard pipeline) ───────────────────────────────
+    try:
+        xlsx = to_excel_bytes(mapped, "MappedData")
         st.download_button(
-            label="📥 Download Cleaned Excel",
+            label="📥 Download Converted Excel",
             data=xlsx,
-            file_name=f"{dist}_3M_cleaned.xlsx",
+            file_name=f"{dist}_converted.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except Exception as e:
