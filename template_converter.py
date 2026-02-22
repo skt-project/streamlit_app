@@ -353,7 +353,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     """Handles upload + conversion for CV MITRA MAKMUR MANDIRI distributors."""
     st.info(
         "ℹ️ This distributor uses the **3M Daily ST** format. "
-        "Please upload the raw *Laporan Detail Penjualan* Excel file."
+        "Please upload the raw *3M Daily ST Upload Template* Excel file."
     )
 
     uploaded = st.file_uploader(
