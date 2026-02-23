@@ -239,9 +239,8 @@ def map_3m_to_master(
     out["PO Date"] = cleaned["PO Date"]
     out["PO Number"] = cleaned["No. TRANSAKSI"]
 
-    # Customer Store Code = branch_code_prefix + ID CUST DISTRIBUTOR
-    branch_prefix = static_fields.get("Customer Branch Code", "")
-    out["Customer Store Code"] = branch_prefix + cleaned["ID CUST DISTRIBUTOR"].astype(str)
+    # Customer Store Code = ID CUST DISTRIBUTOR only (no branch prefix for 3M)
+    out["Customer Store Code"] = cleaned["ID CUST DISTRIBUTOR"].astype(str)
 
     out["Customer Store Name"] = cleaned["Customer Store Name"]
     out["Customer SKU Code"] = cleaned["Product Code"]
@@ -406,7 +405,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         {"Target Column": "Customer Address",     "Source Column": cfg["static_fields"].get("Customer Address", ""),                            "Status": "Mapped"},
         {"Target Column": "PO Date",              "Source Column": "Parsed from transaction header [DD-MM-YYYY]",                               "Status": "Mapped"},
         {"Target Column": "PO Number",            "Source Column": "No. TRANSAKSI (transaction header)",                                        "Status": "Mapped"},
-        {"Target Column": "Customer Store Code",  "Source Column": f"PREFIXED({branch_prefix})Store Code Suggestion (col 7)",                   "Status": "Mapped"},
+        {"Target Column": "Customer Store Code",  "Source Column": "Store Code Suggestion (col 7)",                                             "Status": "Mapped"},
         {"Target Column": "Customer Store Name",  "Source Column": "Parsed from transaction header",                                            "Status": "Mapped"},
         {"Target Column": "Customer SKU Code",    "Source Column": "BARCODE (col 0)",                                                           "Status": "Mapped"},
         {"Target Column": "Customer SKU Name",    "Source Column": "NAMA PRODUK (col 1)",                                                       "Status": "Mapped"},
