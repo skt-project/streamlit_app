@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class Config:
     BQ_PROJECT = "skintific-data-warehouse"
     BQ_DATASET = "gt_schema"
-    BQ_TABLE = "sales_activity_records"
+    BQ_TABLE = "gt_salesman_time_motion"
     CREDENTIALS_PATH = r"C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json"
     TZ_OFFSET = timedelta(hours=7)
 
@@ -367,7 +367,6 @@ def main():
 # ============================================================
 def render_setup():
     st.markdown("## ⏱ Time Motion")
-    st.markdown("### Selamat Datang")
     st.markdown("Pilih SPV, Region, dan Distributor sebelum memulai kunjungan.")
     st.divider()
 
@@ -606,4 +605,5 @@ def _do_stop():
 
 if __name__ == "__main__":
     main()
+
 
