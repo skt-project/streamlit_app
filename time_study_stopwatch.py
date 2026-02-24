@@ -235,7 +235,6 @@ ACTIVITY_MAP = {a["key"]: a for a in ACTIVITIES}
 def init_state():
     defaults = {
         "page": "setup", "spv": "", "region": "", "distributor": "",
-        "p1_checked_in": False,
         "act_key": "", "act_label": "",
         "timer_running": False, "timer_elapsed_ms": 0, "timer_started_at": None,
         "store_id": "", "store_name": "",
@@ -288,29 +287,25 @@ def _extract_coords(loc):
 def main():
     init_state()
 
-    # ── Always call get_geolocation at top level, unconditionally ──
-    # This is required by streamlit-js-eval: the component must be rendered
-    # on every run for the JS to execute. We pass a key that changes only
-    # when we actually want a fresh GPS reading, to avoid re-triggering.
-    need_geo = st.session_state.do_dist_in_write or st.session_state.do_store_write
-
+    # ── Always call get_geolocation when a GPS write is queued ──
     # get_geolocation() is async: first call returns None while browser fetches,
     # then Streamlit reruns automatically with the real coords.
-    # We only render it when a GPS write is queued.
+    # We render it in a hidden container so the page stays visible while waiting.
+    need_geo = st.session_state.do_dist_in_write or st.session_state.do_store_write
+
     loc = None
     if need_geo:
         with st.empty():
             loc = get_geolocation()
+        # If loc is still None, GPS hasn't resolved yet — show a subtle status
+        # but DO NOT call st.stop(), so the rest of the page continues rendering.
         if loc is None:
-            # Still waiting for browser — show status and let Streamlit rerun naturally
             st.info("📡 Mengambil koordinat GPS… pastikan izin lokasi diaktifkan di browser.")
-            st.stop()
 
-    lat, lng, acc = _extract_coords(loc) if need_geo else (None, None, None)
+    lat, lng, acc = _extract_coords(loc) if (need_geo and loc is not None) else (None, None, None)
 
-    # ── Process queued GPS writes ──────────────────────────────
-    if st.session_state.do_dist_in_write and (lat is not None or loc is not None):
-        # loc arrived (could be None coords if permission denied)
+    # ── Process queued GPS writes (only when coords have arrived) ──
+    if st.session_state.do_dist_in_write and loc is not None:
         entry = st.session_state.pending_dist_in
         st.session_state.do_dist_in_write = False
         st.session_state.pending_dist_in  = None
@@ -319,13 +314,12 @@ def main():
                            st.session_state.distributor, entry,
                            lat=lat, lng=lng, acc=acc)
         if ok:
-            st.session_state.p1_checked_in = True
             geo_str = f"📍 {lat:.5f}, {lng:.5f} ±{acc}m" if lat else "📍 lokasi tidak tersedia"
             st.session_state._flash = ("success", f"📥 **Check In Distributor** disimpan · {geo_str}")
         else:
             st.session_state._flash = ("error", f"❌ Gagal: {msg}")
 
-    if st.session_state.do_store_write and (lat is not None or loc is not None):
+    if st.session_state.do_store_write and loc is not None:
         entry = st.session_state.pending_store_session
         st.session_state.do_store_write        = False
         st.session_state.pending_store_session = None
@@ -407,11 +401,7 @@ def render_checkin():
 
     tab1, tab2 = st.tabs(["📍 Check In/Out", "📋 Activities"])
     with tab1: _render_p1_tab()
-    with tab2:
-        if not st.session_state.p1_checked_in:
-            st.warning("⚠️ Wajib Check In Distributor terlebih dahulu.")
-        else:
-            _render_p2_tab()
+    with tab2: _render_p2_tab()
 
     st.divider()
     if st.button("← Kembali ke Halaman Awal"):
@@ -452,7 +442,6 @@ def _render_p1_tab():
                                        st.session_state.distributor, entry)
                 if ok:
                     st.success(f"{meta['icon']} **{meta['label']}** — {msg}")
-                    if key == "dist_out": st.session_state.p1_checked_in = False
                 else:
                     st.error(f"❌ {msg}")
 
