@@ -293,11 +293,18 @@ def main():
     # on every run for the JS to execute. We pass a key that changes only
     # when we actually want a fresh GPS reading, to avoid re-triggering.
     need_geo = st.session_state.do_dist_in_write or st.session_state.do_store_write
-    geo_key  = f"geo_{'active' if need_geo else 'idle'}"
 
-    # Hide the widget visually — we only need the return value
-    with st.empty():
-        loc = get_geolocation(key=geo_key)
+    # get_geolocation() is async: first call returns None while browser fetches,
+    # then Streamlit reruns automatically with the real coords.
+    # We only render it when a GPS write is queued.
+    loc = None
+    if need_geo:
+        with st.empty():
+            loc = get_geolocation()
+        if loc is None:
+            # Still waiting for browser — show status and let Streamlit rerun naturally
+            st.info("📡 Mengambil koordinat GPS… pastikan izin lokasi diaktifkan di browser.")
+            st.stop()
 
     lat, lng, acc = _extract_coords(loc) if need_geo else (None, None, None)
 
