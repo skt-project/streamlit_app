@@ -460,7 +460,16 @@ def _render_p2_tab():
     if choice != "— Pilih Toko —":
         s = store_opts[choice]
         if s["store_id"] != st.session_state.store_id:
-            st.session_state.store_id = s["store_id"]; st.session_state.store_name = s["store_name"]
+            # Stop any running timer and reset totals when store changes
+            if st.session_state.timer_running:
+                st.session_state.timer_running = False
+                st.session_state.timer_started_at = None
+            st.session_state.timer_elapsed_ms = 0
+            st.session_state.act_key = ""
+            st.session_state.act_label = ""
+            st.session_state.totals = {}
+            st.session_state.store_id = s["store_id"]
+            st.session_state.store_name = s["store_name"]
             st.rerun()
 
     if st.session_state.store_id:
