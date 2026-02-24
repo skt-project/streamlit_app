@@ -394,8 +394,7 @@ def render_setup():
 def render_checkin():
     c1, c2 = st.columns([2, 1])
     with c1:
-        st.markdown("## ⏱ Sales Timer")
-        st.caption("Check In / Out & ISHOMA")
+        st.markdown("## ⏱ Time Motion")
     with c2:
         st.info(f"**{st.session_state.spv}**  \n{st.session_state.distributor} · {st.session_state.region}")
 
@@ -413,7 +412,6 @@ def render_checkin():
 
 def _render_p1_tab():
     st.markdown("#### 📋 Catat Aktivitas Check In/Out")
-    st.caption("Check In Distributor otomatis merekam GPS lokasi.")
 
     act_opts = {f"{v['icon']} {v['label']}": k for k, v in P1_ACTIONS.items()}
     chosen   = st.selectbox("Pilih Aktivitas", ["— Pilih Aktivitas —"] + list(act_opts.keys()), key="p1_sel")
@@ -422,7 +420,7 @@ def _render_p1_tab():
     if st.session_state.do_dist_in_write:
         st.info("📡 Mengambil koordinat GPS… tunggu sebentar.")
 
-    if st.button("✅ Catat Waktu Sekarang", type="primary", use_container_width=True):
+    if st.button("✅ Catat Waktu, type="primary", use_container_width=True):
         if chosen == "— Pilih Aktivitas —":
             st.warning("Pilih aktivitas terlebih dahulu!")
         else:
@@ -595,3 +593,4 @@ def _do_stop():
 
 if __name__ == "__main__":
     main()
+
