@@ -549,6 +549,7 @@ def _render_p1_tab():
                     )
                 if ok:
                     st.success(msg)
+                    st.session_state.p1_log = []
                 else:
                     st.error(f"❌ {msg}")
 
@@ -739,8 +740,12 @@ def _render_p2_tab():
                     )
                 if ok:
                     st.success(msg)
-                    if store_id not in st.session_state.submitted_stores:
-                        st.session_state.submitted_stores.append(store_id)
+                    st.session_state.sessions = [
+                        s for s in st.session_state.sessions 
+                        if s["store_id"] != store_id
+                    ]
+                    if store_id in st.session_state.submitted_stores:
+                        st.session_state.submitted_stores.remove(store_id)
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
@@ -836,3 +841,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
