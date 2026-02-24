@@ -517,7 +517,7 @@ def _render_p2_tab():
     elapsed  = get_live_ms()
     act_name = st.session_state.act_label or "— None Selected —"
     clr = "#4ade80" if st.session_state.timer_running else ("#f5a623" if elapsed > 0 else "#e8eaf0")
-    status = "🟢 Recording" if st.session_state.timer_running else ("⏸ Paused" if elapsed > 0 else "○ Idle")
+    status = "🟢 Recording" if st.session_state.timer_running else ("🟡 Ready" if elapsed > 0 else "○ Idle")
 
     st.markdown(f"""
     <div style="background:#12151c;border:1px solid rgba(255,255,255,0.08);border-radius:14px;
@@ -538,6 +538,8 @@ def _render_p2_tab():
         st.info("📡 Mengambil koordinat GPS toko… tunggu sebentar.")
 
     c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
+
     with c1:
         if st.button("▶ Start", type="primary",
                      disabled=st.session_state.timer_running or not st.session_state.act_key,
@@ -546,12 +548,10 @@ def _render_p2_tab():
                 st.warning("Pilih toko terlebih dahulu!")
             else:
                 st.session_state.timer_running = True
-                st.session_state.timer_started_at = datetime.now(timezone.utc); st.rerun()
+                st.session_state.timer_started_at = datetime.now(timezone.utc)
+                st.rerun()
+    
     with c2:
-        if st.button("⏸ Pause", disabled=not st.session_state.timer_running, use_container_width=True):
-            st.session_state.timer_elapsed_ms = get_live_ms()
-            st.session_state.timer_running = False; st.session_state.timer_started_at = None; st.rerun()
-    with c3:
         if st.button("⏹ Stop & Save", type="secondary", use_container_width=True):
             _do_stop()
 
@@ -606,3 +606,4 @@ def _do_stop():
 
 if __name__ == "__main__":
     main()
+
