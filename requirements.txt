@@ -16,3 +16,4 @@ gspread
 pendulum
 reportlab
 bcrypt
+streamlit-js-eval
