@@ -48,7 +48,7 @@ BQ_QUERY = """
     SELECT upper(spv_g2g) as spv,
     CASE WHEN region_g2g='' THEN upper(region) ELSE upper(region_g2g) END region,
     upper(distributor_g2g) as distributor, cust_id AS store_id, store_name
-    FROM `gt_schema.master_store_database_basis`
+    FROM `skintific-data-warehouse.gt_schema.master_store_database_basis`
     WHERE spv_g2g <> '' AND spv_g2g <> '-' AND distributor_g2g<>'-'
     ORDER BY spv, region, distributor, store_name
 """
@@ -1154,3 +1154,4 @@ if (S.spv && S.region && S.distributor) {
 )
 
 components.html(APP_HTML, height=1150, scrolling=True)
+
