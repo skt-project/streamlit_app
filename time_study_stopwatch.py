@@ -367,7 +367,7 @@ BRIDGE_HTML = """<!DOCTYPE html>
 
   // Also listen directly in case the forwarder script below
   // is not yet injected (belt-and-suspenders)
-  window.addEventListener("message", function(e) {
+  window.parent.addEventListener("message", function(e) {
     if (e.data && e.data.type === "bq_save") {
       Streamlit.setComponentValue(e.data.payload);
     }
@@ -1097,3 +1097,4 @@ if (S.spv&&S.region&&S.distributor) {{
 </html>"""
 
 components.html(APP_HTML, height=1150, scrolling=True)
+
