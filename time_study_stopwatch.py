@@ -48,7 +48,7 @@ BQ_QUERY = """
     SELECT upper(spv_g2g) as spv,
     CASE WHEN region_g2g='' THEN upper(region) ELSE upper(region_g2g) END region,
     upper(distributor_g2g) as distributor, cust_id AS store_id, store_name
-    FROM `gt_schema.master_store_database_basis`
+    FROM `skintific-data-warehouse.gt_schema.master_store_database_basis`
     WHERE spv_g2g <> '' AND spv_g2g <> '-' AND distributor_g2g<>'-'
     ORDER BY spv, region, distributor, store_name
 """
@@ -408,17 +408,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .nav-tab:not(.active):hover{background:var(--surface2);color:var(--text);}
 .section-label{font-size:0.68rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
 .field-label{font-size:0.68rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
-.search-wrap{position:relative;margin-bottom:8px;z-index:10;}
+.search-wrap{position:relative;margin-bottom:8px;}
 .search-wrap input{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:12px 16px;font-size:0.9rem;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;transition:border-color 0.18s;}
 .search-wrap input:focus{border-color:var(--accent);}
 .search-wrap input::placeholder{color:var(--muted);}
-.dropdown-list{background:var(--surface2);border:1.5px solid var(--accent);border-radius:10px;margin-top:4px;max-height:220px;overflow-y:auto;display:none;z-index:9999;position:absolute;width:100%;left:0;box-shadow:0 8px 32px rgba(0,0,0,0.5);}
+.dropdown-list{background:var(--surface2);border:1.5px solid var(--accent);border-radius:10px;margin-top:4px;max-height:200px;overflow-y:auto;display:none;z-index:50;position:absolute;width:100%;left:0;}
 .dropdown-list.open{display:block;}
 .dropdown-item{padding:10px 16px;font-size:0.88rem;cursor:pointer;transition:background 0.15s;border-bottom:1px solid var(--border);}
 .dropdown-item:last-child{border-bottom:none;}
 .dropdown-item:hover,.dropdown-item.selected{background:rgba(245,166,35,0.12);color:var(--accent);}
 .selected-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.3);border-radius:20px;padding:4px 14px;font-size:0.78rem;color:var(--accent);margin-top:4px;}
-.select-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;overflow:visible;}
+.select-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;}
 .select-card h2{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:2px;color:var(--text);margin-bottom:4px;}
 .select-card p{font-size:0.83rem;color:var(--muted);margin-bottom:24px;}
 .btn-proceed{width:100%;margin-top:24px;background:var(--accent);color:#0a0c10;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:700;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all 0.18s;letter-spacing:0.5px;}
@@ -497,7 +497,7 @@ APP_HTML = (
         "<div class='field-label'>👤 Supervisor (SPV)</div>"
         "<div class='search-wrap'>"
           "<input type='text' id='spvInput' placeholder='Cari nama SPV…' autocomplete='off'"
-          " oninput=\"p0filter('spv')\" onclick=\"p0open('spv')\"/>"
+          " oninput=\"p0filter('spv')\" onfocus=\"p0open('spv')\" onblur=\"p0close('spv')\"/>"
           "<div class='dropdown-list' id='spvDrop'></div>"
         "</div>"
         "<div id='spvBadge'></div>"
@@ -505,7 +505,7 @@ APP_HTML = (
         "<div class='field-label'>🗺️ Region</div>"
         "<div class='search-wrap'>"
           "<input type='text' id='regionInput' placeholder='Pilih SPV dulu…' autocomplete='off'"
-          " oninput=\"p0filter('region')\" onclick=\"p0open('region')\" disabled/>"
+          " oninput=\"p0filter('region')\" onfocus=\"p0open('region')\" onblur=\"p0close('region')\" disabled/>"
           "<div class='dropdown-list' id='regionDrop'></div>"
         "</div>"
         "<div id='regionBadge'></div>"
@@ -513,7 +513,7 @@ APP_HTML = (
         "<div class='field-label'>🏭 Distributor</div>"
         "<div class='search-wrap'>"
           "<input type='text' id='distInput' placeholder='Pilih Region dulu…' autocomplete='off'"
-          " oninput=\"p0filter('dist')\" onclick=\"p0open('dist')\" disabled/>"
+          " oninput=\"p0filter('dist')\" onfocus=\"p0open('dist')\" onblur=\"p0close('dist')\" disabled/>"
           "<div class='dropdown-list' id='distDrop'></div>"
         "</div>"
         "<div id='distBadge'></div>"
@@ -584,7 +584,7 @@ APP_HTML = (
         "<div class='section-label'>🏪 Pilih Toko</div>"
         "<div class='search-wrap'>"
           "<input type='text' id='actStoreInput' placeholder='Cari nama toko…' autocomplete='off'"
-          " oninput='filterActStore()' onclick='openActStore()'/>"
+          " oninput='filterActStore()' onfocus='openActStore()' onblur='delayCloseActStore()'/>"
           "<div class='dropdown-list' id='actStoreDrop'></div>"
         "</div>"
         "<div id='actStoreBadge'></div>"
@@ -738,25 +738,6 @@ function p0getList(t) {
   return ((MASTER.by_spv[p0sel.spv]||{}).by_region||{})[p0sel.region]
          ? MASTER.by_spv[p0sel.spv].by_region[p0sel.region].distributors : [];
 }
-// Close all dropdowns when clicking outside
-document.addEventListener('click', function(e) {
-  ['spv','region','dist'].forEach(function(t) {
-    const inputId = t==='dist' ? 'distInput' : t+'Input';
-    const dropId  = t==='dist' ? 'distDrop'  : t+'Drop';
-    const inp  = document.getElementById(inputId);
-    const drop = document.getElementById(dropId);
-    if (inp && drop && !inp.contains(e.target) && !drop.contains(e.target)) {
-      drop.classList.remove('open');
-    }
-  });
-  // Also close store dropdown on page 2
-  const storeInp  = document.getElementById('actStoreInput');
-  const storeDrop = document.getElementById('actStoreDrop');
-  if (storeInp && storeDrop && !storeInp.contains(e.target) && !storeDrop.contains(e.target)) {
-    storeDrop.classList.remove('open');
-  }
-});
-
 function p0filter(t) {
   const inputId = t==='dist' ? 'distInput' : t+'Input';
   const dropId  = t==='dist' ? 'distDrop'  : t+'Drop';
@@ -765,32 +746,19 @@ function p0filter(t) {
   document.getElementById(dropId).classList.add('open');
 }
 function p0open(t) {
-  // Close other dropdowns first
-  ['spv','region','dist'].forEach(function(other) {
-    if (other !== t) {
-      const otherId = other==='dist' ? 'distDrop' : other+'Drop';
-      document.getElementById(otherId).classList.remove('open');
-    }
-  });
   const inputId = t==='dist' ? 'distInput' : t+'Input';
   const dropId  = t==='dist' ? 'distDrop'  : t+'Drop';
   const q = document.getElementById(inputId).value.toLowerCase();
-  const list = p0getList(t);
-  if (!list.length && t==='spv') {
-    p0renderDrop(t, [], true);
-  } else {
-    p0renderDrop(t, list.filter(function(x){ return !q || x.toLowerCase().includes(q); }));
-  }
+  p0renderDrop(t, p0getList(t).filter(function(x){ return x.toLowerCase().includes(q)||!q; }));
   document.getElementById(dropId).classList.add('open');
 }
-function p0renderDrop(t, list, isMasterEmpty) {
+function p0close(t) {
+  const dropId = t==='dist' ? 'distDrop' : t+'Drop';
+  setTimeout(function(){ document.getElementById(dropId).classList.remove('open'); }, 220);
+}
+function p0renderDrop(t, list) {
   const dropId = t==='dist' ? 'distDrop' : t+'Drop';
   const cur    = t==='dist' ? p0sel.dist  : p0sel[t];
-  if (isMasterEmpty) {
-    document.getElementById(dropId).innerHTML =
-      "<div class='dropdown-item' style='color:var(--accent2)'>⚠️ Data belum dimuat dari BigQuery</div>";
-    return;
-  }
   if (!list.length) {
     document.getElementById(dropId).innerHTML =
       "<div class='dropdown-item' style='color:var(--muted)'>Tidak ditemukan</div>";
@@ -954,9 +922,12 @@ function filterActStore() {
 function openActStore() {
   const q = document.getElementById('actStoreInput').value.toLowerCase();
   renderActStoreDrop(getStoreList().filter(function(x){
-    return !q || x.store_name.toLowerCase().includes(q);
+    return x.store_name.toLowerCase().includes(q)||!q;
   }));
   document.getElementById('actStoreDrop').classList.add('open');
+}
+function delayCloseActStore() {
+  setTimeout(function(){ document.getElementById('actStoreDrop').classList.remove('open'); }, 220);
 }
 function renderActStoreDrop(list) {
   if (!list.length) {
