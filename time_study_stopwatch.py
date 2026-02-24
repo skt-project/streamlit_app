@@ -183,6 +183,21 @@ def _make_event_id(spv: str, activity_key: str, store_id: Optional[str], logged_
     raw = f"{spv}|{activity_key}|{store_id or ''}|{ts_str}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
+# ════════════════════════════════════════════════════════════
+# FIX #5 — Timestamp serialization for insert_rows_json
+# BigQuery's insert_rows_json does NOT auto-serialize datetime
+# objects → rows silently fail with a schema error.
+# Convert all datetime fields to ISO strings before inserting.
+# ════════════════════════════════════════════════════════════
+def _serialize_row(row: dict) -> dict:
+    out = {}
+    for k, v in row.items():
+        if isinstance(v, datetime):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
+
 def build_rows(payload: dict) -> List[Dict]:
     spv         = payload.get("spv", "")
     region      = payload.get("region", "")
@@ -244,6 +259,11 @@ def write_to_bq(payload: dict) -> Tuple[bool, str]:
     if client is None:
         return False, "No BQ client."
     rows = build_rows(payload)
+    # ════════════════════════════════════════════════════════
+    # FIX #5 (debug logging) — surface exactly how many rows
+    # were built and their event_ids so you can verify in logs
+    # ════════════════════════════════════════════════════════
+    logger.info(f"[write_to_bq] Built {len(rows)} rows from payload keys: {list(payload.keys())}")
     if not rows:
         return False, "No data to save."
     all_ids  = [r["event_id"] for r in rows]
@@ -254,8 +274,19 @@ def write_to_bq(payload: dict) -> Tuple[bool, str]:
     skipped   = len(rows) - len(new_rows)
     table_ref = f"{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}"
     try:
-        errors = client.insert_rows_json(table_ref, new_rows,
-                                         row_ids=[r["event_id"] for r in new_rows])
+        # ════════════════════════════════════════════════════
+        # FIX #5 — serialize datetime → ISO string before insert
+        # ════════════════════════════════════════════════════
+        serialized_rows = [_serialize_row(r) for r in new_rows]
+        errors = client.insert_rows_json(
+            table_ref,
+            serialized_rows,
+            row_ids=[r["event_id"] for r in new_rows],
+        )
+        # ════════════════════════════════════════════════════
+        # FIX #5 (debug logging) — log BQ errors explicitly
+        # ════════════════════════════════════════════════════
+        logger.info(f"[write_to_bq] insert_rows_json errors: {errors}")
         if errors:
             return False, f"BQ insert errors: {errors}"
         msg = f"✅ {len(new_rows)} records saved to BigQuery."
@@ -263,6 +294,7 @@ def write_to_bq(payload: dict) -> Tuple[bool, str]:
             msg += f" ({skipped} duplicates skipped)"
         return True, msg
     except Exception as e:
+        logger.error(f"[write_to_bq] Exception: {e}")
         return False, str(e)
 
 # ============================================================
@@ -283,46 +315,39 @@ MASTER_JSON = json.dumps(MASTER, ensure_ascii=False)
 
 # ============================================================
 # HANDLE PENDING SAVE
-# Runs at the top of every rerun. When the bridge component fires,
-# it stores the BQ payload in session_state["bq_payload"] and calls
-# st.rerun(). We process it here and show a result banner.
 # ============================================================
 _save_banner = st.empty()
 
 if st.session_state.get("bq_payload"):
     _payload = st.session_state.pop("bq_payload")
+    # ════════════════════════════════════════════════════════
+    # FIX #5 (debug logging) — confirm save handler fires
+    # ════════════════════════════════════════════════════════
+    logger.info(f"[save handler] Processing bq_payload with keys: {list(_payload.keys())}")
     try:
         _ok, _msg = write_to_bq(_payload)
         _save_banner.success(_msg) if _ok else _save_banner.error(f"❌ {_msg}")
     except Exception as _e:
+        logger.error(f"[save handler] Exception: {_e}")
         _save_banner.error(f"❌ Exception: {_e}")
 
 # ============================================================
-# BRIDGE COMPONENT  (invisible, height=0)
-# ============================================================
-# Architecture:
-#   1. UI iframe (components.html below) does:
-#        window.parent.postMessage({type:"bq_save", payload:{...}}, "*")
-#      This sends data to the PARENT Streamlit page, not another iframe.
+# FIX #1 + FIX #2 — Bridge Component
 #
-#   2. Bridge iframe (declare_component below) also lives in the same
-#      parent page. It listens for that postMessage and calls:
-#        Streamlit.setComponentValue(payload)
-#      which triggers a Python rerun with the payload as return value.
+# PROBLEM (original): The UI iframe posts to window.parent, but
+# the bridge iframe (declare_component) is a SIBLING iframe —
+# it cannot receive messages posted to the parent.
 #
-#   3. Python stores it in session_state and calls st.rerun() so the
-#      save handler above runs and writes to BigQuery.
+# FIX: Inject a tiny <script> into the Streamlit host page via
+# st.components.v1.html() (height=0) that:
+#   1. Lives in the TOP-LEVEL Streamlit page (not an iframe)
+#   2. Receives the postMessage from the UI iframe
+#   3. Forwards it DOWN into the bridge iframe by iterating
+#      window.frames — the bridge iframe registers itself in
+#      window.__bqBridgeReady so the forwarder can find it.
 #
-# Why this works:
-#   - components.html() renders the full UI reliably (no Streamlit JS needed)
-#   - declare_component() provides the setComponentValue channel
-#   - postMessage between siblings via the shared parent is standard browser API
-#   - The bridge HTML is tiny and has no UI — it just relays messages
-#
-# Why declare_component(path=) is safe here:
-#   - The bridge HTML does NOT use window.location or streamlit-component-lib.js
-#   - It only needs the Streamlit object, which IS injected by Streamlit's
-#     component server when the iframe loads index.html from the path= dir
+# FIX #2: Write bridge HTML only when content changes, not every
+# rerun, to avoid file-lock issues on Windows.
 # ============================================================
 
 BRIDGE_HTML = """<!DOCTYPE html>
@@ -330,13 +355,18 @@ BRIDGE_HTML = """<!DOCTYPE html>
 <head><meta charset="UTF-8"/></head>
 <body>
 <script>
-// Streamlit injects the component API as window.Streamlit for iframes
-// served via declare_component(path=). Poll until it's available.
 (function init() {
   if (!window.Streamlit) { setTimeout(init, 20); return; }
   Streamlit.setComponentReady();
   Streamlit.setFrameHeight(0);
-  // Listen for save requests posted by the UI iframe to the shared parent
+
+  // Register this bridge iframe so the host-page forwarder can find it
+  window.parent.__bqBridgeReady = function(payload) {
+    Streamlit.setComponentValue(payload);
+  };
+
+  // Also listen directly in case the forwarder script below
+  // is not yet injected (belt-and-suspenders)
   window.addEventListener("message", function(e) {
     if (e.data && e.data.type === "bq_save") {
       Streamlit.setComponentValue(e.data.payload);
@@ -347,20 +377,54 @@ BRIDGE_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
-# Write bridge to a stable temp dir (same content = same path across reruns)
-_bridge_dir = pathlib.Path(tempfile.gettempdir()) / "st_bq_bridge_v1"
+# ════════════════════════════════════════════════════════════
+# FIX #2 — Only write the file when its content changes,
+# preventing file-lock / stale-serve issues on Windows.
+# ════════════════════════════════════════════════════════════
+_bridge_dir = pathlib.Path(tempfile.gettempdir()) / "st_bq_bridge_v2"
 _bridge_dir.mkdir(exist_ok=True)
-(_bridge_dir / "index.html").write_text(BRIDGE_HTML, encoding="utf-8")
+_bridge_idx = _bridge_dir / "index.html"
+_new_bytes  = BRIDGE_HTML.encode("utf-8")
+if not _bridge_idx.exists() or _bridge_idx.read_bytes() != _new_bytes:
+    _bridge_idx.write_bytes(_new_bytes)
 
-_bridge      = components.declare_component("bq_bridge", path=str(_bridge_dir))
-_bridge_val  = _bridge(key="bq_bridge", default=None)
+_bridge     = components.declare_component("bq_bridge", path=str(_bridge_dir))
+_bridge_val = _bridge(key="bq_bridge", default=None)
+
+# ════════════════════════════════════════════════════════════
+# FIX #1 — Host-page forwarder script (height=0, invisible)
+# This runs in the TOP-LEVEL Streamlit page (not an iframe),
+# so it can receive postMessages from all child iframes and
+# call window.__bqBridgeReady() which was registered above
+# by the bridge iframe.
+# ════════════════════════════════════════════════════════════
+components.html("""
+<script>
+(function() {
+  if (window.__bqForwarderInstalled) return;
+  window.__bqForwarderInstalled = true;
+  window.addEventListener("message", function(e) {
+    if (e.data && e.data.type === "bq_save") {
+      // Forward to bridge iframe via its registered callback
+      if (typeof window.__bqBridgeReady === "function") {
+        window.__bqBridgeReady(e.data.payload);
+      }
+    }
+  });
+})();
+</script>
+""", height=0)
 
 if _bridge_val is not None:
+    # ════════════════════════════════════════════════════════
+    # FIX #5 (debug logging) — confirm bridge value received
+    # ════════════════════════════════════════════════════════
+    logger.info(f"[bridge] Received payload from JS: keys={list(_bridge_val.keys()) if isinstance(_bridge_val, dict) else type(_bridge_val)}")
     st.session_state["bq_payload"] = _bridge_val
     st.rerun()
 
 # ============================================================
-# MAIN APP  —  components.html (no Streamlit JS API needed, always works)
+# MAIN APP  —  components.html
 # ============================================================
 APP_HTML = f"""<!DOCTYPE html>
 <html lang="en">
@@ -648,12 +712,24 @@ if (!S.device_id) S.device_id = genDeviceId();
 
 function save() {{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }}
 
-// ═══════════════════════════════════════════════════
-// SAVE TO BIGQUERY
-// Sends a postMessage to the Streamlit parent window.
-// The bridge iframe (declare_component) listens there and
-// relays it to Python via Streamlit.setComponentValue().
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// FIX #1 — SAVE TO BIGQUERY via postMessage to parent window
+//
+// ORIGINAL PROBLEM: postMessage went to window.parent (the Streamlit
+// host page), but the bridge iframe is a SIBLING — it could not
+// receive messages from the parent directly.
+//
+// FIX: The Python side now injects a forwarder script into the host
+// page (via a height=0 components.html call) that listens for
+// "bq_save" messages and calls window.__bqBridgeReady() — a callback
+// registered by the bridge iframe. This two-step relay works because:
+//   UI iframe → window.parent (host page forwarder)
+//             → window.__bqBridgeReady() (bridge iframe callback)
+//             → Streamlit.setComponentValue() → Python rerun
+//
+// The JS side is UNCHANGED — it still posts to window.parent.
+// All the fix logic is on the Python side above.
+// ═══════════════════════════════════════════════════════════════════
 function _sendToBQ(payload, btnEl) {{
   if (btnEl) {{
     btnEl.dataset.origLabel = btnEl.textContent;
@@ -664,6 +740,7 @@ function _sendToBQ(payload, btnEl) {{
       btnEl.textContent = btnEl.dataset.origLabel || 'Simpan';
     }}, 5000);
   }}
+  // Post to parent window — the host-page forwarder relays this to the bridge
   window.parent.postMessage({{type: 'bq_save', payload: payload}}, '*');
 }}
 
