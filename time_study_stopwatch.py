@@ -225,7 +225,7 @@ def build_rows(payload: dict) -> List[Dict]:
         duration_s = int(entry.get("duration", 0) / 1000)
         started_at = (ended_at - timedelta(seconds=duration_s)) if ended_at and duration_s else None
         loc        = entry.get("location") or {}
-        store_id   = entry.get("storeId") or None
+        store_id   = str(entry.get("storeId")) if entry.get("storeId") else None
         event_id   = _make_event_id(spv, entry.get("activity", ""), store_id, ended_at)
         rows.append({
             "event_id": event_id, "spv": spv, "region": region, "distributor": distributor,
@@ -1097,4 +1097,5 @@ if (S.spv&&S.region&&S.distributor) {{
 </html>"""
 
 components.html(APP_HTML, height=1150, scrolling=True)
+
 
