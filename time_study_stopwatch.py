@@ -325,27 +325,23 @@ if st.session_state.get("bq_payload"):
 #     component server when the iframe loads index.html from the path= dir
 # ============================================================
 
+# In BRIDGE_HTML — listen on parent, which DOES receive the postMessage:
 BRIDGE_HTML = """<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"/></head>
-<body>
-<script>
-// Streamlit injects the component API as window.Streamlit for iframes
-// served via declare_component(path=). Poll until it's available.
+<html><head><meta charset="UTF-8"/></head>
+<body><script>
 (function init() {
   if (!window.Streamlit) { setTimeout(init, 20); return; }
   Streamlit.setComponentReady();
   Streamlit.setFrameHeight(0);
-  // Listen for save requests posted by the UI iframe to the shared parent
-  window.addEventListener("message", function(e) {
+  
+  // Listen on the PARENT window (we have access to it via window.parent)
+  window.parent.addEventListener("message", function(e) {
     if (e.data && e.data.type === "bq_save") {
       Streamlit.setComponentValue(e.data.payload);
     }
   });
 })();
-</script>
-</body>
-</html>"""
+</script></body></html>"""
 
 # Write bridge to a stable temp dir (same content = same path across reruns)
 _bridge_dir = pathlib.Path(tempfile.gettempdir()) / "st_bq_bridge_v1"
@@ -664,7 +660,7 @@ function _sendToBQ(payload, btnEl) {{
       btnEl.textContent = btnEl.dataset.origLabel || 'Simpan';
     }}, 5000);
   }}
-  window.parent.postMessage({{type: 'bq_save', payload: payload}}, '*');
+  window.parent.frames[0] && window.parent.postMessage({type: 'bq_save', payload: payload}, '*');
 }}
 
 function saveStore(storeId) {{
