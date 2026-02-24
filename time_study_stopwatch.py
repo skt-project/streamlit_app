@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Tuple
 
 import streamlit as st
+import streamlit.components.v1 as components
 from google.oauth2 import service_account
 from google.cloud import bigquery
 
@@ -38,25 +39,21 @@ st.markdown("""
 #MainMenu{visibility:hidden;}footer{visibility:hidden;}header{visibility:hidden;}
 .block-container{padding-top:1rem!important;}
 
-/* ── palette ── */
 :root{
   --accent:#f5a623;--accent2:#e05c5c;--green:#4ade80;
   --blue:#60a5fa;--purple:#a78bfa;--teal:#2dd4bf;
   --muted:#6b7280;
 }
 
-/* ── nav tabs ── */
 div[data-testid="stHorizontalBlock"] button{
   border-radius:9px!important;font-weight:600!important;
 }
 
-/* ── metric cards ── */
 div[data-testid="metric-container"]{
   background:#12151c;border:1px solid rgba(255,255,255,0.08);
   border-radius:12px;padding:12px 16px;
 }
 
-/* ── tag badges ── */
 .tag{
   display:inline-block;padding:3px 10px;border-radius:20px;
   font-size:0.75rem;font-weight:600;
@@ -67,10 +64,18 @@ div[data-testid="metric-container"]{
 .tag-blue {background:rgba(96,165,250,0.15);color:var(--blue);}
 .tag-purple{background:rgba(167,139,250,0.15);color:var(--purple);}
 
-/* ── section divider ── */
 .section-label{
   font-size:0.65rem;font-weight:700;letter-spacing:2px;
   text-transform:uppercase;color:var(--muted);margin-bottom:4px;
+}
+
+.geo-badge {
+  display:inline-flex;align-items:center;gap:6px;
+  padding:4px 12px;border-radius:20px;font-size:0.75rem;font-weight:600;
+  background:rgba(45,212,191,0.12);color:#2dd4bf;border:1px solid rgba(45,212,191,0.25);
+}
+.geo-badge-warn {
+  background:rgba(245,166,35,0.12);color:#f5a623;border:1px solid rgba(245,166,35,0.25);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -110,6 +115,84 @@ CREATE TABLE IF NOT EXISTS `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_T
 PARTITION BY DATE(logged_at)
 CLUSTER BY spv, distributor, store_id
 """
+
+# ============================================================
+# GEOLOCATION — JS → URL query params → Python
+# ============================================================
+# Flow:
+#   1. User clicks a button that requires GPS
+#   2. We set a "awaiting_geo" flag + stash the pending entry in session_state, then st.rerun()
+#   3. On the next render, we inject a hidden JS snippet via st.components.v1.html
+#   4. The JS calls navigator.geolocation, then rewrites the page URL with
+#      ?geo=lat,lng,acc&_geo_trigger=<key> and navigates there
+#   5. Streamlit sees the new URL → re-renders → handle_incoming_geo() picks up the
+#      params, completes the BQ write, clears the params
+
+GEO_PARAM        = "geo"
+GEO_TRIGGER_P1   = "p1_dist_in"
+GEO_TRIGGER_P2   = "p2_first_activity"
+
+
+def _inject_geolocation_trigger(trigger_key: str):
+    """Inject JS that grabs GPS and encodes it into the Streamlit URL."""
+    html = f"""
+    <script>
+    (function() {{
+        var triggerKey = "{trigger_key}";
+
+        function writeParams(value) {{
+            var url = new URL(window.parent.location.href);
+            url.searchParams.set("{GEO_PARAM}", value);
+            url.searchParams.set("_geo_trigger", triggerKey);
+            window.parent.location.replace(url.toString());
+        }}
+
+        if (!navigator.geolocation) {{
+            writeParams("error:not_supported");
+            return;
+        }}
+
+        navigator.geolocation.getCurrentPosition(
+            function(pos) {{
+                var v = pos.coords.latitude + "," + pos.coords.longitude + "," + Math.round(pos.coords.accuracy);
+                writeParams(v);
+            }},
+            function(err) {{
+                writeParams("error:" + err.message.replace(/,/g, ";"));
+            }},
+            {{ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }}
+        );
+    }})();
+    </script>
+    <p style="font-size:0.78rem;color:#6b7280;margin:4px 0;">📡 Mendapatkan koordinat GPS…</p>
+    """
+    components.html(html, height=35)
+
+
+def _parse_geo_params() -> Tuple[Optional[float], Optional[float], Optional[int], Optional[str]]:
+    """Return (lat, lng, accuracy_m, trigger_key) from URL query params, or all-None."""
+    params = st.query_params
+    geo_raw = params.get(GEO_PARAM, "")
+    trigger  = params.get("_geo_trigger", "") or None
+    if not geo_raw or not trigger:
+        return None, None, None, None
+    if geo_raw.startswith("error:"):
+        return None, None, None, trigger
+    try:
+        parts = geo_raw.split(",")
+        return float(parts[0]), float(parts[1]), int(parts[2]) if len(parts) > 2 else None, trigger
+    except Exception:
+        return None, None, None, trigger
+
+
+def _clear_geo_params():
+    """Remove geo-related query params without discarding other params."""
+    keep = {k: v for k, v in st.query_params.items()
+            if k not in (GEO_PARAM, "_geo_trigger")}
+    st.query_params.clear()
+    for k, v in keep.items():
+        st.query_params[k] = v
+
 
 # ============================================================
 # BigQuery CLIENT
@@ -236,61 +319,52 @@ def get_existing_event_ids(client: bigquery.Client, event_ids: List[str]) -> set
         return set()
 
 
-def write_p1_log(spv: str, region: str, distributor: str, p1_log: list) -> Tuple[bool, str]:
-    """Write Check In/Out log entries to BigQuery."""
+def write_single_p1_entry(
+    spv: str, region: str, distributor: str, entry: dict,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    acc: Optional[int] = None,
+) -> Tuple[bool, str]:
     client = get_bq_client()
     if client is None:
         return False, "No BQ client."
-    if not p1_log:
-        return False, "No data to save."
-
     created_at = datetime.now(timezone.utc)
-    rows = []
-    for entry in p1_log:
-        logged_at = _to_wib(
-            datetime.fromtimestamp(entry["time"] / 1000, tz=timezone.utc)
-        )
-        event_id = _make_event_id(spv, entry["key"], None, logged_at)
-        rows.append({
-            "event_id": event_id, "spv": spv, "region": region, "distributor": distributor,
-            "activity_key": entry["key"], "activity_label": entry["label"],
-            "logged_at": logged_at, "store_id": None, "store_name": None,
-            "duration_seconds": None, "started_at": None, "ended_at": None,
-            "latitude": None, "longitude": None, "location_accuracy_m": None,
-            "created_at": created_at, "device_id": None,
-        })
-
-    return _insert_rows(client, rows)
+    logged_at = _to_wib(datetime.fromtimestamp(entry["time"] / 1000, tz=timezone.utc))
+    event_id = _make_event_id(spv, entry["key"], None, logged_at)
+    row = {
+        "event_id": event_id, "spv": spv, "region": region, "distributor": distributor,
+        "activity_key": entry["key"], "activity_label": entry["label"],
+        "logged_at": logged_at, "store_id": None, "store_name": None,
+        "duration_seconds": None, "started_at": None, "ended_at": None,
+        "latitude": lat, "longitude": lng, "location_accuracy_m": acc,
+        "created_at": created_at, "device_id": None,
+    }
+    return _insert_rows(client, [row])
 
 
-def write_store_sessions(spv: str, region: str, distributor: str, sessions: list) -> Tuple[bool, str]:
-    """Write store activity sessions to BigQuery."""
+def write_single_store_session(
+    spv: str, region: str, distributor: str, entry: dict,
+) -> Tuple[bool, str]:
     client = get_bq_client()
     if client is None:
         return False, "No BQ client."
-    if not sessions:
-        return False, "No sessions to save."
-
     created_at = datetime.now(timezone.utc)
-    rows = []
-    for entry in sessions:
-        duration_ms = entry.get("duration_ms", 0)
-        duration_s = int(duration_ms / 1000)
-        ended_at = _to_wib(datetime.fromisoformat(entry["ended_at"].replace("Z", "+00:00")))
-        started_at = (ended_at - timedelta(seconds=duration_s)) if ended_at and duration_s else None
-        store_id = str(entry.get("store_id", "")) or None
-        event_id = _make_event_id(spv, entry["activity_key"], store_id, ended_at)
-        rows.append({
-            "event_id": event_id, "spv": spv, "region": region, "distributor": distributor,
-            "activity_key": entry["activity_key"], "activity_label": entry["activity_label"],
-            "logged_at": ended_at, "store_id": store_id, "store_name": entry.get("store_name"),
-            "duration_seconds": duration_s, "started_at": started_at, "ended_at": ended_at,
-            "latitude": entry.get("latitude"), "longitude": entry.get("longitude"),
-            "location_accuracy_m": entry.get("location_accuracy_m"),
-            "created_at": created_at, "device_id": None,
-        })
-
-    return _insert_rows(client, rows)
+    duration_ms = entry.get("duration_ms", 0)
+    duration_s = int(duration_ms / 1000)
+    ended_at = _to_wib(datetime.fromisoformat(entry["ended_at"].replace("Z", "+00:00")))
+    started_at = (ended_at - timedelta(seconds=duration_s)) if ended_at and duration_s else None
+    store_id = str(entry.get("store_id", "")) or None
+    event_id = _make_event_id(spv, entry["activity_key"], store_id, ended_at)
+    row = {
+        "event_id": event_id, "spv": spv, "region": region, "distributor": distributor,
+        "activity_key": entry["activity_key"], "activity_label": entry["activity_label"],
+        "logged_at": ended_at, "store_id": store_id, "store_name": entry.get("store_name"),
+        "duration_seconds": duration_s, "started_at": started_at, "ended_at": ended_at,
+        "latitude": entry.get("latitude"), "longitude": entry.get("longitude"),
+        "location_accuracy_m": entry.get("location_accuracy_m"),
+        "created_at": created_at, "device_id": None,
+    }
+    return _insert_rows(client, [row])
 
 
 def _insert_rows(client: bigquery.Client, rows: list) -> Tuple[bool, str]:
@@ -326,24 +400,26 @@ def _insert_rows(client: bigquery.Client, rows: list) -> Tuple[bool, str]:
 
 def init_state():
     defaults = {
-        # Setup
-        "page": "setup",          # setup | checkin | activities
+        "page": "setup",
         "spv": "",
         "region": "",
         "distributor": "",
-        # Page 1 — Check In/Out
-        "p1_log": [],              # list of {key, label, time_epoch_ms}
-        # Page 2 — Stopwatch
+        # P1
+        "p1_checked_in": False,
+        "p1_pending_entry": None,    # entry dict waiting for GPS before BQ write
+        "p1_awaiting_geo": False,
+        # P2
         "current_activity_key": "",
         "current_activity_label": "",
         "timer_running": False,
         "timer_elapsed_ms": 0,
-        "timer_started_at": None,  # datetime or None
+        "timer_started_at": None,
         "selected_store_id": "",
         "selected_store_name": "",
-        "sessions": [],            # completed sessions
-        "submitted_stores": [],    # store_ids already submitted
-        "totals": {},              # {activity_key: total_ms}
+        "store_geo_done": set(),     # store_ids whose first-activity GPS is already captured
+        "p2_pending_entry": None,    # session dict waiting for GPS before BQ write
+        "p2_awaiting_geo": False,
+        "totals": {},
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -387,21 +463,18 @@ def fmt_clock(epoch_ms: int) -> str:
 
 
 def has_checked_in() -> bool:
-    return any(e["key"] == "dist_in" for e in st.session_state.p1_log)
+    return st.session_state.p1_checked_in
 
 
 def get_store_list() -> list:
-    spv = st.session_state.spv
-    region = st.session_state.region
-    dist = st.session_state.distributor
     master = st.session_state.get("master", {})
     return (
         master.get("by_spv", {})
-              .get(spv, {})
+              .get(st.session_state.spv, {})
               .get("by_region", {})
-              .get(region, {})
+              .get(st.session_state.region, {})
               .get("by_dist", {})
-              .get(dist, [])
+              .get(st.session_state.distributor, [])
     )
 
 
@@ -413,11 +486,75 @@ def get_live_elapsed_ms() -> int:
 
 
 # ============================================================
+# GEO INTERCEPTION — called at top of every render cycle
+# ============================================================
+
+def handle_incoming_geo():
+    """
+    If URL contains geo query params from a previous JS geolocation call,
+    complete the deferred BQ write and clear the params.
+    """
+    lat, lng, acc, trigger = _parse_geo_params()
+    if not trigger:
+        return
+
+    # ── P1: distributor check-in ──────────────────────────────
+    if trigger == GEO_TRIGGER_P1 and st.session_state.p1_awaiting_geo:
+        entry = st.session_state.p1_pending_entry
+        if entry:
+            _clear_geo_params()
+            st.session_state.p1_awaiting_geo = False
+            st.session_state.p1_pending_entry = None
+
+            with st.spinner("Menyimpan Check In ke BigQuery…"):
+                ok, msg = write_single_p1_entry(
+                    st.session_state.spv, st.session_state.region,
+                    st.session_state.distributor, entry,
+                    lat=lat, lng=lng, acc=acc,
+                )
+            if ok:
+                st.session_state.p1_checked_in = True
+                geo_str = f"📍 {lat:.5f}, {lng:.5f} ±{acc}m" if lat is not None else "📍 lokasi tidak tersedia"
+                st.success(f"📥 **Check In Distributor** disimpan · {geo_str}")
+            else:
+                st.error(f"❌ Gagal menyimpan Check In: {msg}")
+
+    # ── P2: first store activity ──────────────────────────────
+    elif trigger == GEO_TRIGGER_P2 and st.session_state.p2_awaiting_geo:
+        entry = st.session_state.p2_pending_entry
+        if entry:
+            _clear_geo_params()
+            st.session_state.p2_awaiting_geo = False
+            st.session_state.p2_pending_entry = None
+
+            entry["latitude"]            = lat
+            entry["longitude"]           = lng
+            entry["location_accuracy_m"] = acc
+
+            store_id = entry.get("store_id", "")
+            if store_id:
+                st.session_state.store_geo_done.add(store_id)
+
+            with st.spinner("Menyimpan sesi ke BigQuery…"):
+                ok, msg = write_single_store_session(
+                    st.session_state.spv, st.session_state.region,
+                    st.session_state.distributor, entry,
+                )
+            if ok:
+                geo_str = f"📍 {lat:.5f}, {lng:.5f} ±{acc}m" if lat is not None else "📍 lokasi tidak tersedia"
+                st.success(f"✅ **{entry['activity_label']}** — {fmt_ms(entry['duration_ms'])} · {geo_str}")
+            else:
+                st.error(f"❌ Gagal menyimpan sesi: {msg}")
+    else:
+        _clear_geo_params()  # stale params
+
+
+# ============================================================
 # PAGES
 # ============================================================
 
 def render_setup():
-    st.markdown("## ⏱ Sales Timer")
+    st.markdown("## ⏱ Time Motion")
     st.markdown("### Selamat Datang")
     st.markdown("Pilih SPV, Region, dan Distributor sebelum memulai kunjungan.")
     st.divider()
@@ -458,7 +595,6 @@ def render_setup():
 
 
 def render_checkin():
-    # ── Top bar ──────────────────────────────────────────────
     col_title, col_badge = st.columns([2, 1])
     with col_title:
         st.markdown("## ⏱ Sales Timer")
@@ -466,7 +602,6 @@ def render_checkin():
     with col_badge:
         st.info(f"**{st.session_state.spv}**  \n{st.session_state.distributor} · {st.session_state.region}")
 
-    # ── Tab nav ──────────────────────────────────────────────
     tab_checkin, tab_activities = st.tabs(["📍 Check In/Out", "📋 Activities"])
 
     with tab_checkin:
@@ -478,25 +613,36 @@ def render_checkin():
         else:
             _render_p2_tab()
 
-    # ── Back button ──────────────────────────────────────────
     st.divider()
     if st.button("← Kembali ke Halaman Awal"):
-        # Stop timer if running
         if st.session_state.timer_running:
             st.session_state.timer_elapsed_ms = get_live_elapsed_ms()
             st.session_state.timer_running = False
             st.session_state.timer_started_at = None
-        # Reset identity — keep logs so data isn't lost
         st.session_state.page = "setup"
         st.rerun()
 
 
+# ============================================================
+# P1 TAB — Check In/Out
+# ============================================================
+
 def _render_p1_tab():
     st.markdown("#### 📋 Catat Aktivitas Check In/Out")
+    st.caption("Check In Distributor merekam lokasi GPS secara otomatis.")
+
+    # While GPS is being fetched, show spinner + inject JS and wait
+    if st.session_state.p1_awaiting_geo:
+        st.info("📡 Mengakses GPS… Mohon izinkan akses lokasi di browser Anda.")
+        _inject_geolocation_trigger(GEO_TRIGGER_P1)
+        return  # halt render until URL reloads with geo params
 
     act_options = {f"{v['icon']} {v['label']}": k for k, v in P1_ACTIONS.items()}
-    chosen_label = st.selectbox("Pilih Aktivitas", ["— Pilih Aktivitas —"] + list(act_options.keys()),
-                                key="p1_sel")
+    chosen_label = st.selectbox(
+        "Pilih Aktivitas",
+        ["— Pilih Aktivitas —"] + list(act_options.keys()),
+        key="p1_sel",
+    )
 
     if st.button("✅ Catat Waktu Sekarang", type="primary", use_container_width=True):
         if chosen_label == "— Pilih Aktivitas —":
@@ -505,66 +651,43 @@ def _render_p1_tab():
             key = act_options[chosen_label]
             meta = P1_ACTIONS[key]
             entry = {
-                "key": key,
+                "key":   key,
                 "label": meta["label"],
-                "icon": meta["icon"],
-                "time": int(datetime.now(timezone.utc).timestamp() * 1000),
+                "icon":  meta["icon"],
+                "time":  int(datetime.now(timezone.utc).timestamp() * 1000),
             }
-            st.session_state.p1_log.append(entry)
-            st.rerun()
 
-    st.divider()
-
-    # ── Log table ────────────────────────────────────────────
-    log = st.session_state.p1_log
-    if not log:
-        st.info("Belum ada aktivitas tercatat.")
-    else:
-        if not has_checked_in():
-            st.warning("⚠️ Belum Check In Distributor.")
-        for i, e in enumerate(log):
-            col_n, col_act, col_time, col_del = st.columns([0.5, 3, 2, 0.7])
-            col_n.caption(str(i + 1))
-            col_act.markdown(f'<span class="tag">{e["icon"]} {e["label"]}</span>', unsafe_allow_html=True)
-            col_time.code(fmt_clock(e["time"]))
-            if col_del.button("🗑", key=f"del_p1_{i}", help="Hapus entri ini"):
-                st.session_state.p1_log.pop(i)
+            if key == "dist_in":
+                # Stash entry and request GPS — BQ write happens after geo returns
+                st.session_state.p1_pending_entry = entry
+                st.session_state.p1_awaiting_geo  = True
                 st.rerun()
-
-    st.divider()
-
-    # ── Save button ──────────────────────────────────────────
-    col_save, col_clear = st.columns([3, 1])
-    with col_save:
-        if st.button("💾 Simpan Check In/Out ke BigQuery", type="primary", use_container_width=True):
-            if not log:
-                st.warning("Belum ada data Check In/Out untuk disimpan.")
             else:
+                # Other P1 actions: write immediately without GPS
                 with st.spinner("Menyimpan ke BigQuery…"):
-                    ok, msg = write_p1_log(
-                        st.session_state.spv,
-                        st.session_state.region,
-                        st.session_state.distributor,
-                        log,
+                    ok, msg = write_single_p1_entry(
+                        st.session_state.spv, st.session_state.region,
+                        st.session_state.distributor, entry,
                     )
                 if ok:
-                    st.success(msg)
-                    st.session_state.p1_log = []
+                    st.success(f"{meta['icon']} **{meta['label']}** — {msg}")
+                    if key == "dist_out":
+                        st.session_state.p1_checked_in = False
                 else:
-                    st.error(f"❌ {msg}")
+                    st.error(f"❌ Gagal menyimpan: {msg}")
 
-    with col_clear:
-        if st.button("🗑 Clear", use_container_width=True):
-            if st.session_state.get("confirm_clear_p1"):
-                st.session_state.p1_log = []
-                st.session_state.confirm_clear_p1 = False
-                st.rerun()
-            else:
-                st.session_state.confirm_clear_p1 = True
-                st.warning("Klik Clear lagi untuk konfirmasi.")
 
+# ============================================================
+# P2 TAB — Activities / Stopwatch
+# ============================================================
 
 def _render_p2_tab():
+    # While GPS is being fetched for first store activity, show spinner + inject JS
+    if st.session_state.p2_awaiting_geo:
+        st.info("📡 Mengakses GPS lokasi toko… Mohon izinkan akses lokasi di browser Anda.")
+        _inject_geolocation_trigger(GEO_TRIGGER_P2)
+        return  # halt render until URL reloads with geo params
+
     st.markdown("#### 🏪 Pilih Toko")
 
     stores = get_store_list()
@@ -586,23 +709,25 @@ def _render_p2_tab():
     if store_choice != "— Pilih Toko —":
         chosen = store_options[store_choice]
         if chosen["store_id"] != st.session_state.selected_store_id:
-            # Check for unsubmitted sessions before switching
-            cur_id = st.session_state.selected_store_id
-            unsubmitted = cur_id and cur_id not in st.session_state.submitted_stores and \
-                          any(s["store_id"] == cur_id for s in st.session_state.sessions)
-            if unsubmitted:
-                st.warning(f'⚠️ Submit data toko "{st.session_state.selected_store_name}" terlebih dahulu.')
-            else:
-                st.session_state.selected_store_id = chosen["store_id"]
-                st.session_state.selected_store_name = chosen["store_name"]
-                st.rerun()
+            st.session_state.selected_store_id   = chosen["store_id"]
+            st.session_state.selected_store_name = chosen["store_name"]
+            st.rerun()
+
+    # GPS status badge for current store
+    store_id = st.session_state.selected_store_id
+    if store_id:
+        if store_id in st.session_state.store_geo_done:
+            st.markdown('<span class="geo-badge">📍 Lokasi toko sudah terekam</span>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="geo-badge geo-badge-warn">📍 GPS akan direkam pada aktivitas pertama</span>',
+                        unsafe_allow_html=True)
 
     st.divider()
     st.markdown("#### 🗂 Stopwatch Aktivitas")
 
-    # ── Activity selector ─────────────────────────────────────
-    act_options = ["— Pilih Aktivitas —"] + [f"{a['icon']} {a['label']}" for a in ACTIVITIES]
-    act_labels_to_key = {f"{a['icon']} {a['label']}": a["key"] for a in ACTIVITIES}
+    act_list = ["— Pilih Aktivitas —"] + [f"{a['icon']} {a['label']}" for a in ACTIVITIES]
+    act_label_to_key = {f"{a['icon']} {a['label']}": a["key"] for a in ACTIVITIES}
 
     current_act_label = ""
     if st.session_state.current_activity_key:
@@ -612,27 +737,26 @@ def _render_p2_tab():
 
     act_choice = st.selectbox(
         "Pilih Aktivitas",
-        act_options,
-        index=(act_options.index(current_act_label) if current_act_label in act_options else 0),
+        act_list,
+        index=(act_list.index(current_act_label) if current_act_label in act_list else 0),
         key="p2_act_sel",
     )
 
     if act_choice != "— Pilih Aktivitas —":
-        new_key = act_labels_to_key[act_choice]
+        new_key = act_label_to_key[act_choice]
         if new_key != st.session_state.current_activity_key:
-            # Switching activity — pause first
             if st.session_state.timer_running:
                 st.session_state.timer_elapsed_ms = get_live_elapsed_ms()
                 st.session_state.timer_running = False
                 st.session_state.timer_started_at = None
-            st.session_state.current_activity_key = new_key
+            st.session_state.current_activity_key   = new_key
             a = ACTIVITY_MAP[new_key]
             st.session_state.current_activity_label = f"{a['icon']} {a['label']}"
             st.session_state.timer_elapsed_ms = 0
             st.rerun()
 
     # ── Clock display ─────────────────────────────────────────
-    elapsed = get_live_elapsed_ms()
+    elapsed  = get_live_elapsed_ms()
     act_name = st.session_state.current_activity_label or "— None Selected —"
 
     st.markdown(f"""
@@ -661,20 +785,20 @@ def _render_p2_tab():
             if not st.session_state.selected_store_id:
                 st.warning("Pilih toko terlebih dahulu!")
             else:
-                st.session_state.timer_running = True
+                st.session_state.timer_running    = True
                 st.session_state.timer_started_at = datetime.now(timezone.utc)
                 st.rerun()
 
     with col2:
         if st.button("⏸ Pause", disabled=not st.session_state.timer_running, use_container_width=True):
             st.session_state.timer_elapsed_ms = get_live_elapsed_ms()
-            st.session_state.timer_running = False
+            st.session_state.timer_running    = False
             st.session_state.timer_started_at = None
             st.rerun()
 
     with col3:
         if st.button("⏹ Stop & Save", type="secondary", use_container_width=True):
-            _stop_and_record()
+            _stop_and_save_to_bq()
 
     # ── Auto-refresh while running ────────────────────────────
     if st.session_state.timer_running:
@@ -684,7 +808,8 @@ def _render_p2_tab():
 
     # ── Totals ────────────────────────────────────────────────
     st.divider()
-    st.markdown('<div class="section-label">📊 Total Waktu Per Aktivitas</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-label">📊 Total Waktu Per Aktivitas (sesi ini)</div>',
+                unsafe_allow_html=True)
     live_elapsed = get_live_elapsed_ms()
     cols = st.columns(4)
     for i, a in enumerate(ACTIVITIES):
@@ -694,121 +819,72 @@ def _render_p2_tab():
         with cols[i % 4]:
             st.metric(label=f"{a['icon']} {a['label']}", value=fmt_ms(total))
 
-    # ── Session log ───────────────────────────────────────────
-    st.divider()
-    st.markdown('<div class="section-label">📜 Session Log</div>', unsafe_allow_html=True)
-    sessions = st.session_state.sessions
 
-    if not sessions:
-        st.info("No sessions recorded yet.")
-    else:
-        for i, s in enumerate(sessions):
-            tag_color = "tag-green" if s["store_id"] in st.session_state.submitted_stores else "tag"
-            loc_text = ""
-            if s.get("latitude") and s.get("longitude"):
-                loc_text = f"📍 {s['latitude']:.6f}, {s['longitude']:.6f} ±{s.get('location_accuracy_m',0)}m"
+# ============================================================
+# STOP & SAVE
+# ============================================================
 
-            col_n, col_store, col_act, col_dur, col_time = st.columns([0.5, 2.5, 2, 1.5, 1.5])
-            col_n.caption(str(len(sessions) - i))
-            col_store.markdown(f'<span class="{tag_color}">{s["store_name"]}</span>', unsafe_allow_html=True)
-            col_act.markdown(f'<span class="tag">{s["activity_label"]}</span>', unsafe_allow_html=True)
-            col_dur.code(fmt_ms(s["duration_ms"]))
-            ended_epoch = int(datetime.fromisoformat(s["ended_at"]).timestamp() * 1000)
-            col_time.caption(fmt_clock(ended_epoch))
-            if loc_text:
-                st.caption(loc_text)
-
-    # ── Store submit ──────────────────────────────────────────
-    store_id = st.session_state.selected_store_id
-    if store_id:
-        store_sessions = [s for s in sessions if s["store_id"] == store_id]
-        if store_sessions:
-            st.divider()
-            already = store_id in st.session_state.submitted_stores
-            status = f"✔ Sudah disubmit ({len(store_sessions)} sesi). Submit ulang jika ada tambahan." \
-                if already else f"Terdapat **{len(store_sessions)} sesi**. Klik tombol untuk mengirim ke BigQuery."
-            st.markdown(status)
-
-            btn_label = "🔄 Submit Ulang" if already else "✅ Submit Toko Ini"
-            if st.button(btn_label, type="primary", use_container_width=True, key="store_submit_btn"):
-                with st.spinner("Menyimpan ke BigQuery…"):
-                    ok, msg = write_store_sessions(
-                        st.session_state.spv,
-                        st.session_state.region,
-                        st.session_state.distributor,
-                        store_sessions,
-                    )
-                if ok:
-                    st.success(msg)
-                    st.session_state.sessions = [
-                        s for s in st.session_state.sessions 
-                        if s["store_id"] != store_id
-                    ]
-                    if store_id in st.session_state.submitted_stores:
-                        st.session_state.submitted_stores.remove(store_id)
-                    st.rerun()
-                else:
-                    st.error(f"❌ {msg}")
-
-    # ── Clear all ─────────────────────────────────────────────
-    st.divider()
-    if st.button("🗑 Clear All Sessions", use_container_width=True):
-        if st.session_state.get("confirm_clear_sessions"):
-            st.session_state.sessions = []
-            st.session_state.totals = {}
-            st.session_state.submitted_stores = []
-            st.session_state.timer_elapsed_ms = 0
-            st.session_state.timer_running = False
-            st.session_state.timer_started_at = None
-            st.session_state.current_activity_key = ""
-            st.session_state.current_activity_label = ""
-            st.session_state.confirm_clear_sessions = False
-            st.rerun()
-        else:
-            st.session_state.confirm_clear_sessions = True
-            st.warning("Klik Clear lagi untuk konfirmasi.")
-
-
-def _stop_and_record():
+def _stop_and_save_to_bq():
+    """
+    Stop the timer and write the session to BigQuery.
+    If this is the first activity for the selected store, capture GPS first.
+    """
     elapsed = get_live_elapsed_ms()
+
     if elapsed <= 0 or not st.session_state.current_activity_key:
-        # Just reset
-        st.session_state.timer_elapsed_ms = 0
-        st.session_state.timer_running = False
-        st.session_state.timer_started_at = None
-        st.session_state.current_activity_key = ""
+        st.session_state.timer_elapsed_ms       = 0
+        st.session_state.timer_running          = False
+        st.session_state.timer_started_at       = None
+        st.session_state.current_activity_key   = ""
         st.session_state.current_activity_label = ""
         st.rerun()
         return
 
-    key = st.session_state.current_activity_key
-    a = ACTIVITY_MAP.get(key, {})
+    key      = st.session_state.current_activity_key
+    store_id = st.session_state.selected_store_id
     ended_at = datetime.now(timezone.utc).isoformat()
 
     session_entry = {
-        "activity_key": key,
+        "activity_key":   key,
         "activity_label": st.session_state.current_activity_label,
-        "store_id": st.session_state.selected_store_id,
-        "store_name": st.session_state.selected_store_name or "—",
-        "duration_ms": elapsed,
-        "ended_at": ended_at,
-        "latitude": None,
-        "longitude": None,
+        "store_id":       store_id,
+        "store_name":     st.session_state.selected_store_name or "—",
+        "duration_ms":    elapsed,
+        "ended_at":       ended_at,
+        "latitude":       None,
+        "longitude":      None,
         "location_accuracy_m": None,
     }
 
-    # Update totals
+    # Update running totals
     st.session_state.totals[key] = st.session_state.totals.get(key, 0) + elapsed
 
     # Reset timer
-    st.session_state.timer_elapsed_ms = 0
-    st.session_state.timer_running = False
-    st.session_state.timer_started_at = None
-    st.session_state.current_activity_key = ""
+    st.session_state.timer_elapsed_ms       = 0
+    st.session_state.timer_running          = False
+    st.session_state.timer_started_at       = None
+    st.session_state.current_activity_key   = ""
     st.session_state.current_activity_label = ""
 
-    st.session_state.sessions.insert(0, session_entry)
-    st.rerun()
+    # First activity for this store → fetch GPS, then write
+    if store_id and store_id not in st.session_state.store_geo_done:
+        st.session_state.p2_pending_entry = session_entry
+        st.session_state.p2_awaiting_geo  = True
+        st.rerun()
+    else:
+        # GPS already recorded for this store — write immediately
+        with st.spinner("Menyimpan sesi ke BigQuery…"):
+            ok, msg = write_single_store_session(
+                st.session_state.spv,
+                st.session_state.region,
+                st.session_state.distributor,
+                session_entry,
+            )
+        if ok:
+            st.success(f"✅ **{session_entry['activity_label']}** — {fmt_ms(elapsed)} — {msg}")
+        else:
+            st.error(f"❌ Gagal menyimpan sesi: {msg}")
+        st.rerun()
 
 
 # ============================================================
@@ -818,7 +894,9 @@ def _stop_and_record():
 def main():
     init_state()
 
-    # Load master data once
+    # Must run before any page rendering so geo params are consumed first
+    handle_incoming_geo()
+
     if "master" not in st.session_state:
         with st.spinner("⏳ Memuat data dari BigQuery…"):
             st.session_state.master = load_master_data()
@@ -832,8 +910,7 @@ def main():
     elif not master.get("spv_list"):
         st.warning("⚠️ Data kosong. Periksa query / kredensial BigQuery.")
 
-    page = st.session_state.page
-    if page == "setup":
+    if st.session_state.page == "setup":
         render_setup()
     else:
         render_checkin()
@@ -841,4 +918,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
