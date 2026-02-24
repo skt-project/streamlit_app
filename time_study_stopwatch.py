@@ -420,7 +420,7 @@ def _render_p1_tab():
     if st.session_state.do_dist_in_write:
         st.info("📡 Mengambil koordinat GPS… tunggu sebentar.")
 
-    if st.button("✅ Catat Waktu, type="primary", use_container_width=True):
+    if st.button("✅ Catat Waktu", type="primary", use_container_width=True):
         if chosen == "— Pilih Aktivitas —":
             st.warning("Pilih aktivitas terlebih dahulu!")
         else:
