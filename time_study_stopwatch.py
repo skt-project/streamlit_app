@@ -293,15 +293,14 @@ def main():
     # We render it in a hidden container so the page stays visible while waiting.
     need_geo = st.session_state.do_dist_in_write or st.session_state.do_store_write
 
-    # get_geolocation() MUST be called unconditionally on every render (no st.empty(),
-    # no if-guard) so Streamlit registers it as a stable component. Wrapping it in
-    # st.empty() or only rendering it conditionally causes the component to be
-    # destroyed and recreated on each rerun, which resets session_state (including
-    # "page") back to its init_state default, sending the user to the setup page.
-    loc = get_geolocation()
-
-    if need_geo and loc is None:
-        st.info("📡 Mengambil koordinat GPS… pastikan izin lokasi diaktifkan di browser.")
+    loc = None
+    if need_geo:
+        with st.empty():
+            loc = get_geolocation()
+        # If loc is still None, GPS hasn't resolved yet — show a subtle status
+        # but DO NOT call st.stop(), so the rest of the page continues rendering.
+        if loc is None:
+            st.info("📡 Mengambil koordinat GPS… pastikan izin lokasi diaktifkan di browser.")
 
     lat, lng, acc = _extract_coords(loc) if (need_geo and loc is not None) else (None, None, None)
 
