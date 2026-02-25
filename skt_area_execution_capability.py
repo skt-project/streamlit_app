@@ -43,7 +43,10 @@ def load_master_distributor():
             distributor_company,
             distributor
         FROM `{PROJECT_ID}.{DATASET}.master_distributor`
-        WHERE status = 'Active'
+        WHERE status = 'Active' AND brand IN (
+        "SKT & G2G & TPH & FR & BB & NP",
+        "SKT & G2G & FR & BB & NP",
+        "SKT & TPH & FR")
         ORDER BY region, distributor_company
     """
     df = bq_client.query(query).to_dataframe()
