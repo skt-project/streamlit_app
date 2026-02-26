@@ -71,6 +71,9 @@ BRAND_OPTIONS = list(BRAND_PREFIXES.keys())
 # (matched via case-insensitive prefix)
 M3_DISTRIBUTOR_PREFIX = "cv mitra makmur mandiri"
 
+# Master distributor table for BQ lookups
+BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
+
 
 # =========================
 # BigQuery Client
@@ -142,6 +145,46 @@ def get_config(distributor: str) -> Optional[Dict]:
     }
 
 
+@st.cache_data(show_spinner=False)
+def lookup_branch_info_by_store_prefix(store_code_prefix: str) -> Optional[Dict]:
+    """
+    Looks up Customer Name and Customer Branch Code from master_distributor
+    using the first 6 digits of the Customer Store Code.
+
+    Results are cached so repeated calls with the same prefix won't
+    re-hit BigQuery (most rows in a file share the same branch).
+    """
+    if not store_code_prefix or store_code_prefix.strip() in ("", "nan"):
+        return None
+
+    client = get_bq_client()
+    sql = f"""
+    SELECT
+        Customer_Name,
+        Customer_Branch_Code
+    FROM `{BQ_MASTER_DISTRIBUTOR_TABLE}`
+    WHERE SUBSTR(CAST(Customer_Store_Code AS STRING), 1, 6) = @store_prefix
+    LIMIT 1
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("store_prefix", "STRING", store_code_prefix)
+        ]
+    )
+    try:
+        rows = list(client.query(sql, job_config=job_config).result())
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    return {
+        "Customer Name": rows[0].Customer_Name or "",
+        "Customer Branch Code": rows[0].Customer_Branch_Code or "",
+    }
+
+
 # =========================
 # 3M Daily ST Cleaning
 # =========================
@@ -157,7 +200,7 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
     The raw file has a report-style layout where each transaction block starts
     with a header line like:
         "No. Trans : JL/M3-26020183 [ 09-02-2026 ] - ONE MART"
-    followed by product rows.  Column 7 of that header row carries the
+    followed by product rows. Column 7 of that header row carries the
     distributor store ID ("Store Code Suggestion").
 
     Returns a flat intermediate DataFrame with columns:
@@ -219,16 +262,19 @@ def map_3m_to_master(
     cleaned: pd.DataFrame,
     static_fields: Dict[str, str],
     brand_prefix: str,
-) -> Tuple[pd.DataFrame, List[str]]:
+) -> Tuple[pd.DataFrame, List[str], List[str]]:
     """
-    Maps the intermediate 3M cleaned DataFrame to MASTER_SCHEMA, applying
-    static fields and brand/branch prefixes exactly like the standard pipeline.
+    Maps the intermediate 3M cleaned DataFrame to MASTER_SCHEMA.
 
-    Returns (mapped_df, unregistered_stores).
+    Customer Name and Customer Branch Code are resolved by looking up the
+    first 6 digits of each row's Customer Store Code in master_distributor.
+    Falls back to static_fields values when no BQ match is found.
+
+    Returns (mapped_df, unregistered_stores, bq_lookup_misses).
     """
     out = pd.DataFrame(index=cleaned.index)
 
-    # ── Fixed first-5 columns from static_fields ─────────────────────────────
+    # ── Fixed columns from static_fields (overridden below where BQ lookup wins)
     for col in FIXED_FIRST_5:
         out[col] = static_fields.get(col, "")
 
@@ -238,22 +284,48 @@ def map_3m_to_master(
     # ── Dynamic columns ───────────────────────────────────────────────────────
     out["PO Date"] = cleaned["PO Date"]
     out["PO Number"] = cleaned["No. TRANSAKSI"]
-
-    # Customer Store Code = ID CUST DISTRIBUTOR only (no branch prefix for 3M)
     out["Customer Store Code"] = cleaned["ID CUST DISTRIBUTOR"].astype(str)
-
     out["Customer Store Name"] = cleaned["Customer Store Name"]
     out["Customer SKU Code"] = cleaned["Product Code"]
     out["Customer SKU Name"] = cleaned["Product Name"]
     out["Qty"] = cleaned["Kuantitas"]
 
-    # Collect unregistered stores (those whose store ID was blank before prefixing)
-    unregistered = cleaned.loc[
-        cleaned["ID CUST DISTRIBUTOR"] == "", "Customer Store Name"
-    ].unique().tolist()
+    # ── BQ lookup: Customer Name & Customer Branch Code per store prefix ───────
+    bq_lookup_misses: List[str] = []
+
+    def enrich_from_bq(store_code: str) -> pd.Series:
+        prefix = store_code[:6] if len(store_code) >= 6 else store_code
+        if not prefix or prefix in ("", "nan"):
+            return pd.Series({
+                "Customer Name": static_fields.get("Customer Name", ""),
+                "Customer Branch Code": static_fields.get("Customer Branch Code", ""),
+            })
+        result = lookup_branch_info_by_store_prefix(prefix)
+        if result:
+            return pd.Series(result)
+        # BQ miss – record prefix for warning and fall back to static_fields
+        bq_lookup_misses.append(prefix)
+        return pd.Series({
+            "Customer Name": static_fields.get("Customer Name", ""),
+            "Customer Branch Code": static_fields.get("Customer Branch Code", ""),
+        })
+
+    enriched = out["Customer Store Code"].apply(enrich_from_bq)
+    out["Customer Name"] = enriched["Customer Name"]
+    out["Customer Branch Code"] = enriched["Customer Branch Code"]
+
+    # Deduplicate miss list
+    bq_lookup_misses = list(dict.fromkeys(bq_lookup_misses))
+
+    # ── Collect unregistered stores ───────────────────────────────────────────
+    unregistered = (
+        cleaned.loc[cleaned["ID CUST DISTRIBUTOR"] == "", "Customer Store Name"]
+        .unique()
+        .tolist()
+    )
 
     out = out[MASTER_SCHEMA]
-    return out, unregistered
+    return out, unregistered, bq_lookup_misses
 
 
 # =========================
@@ -361,7 +433,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     if not uploaded:
         return
 
-    # ── Fetch distributor config (same as standard pipeline) ─────────────────
+    # ── Fetch distributor config ──────────────────────────────────────────────
     cfg = get_config(dist)
     if not cfg:
         st.error(
@@ -382,36 +454,95 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         st.warning("No product rows were found in the uploaded file.")
         return
 
-    # ── Map to MASTER_SCHEMA ──────────────────────────────────────────────────
-    try:
-        mapped, unregistered = map_3m_to_master(cleaned, cfg["static_fields"], brand_prefix)
-    except Exception as e:
-        st.error(f"Error mapping to master schema: {e}")
-        return
+    # ── Map to MASTER_SCHEMA (includes BQ lookup for Name & Branch Code) ──────
+    with st.spinner("Looking up Customer Name & Branch Code from master_distributor…"):
+        try:
+            mapped, unregistered, bq_misses = map_3m_to_master(
+                cleaned, cfg["static_fields"], brand_prefix
+            )
+        except Exception as e:
+            st.error(f"Error mapping to master schema: {e}")
+            return
 
-    st.success(f"Mapped to master schema.")
+    st.success("Mapped to master schema.")
     st.write("Converted sample:")
     st.dataframe(mapped.head())
 
-    # ── Mapping log (mirrors standard pipeline style) ─────────────────────────
+    # ── Mapping log ───────────────────────────────────────────────────────────
     st.subheader("Mapping Log")
     st.write("✅ **Successful Mappings:**")
-    branch_prefix = cfg["static_fields"].get("Customer Branch Code", "")
     mapping_log = [
-        {"Target Column": "Customer Code",        "Source Column": f"PREFIXED({brand_prefix}){cfg['static_fields'].get('Customer Code','')}",  "Status": "Mapped"},
-        {"Target Column": "Customer Name",        "Source Column": cfg["static_fields"].get("Customer Name", ""),                               "Status": "Mapped"},
-        {"Target Column": "Customer Branch Code", "Source Column": cfg["static_fields"].get("Customer Branch Code", ""),                        "Status": "Mapped"},
-        {"Target Column": "Customer Branch Name", "Source Column": cfg["static_fields"].get("Customer Branch Name", ""),                        "Status": "Mapped"},
-        {"Target Column": "Customer Address",     "Source Column": cfg["static_fields"].get("Customer Address", ""),                            "Status": "Mapped"},
-        {"Target Column": "PO Date",              "Source Column": "Parsed from transaction header [DD-MM-YYYY]",                               "Status": "Mapped"},
-        {"Target Column": "PO Number",            "Source Column": "No. TRANSAKSI (transaction header)",                                        "Status": "Mapped"},
-        {"Target Column": "Customer Store Code",  "Source Column": "Store Code Suggestion (col 7)",                                             "Status": "Mapped"},
-        {"Target Column": "Customer Store Name",  "Source Column": "Parsed from transaction header",                                            "Status": "Mapped"},
-        {"Target Column": "Customer SKU Code",    "Source Column": "BARCODE (col 0)",                                                           "Status": "Mapped"},
-        {"Target Column": "Customer SKU Name",    "Source Column": "NAMA PRODUK (col 1)",                                                       "Status": "Mapped"},
-        {"Target Column": "Qty",                  "Source Column": "QTY (col 2)",                                                               "Status": "Mapped"},
+        {
+            "Target Column": "Customer Code",
+            "Source Column": f"PREFIXED({brand_prefix}){cfg['static_fields'].get('Customer Code', '')}",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer Name",
+            "Source Column": "BQ lookup → master_distributor (first 6 digits of Store Code)",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer Branch Code",
+            "Source Column": "BQ lookup → master_distributor (first 6 digits of Store Code)",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer Branch Name",
+            "Source Column": cfg["static_fields"].get("Customer Branch Name", ""),
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer Address",
+            "Source Column": cfg["static_fields"].get("Customer Address", ""),
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "PO Date",
+            "Source Column": "Parsed from transaction header [DD-MM-YYYY]",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "PO Number",
+            "Source Column": "No. TRANSAKSI (transaction header)",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer Store Code",
+            "Source Column": "Store Code Suggestion (col 7)",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer Store Name",
+            "Source Column": "Parsed from transaction header",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer SKU Code",
+            "Source Column": "BARCODE (col 0)",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Customer SKU Name",
+            "Source Column": "NAMA PRODUK (col 1)",
+            "Status": "Mapped",
+        },
+        {
+            "Target Column": "Qty",
+            "Source Column": "QTY (col 2)",
+            "Status": "Mapped",
+        },
     ]
     st.table(pd.DataFrame(mapping_log))
+
+    # ── BQ lookup miss warning ────────────────────────────────────────────────
+    if bq_misses:
+        st.warning(
+            f"⚠️ **{len(bq_misses)} store prefix(es)** were not found in "
+            "`master_distributor`. Fell back to static config values for "
+            "Customer Name & Customer Branch Code:"
+        )
+        st.write(", ".join(sorted(bq_misses)))
 
     # ── Unregistered stores warning ───────────────────────────────────────────
     if unregistered:
@@ -421,7 +552,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         )
         st.write(", ".join(sorted(unregistered)))
 
-    # ── Download (same UX as standard pipeline) ───────────────────────────────
+    # ── Download ──────────────────────────────────────────────────────────────
     try:
         xlsx = to_excel_bytes(mapped, "MappedData")
         st.download_button(
