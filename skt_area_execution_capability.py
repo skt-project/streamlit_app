@@ -233,7 +233,9 @@ if (
 
         for question in required_name_metrics:
             selected_grade = answers[question]["grade"]
-            person_name = answers[question]["person_name"]
+
+            # Always read the REAL value from session_state
+            person_name = st.session_state.get(f"name_{question}", "")
 
             # Detect do not exist dynamically
             do_not_exist_grades = [
@@ -243,16 +245,16 @@ if (
 
             # 🚨 CASE 1: Role exists but name empty → ERROR
             if selected_grade not in do_not_exist_grades:
-                if not person_name or person_name.strip() == "":
+                if not person_name.strip():
                     error_messages.append(
                         f"Name must be filled for {question} if role exists."
                     )
 
-            # 🚨 CASE 2: Role does NOT exist but name is filled → ERROR
+            # 🚨 CASE 2: Role does NOT exist but name filled → ERROR
             if selected_grade in do_not_exist_grades:
-                if person_name and person_name.strip() != "":
+                if person_name.strip():
                     error_messages.append(
-                        f"Name must be empty for {question} if role does not exist."
+                        f"Name must be EMPTY for {question} because role does not exist."
                     )
 
         # ==========================================
@@ -283,7 +285,7 @@ if (
                 "distributor": distributor,
                 "metric": question,
                 "grade": value["grade"],
-                "person_name": value["person_name"],
+                "person_name": st.session_state.get(f"name_{question}", "").strip(),
                 "point": questions[question][value["grade"]][1],
                 "total_score": total_score
             })
