@@ -190,6 +190,9 @@ if (
 
                 disable_name = grade_option in do_not_exist_grades
 
+                if disable_name:
+                    st.session_state[f"name_{question}"] = "" 
+
                 person_name = st.text_input(
                     f"Name for {question}",
                     key=f"name_{question}",
@@ -238,10 +241,18 @@ if (
                 if "Do not exist" in val[0]
             ]
 
+            # 🚨 CASE 1: Role exists but name empty → ERROR
             if selected_grade not in do_not_exist_grades:
                 if not person_name or person_name.strip() == "":
                     error_messages.append(
                         f"Name must be filled for {question} if role exists."
+                    )
+
+            # 🚨 CASE 2: Role does NOT exist but name is filled → ERROR
+            if selected_grade in do_not_exist_grades:
+                if person_name and person_name.strip() != "":
+                    error_messages.append(
+                        f"Name must be empty for {question} if role does not exist."
                     )
 
         # ==========================================
