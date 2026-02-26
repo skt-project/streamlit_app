@@ -148,8 +148,12 @@ def get_config(distributor: str) -> Optional[Dict]:
 @st.cache_data(show_spinner=False)
 def lookup_branch_info_by_store_prefix(store_code_prefix: str) -> Optional[Dict]:
     """
-    Looks up Customer Name and Customer Branch Code from master_distributor
+    Looks up Customer Branch Code and Customer Branch Name from master_distributor
     using the first 6 digits of the Customer Store Code.
+
+    Column mapping in master_distributor:
+        distributor_code  → Customer Branch Code
+        distributor       → Customer Branch Name
 
     Results are cached so repeated calls with the same prefix won't
     re-hit BigQuery (most rows in a file share the same branch).
@@ -160,8 +164,8 @@ def lookup_branch_info_by_store_prefix(store_code_prefix: str) -> Optional[Dict]
     client = get_bq_client()
     sql = f"""
     SELECT
-        Customer_Name,
-        Customer_Branch_Code
+        distributor_code,
+        distributor
     FROM `{BQ_MASTER_DISTRIBUTOR_TABLE}`
     WHERE SUBSTR(CAST(Customer_Store_Code AS STRING), 1, 6) = @store_prefix
     LIMIT 1
@@ -180,8 +184,8 @@ def lookup_branch_info_by_store_prefix(store_code_prefix: str) -> Optional[Dict]
         return None
 
     return {
-        "Customer Name": rows[0].Customer_Name or "",
-        "Customer Branch Code": rows[0].Customer_Branch_Code or "",
+        "Customer Branch Code": rows[0].distributor_code or "",
+        "Customer Branch Name": rows[0].distributor or "",
     }
 
 
@@ -304,11 +308,11 @@ def map_3m_to_master(
             })
         result = lookup_branch_info_by_store_prefix(prefix)
         if result:
-            # BQ hit – keep static Branch Name as BQ table may not carry it
+            # BQ hit – distributor_code → Branch Code, distributor → Branch Name
             return pd.Series({
-                "Customer Name": result.get("Customer Name", ""),
+                "Customer Name": static_fields.get("Customer Name", ""),
                 "Customer Branch Code": result.get("Customer Branch Code", ""),
-                "Customer Branch Name": static_fields.get("Customer Branch Name", ""),
+                "Customer Branch Name": result.get("Customer Branch Name", ""),
             })
         # BQ miss – record prefix for warning and fall back to static_fields
         bq_lookup_misses.append(prefix)
@@ -493,12 +497,12 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         },
         {
             "Target Column": "Customer Branch Code",
-            "Source Column": "BQ lookup → master_distributor (first 6 digits of Store Code)",
+            "Source Column": "BQ lookup → master_distributor.distributor_code (first 6 digits of Store Code)",
             "Status": "Mapped",
         },
         {
             "Target Column": "Customer Branch Name",
-            "Source Column": cfg["static_fields"].get("Customer Branch Name", ""),
+            "Source Column": "BQ lookup → master_distributor.distributor (first 6 digits of Store Code)",
             "Status": "Mapped",
         },
         {
