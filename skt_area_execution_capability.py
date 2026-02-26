@@ -188,12 +188,9 @@ if (
                     if "Do not exist" in val[0]
                 ]
 
-                disable_name = grade_option in do_not_exist_grades
-
                 person_name = st.text_input(
                     f"Name for {question}",
-                    key=f"name_{question}",
-                    disabled=disable_name
+                    key=f"name_{question}"
                 )
 
             answers[question] = {
