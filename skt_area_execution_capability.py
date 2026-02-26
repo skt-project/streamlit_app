@@ -16,6 +16,14 @@ st.set_page_config(
 st.title("📋 Distributor Operational Assessment Form")
 
 # =====================================================
+# REPRESENTATIVE NAME INPUT
+# =====================================================
+representative_name = st.text_input(
+    "Representative Name",
+    placeholder="Enter your full name"
+)
+
+# =====================================================
 # BIGQUERY CONNECTION (USING STREAMLIT SECRETS)
 # =====================================================
 gcp_secrets = dict(st.secrets["connections"]["bigquery"])
@@ -142,7 +150,11 @@ questions = {
 # =====================================================
 # FORM SECTION
 # =====================================================
-if region != "- Select Region -" and distributor != "- Select Distributor -":
+if (
+    representative_name.strip() != "" and
+    region != "- Select Region -" and
+    distributor != "- Select Distributor -"
+):
 
     st.success("Please complete all assessment questions")
 
@@ -185,6 +197,7 @@ if region != "- Select Region -" and distributor != "- Select Distributor -":
             rows_to_insert.append({
                 "submission_id": submission_id,
                 "submitted_at": submitted_at,
+                "representative_name": representative_name.strip(),  # NEW FIELD
                 "region": region,
                 "distributor": distributor,
                 "metric": question,
