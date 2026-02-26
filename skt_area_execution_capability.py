@@ -165,6 +165,18 @@ if (
         for question, grades in questions.items():
             st.subheader(question)
 
+            # 👇 Tambahkan input name hanya untuk 3 metric tertentu
+            person_name = None
+            if question in [
+                "OPERATIONAL LEADER (SPV / OPERATIONAL MANAGER)",
+                "SALESMAN",
+                "ADMINISTRATIVE & AR SUPPORT"
+            ]:
+                person_name = st.text_input(
+                    f"Name for {question}",
+                    key=f"name_{question}"
+                )
+
             grade_option = st.radio(
                 "Select Grade",
                 options=list(grades.keys()),
@@ -172,10 +184,13 @@ if (
                 key=question
             )
 
-            answers[question] = grade_option
+            answers[question] = {
+                "grade": grade_option,
+                "person_name": person_name
+            }
 
         total_score = sum(
-            questions[q][answers[q]][1] for q in answers
+            questions[q][answers[q]["grade"]][1] for q in answers
         )
 
         st.divider()
@@ -193,16 +208,17 @@ if (
 
         rows_to_insert = []
 
-        for question, grade in answers.items():
+        for question, value in answers.items():
             rows_to_insert.append({
                 "submission_id": submission_id,
                 "submitted_at": submitted_at,
-                "representative_name": representative_name.strip(),  # NEW FIELD
+                "representative_name": representative_name.strip(),
                 "region": region,
                 "distributor": distributor,
                 "metric": question,
-                "grade": grade,
-                "point": questions[question][grade][1],
+                "grade": value["grade"],
+                "person_name": value["person_name"],  # NEW
+                "point": questions[question][value["grade"]][1],
                 "total_score": total_score
             })
 
