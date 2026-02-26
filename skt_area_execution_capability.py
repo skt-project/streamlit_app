@@ -190,9 +190,6 @@ if (
 
                 disable_name = grade_option in do_not_exist_grades
 
-                if disable_name:
-                    st.session_state[f"name_{question}"] = "" 
-
                 person_name = st.text_input(
                     f"Name for {question}",
                     key=f"name_{question}",
@@ -234,8 +231,8 @@ if (
         for question in required_name_metrics:
             selected_grade = answers[question]["grade"]
 
-            # Always read the REAL value from session_state
-            person_name = st.session_state.get(f"name_{question}", "")
+            # Get REAL raw value (no default)
+            person_name = st.session_state[f"name_{question}"]
 
             # Detect do not exist dynamically
             do_not_exist_grades = [
@@ -243,19 +240,20 @@ if (
                 if "Do not exist" in val[0]
             ]
 
-            # 🚨 CASE 1: Role exists but name empty → ERROR
-            if selected_grade not in do_not_exist_grades:
-                if not person_name.strip():
-                    error_messages.append(
-                        f"Name must be filled for {question} if role exists."
-                    )
+            # Normalize
+            person_name_clean = person_name.strip()
 
-            # 🚨 CASE 2: Role does NOT exist but name filled → ERROR
-            if selected_grade in do_not_exist_grades:
-                if person_name.strip():
-                    error_messages.append(
-                        f"Name must be EMPTY for {question} because role does not exist."
-                    )
+            # 🚨 BLOCK IF role does not exist BUT name has value
+            if selected_grade in do_not_exist_grades and person_name_clean != "":
+                error_messages.append(
+                    f"{question}: You selected 'Do not exist' but still filled a name."
+                )
+
+            # 🚨 BLOCK IF role exists BUT name empty
+            if selected_grade not in do_not_exist_grades and person_name_clean == "":
+                error_messages.append(
+                    f"{question}: Name must be filled because role exists."
+                )
 
         # ==========================================
         # IF ERROR → STOP INSERT
@@ -277,6 +275,20 @@ if (
         rows_to_insert = []
 
         for question, value in answers.items():
+            grade = value["grade"]
+
+            # detect do not exist
+            do_not_exist_grades = [
+                key for key, val in questions[question].items()
+                if "Do not exist" in val[0]
+            ]
+
+            raw_name = st.session_state.get(f"name_{question}", "").strip()
+
+            # Force NULL if role does not exist
+            if grade in do_not_exist_grades:
+                raw_name = None
+
             rows_to_insert.append({
                 "submission_id": submission_id,
                 "submitted_at": submitted_at,
@@ -284,9 +296,9 @@ if (
                 "region": region,
                 "distributor": distributor,
                 "metric": question,
-                "grade": value["grade"],
-                "person_name": st.session_state.get(f"name_{question}", "").strip(),
-                "point": questions[question][value["grade"]][1],
+                "grade": grade,
+                "person_name": raw_name,
+                "point": questions[question][grade][1],
                 "total_score": total_score
             })
 
