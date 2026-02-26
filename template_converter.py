@@ -295,24 +295,33 @@ def map_3m_to_master(
 
     def enrich_from_bq(store_code: str) -> pd.Series:
         prefix = store_code[:6] if len(store_code) >= 6 else store_code
+        # Blank store code → blank Name, Branch Code, and Branch Name
         if not prefix or prefix in ("", "nan"):
             return pd.Series({
-                "Customer Name": static_fields.get("Customer Name", ""),
-                "Customer Branch Code": static_fields.get("Customer Branch Code", ""),
+                "Customer Name": "",
+                "Customer Branch Code": "",
+                "Customer Branch Name": "",
             })
         result = lookup_branch_info_by_store_prefix(prefix)
         if result:
-            return pd.Series(result)
+            # BQ hit – keep static Branch Name as BQ table may not carry it
+            return pd.Series({
+                "Customer Name": result.get("Customer Name", ""),
+                "Customer Branch Code": result.get("Customer Branch Code", ""),
+                "Customer Branch Name": static_fields.get("Customer Branch Name", ""),
+            })
         # BQ miss – record prefix for warning and fall back to static_fields
         bq_lookup_misses.append(prefix)
         return pd.Series({
             "Customer Name": static_fields.get("Customer Name", ""),
             "Customer Branch Code": static_fields.get("Customer Branch Code", ""),
+            "Customer Branch Name": static_fields.get("Customer Branch Name", ""),
         })
 
     enriched = out["Customer Store Code"].apply(enrich_from_bq)
     out["Customer Name"] = enriched["Customer Name"]
     out["Customer Branch Code"] = enriched["Customer Branch Code"]
+    out["Customer Branch Name"] = enriched["Customer Branch Name"]
 
     # Deduplicate miss list
     bq_lookup_misses = list(dict.fromkeys(bq_lookup_misses))
