@@ -203,6 +203,44 @@ if (
     # =====================================================
     if submitted:
 
+        error_messages = []
+
+        # 1️⃣ Representative name validation
+        if representative_name.strip() == "":
+            error_messages.append("Representative Name must be filled.")
+
+        # 2️⃣ Person name validation for specific metrics
+        required_name_metrics = [
+            "OPERATIONAL LEADER (SPV / OPERATIONAL MANAGER)",
+            "SALESMAN",
+            "ADMINISTRATIVE & AR SUPPORT"
+        ]
+
+        for question in required_name_metrics:
+            selected_grade = answers[question]["grade"]
+            person_name = answers[question]["person_name"]
+
+            # If grade is not "Do not exist", name must be filled
+            if selected_grade not in ["C", "D"]:  # C or D = Do not exist (depending on metric)
+                if not person_name or person_name.strip() == "":
+                    error_messages.append(
+                        f"Name must be filled for {question} if role exists."
+                    )
+
+        # ==========================================
+        # IF ERROR → STOP INSERT
+        # ==========================================
+
+        if error_messages:
+            st.error("❌ Please fix the following errors:")
+            for msg in error_messages:
+                st.write(f"- {msg}")
+            st.stop()
+
+        # ==========================================
+        # INSERT TO BIGQUERY
+        # ==========================================
+
         submission_id = str(uuid.uuid4())
         submitted_at = now("Asia/Jakarta").to_datetime_string()
 
@@ -217,7 +255,7 @@ if (
                 "distributor": distributor,
                 "metric": question,
                 "grade": value["grade"],
-                "person_name": value["person_name"],  # NEW
+                "person_name": value["person_name"],
                 "point": questions[question][value["grade"]][1],
                 "total_score": total_score
             })
