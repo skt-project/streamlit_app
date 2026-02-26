@@ -165,24 +165,36 @@ if (
         for question, grades in questions.items():
             st.subheader(question)
 
-            # 👇 Tambahkan input name hanya untuk 3 metric tertentu
+            # 1️⃣ Grade selection FIRST
+            grade_option = st.radio(
+                "Select Grade",
+                options=list(grades.keys()),
+                format_func=lambda x: f"{x} - {grades[x][0]} ({grades[x][1]} pts)",
+                key=f"grade_{question}"
+            )
+
             person_name = None
+
+            # 2️⃣ Special handling for 3 metrics
             if question in [
                 "OPERATIONAL LEADER (SPV / OPERATIONAL MANAGER)",
                 "SALESMAN",
                 "ADMINISTRATIVE & AR SUPPORT"
             ]:
+
+                # Detect which grade means "Do not exist"
+                do_not_exist_grades = [
+                    key for key, val in grades.items()
+                    if "Do not exist" in val[0]
+                ]
+
+                disable_name = grade_option in do_not_exist_grades
+
                 person_name = st.text_input(
                     f"Name for {question}",
-                    key=f"name_{question}"
+                    key=f"name_{question}",
+                    disabled=disable_name
                 )
-
-            grade_option = st.radio(
-                "Select Grade",
-                options=list(grades.keys()),
-                format_func=lambda x: f"{x} - {grades[x][0]} ({grades[x][1]} pts)",
-                key=question
-            )
 
             answers[question] = {
                 "grade": grade_option,
@@ -220,8 +232,13 @@ if (
             selected_grade = answers[question]["grade"]
             person_name = answers[question]["person_name"]
 
-            # If grade is not "Do not exist", name must be filled
-            if selected_grade not in ["C", "D"]:  # C or D = Do not exist (depending on metric)
+            # Detect do not exist dynamically
+            do_not_exist_grades = [
+                key for key, val in questions[question].items()
+                if "Do not exist" in val[0]
+            ]
+
+            if selected_grade not in do_not_exist_grades:
                 if not person_name or person_name.strip() == "":
                     error_messages.append(
                         f"Name must be filled for {question} if role exists."
