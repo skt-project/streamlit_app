@@ -167,7 +167,7 @@ def lookup_branch_info_by_store_prefix(store_code_prefix: str) -> Optional[Dict]
         distributor_code,
         distributor
     FROM `{BQ_MASTER_DISTRIBUTOR_TABLE}`
-    WHERE SUBSTR(CAST(Customer_Store_Code AS STRING), 1, 6) = @store_prefix
+    WHERE distributor_code = @store_prefix
     LIMIT 1
     """
     job_config = bigquery.QueryJobConfig(
@@ -497,12 +497,12 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         },
         {
             "Target Column": "Customer Branch Code",
-            "Source Column": "BQ lookup → master_distributor.distributor_code (first 6 digits of Store Code)",
+            "Source Column": "BQ lookup → master_distributor WHERE distributor_code = first 6 chars of Store Code",
             "Status": "Mapped",
         },
         {
             "Target Column": "Customer Branch Name",
-            "Source Column": "BQ lookup → master_distributor.distributor (first 6 digits of Store Code)",
+            "Source Column": "BQ lookup → master_distributor WHERE distributor_code = first 6 chars of Store Code",
             "Status": "Mapped",
         },
         {
