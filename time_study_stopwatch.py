@@ -489,7 +489,7 @@ def _render_p2_tab():
                 st.session_state.timer_running = False; st.session_state.timer_started_at = None
             st.session_state.act_key = nk
             a = ACTIVITY_MAP[nk]; st.session_state.act_label = f"{a['icon']} {a['label']}"
-            st.session_state.timer_elapsed_ms = 0; st.rerun()
+            st.session_state.timer_elapsed_ms = 0
 
     elapsed  = get_live_ms()
     act_name = st.session_state.act_label or "— None Selected —"
