@@ -245,9 +245,6 @@ def init_state():
         "pending_dist_in": None,
         "do_store_write": False,
         "pending_store_session": None,
-        # Tracks which page/tab the user was on before GPS capture started,
-        # so we can return them there after coords arrive.
-        # Values: "checkin_tab0" (Check In/Out tab) or "checkin_tab1" (Activities tab)
         "geo_return_tab": None,
     }
     for k, v in defaults.items():
@@ -292,8 +289,6 @@ def main():
 
     need_geo = st.session_state.do_dist_in_write or st.session_state.do_store_write
 
-    # Always call get_geolocation() unconditionally so it is a stable component
-    # across all reruns — never inside st.empty() or a conditional block.
     loc = get_geolocation()
 
     if need_geo and loc is None:
@@ -301,7 +296,6 @@ def main():
 
     lat, lng, acc = _extract_coords(loc) if (need_geo and loc is not None) else (None, None, None)
 
-    # Process queued GPS writes once coords have arrived
     if st.session_state.do_dist_in_write and loc is not None:
         entry = st.session_state.pending_dist_in
         st.session_state.do_dist_in_write = False
@@ -315,7 +309,6 @@ def main():
             st.session_state._flash = ("success", f"📥 **Check In Distributor** disimpan · {geo_str}")
         else:
             st.session_state._flash = ("error", f"❌ Gagal: {msg}")
-        # Return user to the tab they came from
         st.session_state.page = "checkin"
         st.session_state._return_tab = st.session_state.pop("geo_return_tab", 0)
 
@@ -336,7 +329,6 @@ def main():
                 f"✅ **{entry['activity_label']}** — {fmt_ms(entry['duration_ms'])} · {geo_str}")
         else:
             st.session_state._flash = ("error", f"❌ Gagal: {msg}")
-        # Return user to the tab they came from
         st.session_state.page = "checkin"
         st.session_state._return_tab = st.session_state.pop("geo_return_tab", 1)
 
@@ -398,14 +390,8 @@ def render_checkin():
     with c2:
         st.info(f"**{st.session_state.spv}**  \n{st.session_state.distributor} · {st.session_state.region}")
 
-    # Determine which tab index to open — default 0, but restore after GPS capture
     default_tab = st.session_state.pop("_return_tab", 0)
 
-    # Streamlit tabs don't support programmatic selection natively,
-    # so we use a workaround: render both tabs but scroll/focus via JS key trick.
-    # The cleanest supported way is just to render with default ordering — tab0 first.
-    # After GPS, we set default_tab=1 to visually indicate Activities tab is active
-    # by swapping render order (tab labels stay correct via content).
     if default_tab == 1:
         tab2, tab1 = st.tabs(["📋 Activities", "📍 Check In/Out"])
         with tab2: _render_p2_tab()
@@ -444,7 +430,7 @@ def _render_p1_tab():
             if key == "dist_in":
                 st.session_state.pending_dist_in  = entry
                 st.session_state.do_dist_in_write = True
-                st.session_state.geo_return_tab   = 0  # came from tab 0 (Check In/Out)
+                st.session_state.geo_return_tab   = 0
                 st.rerun()
             else:
                 with st.spinner("Menyimpan…"):
@@ -470,19 +456,9 @@ def _render_p2_tab():
     if choice != "— Pilih Toko —":
         s = store_opts[choice]
         if s["store_id"] != st.session_state.store_id:
-            first_select = not st.session_state.store_id
-            if not first_select:
-                if st.session_state.timer_running:
-                    st.session_state.timer_running = False
-                    st.session_state.timer_started_at = None
-                st.session_state.timer_elapsed_ms = 0
-                st.session_state.act_key = ""
-                st.session_state.act_label = ""
-                st.session_state.totals = {}
             st.session_state.store_id = s["store_id"]
             st.session_state.store_name = s["store_name"]
-            if not first_select:
-                st.rerun()
+            st.rerun()
 
     if st.session_state.store_id:
         if st.session_state.store_id in st.session_state.store_geo_done:
@@ -536,7 +512,6 @@ def _render_p2_tab():
     if st.session_state.do_store_write:
         st.info("📡 Mengambil koordinat GPS toko… tunggu sebentar.")
 
-    c1, c2, c3 = st.columns(3)
     c1, c2 = st.columns(2)
 
     with c1:
@@ -549,7 +524,7 @@ def _render_p2_tab():
                 st.session_state.timer_running = True
                 st.session_state.timer_started_at = datetime.now(timezone.utc)
                 st.rerun()
-    
+
     with c2:
         if st.button("⏹ Stop & Save", type="secondary", use_container_width=True):
             _do_stop()
@@ -590,7 +565,7 @@ def _do_stop():
     if store_id and store_id not in st.session_state.store_geo_done:
         st.session_state.pending_store_session = entry
         st.session_state.do_store_write        = True
-        st.session_state.geo_return_tab        = 1  # came from tab 1 (Activities)
+        st.session_state.geo_return_tab        = 1
         st.rerun()
     else:
         with st.spinner("Menyimpan…"):
@@ -605,5 +580,3 @@ def _do_stop():
 
 if __name__ == "__main__":
     main()
-
-
