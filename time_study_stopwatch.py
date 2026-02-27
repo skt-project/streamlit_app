@@ -446,7 +446,6 @@ def _render_p2_tab():
         if s["store_id"] != st.session_state.store_id:
             st.session_state.store_id = s["store_id"]
             st.session_state.store_name = s["store_name"]
-            st.rerun()
 
     if st.session_state.store_id:
         col_geo, col_reset = st.columns([3, 1])
@@ -466,8 +465,7 @@ def _render_p2_tab():
                 st.session_state.act_label = ""
                 st.session_state.totals = {}
                 st.session_state.store_geo_done.discard(st.session_state.store_id)
-                st.session_state._flash = ("success", "✅ Data toko berhasil direset.")
-                st.rerun()
+                st.success("✅ Data toko berhasil direset.")
 
     st.divider()
     st.markdown("#### 🗂 Stopwatch Aktivitas")
