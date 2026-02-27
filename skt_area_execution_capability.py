@@ -4,6 +4,7 @@ import uuid
 from pendulum import now
 from google.oauth2 import service_account
 from google.cloud import bigquery
+from datetime import datetime
 
 # =====================================================
 # PAGE CONFIG
@@ -14,6 +15,30 @@ st.set_page_config(
 )
 
 st.title("📋 Distributor Operational Assessment Form")
+
+# =====================================================
+# MONTH YEAR SELECTION
+# =====================================================
+current_year = datetime.now().year
+years = [current_year - 1, current_year, current_year + 1]
+
+months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+]
+
+st.subheader("📅 Assessment Period")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    selected_month = st.selectbox("Select Month", months)
+
+with col2:
+    selected_year = st.selectbox("Select Year", years)
+
+assessment_period = f"{selected_month} {selected_year}"
+
 
 # =====================================================
 # REPRESENTATIVE NAME INPUT
@@ -151,6 +176,8 @@ questions = {
 # FORM SECTION
 # =====================================================
 if (
+    selected_month and
+    selected_year and
     representative_name.strip() != "" and
     region != "- Select Region -" and
     distributor != "- Select Distributor -"
@@ -214,7 +241,10 @@ if (
 
         error_messages = []
 
+        if not selected_month or not selected_year:
+            error_messages.append("Assessment Month & Year must be selected.")
         # 1️⃣ Representative name validation
+        
         if representative_name.strip() == "":
             error_messages.append("Representative Name must be filled.")
 
@@ -296,6 +326,7 @@ if (
                 "grade": grade,
                 "person_name": raw_name,
                 "point": questions[question][grade][1],
+                "assessment_period": assessment_period,
                 "total_score": total_score
             })
 
