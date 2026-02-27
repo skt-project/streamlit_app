@@ -464,7 +464,7 @@ def _generate_store_page_elements(
     
     # Product Table
     table_data = [
-        ["SKU / Produk", "Stok\nToko", "SO\nBulanan",
+        ["SKU / Produk", "Stok\nToko\nEst", "SO\nBulanan",
          "Dist.\nStok", "Saran\n(Qty)", "Nilai Order\n(Rp)", "Order\nAktual"]
     ]
     
@@ -827,7 +827,7 @@ def load_inventory_buffer_data() -> pd.DataFrame:
         INNER JOIN latest_stock ls
             ON ib.store_code = ls.store_code
             AND ib.stock_date = ls.latest_stock_date
-        ORDER BY ib.region, ib.store_name, ib.SO_Bulanan DESC, ib.buffer_plan_value_ver2 DESC
+        ORDER BY ib.region, ib.store_name, STRPOS('Must Have SKU, NPD, Discontinued', ib.priority_label), ib.SO_Bulanan DESC, ib.buffer_plan_value_ver2 DESC, 
         """
         
         df = client.query(query).to_dataframe()
