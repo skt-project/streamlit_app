@@ -461,10 +461,25 @@ def _render_p2_tab():
             st.rerun()
 
     if st.session_state.store_id:
-        if st.session_state.store_id in st.session_state.store_geo_done:
-            st.markdown('<span class="geo-ok">📍 Lokasi toko sudah terekam</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="geo-warn">📍 GPS direkam pada aktivitas pertama</span>', unsafe_allow_html=True)
+        col_geo, col_reset = st.columns([3, 1])
+        with col_geo:
+            if st.session_state.store_id in st.session_state.store_geo_done:
+                st.markdown('<span class="geo-ok">📍 Lokasi toko sudah terekam</span>', unsafe_allow_html=True)
+            else:
+                st.markdown('<span class="geo-warn">📍 GPS direkam pada aktivitas pertama</span>', unsafe_allow_html=True)
+        with col_reset:
+            if st.button("🔄 Reset Data", use_container_width=True,
+                         help="Reset timer, aktivitas, dan total waktu untuk toko ini"):
+                if st.session_state.timer_running:
+                    st.session_state.timer_running = False
+                    st.session_state.timer_started_at = None
+                st.session_state.timer_elapsed_ms = 0
+                st.session_state.act_key = ""
+                st.session_state.act_label = ""
+                st.session_state.totals = {}
+                st.session_state.store_geo_done.discard(st.session_state.store_id)
+                st.session_state._flash = ("success", "✅ Data toko berhasil direset.")
+                st.rerun()
 
     st.divider()
     st.markdown("#### 🗂 Stopwatch Aktivitas")
