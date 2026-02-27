@@ -292,6 +292,7 @@ def main():
 
     if need_geo and loc is None:
         st.info("📡 Mengambil koordinat GPS… pastikan izin lokasi diaktifkan di browser.")
+        import time; time.sleep(0.5); st.rerun()
 
     lat, lng, acc = _extract_coords(loc) if (need_geo and loc is not None) else (None, None, None)
 
@@ -566,7 +567,6 @@ def _do_stop():
     if store_id and store_id not in st.session_state.store_geo_done:
         st.session_state.pending_store_session = entry
         st.session_state.do_store_write        = True
-        st.rerun()
     else:
         with st.spinner("Menyimpan…"):
             ok, msg = write_session(st.session_state.spv, st.session_state.region,
