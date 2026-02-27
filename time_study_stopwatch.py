@@ -292,7 +292,6 @@ def main():
 
     if need_geo and loc is None:
         st.info("📡 Mengambil koordinat GPS… pastikan izin lokasi diaktifkan di browser.")
-        import time; time.sleep(0.5); st.rerun()
 
     lat, lng, acc = _extract_coords(loc) if (need_geo and loc is not None) else (None, None, None)
 
