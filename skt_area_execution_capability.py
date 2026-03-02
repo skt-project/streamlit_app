@@ -189,8 +189,7 @@ questions = {
     "BAD STOCK HANDLING PERFORMANCE": {
         "A": ("100% compliance", 2),
         "B": ("≥ 90%", 1),
-        "C": ("≥ 70%", 0),
-        "D": ("< 70%", 0),
+        "C": ("< 70%", 0),
     },
     "BANK GUARANTEE UPDATE COMPLIANCE": {
         "A": ("100% BG updated within agreed timeline", 4),
@@ -223,6 +222,13 @@ if (
             # 1️⃣ SPECIAL CASE → DELIVERY SLA
             # ==========================================
             if question == "DELIVERY SLA COMPLIANCE":
+
+                st.info("""
+                📌 **Scoring Logic:**
+                - If either Inner or Outer < 80% → 0 points
+                - If either Inner or Outer is 99%-80% (and none <80%) → 4 points
+                - If both Inner and Outer are 100% → 8 points
+                """)
 
                 st.markdown("### INNER CITY (2 x 24 Hours)")
                 inner_city = st.radio(
@@ -289,7 +295,7 @@ if (
             # ==========================================
             if question == "SALESMAN":
 
-                st.info("If the number of salesman is fewer than 5, please enter '-' in the remaining name fields.")
+                st.info("If the number of salesmen is fewer than 5, please enter '-' in the remaining name fields.")
 
                 salesman_names = []
 
