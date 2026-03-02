@@ -138,11 +138,6 @@ questions = {
         "B": ("Warehouse exists but limited facility", 1),
         "C": ("No dedicated warehouse", 0),
     },
-    "DELIVERY SLA COMPLIANCE": {
-        "A": ("≥ 95% on-time delivery", 8),
-        "B": ("Partial SLA compliance", 4),
-        "C": ("Below SLA requirement", 0),
-    },
     "INVENTORY CONTROL & STOCK OPNAME": {
         "A": ("Stock opname ≥ 2x/year", 6),
         "B": ("Stock opname 1x/year", 4),
@@ -209,6 +204,37 @@ if (
                 "ADMINISTRATIVE & AR SUPPORT"
             ]:
                 
+                # ==============================================
+                # SPECIAL CASE → DELIVERY SLA COMPLIANCE
+                # ==============================================
+                if question == "DELIVERY SLA COMPLIANCE":
+
+                    inner = answers[question]["inner"]
+                    outer = answers[question]["outer"]
+
+                    if inner == "<80%" or outer == "<80%":
+                        point = 0
+                    elif inner == "99%-80%" or outer == "99%-80%":
+                        point = 4
+                    else:
+                        point = 8
+
+                    rows_to_insert.append({
+                        "submission_id": submission_id,
+                        "submitted_at": submitted_at,
+                        "representative_name": representative_name.strip(),
+                        "region": region,
+                        "distributor": distributor,
+                        "metric": question,
+                        "grade": f"Inner: {inner} | Outer: {outer}",
+                        "person_name": None,
+                        "point": point,
+                        "assessment_period": assessment_period,
+                        "total_score": total_score
+                    })
+
+                    continue
+
                 # SPECIAL CASE → SALESMAN (5 names required)
                 if question == "SALESMAN":
 
@@ -240,9 +266,27 @@ if (
 
                 continue
 
-        total_score = sum(
-            questions[q][answers[q]["grade"]][1] for q in answers
-        )
+        total_score = 0
+
+        for q in answers:
+
+            if q == "DELIVERY SLA COMPLIANCE":
+
+                inner = answers[q]["inner"]
+                outer = answers[q]["outer"]
+
+                # PRIORITY LOGIC
+                if inner == "<80%" or outer == "<80%":
+                    point = 0
+                elif inner == "99%-80%" or outer == "99%-80%":
+                    point = 4
+                else:
+                    point = 8
+
+                total_score += point
+
+            else:
+                total_score += questions[q][answers[q]["grade"]][1]
 
         st.divider()
         st.metric("Total Score Preview", total_score)
