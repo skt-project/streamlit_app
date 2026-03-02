@@ -5,12 +5,12 @@ import math
 from datetime import datetime
 from google.oauth2 import service_account
 from google.cloud import bigquery
+import streamlit.components.v1 as components
 
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
 st.set_page_config(page_title="SFA Attendance App", layout="wide")
-
 st.title("📍 SFA Salesman Attendance")
 
 # --------------------------------------------------
@@ -23,7 +23,7 @@ credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
 
 PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = st.secrets["bigquery"]["dataset"]
-ATT_TABLE = "sfa_attendance"
+ATT_TABLE = st.secrets["bigquery"]["attendance_table"]
 
 bq_client = bigquery.Client(
     credentials=credentials,
@@ -48,10 +48,8 @@ def load_store_master():
     df = bq_client.query(query).to_dataframe()
 
     df = df.dropna(subset=["salesman_name", "latitude", "longitude"])
-
     df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
     df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
-
     df = df.dropna(subset=["latitude", "longitude"])
 
     return df
@@ -59,59 +57,85 @@ def load_store_master():
 store_df = load_store_master()
 
 # --------------------------------------------------
-# LOGIN SIMPLE (Salesman Name Based)
+# SALESMAN SELECT
 # --------------------------------------------------
 salesman_list = sorted(store_df["salesman_name"].unique())
-
 salesman = st.selectbox("Select Your Name", salesman_list)
 
-if not salesman:
-    st.stop()
-
-# Filter stores by salesman
 salesman_stores = store_df[
     store_df["salesman_name"] == salesman
 ]
 
-store_options = salesman_stores["store_name"].unique()
-
-selected_store = st.selectbox("Select Store to Visit", store_options)
+selected_store = st.selectbox(
+    "Select Store to Visit",
+    salesman_stores["store_name"].unique()
+)
 
 store_data = salesman_stores[
     salesman_stores["store_name"] == selected_store
 ].iloc[0]
 
-store_lat = store_data["latitude"]
-store_lon = store_data["longitude"]
+store_lat = float(store_data["latitude"])
+store_lon = float(store_data["longitude"])
 
 # --------------------------------------------------
-# DEVICE GPS INPUT
+# AUTO GPS CAPTURE (JAVASCRIPT)
 # --------------------------------------------------
-st.subheader("📱 Capture Your Current Location")
+st.subheader("📱 Capture Your Real-Time Location")
 
-device_lat = st.number_input("Your Latitude")
-device_lon = st.number_input("Your Longitude")
+gps_html = """
+<script>
+navigator.geolocation.getCurrentPosition(
+    function(position) {
+        const latitude = position.coords.latitude;
+        const longitude = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+
+        const data = {
+            latitude: latitude,
+            longitude: longitude,
+            accuracy: accuracy
+        };
+
+        window.parent.postMessage(
+            { type: "streamlit:setComponentValue", value: data },
+            "*"
+        );
+    },
+    function(error) {
+        alert("Please enable location access.");
+    }
+);
+</script>
+"""
+
+gps_data = components.html(gps_html, height=0)
+
+if gps_data:
+    device_lat = gps_data["latitude"]
+    device_lon = gps_data["longitude"]
+    accuracy = gps_data["accuracy"]
+
+    st.success(f"📍 Location Captured (Accuracy: {round(accuracy,1)}m)")
+    st.write(f"Latitude: {device_lat}")
+    st.write(f"Longitude: {device_lon}")
+else:
+    st.warning("Waiting for GPS permission...")
 
 # --------------------------------------------------
-# HAVERSINE DISTANCE FUNCTION
+# DISTANCE FUNCTION
 # --------------------------------------------------
 def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000  # meters
-
+    R = 6371000
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
 
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + \
+        math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
 
-    a = math.sin(delta_phi / 2) ** 2 + \
-        math.cos(phi1) * math.cos(phi2) * \
-        math.sin(delta_lambda / 2) ** 2
-
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    distance = R * c
-    return distance
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
 # --------------------------------------------------
 # SESSION STATE
@@ -120,13 +144,9 @@ if "checkin_time" not in st.session_state:
     st.session_state.checkin_time = None
 
 # --------------------------------------------------
-# CHECK-IN BUTTON
+# CHECK IN
 # --------------------------------------------------
-if st.button("✅ Check In"):
-
-    if device_lat == 0 or device_lon == 0:
-        st.error("Please input your GPS location")
-        st.stop()
+if gps_data and st.button("✅ Check In"):
 
     distance = calculate_distance(
         store_lat, store_lon,
@@ -134,19 +154,21 @@ if st.button("✅ Check In"):
     )
 
     if distance > 100:
-        st.error(f"❌ You are too far from store ({round(distance,2)} meters)")
+        st.error(f"❌ Too far from store ({round(distance,2)} meters)")
         st.stop()
 
     st.session_state.checkin_time = datetime.now()
+    st.session_state.checkin_lat = device_lat
+    st.session_state.checkin_lon = device_lon
 
-    st.success(f"Checked in successfully! Distance: {round(distance,2)} meters")
+    st.success("✅ Check-in successful")
 
 # --------------------------------------------------
-# CHECK-OUT BUTTON
+# CHECK OUT
 # --------------------------------------------------
 if st.session_state.checkin_time:
 
-    st.info(f"Checked in at: {st.session_state.checkin_time}")
+    st.info(f"Checked in at {st.session_state.checkin_time}")
 
     if st.button("🏁 Check Out"):
 
@@ -157,13 +179,12 @@ if st.session_state.checkin_time:
 
         distance = calculate_distance(
             store_lat, store_lon,
-            device_lat, device_lon
+            st.session_state.checkin_lat,
+            st.session_state.checkin_lon
         )
 
-        visit_id = str(uuid.uuid4())
-
         record = {
-            "visit_id": visit_id,
+            "visit_id": str(uuid.uuid4()),
             "visit_date": datetime.now().date().isoformat(),
             "salesman_name": salesman,
             "cust_id": store_data["cust_id"],
@@ -173,8 +194,8 @@ if st.session_state.checkin_time:
             "checkin_time": st.session_state.checkin_time.isoformat(),
             "checkout_time": checkout_time.isoformat(),
             "visit_duration_minutes": duration,
-            "checkin_latitude": device_lat,
-            "checkin_longitude": device_lon,
+            "checkin_latitude": st.session_state.checkin_lat,
+            "checkin_longitude": st.session_state.checkin_lon,
             "distance_meters": distance,
             "is_valid_visit": distance <= 100
         }
@@ -187,6 +208,6 @@ if st.session_state.checkin_time:
         if errors:
             st.error(errors)
         else:
-            st.success("✅ Visit saved successfully")
+            st.success("🎉 Visit saved successfully")
 
         st.session_state.checkin_time = None
