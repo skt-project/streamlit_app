@@ -6,6 +6,8 @@ from datetime import datetime
 from google.oauth2 import service_account
 from google.cloud import bigquery
 import streamlit.components.v1 as components
+from streamlit_js_eval import streamlit_js_eval
+
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -83,44 +85,34 @@ store_lon = float(store_data["longitude"])
 # --------------------------------------------------
 st.subheader("📱 Capture Your Real-Time Location")
 
-gps_html = """
-<script>
-navigator.geolocation.getCurrentPosition(
-    function(position) {
-        const latitude = position.coords.latitude;
-        const longitude = position.coords.longitude;
-        const accuracy = position.coords.accuracy;
-
-        const data = {
-            latitude: latitude,
-            longitude: longitude,
-            accuracy: accuracy
-        };
-
-        window.parent.postMessage(
-            { type: "streamlit:setComponentValue", value: data },
-            "*"
+gps = streamlit_js_eval(
+    js_expressions="""
+    new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                resolve({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy
+                });
+            },
+            (error) => {
+                resolve(null);
+            }
         );
-    },
-    function(error) {
-        alert("Please enable location access.");
-    }
-);
-</script>
-"""
+    })
+    """,
+    key="GPS"
+)
 
-gps_data = components.html(gps_html, height=0)
-
-if gps_data:
-    device_lat = gps_data["latitude"]
-    device_lon = gps_data["longitude"]
-    accuracy = gps_data["accuracy"]
+if gps:
+    device_lat = gps["latitude"]
+    device_lon = gps["longitude"]
+    accuracy = gps["accuracy"]
 
     st.success(f"📍 Location Captured (Accuracy: {round(accuracy,1)}m)")
-    st.write(f"Latitude: {device_lat}")
-    st.write(f"Longitude: {device_lon}")
 else:
-    st.warning("Waiting for GPS permission...")
+    st.warning("Please allow location access.")
 
 # --------------------------------------------------
 # DISTANCE FUNCTION
