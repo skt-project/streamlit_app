@@ -137,6 +137,11 @@ questions = {
         "A": ("Dedicated warehouse + temperature control", 3),
         "B": ("Warehouse exists but limited facility", 1),
         "C": ("No dedicated warehouse", 0),
+    },    
+    "DELIVERY SLA COMPLIANCE": {
+    "A": ("≥ 95% on-time delivery", 8),
+    "B": ("Partial SLA compliance", 4),
+    "C": ("Below SLA requirement", 0),
     },
     "INVENTORY CONTROL & STOCK OPNAME": {
         "A": ("Stock opname ≥ 2x/year", 6),
@@ -187,7 +192,35 @@ if (
         for question, grades in questions.items():
             st.subheader(question)
 
-            # 1️⃣ Grade selection FIRST
+            # ==========================================
+            # 1️⃣ SPECIAL CASE → DELIVERY SLA
+            # ==========================================
+            if question == "DELIVERY SLA COMPLIANCE":
+
+                st.markdown("### INNER CITY (2 x 24 Hours)")
+                inner_city = st.radio(
+                    "Inner City SLA",
+                    ["100%", "99%-80%", "<80%"],
+                    key="inner_city_sla"
+                )
+
+                st.markdown("### OUTER CITY (3 x 24 Hours)")
+                outer_city = st.radio(
+                    "Outer City SLA",
+                    ["100%", "99%-80%", "<80%"],
+                    key="outer_city_sla"
+                )
+
+                answers[question] = {
+                    "inner": inner_city,
+                    "outer": outer_city
+                }
+
+                continue
+
+            # ==========================================
+            # 2️⃣ NORMAL QUESTIONS (WITH GRADE)
+            # ==========================================
             grade_option = st.radio(
                 "Select Grade",
                 options=list(grades.keys()),
@@ -195,76 +228,45 @@ if (
                 key=f"grade_{question}"
             )
 
-            person_name = None
+            # ==========================================
+            # 3️⃣ SPECIAL NAME HANDLING
+            # ==========================================
+            if question == "SALESMAN":
 
-            # 2️⃣ Special handling for 3 metrics
-            if question in [
+                salesman_names = []
+
+                for i in range(1, 6):
+                    name_input = st.text_input(
+                        f"Salesman Name {i}",
+                        key=f"name_{question}_{i}"
+                    )
+                    salesman_names.append(name_input)
+
+                answers[question] = {
+                    "grade": grade_option,
+                    "person_name": salesman_names
+                }
+
+            elif question in [
                 "OPERATIONAL LEADER (SPV / OPERATIONAL MANAGER)",
-                "SALESMAN",
                 "ADMINISTRATIVE & AR SUPPORT"
             ]:
-                
-                # ==============================================
-                # SPECIAL CASE → DELIVERY SLA COMPLIANCE
-                # ==============================================
-                if question == "DELIVERY SLA COMPLIANCE":
 
-                    inner = answers[question]["inner"]
-                    outer = answers[question]["outer"]
+                person_name = st.text_input(
+                    f"Name for {question}",
+                    key=f"name_{question}"
+                )
 
-                    if inner == "<80%" or outer == "<80%":
-                        point = 0
-                    elif inner == "99%-80%" or outer == "99%-80%":
-                        point = 4
-                    else:
-                        point = 8
+                answers[question] = {
+                    "grade": grade_option,
+                    "person_name": person_name
+                }
 
-                    rows_to_insert.append({
-                        "submission_id": submission_id,
-                        "submitted_at": submitted_at,
-                        "representative_name": representative_name.strip(),
-                        "region": region,
-                        "distributor": distributor,
-                        "metric": question,
-                        "grade": f"Inner: {inner} | Outer: {outer}",
-                        "person_name": None,
-                        "point": point,
-                        "assessment_period": assessment_period,
-                        "total_score": total_score
-                    })
+            else:
 
-                    continue
-
-                # SPECIAL CASE → SALESMAN (5 names required)
-                if question == "SALESMAN":
-
-                    salesman_names = []
-
-                    for i in range(1, 6):  # 5 salesman
-                        name_input = st.text_input(
-                            f"Salesman Name {i}",
-                            key=f"name_{question}_{i}"
-                        )
-                        salesman_names.append(name_input)
-
-                    answers[question] = {
-                        "grade": grade_option,
-                        "person_name": salesman_names  # LIST of 5 names
-                    }
-
-                # NORMAL CASE → Only 1 name
-                else:
-                    person_name = st.text_input(
-                        f"Name for {question}",
-                        key=f"name_{question}"
-                    )
-
-                    answers[question] = {
-                        "grade": grade_option,
-                        "person_name": person_name
-                    }
-
-                continue
+                answers[question] = {
+                    "grade": grade_option
+                }
 
         total_score = 0
 
@@ -275,7 +277,6 @@ if (
                 inner = answers[q]["inner"]
                 outer = answers[q]["outer"]
 
-                # PRIORITY LOGIC
                 if inner == "<80%" or outer == "<80%":
                     point = 0
                 elif inner == "99%-80%" or outer == "99%-80%":
@@ -380,16 +381,54 @@ if (
         rows_to_insert = []
 
         for question, value in answers.items():
-            grade = value["grade"]
 
-            # detect do not exist
+            # ======================================
+            # DELIVERY SLA
+            # ======================================
+            if question == "DELIVERY SLA COMPLIANCE":
+
+                inner = value["inner"]
+                outer = value["outer"]
+
+                if inner == "<80%" or outer == "<80%":
+                    point = 0
+                elif inner == "99%-80%" or outer == "99%-80%":
+                    point = 4
+                else:
+                    point = 8
+
+                rows_to_insert.append({
+                    "submission_id": submission_id,
+                    "submitted_at": submitted_at,
+                    "representative_name": representative_name.strip(),
+                    "region": region,
+                    "distributor": distributor,
+                    "metric": question,
+                    "grade": f"Inner: {inner} | Outer: {outer}",
+                    "person_name": None,
+                    "point": point,
+                    "assessment_period": assessment_period,
+                    "total_score": total_score
+                })
+
+                continue
+
+
+            # ======================================
+            # NORMAL QUESTIONS
+            # ======================================
+
+            grade = value.get("grade")
+
             do_not_exist_grades = [
                 key for key, val in questions[question].items()
                 if "Do not exist" in val[0]
             ]
 
-            raw_name = st.session_state.get(f"name_{question}", "").strip()
 
+            # ======================================
+            # SALESMAN
+            # ======================================
             if question == "SALESMAN":
 
                 salesman_names = [
@@ -416,6 +455,10 @@ if (
                         "total_score": total_score
                     })
 
+
+            # ======================================
+            # OTHER QUESTIONS
+            # ======================================
             else:
 
                 raw_name = st.session_state.get(f"name_{question}", "").strip()
