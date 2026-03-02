@@ -332,6 +332,12 @@ if (
                     "grade": grade_option
                 }
 
+        submitted = st.form_submit_button("🚀 Submit Assessment")
+
+        # =====================================================
+        # LIVE TOTAL SCORE CALCULATION (OUTSIDE FORM)
+        # =====================================================
+
         total_score = 0
 
         for q in answers:
@@ -354,9 +360,7 @@ if (
                 total_score += questions[q][answers[q]["grade"]][1]
 
         st.divider()
-        st.metric("Total Score Preview", total_score)
-
-        submitted = st.form_submit_button("🚀 Submit Assessment")
+        st.metric("📊 Total Score Preview", total_score)
 
     # =====================================================
     # INSERT TO BIGQUERY
