@@ -81,6 +81,21 @@ store_lat = float(store_data["latitude"])
 store_lon = float(store_data["longitude"])
 
 # --------------------------------------------------
+# DISTANCE FUNCTION
+# --------------------------------------------------
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = math.sin(dphi/2)**2 + \
+        math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+# --------------------------------------------------
 # AUTO GPS CAPTURE (JAVASCRIPT)
 # --------------------------------------------------
 st.subheader("📱 Capture Your Real-Time Location")
@@ -111,15 +126,7 @@ if gps:
     device_lon = gps["longitude"]
     accuracy = gps["accuracy"]
 
-    st.success(f"📍 Location Captured")
-    st.write(f"Accuracy: {round(accuracy,1)} meters")
-
-    # 🚨 Accuracy validation
-    if accuracy > 50:
-        st.error("❌ GPS accuracy too low. Please move to open area and refresh.")
-        st.stop()
-
-    # 📏 Calculate distance immediately
+    # 📏 Calculate distance
     distance = calculate_distance(
         store_lat,
         store_lon,
@@ -127,9 +134,20 @@ if gps:
         device_lon
     )
 
-    st.write(f"Distance from store: {round(distance,2)} meters")
+    # 🎯 Distance message
+    st.markdown(f"### 📍 You are **{round(distance)} meters** away from Store Location")
 
-    # 🗺 Show map (device + store)
+    st.write(f"GPS Accuracy: {round(accuracy,1)} meters")
+
+    # 🟢 / 🔴 Status indicator
+    if distance <= 100 and accuracy <= 80:
+        st.success("✅ You are within allowed check-in radius")
+        can_checkin = True
+    else:
+        st.error("❌ You are outside allowed radius (100m)")
+        can_checkin = False
+
+    # 🗺 Map visualization
     map_df = pd.DataFrame({
         "lat": [device_lat, store_lat],
         "lon": [device_lon, store_lon]
@@ -142,21 +160,6 @@ else:
     st.stop()
 
 # --------------------------------------------------
-# DISTANCE FUNCTION
-# --------------------------------------------------
-def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-
-    a = math.sin(dphi/2)**2 + \
-        math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
-
-    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
-
-# --------------------------------------------------
 # SESSION STATE
 # --------------------------------------------------
 if "checkin_time" not in st.session_state:
@@ -165,7 +168,7 @@ if "checkin_time" not in st.session_state:
 # --------------------------------------------------
 # CHECK IN
 # --------------------------------------------------
-if gps and st.button("✅ Check In"):
+if gps and can_checkin and st.button("✅ Check In"):
 
     distance = calculate_distance(
         store_lat, store_lon,
