@@ -193,9 +193,9 @@ questions = {
         "D": ("< 70%", 0),
     },
     "BANK GUARANTEE UPDATE COMPLIANCE": {
-        "A": ("100% updated on time", 4),
-        "B": ("Updated with delay", 2),
-        "C": ("Not updated", 0),
+        "A": ("100% BG updated within agreed timeline", 4),
+        "B": ("BG updated with delay / negotiation", 2),
+        "C": ("BG not willing used", 0),
     }
 }
 
@@ -288,6 +288,8 @@ if (
             # 3️⃣ SPECIAL NAME HANDLING
             # ==========================================
             if question == "SALESMAN":
+
+                st.info("If the number of salesmen is fewer than 5, please enter '-' in the remaining name fields.")
 
                 salesman_names = []
 
