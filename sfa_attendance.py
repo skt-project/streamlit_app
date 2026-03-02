@@ -112,15 +112,30 @@ if gps:
     accuracy = gps["accuracy"]
 
     st.success(f"📍 Location Captured")
-
-    st.write(f"Latitude: {device_lat}")
-    st.write(f"Longitude: {device_lon}")
     st.write(f"Accuracy: {round(accuracy,1)} meters")
 
-    # GPS Accuracy validation
+    # 🚨 Accuracy validation
     if accuracy > 50:
         st.error("❌ GPS accuracy too low. Please move to open area and refresh.")
         st.stop()
+
+    # 📏 Calculate distance immediately
+    distance = calculate_distance(
+        store_lat,
+        store_lon,
+        device_lat,
+        device_lon
+    )
+
+    st.write(f"Distance from store: {round(distance,2)} meters")
+
+    # 🗺 Show map (device + store)
+    map_df = pd.DataFrame({
+        "lat": [device_lat, store_lat],
+        "lon": [device_lon, store_lon]
+    })
+
+    st.map(map_df)
 
 else:
     st.warning("Please allow location access.")
