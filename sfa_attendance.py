@@ -106,13 +106,25 @@ gps = streamlit_js_eval(
 )
 
 if gps:
+
     device_lat = gps["latitude"]
     device_lon = gps["longitude"]
     accuracy = gps["accuracy"]
 
-    st.success(f"📍 Location Captured (Accuracy: {round(accuracy,1)}m)")
+    st.success(f"📍 Location Captured")
+
+    st.write(f"Latitude: {device_lat}")
+    st.write(f"Longitude: {device_lon}")
+    st.write(f"Accuracy: {round(accuracy,1)} meters")
+
+    # GPS Accuracy validation
+    if accuracy > 50:
+        st.error("❌ GPS accuracy too low. Please move to open area and refresh.")
+        st.stop()
+
 else:
     st.warning("Please allow location access.")
+    st.stop()
 
 # --------------------------------------------------
 # DISTANCE FUNCTION
@@ -138,7 +150,7 @@ if "checkin_time" not in st.session_state:
 # --------------------------------------------------
 # CHECK IN
 # --------------------------------------------------
-if gps_data and st.button("✅ Check In"):
+if gps and st.button("✅ Check In"):
 
     distance = calculate_distance(
         store_lat, store_lon,
