@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import uuid
+import base64
 from pendulum import now
 from google.oauth2 import service_account
 from google.cloud import bigquery
@@ -262,6 +263,19 @@ if (
                     "person_name": person_name
                 }
 
+            elif question == "WAREHOUSE FACILITY STANDARD":
+
+                uploaded_image = st.file_uploader(
+                    "Upload Warehouse Photo (Required)",
+                    type=["jpg", "jpeg", "png"],
+                    key="warehouse_photo"
+                )
+
+                answers[question] = {
+                    "grade": grade_option,
+                    "warehouse_image": uploaded_image
+                }
+
             else:
 
                 answers[question] = {
@@ -466,6 +480,17 @@ if (
                 if grade in do_not_exist_grades:
                     raw_name = None
 
+                warehouse_image_base64 = None
+
+                # Special handling for warehouse image
+                if question == "WAREHOUSE FACILITY STANDARD":
+                    uploaded_file = value.get("warehouse_image")
+
+                    if uploaded_file is not None:
+                        warehouse_image_base64 = base64.b64encode(
+                            uploaded_file.read()
+                        ).decode("utf-8")
+
                 rows_to_insert.append({
                     "submission_id": submission_id,
                     "submitted_at": submitted_at,
@@ -476,6 +501,7 @@ if (
                     "grade": grade,
                     "person_name": raw_name,
                     "point": questions[question][grade][1],
+                    "warehouse_image": warehouse_image_base64,
                     "assessment_period": assessment_period,
                     "total_score": total_score
                 })
