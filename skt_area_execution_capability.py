@@ -89,6 +89,34 @@ def load_master_distributor():
 
     return df
 
+# =====================================================
+# LOAD YTD SELL THROUGH
+# =====================================================
+@st.cache_data(ttl=600)
+def get_ytd_sell_through(distributor_name, selected_year):
+    
+    query = f"""
+        SELECT 
+            SUM(value) AS ytd_value
+        FROM `pbi_gt_dataset.fact_sell_through_all`
+        WHERE distributor_name = @distributor_name
+        AND EXTRACT(YEAR FROM calendar_date) = @selected_year
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("distributor_name", "STRING", distributor_name),
+            bigquery.ScalarQueryParameter("selected_year", "INT64", selected_year),
+        ]
+    )
+
+    df = bq_client.query(query, job_config=job_config).to_dataframe()
+
+    if df.empty or df["ytd_value"].iloc[0] is None:
+        return 0
+
+    return df["ytd_value"].iloc[0]
+
 
 master_df = load_master_distributor()
 
@@ -124,7 +152,7 @@ questions = {
     },
     "SALESMAN": {
         "A": ("Exist, exclusive for SKINTIFIC", 7),
-        "B": ("Exist", 5),
+        "B": ("Exist, mix with other principle", 5),
         "C": ("Exist (do not meet qty requirement)", 3),
         "D": ("Do not exist", 0),
     },
@@ -149,15 +177,14 @@ questions = {
         "C": ("No regular stock opname", 0),
     },
     "DATA REPORTING COMPLIANCE": {
-        "A": ("≥ 95% on-time reports", 8),
-        "B": ("80–94% compliance", 4),
-        "C": ("< 80%", 1),
+        "A": ("On Time", 8),
+        "B": ("+ 1 Days", 4),
+        "C": ("+ more than 1 Days", 0),
     },
     "ACCOUNT RECEIVABLE (AR) PERFORMANCE": {
-        "A": ("100% within credit terms", 4),
-        "B": ("≥ 90%", 3),
-        "C": ("≥ 70%", 1),
-        "D": ("< 70%", 0),
+        "A": ("On Time", 4),
+        "B": ("+ 2 Days", 2),
+        "C": ("+ more than 2 Days", 0),
     },
     "BAD STOCK HANDLING PERFORMANCE": {
         "A": ("100% compliance", 2),
@@ -214,6 +241,35 @@ if (
                 answers[question] = {
                     "inner": inner_city,
                     "outer": outer_city
+                }
+
+                continue
+
+            # ==========================================
+            # SPECIAL CASE → BAD STOCK HANDLING
+            # ==========================================
+            if question == "BAD STOCK HANDLING PERFORMANCE":
+
+                ytd_value = get_ytd_sell_through(distributor, selected_year)
+                bs_allowance = ytd_value * 0.005
+
+                st.markdown("### 📊 YTD Sell Through (Value)")
+                st.info(f"Rp {ytd_value:,.0f}")
+
+                st.markdown("### 💰 Bad Stock Allowance (0.5%)")
+                st.info(f"Rp {bs_allowance:,.0f}")
+
+                grade_option = st.radio(
+                    "Select Compliance Level",
+                    options=list(grades.keys()),
+                    format_func=lambda x: f"{x} - {grades[x][0]} ({grades[x][1]} pts)",
+                    key=f"grade_{question}"
+                )
+
+                answers[question] = {
+                    "grade": grade_option,
+                    "ytd_value": ytd_value,
+                    "bs_allowance": bs_allowance
                 }
 
                 continue
