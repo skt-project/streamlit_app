@@ -289,7 +289,7 @@ if (
             # ==========================================
             if question == "SALESMAN":
 
-                st.info("If the number of salesmen is fewer than 5, please enter '-' in the remaining name fields.")
+                st.info("If the number of salesman is fewer than 5, please enter '-' in the remaining name fields.")
 
                 salesman_names = []
 
