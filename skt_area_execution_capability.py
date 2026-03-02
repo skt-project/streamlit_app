@@ -334,33 +334,33 @@ if (
 
         submitted = st.form_submit_button("🚀 Submit Assessment")
 
-        # =====================================================
-        # LIVE TOTAL SCORE CALCULATION (OUTSIDE FORM)
-        # =====================================================
+    # =====================================================
+    # LIVE TOTAL SCORE PREVIEW (TRULY OUTSIDE FORM)
+    # =====================================================
 
-        total_score = 0
+    total_score = 0
 
-        for q in answers:
+    for q, value in answers.items():
 
-            if q == "DELIVERY SLA COMPLIANCE":
+        if q == "DELIVERY SLA COMPLIANCE":
 
-                inner = answers[q]["inner"]
-                outer = answers[q]["outer"]
+            inner = value["inner"]
+            outer = value["outer"]
 
-                if inner == "<80%" or outer == "<80%":
-                    point = 0
-                elif inner == "99%-80%" or outer == "99%-80%":
-                    point = 4
-                else:
-                    point = 8
-
-                total_score += point
-
+            if inner == "<80%" or outer == "<80%":
+                point = 0
+            elif inner == "99%-80%" or outer == "99%-80%":
+                point = 4
             else:
-                total_score += questions[q][answers[q]["grade"]][1]
+                point = 8
 
-        st.divider()
-        st.metric("📊 Total Score Preview", total_score)
+            total_score += point
+
+        else:
+            total_score += questions[q][value["grade"]][1]
+
+    st.divider()
+    st.metric("📊 Total Score Preview", total_score)
 
     # =====================================================
     # INSERT TO BIGQUERY
