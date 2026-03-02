@@ -208,22 +208,37 @@ if (
                 "SALESMAN",
                 "ADMINISTRATIVE & AR SUPPORT"
             ]:
+                
+                # SPECIAL CASE → SALESMAN (5 names required)
+                if question == "SALESMAN":
 
-                # Detect which grade means "Do not exist"
-                do_not_exist_grades = [
-                    key for key, val in grades.items()
-                    if "Do not exist" in val[0]
-                ]
+                    salesman_names = []
 
-                person_name = st.text_input(
-                    f"Name for {question}",
-                    key=f"name_{question}"
-                )
+                    for i in range(1, 6):  # 5 salesman
+                        name_input = st.text_input(
+                            f"Salesman Name {i}",
+                            key=f"name_{question}_{i}"
+                        )
+                        salesman_names.append(name_input)
 
-            answers[question] = {
-                "grade": grade_option,
-                "person_name": person_name
-            }
+                    answers[question] = {
+                        "grade": grade_option,
+                        "person_name": salesman_names  # LIST of 5 names
+                    }
+
+                # NORMAL CASE → Only 1 name
+                else:
+                    person_name = st.text_input(
+                        f"Name for {question}",
+                        key=f"name_{question}"
+                    )
+
+                    answers[question] = {
+                        "grade": grade_option,
+                        "person_name": person_name
+                    }
+
+                continue
 
         total_score = sum(
             questions[q][answers[q]["grade"]][1] for q in answers
@@ -256,31 +271,50 @@ if (
         ]
 
         for question in required_name_metrics:
+
             selected_grade = answers[question]["grade"]
 
-            # Get REAL raw value (no default)
-            person_name = st.session_state[f"name_{question}"]
-
-            # Detect do not exist dynamically
             do_not_exist_grades = [
                 key for key, val in questions[question].items()
                 if "Do not exist" in val[0]
             ]
 
-            # Normalize
-            person_name_clean = person_name.strip()
+            # 🔹 SALESMAN VALIDATION
+            if question == "SALESMAN":
 
-            # 🚨 BLOCK IF role does not exist BUT name has value
-            if selected_grade in do_not_exist_grades and person_name_clean != "":
-                error_messages.append(
-                    f"{question}: You selected 'Do not exist' but still filled a name."
-                )
+                salesman_names = [
+                    st.session_state.get(f"name_{question}_{i}", "").strip()
+                    for i in range(1, 6)
+                ]
 
-            # 🚨 BLOCK IF role exists BUT name empty
-            if selected_grade not in do_not_exist_grades and person_name_clean == "":
-                error_messages.append(
-                    f"{question}: Name must be filled because role exists."
-                )
+                if selected_grade in do_not_exist_grades:
+                    # If Do Not Exist → all must be empty
+                    if any(name != "" for name in salesman_names):
+                        error_messages.append(
+                            "SALESMAN: You selected 'Do not exist' but filled names."
+                        )
+                else:
+                    # Must fill exactly 5 names
+                    filled_count = sum(1 for name in salesman_names if name != "")
+                    if filled_count != 5:
+                        error_messages.append(
+                            "SALESMAN: You must fill exactly 5 salesman names."
+                        )
+
+            # 🔹 OTHER METRICS (1 NAME)
+            else:
+
+                person_name = st.session_state.get(f"name_{question}", "").strip()
+
+                if selected_grade in do_not_exist_grades and person_name != "":
+                    error_messages.append(
+                        f"{question}: You selected 'Do not exist' but still filled a name."
+                    )
+
+                if selected_grade not in do_not_exist_grades and person_name == "":
+                    error_messages.append(
+                        f"{question}: Name must be filled because role exists."
+                    )
 
         # ==========================================
         # IF ERROR → STOP INSERT
@@ -312,23 +346,52 @@ if (
 
             raw_name = st.session_state.get(f"name_{question}", "").strip()
 
-            # Force NULL if role does not exist
-            if grade in do_not_exist_grades:
-                raw_name = None
+            if question == "SALESMAN":
 
-            rows_to_insert.append({
-                "submission_id": submission_id,
-                "submitted_at": submitted_at,
-                "representative_name": representative_name.strip(),
-                "region": region,
-                "distributor": distributor,
-                "metric": question,
-                "grade": grade,
-                "person_name": raw_name,
-                "point": questions[question][grade][1],
-                "assessment_period": assessment_period,
-                "total_score": total_score
-            })
+                salesman_names = [
+                    st.session_state.get(f"name_{question}_{i}", "").strip()
+                    for i in range(1, 6)
+                ]
+
+                for name in salesman_names:
+
+                    if grade in do_not_exist_grades:
+                        name = None
+
+                    rows_to_insert.append({
+                        "submission_id": submission_id,
+                        "submitted_at": submitted_at,
+                        "representative_name": representative_name.strip(),
+                        "region": region,
+                        "distributor": distributor,
+                        "metric": question,
+                        "grade": grade,
+                        "person_name": name,
+                        "point": questions[question][grade][1],
+                        "assessment_period": assessment_period,
+                        "total_score": total_score
+                    })
+
+            else:
+
+                raw_name = st.session_state.get(f"name_{question}", "").strip()
+
+                if grade in do_not_exist_grades:
+                    raw_name = None
+
+                rows_to_insert.append({
+                    "submission_id": submission_id,
+                    "submitted_at": submitted_at,
+                    "representative_name": representative_name.strip(),
+                    "region": region,
+                    "distributor": distributor,
+                    "metric": question,
+                    "grade": grade,
+                    "person_name": raw_name,
+                    "point": questions[question][grade][1],
+                    "assessment_period": assessment_period,
+                    "total_score": total_score
+                })
 
         table_id = f"{PROJECT_ID}.{DATASET}.{TABLE}"
 
