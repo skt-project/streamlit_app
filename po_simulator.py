@@ -486,7 +486,7 @@ def main():
         "G2G-30703",
         "G2G-30704"
     ]
-    
+
     # Combined list for checking
     MANUAL_REJECT_SKUS = MANUAL_REJECT_SKUS_APPROVAL + MANUAL_REJECT_SKUS_NO_TOLERANCE
 
@@ -499,7 +499,7 @@ def main():
     REJECTED_SKUS_1 = ["G2G-29700", "G2G-27300"]
     REGION_LIST_1 = [
         "Central Sumatera",
-        "Northern Sumatera", 
+        "Northern Sumatera",
         "Jakarta (Csa)",
         "West Kalimantan",
         "South Kalimantan",
@@ -527,6 +527,7 @@ def main():
             The following rules are applied in order to determine the remark for each SKU. The rest are the calculations logic behind the results.
 
             1.  **Reject**: The SKU is rejected if any of these conditions are met:
+                * The SKU **does not exist** in the system (not found in BigQuery master product or stock analysis tables).
                 * It is on the **regional rejection list** (Stop by Steve), unless the region is allowed to order.
                 * It is on the **manual rejection list** (Stop by Steve) with specific remarks:
                     * **Need approval email**: G2G-252, G2G-253
@@ -557,7 +558,7 @@ def main():
                 reject_data.append({"SKU": sku, "Remark": "Need approval email"})
             for sku in MANUAL_REJECT_SKUS_NO_TOLERANCE:
                 reject_data.append({"SKU": sku, "Remark": "No tolerance to open"})
-            
+
             reject_df = pd.DataFrame(reject_data).sort_values(by="SKU").reset_index(drop=True)
             st.dataframe(reject_df)
 
@@ -675,8 +676,6 @@ def main():
                     current_po_df = po_df[po_df["Distributor"] == distributor_name].copy()
                     sku_list = current_po_df["Customer SKU Code"].unique().tolist()
 
-                    # Fetch data from BigQuery for the current distributor
-
                     # --- Fetch missing data from BigQuery ---
                     sku_df = get_sku_data(sku_list)
                     sku_data_df = get_stock_data(distributor_name, sku_list)
@@ -697,6 +696,20 @@ def main():
 
                     if "sku" in sku_data_df.columns:
                         sku_data_df.rename(columns={"sku": "Customer SKU Code", "distributor": "Distributor"}, inplace=True)
+
+                    # ===== TRACK SKUs NOT FOUND IN BIGQUERY =====
+                    # A SKU is considered "not found" if it doesn't appear in either
+                    # the master_product table (sku_df) OR the stock_analysis table (sku_data_df)
+                    skus_in_sku_df = set(sku_df["Customer SKU Code"].tolist()) if not sku_df.empty else set()
+                    skus_in_stock_df = set(sku_data_df["Customer SKU Code"].tolist()) if not sku_data_df.empty else set()
+                    skus_not_in_bq = set(sku_list) - (skus_in_sku_df | skus_in_stock_df)
+
+                    if skus_not_in_bq:
+                        st.warning(
+                            f"The following SKUs were **not found** in the system and will be rejected: "
+                            f"`{', '.join(sorted(skus_not_in_bq))}`"
+                        )
+                    # ===== END TRACK SKUs NOT FOUND =====
 
                     # Merge uploaded PO data with SKU price data
                     result_df = pd.merge(current_po_df, sku_df, on="Customer SKU Code", how="left")
@@ -764,33 +777,36 @@ def main():
 
                     # Build exclusion conditions for suggested SKUs
                     exclude_suggested = (
+                        # 0. SKU does not exist in BigQuery at all
+                        (result_df["Customer SKU Code"].isin(skus_not_in_bq)) |
+
                         # 1. Manual rejection list - Need Approval Email
                         (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_APPROVAL)) |
-                        
+
                         # 2. Manual rejection list - No Tolerance
                         (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_NO_TOLERANCE)) |
-                        
+
                         # 3. Negative remaining allocation
                         (result_df["remaining_allocation_qty_region"] < 0) |
-                        
+
                         # 4. Supply control status is STOP PO, DISCONTINUED, OOS, or UNAVAILABLE
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) |
-                        
+
                         # 5. Limited SKUs exceeding max quantity limit
                         (
-                            (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & 
+                            (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) &
                             (result_df["buffer_plan_by_lm_qty_adj"] > MAX_QTY_LIMIT)
                         ) |
-                        
+
                         # 6. Suggested PO quantity is 0 (no buffer needed)
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0)
                     )
 
-                    # NEW: Add regional rejection for suggested SKUs
+                    # Add regional rejection for suggested SKUs
                     if REJECTED_SKUS_1:
                         regions_upper_1 = [r.upper() for r in REGION_LIST_1]
                         regional_reject_1 = (
-                            (result_df["Customer SKU Code"].isin(REJECTED_SKUS_1)) & 
+                            (result_df["Customer SKU Code"].isin(REJECTED_SKUS_1)) &
                             (~result_df["region"].str.upper().isin(regions_upper_1))
                         )
                         exclude_suggested = exclude_suggested | regional_reject_1
@@ -825,48 +841,51 @@ def main():
 
                     # Conditions for np.select
                     conditions = [
-                        # Additional: New condition for PO Qty > MAX_QTY_LIMIT for specific SKUs
+                        # 0. Reject if SKU does not exist in BigQuery at all
+                        result_df["Customer SKU Code"].isin(skus_not_in_bq),
+                        # 1. New condition for PO Qty > MAX_QTY_LIMIT for specific SKUs
                         (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > MAX_QTY_LIMIT),
-                        # 1. Reject if Remaining Allocation is less than 0
+                        # 2. Reject if Remaining Allocation is less than 0
                         (result_df["remaining_allocation_qty_region"] < 0),
-                        # 2. New condition for additional suggested SKUs
+                        # 3. New condition for additional suggested SKUs
                         (result_df["is_po_sku"] == False),
-                        # 3. Hardcoded Reject - Need Approval Email
+                        # 4. Hardcoded Reject - Need Approval Email
                         result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_APPROVAL),
-                        # 4. Hardcoded Reject - No Tolerance
+                        # 5. Hardcoded Reject - No Tolerance
                         result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_NO_TOLERANCE),
-                        # 5. Reject if the supply control status are ["STOP PO", "DISCONTINUED", "OOS"]
+                        # 6. Reject if the supply control status are ["STOP PO", "DISCONTINUED", "OOS"]
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
-                        # 6. Proceed (ST LM = 0) -> NPD or there's no ST for LM
+                        # 7. Proceed (ST LM = 0) -> NPD or there's no ST for LM
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
                             (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
                             (~result_df["Customer SKU Code"].str.upper().isin(all_npd_sku_list)) &
                             (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
                         ),
-                        # 7. Reject if suggested PO is 0 or isin ["STOP PO", "DISCONTINUED", "OOS"]
+                        # 8. Reject if suggested PO is 0 or isin ["STOP PO", "DISCONTINUED", "OOS"]
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                        # 8. PO Qty > Suggested PO Qty (Over-ordering)
+                        # 9. PO Qty > Suggested PO Qty (Over-ordering)
                         (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                        # 9. PO Qty < Suggested PO Qty (Under-ordering)
+                        # 10. PO Qty < Suggested PO Qty (Under-ordering)
                         (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                        # 10. PO Qty = Suggested PO Qty (Exact Match)
+                        # 11. PO Qty = Suggested PO Qty (Exact Match)
                         (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
                     ]
 
                     # Corresponding values
                     choices = [
-                        f"Reject (Exceeds Qty Limit of {MAX_QTY_LIMIT})",
-                        "Reject (Negative Allocation)",
-                        "Additional Suggestion",
-                        "Reject (Stop by Steve - Need approval email)",
-                        "Reject (Stop by Steve - No tolerance to open)",
-                        "Reject",
-                        "Proceed",
-                        "Reject",
-                        "Reject with suggestion",
-                        "Proceed with suggestion",
-                        "Proceed",
+                        "Reject (SKU Not Found in System)",                          # 0
+                        f"Reject (Exceeds Qty Limit of {MAX_QTY_LIMIT})",            # 1
+                        "Reject (Negative Allocation)",                              # 2
+                        "Additional Suggestion",                                     # 3
+                        "Reject (Stop by Steve - Need approval email)",              # 4
+                        "Reject (Stop by Steve - No tolerance to open)",             # 5
+                        "Reject",                                                    # 6
+                        "Proceed",                                                   # 7
+                        "Reject",                                                    # 8
+                        "Reject with suggestion",                                    # 9
+                        "Proceed with suggestion",                                   # 10
+                        "Proceed",                                                   # 11
                     ]
 
                     # Apply the conditions to create the 'Remark' column
@@ -898,17 +917,17 @@ def main():
                     # Apply regional rejection rules for SKUs on the PO (after column renaming)
                     if REJECTED_SKUS_1:
                         result_df = apply_sku_rejection_rules(
-                            REJECTED_SKUS_1, 
-                            result_df, 
-                            REGION_LIST_1, 
+                            REJECTED_SKUS_1,
+                            result_df,
+                            REGION_LIST_1,
                             is_in=False  # False means: only allow in these regions, reject all others
                         )
 
                     if REJECTED_SKUS_2:
                         result_df = apply_sku_rejection_rules(
-                            REJECTED_SKUS_2, 
-                            result_df, 
-                            REGION_LIST_2, 
+                            REJECTED_SKUS_2,
+                            result_df,
+                            REGION_LIST_2,
                             is_in=False
                         )
 
