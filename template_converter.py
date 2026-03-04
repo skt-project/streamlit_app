@@ -342,6 +342,29 @@ def map_3m_to_master(
 
 
 # =========================
+# Deduplication / Qty Sum
+# =========================
+def deduplicate_and_sum_qty(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Groups by all MASTER_SCHEMA columns except Qty and sums Qty for
+    duplicate rows (i.e. rows where every non-Qty column is identical).
+
+    Returns a DataFrame with the same column order as MASTER_SCHEMA.
+    """
+    group_cols = [col for col in MASTER_SCHEMA if col != "Qty"]
+
+    df = df.copy()
+    df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
+
+    result = (
+        df.groupby(group_cols, as_index=False, dropna=False)["Qty"]
+        .sum()
+    )
+
+    return result[MASTER_SCHEMA]
+
+
+# =========================
 # Intelligent Mapping
 # =========================
 def intelligent_mapping(
@@ -477,6 +500,17 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
             st.error(f"Error mapping to master schema: {e}")
             return
 
+    # ── Deduplicate rows and sum Qty ──────────────────────────────────────────
+    rows_before = len(mapped)
+    mapped = deduplicate_and_sum_qty(mapped)
+    rows_after = len(mapped)
+    rows_merged = rows_before - rows_after
+    if rows_merged > 0:
+        st.info(
+            f"ℹ️ **{rows_merged} duplicate row(s)** were merged and their Qty summed "
+            f"({rows_before} → {rows_after} rows)."
+        )
+
     st.success("Mapped to master schema.")
     st.write("Converted sample:")
     st.dataframe(mapped.head())
@@ -542,7 +576,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         },
         {
             "Target Column": "Qty",
-            "Source Column": "QTY (col 2)",
+            "Source Column": "QTY (col 2) — summed for duplicate rows",
             "Status": "Mapped",
         },
     ]
@@ -613,6 +647,17 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     except Exception as e:
         st.error(f"Error during data mapping: {e}")
         return
+
+    # ── Deduplicate rows and sum Qty ──────────────────────────────────────────
+    rows_before = len(mapped)
+    mapped = deduplicate_and_sum_qty(mapped)
+    rows_after = len(mapped)
+    rows_merged = rows_before - rows_after
+    if rows_merged > 0:
+        st.info(
+            f"ℹ️ **{rows_merged} duplicate row(s)** were merged and their Qty summed "
+            f"({rows_before} → {rows_after} rows)."
+        )
 
     st.success("Mapped to master schema.")
     st.write("Converted sample:")
