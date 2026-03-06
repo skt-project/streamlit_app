@@ -64,6 +64,7 @@ BRAND_PREFIXES = {
     "TIMEPHORIA": "13",
     "FACERINNA": "1A",
     "BODIBREZE": "17",
+    "NEXTPRIME": "17"
 }
 BRAND_OPTIONS = list(BRAND_PREFIXES.keys())
 
