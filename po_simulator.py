@@ -90,7 +90,7 @@ def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
         sku,
         price_for_distri
     FROM `{table_id}`
-    WHERE sku IN ({sku_list_str})
+    WHERE UPPER(sku) IN ({sku_list_str})
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
@@ -156,7 +156,7 @@ def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
     FROM `{table_id}`
     WHERE UPPER(distributor) = '{distributor_name}'
     AND (
-        sku IN ({sku_list_str})
+        UPPER(sku) IN ({sku_list_str})
         OR buffer_plan_by_lm_qty_adj > 0
     )
     """
