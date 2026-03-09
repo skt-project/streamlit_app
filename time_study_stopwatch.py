@@ -33,7 +33,7 @@ import logging
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
@@ -475,9 +475,10 @@ def _ensure_schema(client: bigquery.Client) -> None:
 
 @dataclass
 class MasterData:
-    spv_list: List[str]
-    by_spv:   Dict[str, Any]
-    error:    Optional[str] = None
+    spv_list:   List[str]
+    by_spv:     Dict[str, Any]
+    all_stores: List[Dict] = field(default_factory=list)  # flat list, independent of SPV hierarchy
+    error:      Optional[str] = None
 
     def ok(self) -> bool:
         return self.error is None
@@ -487,20 +488,25 @@ class MasterData:
 def _load_master_data() -> MasterData:
     """
     Load the full store hierarchy from BigQuery and cache for MASTER_DATA_TTL seconds.
+    Also builds a flat deduplicated store list (all_stores) that is not filtered
+    by SPV / Region / Distributor, so the store picker shows every store.
     On failure, returns a MasterData with the error field set so callers
     can degrade gracefully without crashing.
     """
     client = _get_bq_client()
     if client is None:
-        return MasterData(spv_list=[], by_spv={}, error="Cannot connect to BigQuery.")
+        return MasterData(spv_list=[], by_spv={}, all_stores=[], error="Cannot connect to BigQuery.")
 
     try:
         rows = list(client.query(_MASTER_QUERY).result())
     except gcp_exc.GoogleAPIError as exc:
         logger.error("Master data query failed: %s", exc)
-        return MasterData(spv_list=[], by_spv={}, error=str(exc))
+        return MasterData(spv_list=[], by_spv={}, all_stores=[], error=str(exc))
 
     by_spv: Dict[str, Any] = {}
+    seen_store_ids: Set[str] = set()
+    all_stores: List[Dict] = []
+
     for row in rows:
         spv   = (row.spv         or "").strip()
         reg   = (row.region      or "").strip()
@@ -511,6 +517,7 @@ def _load_master_data() -> MasterData:
         if not (spv and reg and dist):
             continue
 
+        # ── Build SPV hierarchy (used for setup page dropdowns) ──
         spv_node = by_spv.setdefault(spv, {"regions": [], "by_region": {}})
         if reg not in spv_node["regions"]:
             spv_node["regions"].append(reg)
@@ -525,7 +532,18 @@ def _load_master_data() -> MasterData:
         if sid not in {s["store_id"] for s in store_list}:
             store_list.append({"store_id": sid, "store_name": sname})
 
-    return MasterData(spv_list=sorted(by_spv.keys()), by_spv=by_spv)
+        # ── Build flat store list (used for the store picker — no SPV filter) ──
+        if sid and sid not in seen_store_ids:
+            seen_store_ids.add(sid)
+            all_stores.append({"store_id": sid, "store_name": sname})
+
+    all_stores.sort(key=lambda s: s["store_name"])
+
+    return MasterData(
+        spv_list=sorted(by_spv.keys()),
+        by_spv=by_spv,
+        all_stores=all_stores,
+    )
 
 
 # ============================================================
@@ -716,17 +734,14 @@ def _get_live_ms() -> int:
 
 
 def _get_stores() -> List[Dict]:
+    """
+    Return all stores from the master data, independent of the selected
+    SPV / Region / Distributor hierarchy.
+    """
     master: Optional[MasterData] = st.session_state.get("master")
     if not master:
         return []
-    return (
-        master.by_spv
-              .get(_spv(), {})
-              .get("by_region", {})
-              .get(_region(), {})
-              .get("by_dist", {})
-              .get(_distributor(), [])
-    )
+    return master.all_stores
 
 
 # ============================================================
@@ -949,7 +964,7 @@ def _tab_p1() -> None:
 def _tab_p2() -> None:
     # ── Store selector ────────────────────────────────────────────────────
     st.markdown("#### 🏪 Pilih Toko")
-    stores     = _get_stores()
+    stores     = _get_stores()   # all stores, not filtered by SPV hierarchy
     store_opts = {f"{s['store_name']} ({s['store_id']})": s for s in stores}
     cur_label  = next(
         (k for k, v in store_opts.items() if v["store_id"] == _store_id()), ""
