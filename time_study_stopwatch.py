@@ -70,6 +70,7 @@ class BigQueryConfig:
     INSERT_MAX_RETRIES:   int   = 3
     INSERT_RETRY_DELAY_S: float = 1.0
     MASTER_DATA_TTL:      int   = int(os.environ.get("MASTER_DATA_TTL", 3600))
+    GPS_TIMEOUT_S:        int   = 15   # seconds to wait before offering skip
 
     @classmethod
     def full_table(cls) -> str:
@@ -233,6 +234,11 @@ div[data-testid="metric-container"] {
     color:      var(--accent);
     border:     1px solid rgba(245, 166, 35, 0.3);
 }
+.badge-geo-skip {
+    background: rgba(107, 114, 128, 0.12);
+    color:      #9ca3af;
+    border:     1px solid rgba(107, 114, 128, 0.3);
+}
 
 /* ── Section label ── */
 .section-label {
@@ -353,6 +359,7 @@ _STATE_DEFAULTS: Dict[str, Any] = {
     "write_phase":      None,     # "dist_in" | "store_session" | None
     "pending_payload":  None,     # dict | None
     "master":           None,     # MasterData | None
+    "gps_requested_at": None,     # float (epoch seconds) | None — when GPS fetch started
 }
 
 
@@ -397,6 +404,13 @@ def _reset_store_data() -> None:
     _reset_activity()
     st.session_state.totals = {}
     st.session_state.store_geo_done.discard(st.session_state.store_id)
+
+
+def _clear_write_pipeline() -> None:
+    """Reset GPS write pipeline state completely."""
+    st.session_state.write_phase     = None
+    st.session_state.pending_payload = None
+    st.session_state.gps_requested_at = None
 
 
 # ============================================================
@@ -748,35 +762,18 @@ def _get_stores() -> List[Dict]:
 # GPS two-phase write handler
 # ============================================================
 
-def _handle_write_phase() -> bool:
+def _commit_write(
+    phase: str,
+    payload: dict,
+    lat: Optional[float],
+    lng: Optional[float],
+    acc: Optional[int],
+) -> None:
     """
-    Two-phase GPS commit guard.
-
-    When an action needs GPS:
-      Phase 1 — caller stores payload dict in ``pending_payload``,
-                sets ``write_phase`` to a sentinel string, then reruns.
-      Phase 2 — this function fires on the next rerun, calls
-                ``get_geolocation()``, waits for coordinates, persists
-                the record, clears the pipeline, and reruns again.
-
-    Returns True if a write phase was active; the caller must return
-    immediately so the rest of the page is not rendered mid-phase.
+    Execute the actual BigQuery write for either phase, with the given
+    (possibly None) coordinates. Displays success / error feedback inline.
     """
-    if _write_phase() is None:
-        return False
-
-    loc = get_geolocation()
-    if loc is None:
-        st.info("📡 Mengambil koordinat GPS… pastikan izin lokasi diaktifkan.")
-        return True
-
-    lat, lng, acc = _extract_coords(loc)
-    payload = _pending_payload()
-    phase   = _write_phase()
-
-    # Clear pipeline BEFORE writing — prevents re-trigger if write raises
-    st.session_state.write_phase     = None
-    st.session_state.pending_payload = None
+    geo_note = _geo_label(lat, lng, acc)
 
     if phase == "dist_in":
         result = _write_checkin_event(
@@ -787,13 +784,14 @@ def _handle_write_phase() -> bool:
             lat=lat, lng=lng, acc=acc,
         )
         if result.ok:
-            st.success(f"📥 **{payload['action_label']}** disimpan · {_geo_label(lat, lng, acc)}")
+            st.success(f"📥 **{payload['action_label']}** disimpan · {geo_note}")
         else:
             st.error(result.message)
 
     elif phase == "store_session":
         sid = payload.get("store_id")
-        if sid:
+        if sid and lat is not None:
+            # Only mark geo_done when we actually captured coordinates
             st.session_state.store_geo_done.add(sid)
 
         result = _write_activity_session(
@@ -809,7 +807,7 @@ def _handle_write_phase() -> bool:
         if result.ok:
             st.success(
                 f"✅ **{payload['activity_label']}** — "
-                f"{_fmt_ms(payload['duration_ms'])} · {_geo_label(lat, lng, acc)}"
+                f"{_fmt_ms(payload['duration_ms'])} · {geo_note}"
             )
         else:
             st.error(result.message)
@@ -817,6 +815,62 @@ def _handle_write_phase() -> bool:
     else:
         logger.error("Unknown write_phase value: '%s'", phase)
 
+
+def _handle_write_phase() -> bool:
+    """
+    Two-phase GPS commit guard — GPS is *optional*.
+
+    Phase 1 — caller stores payload dict in ``pending_payload``,
+               sets ``write_phase`` to a sentinel string,
+               records ``gps_requested_at`` timestamp, then reruns.
+    Phase 2 — this function fires on every rerun while a phase is active:
+               • If GPS coords arrive   → write immediately with coords.
+               • If GPS is still None   → show a spinner + "Lewati GPS" button.
+               • If user clicks skip    → write without coords.
+               • Either way, pipeline is cleared and page reruns.
+
+    Returns True if a write phase was active (caller must return to halt
+    further rendering).
+    """
+    if _write_phase() is None:
+        return False
+
+    # Record when we first entered this phase (for elapsed-time display)
+    if st.session_state.gps_requested_at is None:
+        st.session_state.gps_requested_at = time.monotonic()
+
+    loc = get_geolocation()
+    lat, lng, acc = _extract_coords(loc)
+
+    payload = _pending_payload()
+    phase   = _write_phase()
+
+    # ── GPS arrived → commit with coordinates ──────────────────────────
+    if lat is not None:
+        _clear_write_pipeline()
+        _commit_write(phase, payload, lat, lng, acc)
+        st.rerun()
+        return True
+
+    # ── GPS not yet available → auto-skip after timeout ────────────────
+    elapsed_s = int(time.monotonic() - (st.session_state.gps_requested_at or 0))
+    remaining = BigQueryConfig.GPS_TIMEOUT_S - elapsed_s
+
+    if remaining <= 0:
+        # Timeout reached — commit without coordinates automatically
+        logger.info("GPS timeout after %ds — saving without location", elapsed_s)
+        _clear_write_pipeline()
+        _commit_write(phase, payload, None, None, None)
+        st.rerun()
+        return True
+
+    st.info(
+        f"📡 Mengambil koordinat GPS… otomatis lewati dalam **{remaining}** detik.  \n"
+        "Pastikan izin lokasi diaktifkan di browser/perangkat Anda."
+    )
+
+    # Keep re-polling every second while waiting
+    time.sleep(1)
     st.rerun()
     return True
 
@@ -942,7 +996,8 @@ def _tab_p1() -> None:
                 "action_label":  action.label,
                 "event_time_ms": event_time_ms,
             }
-            st.session_state.write_phase = "dist_in"
+            st.session_state.write_phase     = "dist_in"
+            st.session_state.gps_requested_at = None   # reset timer
             st.rerun()
         else:
             with st.spinner("Menyimpan…"):
@@ -992,7 +1047,7 @@ def _tab_p2() -> None:
                 )
             else:
                 st.markdown(
-                    '<span class="badge badge-geo-warn">📍 GPS direkam pada aktivitas pertama</span>',
+                    '<span class="badge badge-geo-warn">📍 GPS direkam pada aktivitas pertama (opsional)</span>',
                     unsafe_allow_html=True,
                 )
         with col_reset:
@@ -1116,9 +1171,10 @@ def _stop_and_save() -> None:
     _reset_activity()
 
     if store_id and store_id not in _geo_done():
-        # First activity for this store → capture GPS coordinates
-        st.session_state.pending_payload = payload
-        st.session_state.write_phase     = "store_session"
+        # First activity for this store → attempt GPS capture (optional)
+        st.session_state.pending_payload  = payload
+        st.session_state.write_phase      = "store_session"
+        st.session_state.gps_requested_at = None   # reset timer for new phase
         st.rerun()
     else:
         with st.spinner("Menyimpan…"):
@@ -1157,7 +1213,7 @@ st.markdown(_APP_CSS, unsafe_allow_html=True)
 def main() -> None:
     _init_state()
 
-    # GPS two-phase handler must run first — halts rendering until coords arrive
+    # GPS two-phase handler must run first — halts rendering until resolved
     if _handle_write_phase():
         return
 
@@ -1177,4 +1233,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
