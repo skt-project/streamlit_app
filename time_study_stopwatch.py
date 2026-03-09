@@ -484,7 +484,7 @@ class MasterData:
         return self.error is None
 
 
-@st.cache_data(ttl=BigQueryConfig.MASTER_DATA_TTL, show_spinner=False)
+@st.cache_resource(ttl=BigQueryConfig.MASTER_DATA_TTL, show_spinner=False)
 def _load_master_data() -> MasterData:
     """
     Load the full store hierarchy from BigQuery and cache for MASTER_DATA_TTL seconds.
@@ -1177,3 +1177,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
