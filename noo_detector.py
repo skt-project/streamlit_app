@@ -55,6 +55,7 @@ def load_existing_data(brand_filter):
             cust_id,
             store_name,
             region,
+            region_g2g,
             city,
             address,
             longitude,
@@ -74,7 +75,6 @@ def load_existing_data(brand_filter):
     # --- Brand Filter Logic ---
     brand_where_clause = ""
     if brand_filter and brand_filter != "All Brand":
-        # Assuming the sell-through table has a 'brand' column
         brand_where_clause = f"AND brand = '{brand_filter}'"
 
     sell_through_query = f"""
@@ -92,23 +92,19 @@ def load_existing_data(brand_filter):
 
     # 3. Pivot the monthly sell-through data in Pandas
     if not sell_through_df.empty:
-        # Convert month_ to datetime
         if not sell_through_df.empty:
             sell_through_df['month_'] = pd.to_datetime(sell_through_df['month_'])
 
-        # Format month as YYYY-MM for column names
         sell_through_df['month_str'] = sell_through_df['month_'].dt.strftime('%Y-%m')
 
-        # Pivot the table
         pivoted_st_df = sell_through_df.pivot_table(
             index='cust_id',
             columns='month_str',
             values='monthly_st_value',
-            fill_value=0 # Fill NaN with 0 for months without data
+            fill_value=0
         ).reset_index()
 
-        # Rename columns to be more descriptive (e.g., 'ST Value 2024-01')
-        pivoted_st_df.columns.name = None # Remove the column name from the index
+        pivoted_st_df.columns.name = None
         pivoted_st_df = pivoted_st_df.rename(
             columns={col: f"ST Value {col}" for col in pivoted_st_df.columns if col != 'cust_id'}
         )
@@ -120,51 +116,60 @@ def load_existing_data(brand_filter):
             on='cust_id',
             how='left'
         )
-        # Ensure that newly added ST columns are filled with 0 if no match (left join)
         st_cols = [col for col in merged_df.columns if col.startswith('ST Value')]
         merged_df[st_cols] = merged_df[st_cols].fillna(0)
     else:
-        # If no sell-through data is returned, initialize the columns with 0
         merged_df = existing_df.copy()
-        # Create column names for the last 6 months dynamically and MTD
         today = pd.to_datetime(pd.Timestamp.now().date())
         st_col_prefix = f"ST Value ({brand_filter}) "
         for i in range(7):
-            # We want the *last* 6 full months. So 1 month ago, 2 months ago, etc.
-            # Example: If today is July 16, 2025, we want June, May, April, March, Feb, Jan 2025
             month_date = today - pd.DateOffset(months=i+1)
             col_name = f"{st_col_prefix}{month_date.strftime('%Y-%m')}"
             merged_df[col_name] = 0
 
+    # 5. Build a unified set of normalized regions per row (region + region_g2g)
+    merged_df['_all_regions'] = merged_df.apply(
+        lambda row: {
+            normalize(str(row['region']), 'region'),
+            normalize(str(row['region_g2g']), 'region')
+        } - {normalize('', 'region'), normalize('nan', 'region')},
+        axis=1
+    )
+
     return merged_df
+
 
 # --- Normalize Helper ---
 def normalize(text: str, text_type: str):
     if not text or not text_type:
         return ""
-    
+
     text = str(text).lower()
-    
-    # Normalize for store name
+
     if text_type == 'store_name':
         return text.strip()
-    # Normalize for store address
     elif text_type == 'address':
         text = text.replace("jl.", "").replace("no.", "").replace("jl", "").replace("jalan", "").replace("no", "").replace("jalan.", "")
-        text = re.sub(r"[^a-z0-9\s]", " ", text)  # Remove punctuation
-        text = re.sub(r"\brt\b|\brw\b", "", text)  # Remove rt/rw
+        text = re.sub(r"[^a-z0-9\s]", " ", text)
+        text = re.sub(r"\brt\b|\brw\b", "", text)
         text = re.sub(r"\s+", " ", text).strip()
-    # Normalize for store city
     elif text_type == 'city':
-        text = re.sub(r"[^a-z0-9\s]", " ", text)  # Remove punctuation
+        text = re.sub(r"[^a-z0-9\s]", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
-    # Normalize for region
     elif text_type == 'region':
-        text = re.sub(r'\s*\(.*\)\s*', '', text)  # Remove text in parentheses and surrounding spaces (e.g., "(SD)")
-        text = re.sub(r"[^a-z0-9\s]", " ", text)  # Remove any other non-alphanumeric punctuation
-        text = re.sub(r"\s+", " ", text).strip()  # Replace multiple spaces with single space and trim
+        text = re.sub(r'\s*\(.*\)\s*', '', text)
+        text = re.sub(r"[^a-z0-9\s]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
 
     return text
+
+
+# --- Region Filter Helper ---
+def filter_by_region(df, target_regions: list):
+    """Filter existing_df where any of target_regions appears in either region or region_g2g column."""
+    target_set = {normalize(r, 'region') for r in target_regions}
+    return df[df['_all_regions'].apply(lambda regions: bool(regions & target_set))]
+
 
 # --- Matching Logic ---
 def match_store(new_store, existing_stores, return_all=False):
@@ -190,10 +195,8 @@ def match_store(new_store, existing_stores, return_all=False):
         new_city = new_store['City']
         existing_city = store['city']
 
-        # Check if both new_city and existing_city are filled (not NaN and not empty string after strip)
         if pd.notna(new_city) and str(new_city).strip() != "" and \
            pd.notna(existing_city) and str(existing_city).strip() != "":
-            # Both cities are present, split the 25 points: 20 for address, 5 for city
             address_weight_current = 20
             city_weight_current = 10
 
@@ -210,12 +213,11 @@ def match_store(new_store, existing_stores, return_all=False):
 
             address_score_scaled = (address_score / 100) * address_weight_current
             city_score_scaled = (city_score / 100) * city_weight_current
-            
+
             score += address_score_scaled + city_score_scaled
             log_lines.append(f"• Address Similarity: {address_score} → Score: {address_score_scaled:.1f} / {address_weight_current}")
             log_lines.append(f"• City Similarity: {city_score} → Score: {city_score_scaled:.1f} / {city_weight_current}")
         else:
-            # City is blank in one or both, assign full 25 points to address
             address_weight_current = 25
 
             address_score = max(
@@ -224,7 +226,7 @@ def match_store(new_store, existing_stores, return_all=False):
                 fuzz.partial_ratio(normalize(new_address, "address"), normalize(existing_address, "address"))
             )
             address_score_scaled = (address_score / 100) * address_weight_current
-            
+
             score += address_score_scaled
             log_lines.append(f"• Address Similarity: {address_score} → Score: {address_score_scaled:.1f} / {address_weight_current} (City data missing)")
 
@@ -292,11 +294,12 @@ def match_store(new_store, existing_stores, return_all=False):
 
     return results
 
+
 # --- Streamlit UI ---
 st.set_page_config("Duplicate Store Checker", page_icon="🔍")
 st.title("🔍 Duplicate Store Detection")
 
-# --- Brand Filter Addition ---
+# --- Brand Filter ---
 available_brands = ["All Brand", "SKINTIFIC", "G2G", "TIMEPHORIA", "FACERINNA", "BODIBREZE"]
 
 selected_brand = st.selectbox(
@@ -307,16 +310,19 @@ selected_brand = st.selectbox(
 
 existing_df = load_existing_data(selected_brand)
 
+# Pre-compute normalized special-case regions
+normalized_west_java = normalize('West Java (SD)', 'region')
+normalized_jakarta_csa = normalize('Jakarta (CSA)', 'region')
+
 option = st.radio("Input Type", ["Upload Excel", "Manual Entry"])
 
 if option == "Upload Excel":
     st.markdown("---")
     st.subheader("1. Download Excel Template")
-    # Create a dummy DataFrame for the template
     template_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
     template_excel_buffer = BytesIO()
     template_df.to_excel(template_excel_buffer, index=False, engine='openpyxl')
-    template_excel_buffer.seek(0) # Rewind the buffer to the beginning
+    template_excel_buffer.seek(0)
 
     st.download_button(
         label="Download New Store Data Template (Excel)",
@@ -325,7 +331,6 @@ if option == "Upload Excel":
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # Notes on required columns for the template
     st.info(
         f"**Important:** When filling the template, all the following columns are required:\n"
         f"- **Store Name**\n"
@@ -337,10 +342,8 @@ if option == "Upload Excel":
     )
 
     st.markdown("---")
-
     st.subheader("2. Upload Your New Store Data")
 
-    # Notes for Excel upload guidelines
     st.info(
         "**Please follow these important guidelines for your Excel upload:**\n"
         "\n"
@@ -362,47 +365,36 @@ if option == "Upload Excel":
                 f"Expected columns (case-sensitive, order doesn't matter): {', '.join(REQUIRED_COLUMNS)}. "
                 f"Found columns: {', '.join(uploaded_columns)}."
             )
-            st.stop() # Stop execution if validation fails
+            st.stop()
 
-        # Normalize the columns in the new_stores DataFrame
+        # Normalize columns
         new_stores['Region'] = new_stores['Region'].apply(lambda x: normalize(x, 'region') if pd.notna(x) else x)
         new_stores['City'] = new_stores['City'].apply(lambda x: normalize(x, 'city') if pd.notna(x) else x)
         new_stores['Store Name'] = new_stores['Store Name'].apply(lambda x: normalize(x, 'store_name') if pd.notna(x) else x)
         new_stores['Address'] = new_stores['Address'].apply(lambda x: normalize(x, 'address') if pd.notna(x) else x)
 
-        # Validate and get unique region(s) from uploaded file
+        # Validate unique region
         input_regions = new_stores['Region'].dropna().unique().tolist()
-        
+
         if not input_regions:
             st.error("No valid region found in the 'Region' column of the uploaded Excel file. Please ensure the column is populated.")
             st.stop()
-        
-        # Check for single region in uploaded Excel as per requirement
+
         if len(input_regions) > 1:
             st.error("The uploaded Excel file must contain data for only one region. Multiple regions found: " + ", ".join(input_regions))
             st.stop()
-        
-        # Now we know there's exactly one region to filter by
+
         selected_input_region = input_regions[0]
 
-        # Normalize the specific regions for comparison, assuming 'normalize' handles these strings correctly
-        normalized_west_java = normalize('West Java (SD)', 'region')
-        normalized_jakarta_csa = normalize('Jakarta (CSA)', 'region')
-        
-        if selected_input_region == normalized_west_java or selected_input_region == normalized_jakarta_csa:
-            # If the input region is one of the special cases, filter for both regions
-            st.info(f"Special case detected: Input region is '{selected_input_region}'. Filtering existing data for both 'West Java (SD)' and 'Jakarta (CSA)' for potential duplicates.")
-            
-            target_regions_for_filter = [normalized_west_java, normalized_jakarta_csa]
-            
-            filtered_existing_df = existing_df[
-                existing_df['region'].apply(lambda x: normalize(x, 'region')).isin(target_regions_for_filter)
-            ]
+        # Filter existing data by region (either region or region_g2g)
+        if selected_input_region in (normalized_west_java, normalized_jakarta_csa):
+            st.info(
+                f"Special case detected: Input region is '{selected_input_region}'. "
+                f"Filtering existing data for both 'West Java (SD)' and 'Jakarta (CSA)' for potential duplicates."
+            )
+            filtered_existing_df = filter_by_region(existing_df, [normalized_west_java, normalized_jakarta_csa])
         else:
-            # Existing logic: Filter existing_df based on the single input region
-            filtered_existing_df = existing_df[
-                existing_df['region'].apply(lambda x: normalize(x, 'region')) == selected_input_region
-            ]
+            filtered_existing_df = filter_by_region(existing_df, [selected_input_region])
 
         if filtered_existing_df.empty:
             st.warning(f"No existing stores found in the specified region: '{selected_input_region}'. Cannot perform matching.")
@@ -415,24 +407,24 @@ if option == "Upload Excel":
             if all_matches:
                 result_df = pd.DataFrame(all_matches)
                 st.write("### Possible Duplicates")
-                
+
                 st_value_cols = [col for col in result_df.columns if col.startswith('ST Value')]
                 display_columns = [
-                    "New Store Name", "New Address", "cust_id", "store_name", "region", 
-                    "city", "address", "latitude", "longitude", "reference_id_skt", "reference_id_g2g",
-                    "reference_id_tph", "nik", "npwp", "Match Score", "Match Log"
-                    ] + sorted(st_value_cols)
+                    "New Store Name", "New Address", "cust_id", "store_name", "region",
+                    "region_g2g", "city", "address", "latitude", "longitude",
+                    "reference_id_skt", "reference_id_g2g", "reference_id_tph",
+                    "nik", "npwp", "Match Score", "Match Log"
+                ] + sorted(st_value_cols)
 
-                # Create a copy for display to avoid modifying the original result_df
                 display_df = result_df[display_columns].copy()
 
-                # Rename columns for display
                 rename_map = {
                     "New Store Name": "Input Store Name",
                     "New Address": "Input Address",
                     "cust_id": "Matched Customer ID",
                     "store_name": "Matched Store Name",
                     "region": "Region",
+                    "region_g2g": "Region G2G",
                     "city": "City",
                     "address": "Matched Address",
                     "latitude": "Latitude",
@@ -446,12 +438,9 @@ if option == "Upload Excel":
                     "Match Log": "Log Info"
                 }
 
-                # Apply renaming
                 display_df.rename(columns=rename_map, inplace=True)
 
-                # Apply formatting to ST Value columns for display
                 for col in st_value_cols:
-                    # Ensure the column is numeric before formatting, handle potential NaN by showing empty string
                     display_df[col] = pd.to_numeric(display_df[col], errors='coerce').apply(
                         lambda x: f"{x:,.2f}" if pd.notna(x) else ""
                     )
@@ -467,6 +456,7 @@ if option == "Upload Excel":
                 st.download_button("Download Results", data=output.getvalue(), file_name="duplicates.xlsx")
             else:
                 st.success("No duplicates found.")
+
 else:
     with st.form("manual_form"):
         store_name = st.text_input("Store Name")
@@ -493,33 +483,20 @@ else:
             "NPWP": npwp
         }
 
-        # Extract region from manual input and validate
         input_region = new_store.get('Region')
         if not input_region:
             st.error("Region must be provided for manual entry.")
             st.stop()
 
-        # Filter existing_df based on the input region
-        filtered_existing_df = existing_df[existing_df['region'].apply(lambda x: normalize(x, 'region')) == input_region]
-
-         # Normalize the specific regions for comparison, assuming 'normalize' handles these strings correctly
-        normalized_west_java = normalize('West Java (SD)', 'region')
-        normalized_jakarta_csa = normalize('Jakarta (CSA)', 'region')
-        
-        if input_region == normalized_west_java or input_region == normalized_jakarta_csa:
-            # If the input region is one of the special cases, filter for both regions
-            st.info(f"Special case detected: Input region is '{input_region}'. Filtering existing data for both 'West Java (SD)' and 'Jakarta (CSA)' for potential duplicates.")
-            
-            target_regions_for_filter = [normalized_west_java, normalized_jakarta_csa]
-            
-            filtered_existing_df = existing_df[
-                existing_df['region'].apply(lambda x: normalize(x, 'region')).isin(target_regions_for_filter)
-            ]
+        # Filter existing data by region (either region or region_g2g)
+        if input_region in (normalized_west_java, normalized_jakarta_csa):
+            st.info(
+                f"Special case detected: Input region is '{input_region}'. "
+                f"Filtering existing data for both 'West Java (SD)' and 'Jakarta (CSA)' for potential duplicates."
+            )
+            filtered_existing_df = filter_by_region(existing_df, [normalized_west_java, normalized_jakarta_csa])
         else:
-            # Existing logic: Filter existing_df based on the single input region
-            filtered_existing_df = existing_df[
-                existing_df['region'].apply(lambda x: normalize(x, 'region')) == input_region
-            ]
+            filtered_existing_df = filter_by_region(existing_df, [input_region])
 
         if filtered_existing_df.empty:
             st.warning(f"No existing stores found in region: '{input_region}'. Cannot perform matching.")
@@ -529,22 +506,21 @@ else:
             if matches:
                 result_df = pd.DataFrame(matches).sort_values(by="Match Score", ascending=False)
                 st.write("### All Matches (Sorted by Score)")
-                
+
                 st_value_cols = [col for col in result_df.columns if col.startswith('ST Value')]
                 display_columns = [
-                    "cust_id", "store_name", "region", "city", "address", 
+                    "cust_id", "store_name", "region", "region_g2g", "city", "address",
                     "latitude", "longitude", "reference_id_skt", "reference_id_g2g",
                     "reference_id_tph", "nik", "npwp", "Match Score", "Match Log"
                 ] + sorted(st_value_cols)
 
-                # Create a copy for display to avoid modifying the original result_df
                 display_df = result_df[display_columns].copy()
 
-                # Rename columns for display
                 rename_map = {
                     "cust_id": "Matched Customer ID",
                     "store_name": "Matched Store Name",
                     "region": "Region",
+                    "region_g2g": "Region G2G",
                     "city": "City",
                     "address": "Matched Address",
                     "latitude": "Latitude",
@@ -558,12 +534,9 @@ else:
                     "Match Log": "Log Info"
                 }
 
-                # Apply renaming
                 display_df.rename(columns=rename_map, inplace=True)
 
-                # Apply formatting to ST Value columns for display
                 for col in st_value_cols:
-                    # Ensure the column is numeric before formatting, handle potential NaN by showing empty string
                     display_df[col] = pd.to_numeric(display_df[col], errors='coerce').apply(
                         lambda x: f"{x:,.2f}" if pd.notna(x) else ""
                     )
