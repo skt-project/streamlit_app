@@ -420,6 +420,25 @@ if (
 
         rows_to_insert = []
 
+        total_score = 0
+
+        for question, value in answers.items():
+
+            if question == "DELIVERY SLA COMPLIANCE":
+                inner = value["inner"]
+                outer = value["outer"]
+
+                if inner == "<80%" or outer == "<80%":
+                    total_score += 0
+                elif inner == "99%-80%" or outer == "99%-80%":
+                    total_score += 4
+                else:
+                    total_score += 8
+
+            else:
+                grade = value.get("grade")
+                total_score += questions[question][grade][1]
+
         for question, value in answers.items():
 
             # ======================================
