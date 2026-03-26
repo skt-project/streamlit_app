@@ -66,6 +66,17 @@ bq_client = bigquery.Client(
 )
 
 # =====================================================
+# HELPER FUNCTIONS
+# =====================================================
+def get_sla_grade(inner, outer):
+    if inner == "<80%" or outer == "<80%":
+        return "C", 0
+    elif inner == "99%-80%" or outer == "99%-80%":
+        return "B", 4
+    else:
+        return "A", 8
+
+# =====================================================
 # LOAD MASTER DISTRIBUTOR
 # =====================================================
 @st.cache_data(ttl=600)
@@ -449,12 +460,7 @@ if (
                 inner = value["inner"]
                 outer = value["outer"]
 
-                if inner == "<80%" or outer == "<80%":
-                    point = 0
-                elif inner == "99%-80%" or outer == "99%-80%":
-                    point = 4
-                else:
-                    point = 8
+                grade, point = get_sla_grade(inner, outer)
 
                 rows_to_insert.append({
                     "submission_id": submission_id,
@@ -463,7 +469,7 @@ if (
                     "region": region,
                     "distributor": distributor,
                     "metric": question,
-                    "grade": f"Inner: {inner} | Outer: {outer}",
+                    "grade": grade,
                     "person_name": None,
                     "point": point,
                     "assessment_period": assessment_period,
