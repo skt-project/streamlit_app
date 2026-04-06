@@ -594,8 +594,6 @@ if uploaded_file:
 
     records = df_upload[final_cols].to_dict("records")
 
-    st.write("Sample record:")
-    st.json(records[0])
     # --------------------------------------------------
     # INSERT TO BIGQUERY
     # --------------------------------------------------
