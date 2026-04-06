@@ -532,7 +532,7 @@ if uploaded_file:
     # ADD SUBMISSION METADATA
     # --------------------------------------------------
     submission_id = str(uuid.uuid4())
-    submitted_at = datetime.now()
+    submitted_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     df_upload["submission_id"] = submission_id
     df_upload["submitted_at"] = submitted_at
@@ -589,12 +589,9 @@ if uploaded_file:
     # Convert ke native Python types (WAJIB untuk BigQuery JSON)
     df_upload = df_upload.astype(object)
 
-    # Handle datetime → string ISO (lebih aman)
-    df_upload["submitted_at"] = df_upload["submitted_at"].astype(str)
-
     # Replace NaN lagi (just in case)
     df_upload = df_upload.where(pd.notna(df_upload), None)
-    
+
     records = df_upload[final_cols].to_dict("records")
 
     st.write("Sample record:")
