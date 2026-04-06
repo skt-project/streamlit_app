@@ -586,6 +586,15 @@ if uploaded_file:
     })
 
     # Prepare payload
+    # Convert ke native Python types (WAJIB untuk BigQuery JSON)
+    df_upload = df_upload.astype(object)
+
+    # Handle datetime → string ISO (lebih aman)
+    df_upload["submitted_at"] = df_upload["submitted_at"].astype(str)
+
+    # Replace NaN lagi (just in case)
+    df_upload = df_upload.where(pd.notna(df_upload), None)
+    
     records = df_upload[final_cols].to_dict("records")
 
     st.write("Sample record:")
