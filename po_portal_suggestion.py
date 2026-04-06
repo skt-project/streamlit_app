@@ -3,6 +3,7 @@ import pandas as pd
 import uuid
 from io import BytesIO
 from pendulum import now
+from datetime import datetime
 from google.oauth2 import service_account
 from google.cloud import bigquery
 
@@ -524,18 +525,14 @@ if uploaded_file:
                 .astype(dtype)
             )
 
-    clean_numeric(df_upload, INT_COLS, "int64")
+    clean_numeric(df_upload, INT_COLS, "Int64")
     clean_numeric(df_upload, FLOAT_COLS, "float64")
 
     # --------------------------------------------------
     # ADD SUBMISSION METADATA
     # --------------------------------------------------
     submission_id = str(uuid.uuid4())
-    submitted_at = (
-        now("Asia/Jakarta")
-        .naive()
-        .format("YYYY-MM-DD HH:mm:ss")
-    )
+    submitted_at = datetime.now()
 
     df_upload["submission_id"] = submission_id
     df_upload["submitted_at"] = submitted_at
@@ -577,13 +574,22 @@ if uploaded_file:
     )
 
     # Convert other NaN values to None for BigQuery
-    df_upload = df_upload.where(pd.notna(df_upload), None)
+    df_upload = df_upload.fillna({
+        "sku_status": "",
+        "brand": "",
+        "region": "",
+        "distributor_company": "",
+        "distributor_branch": "",
+        "product_id": "",
+        "product_name": "",
+        "assortment": ""
+    })
 
     # Prepare payload
     records = df_upload[final_cols].to_dict("records")
 
-    st.write(df_upload.dtypes)
-    st.write(df_upload.head())
+    st.write("Sample record:")
+    st.json(records[0])
     # --------------------------------------------------
     # INSERT TO BIGQUERY
     # --------------------------------------------------
