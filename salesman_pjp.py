@@ -61,10 +61,6 @@ def load_distributor_data() -> pd.DataFrame:
 
 @st.cache_data(show_spinner="Memuat data toko dari Database...")
 def load_store_data() -> pd.DataFrame:
-    """
-    Returns DataFrame with columns: store_code, store_name, distributor_name.
-    Combined label 'store_label' = 'store_code - store_name'.
-    """
     credentials, project_id = get_credentials()
     client = bigquery.Client(credentials=credentials, project=project_id)
     query = """
@@ -86,11 +82,10 @@ def load_store_data() -> pd.DataFrame:
     """
     df = client.query(query).to_dataframe()
     df = df.dropna(subset=["store_code", "store_name", "distributor_name"])
-    df["store_code"]  = df["store_code"].astype(str).str.strip()
-    df["store_name"]  = df["store_name"].astype(str).str.strip()
+    df["store_code"]       = df["store_code"].astype(str).str.strip()
+    df["store_name"]       = df["store_name"].astype(str).str.strip()
     df["distributor_name"] = df["distributor_name"].astype(str).str.strip()
-    # Combined label used in the dropdown
-    df["store_label"] = df["store_code"] + " - " + df["store_name"]
+    df["store_label"]      = df["store_code"] + " - " + df["store_name"]
     df = df.drop_duplicates(subset=["store_label"]).reset_index(drop=True)
     return df
 
@@ -132,14 +127,13 @@ SALESMAN_COLS = [
     ("Tanggal Join di G2G",                                 True,  "date"),
 ]
 
-# Kode Toko is a store cascade dropdown; Nama Toko removed from template
 PJP_COLS = [
     ("ASM",                                                 True,  "cascade"),
     ("Region",                                              True,  "cascade"),
     ("Nama Distributor",                                    True,  "cascade"),
     ("Kode Distributor",                                    True,  "auto"),
     ("Nama Salesman",                                       True,  "text"),
-    ("Kode Toko",                                           True,  "store_cascade"),  # dropdown: code - name
+    ("Kode Toko",                                           True,  "store_cascade"),
     ("Hari",                                                True,  "dropdown"),
     ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap",    True,  "dropdown"),
     ("Frekuensi",                                           True,  "dropdown"),
@@ -192,7 +186,7 @@ def _vcenter(wrap=False):
     return Alignment(vertical="center", wrap_text=wrap)
 
 
-# ─── Build Lookup sheet + named ranges (distributor cascade + store cascade) ──
+# ─── Build Lookup sheet + named ranges ───────────────────────────────────────
 
 def _build_lookup_and_named_ranges(
     wb: Workbook,
@@ -206,7 +200,7 @@ def _build_lookup_and_named_ranges(
     asm_list = sorted(dist_df["asm"].dropna().unique().tolist())
     cur_col  = 1
 
-    # ── Col A: all ASMs ───────────────────────────────────────────────────────
+    # Col A: all ASMs
     lk.cell(row=1, column=cur_col, value="__ALL_ASM__")
     for i, asm in enumerate(asm_list, start=2):
         lk.cell(row=i, column=cur_col, value=asm)
@@ -215,7 +209,7 @@ def _build_lookup_and_named_ranges(
     wb.defined_names[nm] = DefinedName(nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(asm_list)}")
     cur_col += 1
 
-    # ── One col per ASM: its regions ─────────────────────────────────────────
+    # One col per ASM: its regions
     for asm in asm_list:
         regions = sorted(dist_df.loc[dist_df["asm"] == asm, "region"].unique().tolist())
         lk.cell(row=1, column=cur_col, value=f"__ASM_{asm}__")
@@ -226,7 +220,7 @@ def _build_lookup_and_named_ranges(
         wb.defined_names[nm] = DefinedName(nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(regions)}")
         cur_col += 1
 
-    # ── One col per (ASM, Region): distributor names ──────────────────────────
+    # One col per (ASM, Region): distributor names
     for asm in asm_list:
         regions = sorted(dist_df.loc[dist_df["asm"] == asm, "region"].unique().tolist())
         for region in regions:
@@ -240,7 +234,7 @@ def _build_lookup_and_named_ranges(
             wb.defined_names[nm] = DefinedName(nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(names)}")
             cur_col += 1
 
-    # ── Two-col block: distributor_name | distributor_code (NR_DIST_LOOKUP) ──
+    # Two-col block: distributor_name | distributor_code (NR_DIST_LOOKUP)
     name_col = cur_col
     code_col = cur_col + 1
     lk.cell(row=1, column=name_col, value="__DIST_NAME__")
@@ -263,20 +257,14 @@ def _build_lookup_and_named_ranges(
     )
     cur_col += 2
 
-    # ── Store named ranges: one col per distributor_name ─────────────────────
-    # NR_STORE_<distributor_name> → list of "store_code - store_name"
-    # NR_STORE_LOOKUP             → two-col table (store_label | store_name) for VLOOKUP
+    # Store named ranges: one col per distributor_name
     if store_df is not None and not store_df.empty:
         dist_names_with_stores = sorted(store_df["distributor_name"].dropna().unique().tolist())
-
-        # Store named ranges: one col per distributor_name
-        # NR_STORE_<distributor_name> → list of "store_code - store_name"
         for dist_name in dist_names_with_stores:
-            labels = (
+            labels = sorted(
                 store_df.loc[store_df["distributor_name"] == dist_name, "store_label"]
                 .dropna().unique().tolist()
             )
-            labels = sorted(labels)
             lk.cell(row=1, column=cur_col, value=f"__STORE_{dist_name}__")
             for i, lbl in enumerate(labels, start=2):
                 lk.cell(row=i, column=cur_col, value=lbl)
@@ -288,7 +276,7 @@ def _build_lookup_and_named_ranges(
             cur_col += 1
 
 
-# ─── Attach cascading DVs (distributor + store) ───────────────────────────────
+# ─── Attach cascading DVs ─────────────────────────────────────────────────────
 
 def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     def cl(name):
@@ -298,13 +286,12 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
         c = cl(name)
         return f"{c}{first_data}:{c}{last_data}"
 
-    asm_ref  = f"{cl('ASM')}{first_data}"
-    reg_ref  = f"{cl('Region')}{first_data}"
+    asm_ref = f"{cl('ASM')}{first_data}"
+    reg_ref = f"{cl('Region')}{first_data}"
 
-    # ── ASM ──────────────────────────────────────────────────────────────────
-    nm_all_asm = _safe_name("ALL_ASM")
+    # ASM
     dv_asm = DataValidation(
-        type="list", formula1=nm_all_asm, allow_blank=True,
+        type="list", formula1=_safe_name("ALL_ASM"), allow_blank=True,
         showInputMessage=True, promptTitle="Langkah 1 - ASM",
         prompt="Pilih nama ASM. Region dan Distributor akan menyesuaikan.",
         showErrorMessage=True, errorTitle="Input Tidak Valid",
@@ -313,7 +300,7 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     ws.add_data_validation(dv_asm)
     dv_asm.sqref = sqref("ASM")
 
-    # ── Region ────────────────────────────────────────────────────────────────
+    # Region
     asm_clean = _indirect_clean(asm_ref)
     dv_reg = DataValidation(
         type="list", formula1=f'INDIRECT("NR_"&{asm_clean})', allow_blank=True,
@@ -325,7 +312,7 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     ws.add_data_validation(dv_reg)
     dv_reg.sqref = sqref("Region")
 
-    # ── Nama Distributor ──────────────────────────────────────────────────────
+    # Nama Distributor
     reg_clean = _indirect_clean(reg_ref)
     dv_nama = DataValidation(
         type="list",
@@ -339,10 +326,10 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     ws.add_data_validation(dv_nama)
     dv_nama.sqref = sqref("Nama Distributor")
 
-    # ── Kode Toko (store cascade) — PJP only ──────────────────────────────────
+    # Kode Toko (PJP only)
     if "Kode Toko" in col_names:
-        nama_dist_ref   = f"{cl('Nama Distributor')}{first_data}"
-        dist_clean      = _indirect_clean(nama_dist_ref)
+        nama_dist_ref = f"{cl('Nama Distributor')}{first_data}"
+        dist_clean    = _indirect_clean(nama_dist_ref)
         dv_store = DataValidation(
             type="list",
             formula1=f'INDIRECT("NR_STORE_"&{dist_clean})',
@@ -367,7 +354,7 @@ def create_salesman_excel(
 ) -> BytesIO:
     wb = Workbook()
     wb.remove(wb.active)
-    _build_lookup_and_named_ranges(wb, dist_df)  # no store data needed for salesman
+    _build_lookup_and_named_ranges(wb, dist_df)
 
     ws = wb.create_sheet("Salesman Template")
 
@@ -381,29 +368,49 @@ def create_salesman_excel(
     CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor"}
 
     notes = {
-        "Nama Salesman":                                     "Teks bebas",
-        "Nama SPV External":                                 "Teks bebas (opsional)",
-        "Nama SPV Internal":                                 "Teks bebas",
-        "ASM":                                               "Langkah 1 - Pilih ASM dari dropdown",
-        "Region":                                            "Langkah 2 - Pilih Region (mengikuti ASM)",
-        "Nama Distributor":                                  "Langkah 3 - Pilih Distributor (mengikuti Region)",
-        "Kode Distributor":                                  "Otomatis terisi dari Nama Distributor",
-        "Status Salesman":                                   "Pilih: Mix atau Eksklusif",
-        "Total Outlet Coverage PJP":                         "Angka bulat",
-        "Gaji Pokok":                                        "Angka (Rupiah)",
-        "Tunjangan dan insentif":                            "Angka (Rupiah)",
-        "Tanggal Lahir":                                     "Isi tanggal dengan format YYYY-MM-DD (contoh: 2001-01-25)",
-        "Jenis Kelamin":                                     "Pilih: Male atau Female",
-        "Pendidikan Terakhir":                               "Pilih dari dropdown",
-        "Pengalaman di Perusahaan Sebelumnya (Dalam Bulan)": "Angka (bulan)",
-        "Principal Lain yang Ditanggungjawabi":              "Teks bebas (opsional)",
-        "No. HP":                                            "Angka, tanpa tanda hubung",
-        "Tanggal Join di G2G":                               "Isi tanggal dengan format YYYY-MM-DD (contoh: 2026-01-25)",
+        "Nama Salesman":
+            "Teks bebas",
+        "Nama SPV External":
+            "Teks bebas (opsional)",
+        "Nama SPV Internal":
+            "Teks bebas",
+        "ASM":
+            "Langkah 1 - Pilih ASM dari dropdown",
+        "Region":
+            "Langkah 2 - Pilih Region (mengikuti ASM)",
+        "Nama Distributor":
+            "Langkah 3 - Pilih Distributor (mengikuti Region)",
+        "Kode Distributor":
+            "Otomatis terisi dari Nama Distributor",
+        "Status Salesman":
+            "Pilih: Mix atau Eksklusif",
+        "Total Outlet Coverage PJP":
+            "Angka bulat",
+        "Gaji Pokok":
+            "Angka (Rupiah)",
+        "Tunjangan dan insentif":
+            "Angka (Rupiah)",
+        "Tanggal Lahir":
+            "Isi tanggal dengan format YYYY-MM-DD (contoh: 2001-01-25)",
+        "Jenis Kelamin":
+            "Pilih: Male atau Female",
+        "Pendidikan Terakhir":
+            "Pilih dari dropdown",
+        "Pengalaman di Perusahaan Sebelumnya (Dalam Bulan)":
+            "Angka (bulan)",
+        # Comma-separation hint for multiple principals
+        "Principal Lain yang Ditanggungjawabi":
+            "Teks bebas (opsional) — jika lebih dari satu, pisahkan dengan koma. Contoh: Unilever, P&G, Nestle",
+        "No. HP":
+            "Angka, tanpa tanda hubung",
+        "Tanggal Join di G2G":
+            "Isi tanggal dengan format YYYY-MM-DD (contoh: 2026-01-25)",
     }
 
     for ci, cn in enumerate(col_names, 1):
         cell = ws.cell(row=1, column=ci, value=notes.get(cn, ""))
-        cell.font = _note_font(); cell.alignment = _vcenter()
+        cell.font = _note_font()
+        cell.alignment = _vcenter(wrap=True)
 
     for ci, cn in enumerate(col_names, 1):
         if col_req[cn]:
@@ -417,12 +424,12 @@ def create_salesman_excel(
         cell.alignment = _center()
         cell.border    = _thin_border()
 
-    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[1].height = 42   # taller row to show wrapped note text
     ws.row_dimensions[2].height = 16
     ws.row_dimensions[3].height = 44
     ws.freeze_panes = "A4"
 
-    widths = [22, 22, 22, 22, 24, 30, 20, 16, 22, 16, 22, 18, 14, 20, 38, 32, 16, 20]
+    widths = [22, 22, 22, 22, 24, 30, 20, 16, 22, 16, 22, 18, 14, 20, 38, 42, 16, 20]
     for ci, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
@@ -483,6 +490,20 @@ def create_salesman_excel(
         f"{cl_lahir}{FIRST_DATA}:{cl_lahir}{LAST_DATA} "
         f"{cl_join}{FIRST_DATA}:{cl_join}{LAST_DATA}"
     )
+
+    # Input-message tooltip on Principal Lain (comma-separation reminder)
+    principal_cl = col_letter("Principal Lain yang Ditanggungjawabi")
+    principal_dv = DataValidation(
+        type="custom",
+        formula1=f'LEN({principal_cl}{FIRST_DATA})>=0',  # always passes
+        allow_blank=True,
+        showInputMessage=True,
+        promptTitle="Principal Lain (opsional)",
+        prompt="Jika lebih dari satu principal, pisahkan dengan koma.\nContoh: Unilever, P&G, Nestle",
+        showErrorMessage=False,
+    )
+    ws.add_data_validation(principal_dv)
+    principal_dv.sqref = dr("Principal Lain yang Ditanggungjawabi")
 
     nama_cl = col_letter("Nama Distributor")
 
@@ -561,22 +582,33 @@ def create_pjp_excel(
     CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor", "Kode Toko"}
 
     notes_pjp = {
-        "ASM":                                               "Langkah 1 - Pilih ASM dari dropdown",
-        "Region":                                            "Langkah 2 - Pilih Region (mengikuti ASM)",
-        "Nama Distributor":                                  "Langkah 3 - Pilih Distributor (mengikuti Region)",
-        "Kode Distributor":                                  "Otomatis terisi dari Nama Distributor",
-        "Nama Salesman":                                     "Teks bebas",
-        "Kode Toko":                                         "Langkah 4 - Pilih Kode Toko (mengikuti Distributor)",
-        "Hari":                                              "Drop down dengan opsi hari",
-        "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap":  "Drop down: ganjil / genap / ganjil+genap",
-        "Frekuensi":                                         "Drop down dengan opsi F4, F2, F1",
+        "ASM":
+            "Langkah 1 - Pilih ASM dari dropdown",
+        "Region":
+            "Langkah 2 - Pilih Region (mengikuti ASM)",
+        "Nama Distributor":
+            "Langkah 3 - Pilih Distributor (mengikuti Region)",
+        "Kode Distributor":
+            "Otomatis terisi dari Nama Distributor",
+        "Nama Salesman":
+            "Teks bebas",
+        "Kode Toko":
+            "Langkah 4 - Pilih Kode Toko (mengikuti Distributor)",
+        "Hari":
+            "Drop down dengan opsi hari",
+        "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap":
+            "Drop down: ganjil / genap / ganjil+genap",
+        # F4/F2/F1 descriptions shown in the note row
+        "Frekuensi":
+            "F4 = 1 minggu sekali  |  F2 = 2 minggu sekali  |  F1 = 1 bulan sekali",
     }
 
     ws = wb.create_sheet("PJP Template")
 
     for ci, cn in enumerate(col_names, 1):
         cell = ws.cell(row=1, column=ci, value=notes_pjp.get(cn, ""))
-        cell.font = _note_font(); cell.alignment = _vcenter()
+        cell.font = _note_font()
+        cell.alignment = _vcenter(wrap=True)
 
     for ci, cn in enumerate(col_names, 1):
         if col_req.get(cn):
@@ -590,12 +622,12 @@ def create_pjp_excel(
         cell.alignment = _center()
         cell.border    = _thin_border()
 
-    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[1].height = 42   # taller row for wrapped note text
     ws.row_dimensions[2].height = 16
     ws.row_dimensions[3].height = 44
     ws.freeze_panes = "A4"
 
-    widths = [22, 24, 30, 20, 22, 30, 12, 40, 12]
+    widths = [22, 24, 30, 20, 22, 30, 12, 40, 22]
     for ci, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
@@ -610,7 +642,6 @@ def create_pjp_excel(
     for col_name, opts in [
         ("Hari",                                              DAY_OPTIONS),
         ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap", WEEK_OPTIONS),
-        ("Frekuensi",                                         FREQUENCY_OPTIONS),
     ]:
         dv = DataValidation(
             type="list", formula1='"' + ",".join(opts) + '"', allow_blank=True,
@@ -619,6 +650,26 @@ def create_pjp_excel(
             error="Pilih nilai dari daftar dropdown.",
         )
         ws.add_data_validation(dv); dv.sqref = dr(col_name)
+
+    # Frekuensi dropdown with F4/F2/F1 descriptions in the prompt tooltip
+    frekuensi_dv = DataValidation(
+        type="list",
+        formula1='"' + ",".join(FREQUENCY_OPTIONS) + '"',
+        allow_blank=True,
+        showInputMessage=True,
+        promptTitle="Frekuensi Kunjungan",
+        prompt=(
+            "Pilih frekuensi kunjungan:\n"
+            "  F4 = 1 minggu sekali\n"
+            "  F2 = 2 minggu sekali\n"
+            "  F1 = 1 bulan sekali"
+        ),
+        showErrorMessage=True,
+        errorTitle="Input Tidak Valid",
+        error="Pilih F4, F2, atau F1.",
+    )
+    ws.add_data_validation(frekuensi_dv)
+    frekuensi_dv.sqref = dr("Frekuensi")
 
     nama_cl      = col_letter("Nama Distributor")
     df_reindexed = df.reindex(columns=col_names)
@@ -667,16 +718,13 @@ def normalize_phone_id(phone) -> str:
     if phone is None:
         return ""
     hp = str(phone).strip().replace(" ", "").replace("-", "").rstrip(".0")
-    # Remove duplicate +62 if exists
     if hp.startswith("+62+62"):
-        hp = hp[3:]  # Remove first +62
-    if hp.startswith("+62"):  
-        # Validate length after +62 (should be 8-13 digits)
+        hp = hp[3:]
+    if hp.startswith("+62"):
         digits_after = hp[3:]
         if digits_after.isdigit() and 8 <= len(digits_after) <= 13:
             return hp
-        else:
-            return hp  # Return as is, will be caught by validation
+        return hp
     if hp.startswith("62"):
         if hp[2:].isdigit() and 8 <= len(hp[2:]) <= 13:
             return "+" + hp
@@ -704,21 +752,14 @@ def _get_unique_distributors(df: pd.DataFrame, col: str = "Kode Distributor") ->
 
 
 def validate_row_completeness(df: pd.DataFrame, required_cols: list, sheet_label: str) -> list:
-    """
-    For every non-empty row, check that ALL required columns are filled.
-    A row is considered non-empty if at least one required cell has a value.
-    Returns a list of error strings.
-    """
     errors = []
     for i, row in df.iterrows():
         n = i + 1
-        values = {c: row.get(c, "") for c in required_cols}
+        values    = {c: row.get(c, "") for c in required_cols}
         non_empty = [c for c, v in values.items() if not _is_empty(v)]
         empty     = [c for c, v in values.items() if _is_empty(v)]
         if non_empty and empty:
-            errors.append(
-                f"Baris {n}: kolom wajib belum terisi — {', '.join(empty)}"
-            )
+            errors.append(f"Baris {n}: kolom wajib belum terisi — {', '.join(empty)}")
     return errors
 
 
@@ -729,7 +770,6 @@ def validate_salesman_df(df, distributor_map, asm_options, region_options):
         errors.append(f"Kolom wajib tidak ditemukan: {', '.join(missing)}")
         return errors, warnings
 
-    # Row completeness check
     errors += validate_row_completeness(df, SALESMAN_REQUIRED, "Salesman")
 
     unique_dist = _get_unique_distributors(df)
@@ -768,16 +808,12 @@ def validate_salesman_df(df, distributor_map, asm_options, region_options):
                 except: errors.append(f"Baris {n}: '{nc}' harus berupa angka")
 
         hp = str(row.get("No. HP", "")).strip().rstrip(".0")
-        # More strict validation for phone number
         if hp:
-            # Remove +62 prefix for validation if present
             hp_clean = hp
             if hp_clean.startswith("+62"):
                 hp_clean = hp_clean[3:]
             elif hp_clean.startswith("62"):
                 hp_clean = hp_clean[2:]
-            
-            # Check if it's all digits and length between 8-13
             if not hp_clean.isdigit():
                 warnings.append(f"Baris {n}: No. HP '{hp}' harus hanya berisi angka (8-15 digit)")
             elif len(hp_clean) < 8 or len(hp_clean) > 13:
@@ -795,7 +831,6 @@ def validate_pjp_df(df, distributor_map, store_df: pd.DataFrame | None = None):
         errors.append(f"Kolom wajib tidak ditemukan: {', '.join(missing)}")
         return errors, warnings
 
-    # Row completeness check
     errors += validate_row_completeness(df, PJP_REQUIRED, "PJP")
 
     unique_dist = _get_unique_distributors(df)
@@ -806,7 +841,6 @@ def validate_pjp_df(df, distributor_map, store_df: pd.DataFrame | None = None):
         )
         return errors, warnings
 
-    # Build valid store labels per distributor for validation
     valid_store_labels = set()
     if store_df is not None and not store_df.empty:
         valid_store_labels = set(store_df["store_label"].dropna().tolist())
@@ -817,7 +851,6 @@ def validate_pjp_df(df, distributor_map, store_df: pd.DataFrame | None = None):
         if kode and kode not in distributor_map:
             errors.append(f"Baris {n}: Kode Distributor '{kode}' tidak valid")
 
-        # Kode Toko must be a valid "store_code - store_name" label
         kode_toko = str(row.get("Kode Toko", "")).strip()
         if kode_toko and valid_store_labels and kode_toko not in valid_store_labels:
             warnings.append(f"Baris {n}: Kode Toko '{kode_toko}' tidak ditemukan di master store")
@@ -838,7 +871,6 @@ def read_template_sheet(uploaded_file, sheet_name, header_row, distributor_map, 
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=header_row)
     df = df.dropna(how="all")
 
-    # Re-derive Kode Distributor from Nama Distributor
     name_to_code = {v: k for k, v in distributor_map.items()}
     if "Nama Distributor" in df.columns:
         df["Kode Distributor"] = df["Nama Distributor"].apply(
@@ -853,7 +885,6 @@ def read_template_sheet(uploaded_file, sheet_name, header_row, distributor_map, 
 
 # ─── BigQuery writer ──────────────────────────────────────────────────────────
 
-# BQ column name mapping: DataFrame column → BigQuery field name (snake_case, safe)
 _SAL_COL_MAP = {
     "Nama Salesman":                                     "nama_salesman",
     "Nama SPV External":                                 "nama_spv_external",
@@ -889,23 +920,13 @@ _PJP_COL_MAP = {
 
 
 def push_to_bigquery(df: pd.DataFrame, col_map: dict, table_id: str) -> tuple[bool, str]:
-    """
-    Push DataFrame to BigQuery (WRITE_APPEND — adds rows to existing table).
-    col_map maps DataFrame column names → BQ field names.
-    Returns (success: bool, message: str).
-    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
-
         existing_cols = {c: col_map[c] for c in col_map if c in df.columns}
         bq_df = df[list(existing_cols.keys())].rename(columns=existing_cols).copy()
         bq_df["uploaded_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-
-        job_config = bigquery.LoadJobConfig(
-            write_disposition="WRITE_APPEND",
-            autodetect=True,
-        )
+        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND", autodetect=True)
         job = client.load_table_from_dataframe(bq_df, table_id, job_config=job_config)
         job.result()
         return True, f"Berhasil menyimpan {len(bq_df)} baris ke `{table_id}`."
@@ -914,11 +935,6 @@ def push_to_bigquery(df: pd.DataFrame, col_map: dict, table_id: str) -> tuple[bo
 
 
 def check_distributor_submitted(kode_distributor: str, table_id: str) -> tuple[bool, str]:
-    """
-    Check if kode_distributor already exists in the given BQ table.
-    Returns (already_submitted: bool, error_or_empty_msg: str).
-    If the table doesn't exist yet, returns (False, "").
-    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
@@ -928,19 +944,15 @@ def check_distributor_submitted(kode_distributor: str, table_id: str) -> tuple[b
             WHERE UPPER(kode_distributor) = UPPER(@kode)
         """
         job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("kode", "STRING", kode_distributor)
-            ]
+            query_parameters=[bigquery.ScalarQueryParameter("kode", "STRING", kode_distributor)]
         )
         result = client.query(query, job_config=job_config).result()
         cnt = next(iter(result))["cnt"]
         return (cnt > 0), ""
     except Exception as e:
         err = str(e)
-        # Table doesn't exist yet → treat as not submitted
         if "Not found" in err or "notFound" in err or "does not exist" in err.lower():
             return False, ""
-        # Any other error → surface it
         return False, f"Gagal memeriksa riwayat submission: {err}"
 
 
@@ -958,7 +970,6 @@ except Exception as e:
     st.error(f"Gagal memuat data dari Database: {e}")
     st.stop()
 
-# Comprehensive instructions (compact version)
 with st.expander("📖 **PANDUAN SINGKAT**", expanded=False):
     st.markdown("""
     ### ⚡ ATURAN DASAR:
@@ -966,19 +977,21 @@ with st.expander("📖 **PANDUAN SINGKAT**", expanded=False):
     - **1 distributor = 1 kali submit** (tidak bisa ulang)
     - **Semua kolom "Wajib Diisi" harus terisi**
     - **Jangan edit kolom "Kode Distributor"** (otomatis)
-    
+
     ### 🔄 URUTAN DROPDOWN BERTINGKAT (WAJIB!):
     1. **ASM** → 2. **Region** → 3. **Nama Distributor** → 4. **(PJP) Kode Toko**
-    
+
     ### ✅ FORMAT DATA YANG BENAR:
     - **Tanggal**: Isi manual dengan format YYYY-MM-DD (contoh: 2001-01-25)
     - **Angka**: Hanya angka (contoh: 5000000)
     - **No. HP**: 8-13 digit, contoh: `08123456789` atau `+628123456789`
-    
+    - **Principal Lain**: Jika lebih dari satu, pisahkan dengan koma — contoh: `Unilever, P&G, Nestle`
+    - **Frekuensi PJP**: F4 = 1 minggu sekali | F2 = 2 minggu sekali | F1 = 1 bulan sekali
+
     ### ❌ UPLOAD DITOLAK JIKA:
     - Ada **error** (merah) ATAU **peringatan** (kuning)
     - Perbaiki semua masalah, lalu upload ulang
-    
+
     ### 📞 BUTUH BANTUAN?
     Hubungi tim support G2G
     """)
@@ -1020,18 +1033,17 @@ with tab_download:
 # ─── Tab: Upload & Validasi ───────────────────────────────────────────────────
 with tab_upload:
     st.header("📤 Upload & Validasi Template")
-    
-    # Warning banner
+
     st.warning("""
     ⚠️ **PERHATIAN:**
     - 1 file = 1 distributor | 1 distributor = 1 kali submit
     - **Data TIDAK BISA diupload jika masih ada error ATAU peringatan**
     - Perbaiki semua masalah di file Excel, lalu upload ulang
     """)
-    
+
     st.info(
         "Upload file Excel yang sudah diisi. "
-        "Harus mengandung sheet **'Salesman Template'** dan/atau **'PJP Template'**. "
+        "Harus mengandung sheet **'Salesman Template'** dan/atau **'PJP Template'**."
     )
 
     uploaded = st.file_uploader("Pilih file Excel (.xlsx)", type=["xlsx"], key="main_uploader")
@@ -1057,10 +1069,7 @@ with tab_upload:
 
         sal_errors = sal_warnings = pjp_errors = pjp_warnings = []
         sal_df = pjp_df = pd.DataFrame()
-        
-        # Flags for blocking upload
-        sal_can_upload = True
-        pjp_can_upload = True
+        sal_can_upload = pjp_can_upload = True
 
         if has_salesman:
             st.markdown("---")
@@ -1083,24 +1092,19 @@ with tab_upload:
                 sal_errors, sal_warnings = validate_salesman_df(
                     sal_df, distributor_map, asm_options, region_options
                 )
-                
-                # Check if there are errors OR warnings
+
                 if sal_errors or sal_warnings:
                     sal_can_upload = False
                     if sal_errors:
                         st.error(f"**❌ {len(sal_errors)} ERROR - Data TIDAK BISA diupload:**")
-                        for e in sal_errors: 
-                            st.markdown(f"- {e}")
+                        for e in sal_errors: st.markdown(f"- {e}")
                     if sal_warnings:
                         st.warning(f"**⚠️ {len(sal_warnings)} PERINGATAN - Data TIDAK BISA diupload sampai peringatan diperbaiki:**")
-                        for w in sal_warnings: 
-                            st.markdown(f"- {w}")
-                        # Show specific instruction to fix warnings
+                        for w in sal_warnings: st.markdown(f"- {w}")
                         if any("No. HP" in w for w in sal_warnings):
                             st.info("📝 **Cara memperbaiki No. HP:**\n"
-                                   "- Gunakan format: 08123456789 atau +628123456789\n"
-                                   "- Jangan: +624552525235 (kelebihan +62)\n"
-                                   "- Perbaiki di file Excel, lalu upload ulang")
+                                    "- Gunakan format: 08123456789 atau +628123456789\n"
+                                    "- Perbaiki di file Excel, lalu upload ulang")
                 else:
                     st.success("✅ Validasi Salesman berhasil! Data siap diupload.")
 
@@ -1128,18 +1132,15 @@ with tab_upload:
                     st.dataframe(pjp_df, use_container_width=True, hide_index=True)
 
                 pjp_errors, pjp_warnings = validate_pjp_df(pjp_df, distributor_map, store_df)
-                
-                # Check if there are errors OR warnings
+
                 if pjp_errors or pjp_warnings:
                     pjp_can_upload = False
                     if pjp_errors:
                         st.error(f"**❌ {len(pjp_errors)} ERROR - Data TIDAK BISA diupload:**")
-                        for e in pjp_errors: 
-                            st.markdown(f"- {e}")
+                        for e in pjp_errors: st.markdown(f"- {e}")
                     if pjp_warnings:
                         st.warning(f"**⚠️ {len(pjp_warnings)} PERINGATAN - Data TIDAK BISA diupload sampai peringatan diperbaiki:**")
-                        for w in pjp_warnings: 
-                            st.markdown(f"- {w}")
+                        for w in pjp_warnings: st.markdown(f"- {w}")
                 else:
                     st.success("✅ Validasi PJP berhasil! Data siap diupload.")
 
@@ -1155,14 +1156,12 @@ with tab_upload:
                 c3.metric("Status", "✅ Siap Upload")
             else:
                 c3.metric("Status", "❌ Ada Error/Peringatan - Perbaiki Data")
-        
-        # Submission buttons with blockers
+
         st.markdown("---")
         st.subheader("☁️ Upload ke Database")
-        
-        # Salesman submission
+
         if has_salesman and not sal_df.empty:
-            sal_kode = str(sal_df["Kode Distributor"].iloc[0]).strip()
+            sal_kode  = str(sal_df["Kode Distributor"].iloc[0]).strip()
             SAL_TABLE = "skintific-data-warehouse.gt_schema.gt_master_salesman"
             already_sal, chk_err_sal = check_distributor_submitted(sal_kode, SAL_TABLE)
 
@@ -1177,7 +1176,6 @@ with tab_upload:
                 )
                 sal_can_upload = False
             else:
-                # Only show button if NO errors AND NO warnings
                 if sal_can_upload and not sal_errors and not sal_warnings:
                     if st.button("☁️ Simpan Salesman ke Database", key="bq_sal", type="primary"):
                         with st.spinner("Menyimpan data Salesman ke Database..."):
@@ -1195,10 +1193,9 @@ with tab_upload:
                         st.info("Perbaiki semua peringatan di file Excel, lalu upload ulang.")
                     else:
                         st.warning("⚠️ Data Salesman belum siap diupload. Perbaiki masalah yang ditemukan.")
-        
-        # PJP submission
+
         if has_pjp and not pjp_df.empty:
-            pjp_kode = str(pjp_df["Kode Distributor"].iloc[0]).strip()
+            pjp_kode  = str(pjp_df["Kode Distributor"].iloc[0]).strip()
             PJP_TABLE = "skintific-data-warehouse.gt_schema.gt_master_salesman_pjp"
             already_pjp, chk_err_pjp = check_distributor_submitted(pjp_kode, PJP_TABLE)
 
@@ -1213,7 +1210,6 @@ with tab_upload:
                 )
                 pjp_can_upload = False
             else:
-                # Only show button if NO errors AND NO warnings
                 if pjp_can_upload and not pjp_errors and not pjp_warnings:
                     if st.button("☁️ Simpan PJP ke Database", key="bq_pjp", type="primary"):
                         with st.spinner("Menyimpan data PJP ke Database..."):
