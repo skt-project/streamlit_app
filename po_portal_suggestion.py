@@ -582,6 +582,8 @@ if uploaded_file:
     # Prepare payload
     records = df_upload[final_cols].to_dict("records")
 
+    st.write(df_upload.dtypes)
+    st.write(df_upload.head())
     # --------------------------------------------------
     # INSERT TO BIGQUERY
     # --------------------------------------------------
@@ -595,6 +597,7 @@ if uploaded_file:
 
         if errors:
             st.error("❌ Failed to insert feedback")
-            st.json(errors)
+            for err in errors:
+                st.write(err)
         else:
             st.success("✅ Feedback successfully submitted")
