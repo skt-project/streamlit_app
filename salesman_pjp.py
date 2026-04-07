@@ -133,7 +133,7 @@ PJP_COLS = [
     ("Nama Distributor",                                    True,  "cascade"),
     ("Kode Distributor",                                    True,  "auto"),
     ("Nama Salesman",                                       True,  "text"),
-    ("Kode Toko",                                           True,  "store_cascade"),
+    ("Toko",                                                True,  "store_cascade"),
     ("Hari",                                                True,  "dropdown"),
     ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap",    True,  "dropdown"),
     ("Frekuensi",                                           True,  "dropdown"),
@@ -326,21 +326,21 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     ws.add_data_validation(dv_nama)
     dv_nama.sqref = sqref("Nama Distributor")
 
-    # Kode Toko (PJP only)
-    if "Kode Toko" in col_names:
+    # Toko (PJP only)
+    if "Toko" in col_names:
         nama_dist_ref = f"{cl('Nama Distributor')}{first_data}"
         dist_clean    = _indirect_clean(nama_dist_ref)
         dv_store = DataValidation(
             type="list",
             formula1=f'INDIRECT("NR_STORE_"&{dist_clean})',
             allow_blank=True,
-            showInputMessage=True, promptTitle="Langkah 4 - Kode Toko",
-            prompt="Pilih Kode Toko. Daftar disesuaikan dengan Distributor yang dipilih.",
+            showInputMessage=True, promptTitle="Langkah 4 - Toko",
+            prompt="Pilih Toko. Daftar disesuaikan dengan Distributor yang dipilih.",
             showErrorMessage=True, errorTitle="Input Tidak Valid",
-            error="Pilih Kode Toko dari daftar. Pastikan Nama Distributor sudah dipilih.",
+            error="Pilih Toko dari daftar. Pastikan Nama Distributor sudah dipilih.",
         )
         ws.add_data_validation(dv_store)
-        dv_store.sqref = sqref("Kode Toko")
+        dv_store.sqref = sqref("Toko")
 
 
 # ─── Salesman Excel ───────────────────────────────────────────────────────────
@@ -579,7 +579,7 @@ def create_pjp_excel(
     FIRST_DATA = 4
     LAST_DATA  = 1003
 
-    CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor", "Kode Toko"}
+    CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor", "Toko"}
 
     notes_pjp = {
         "ASM":
@@ -592,8 +592,8 @@ def create_pjp_excel(
             "Otomatis terisi dari Nama Distributor",
         "Nama Salesman":
             "Teks bebas",
-        "Kode Toko":
-            "Langkah 4 - Pilih Kode Toko (mengikuti Distributor)",
+        "Toko":
+            "Langkah 4 - Pilih Toko (mengikuti Distributor)",
         "Hari":
             "Drop down dengan opsi hari",
         "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap":
@@ -851,9 +851,9 @@ def validate_pjp_df(df, distributor_map, store_df: pd.DataFrame | None = None):
         if kode and kode not in distributor_map:
             errors.append(f"Baris {n}: Kode Distributor '{kode}' tidak valid")
 
-        kode_toko = str(row.get("Kode Toko", "")).strip()
-        if kode_toko and valid_store_labels and kode_toko not in valid_store_labels:
-            warnings.append(f"Baris {n}: Kode Toko '{kode_toko}' tidak ditemukan di master store")
+        toko = str(row.get("Toko", "")).strip()
+        if toko and valid_store_labels and toko not in valid_store_labels:
+            warnings.append(f"Baris {n}: Toko '{toko}' tidak ditemukan di master store")
 
         for col, opts in [
             ("Hari",                                              DAY_OPTIONS),
@@ -912,7 +912,7 @@ _PJP_COL_MAP = {
     "Nama Distributor":                                  "nama_distributor",
     "Kode Distributor":                                  "kode_distributor",
     "Nama Salesman":                                     "nama_salesman",
-    "Kode Toko":                                         "kode_toko",
+    "Toko":                                              "kode_toko",
     "Hari":                                              "hari",
     "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap":  "minggu",
     "Frekuensi":                                         "frekuensi",
@@ -979,7 +979,7 @@ with st.expander("📖 **PANDUAN SINGKAT**", expanded=False):
     - **Jangan edit kolom "Kode Distributor"** (otomatis)
 
     ### 🔄 URUTAN DROPDOWN BERTINGKAT (WAJIB!):
-    1. **ASM** → 2. **Region** → 3. **Nama Distributor** → 4. **(PJP) Kode Toko**
+    1. **ASM** → 2. **Region** → 3. **Nama Distributor** → 4. **(PJP) Toko**
 
     ### ✅ FORMAT DATA YANG BENAR:
     - **Tanggal**: Isi manual dengan format YYYY-MM-DD (contoh: 2001-01-25)
