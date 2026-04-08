@@ -20,7 +20,7 @@ st.title("📋 Distributor Operational Assessment Form")
 # MONTH YEAR SELECTION
 # =====================================================
 current_year = datetime.now().year
-years = [current_year - 1, current_year, current_year + 1]
+years = [current_year, current_year + 1]
 
 months = [
     "January", "February", "March", "April", "May", "June",
