@@ -465,7 +465,7 @@ if (
                 rows_to_insert.append({
                     "submission_id": submission_id,
                     "submitted_at": submitted_at,
-                    "representative_name": representative_name.strip(),
+                    "representative_name": representative_name.strip().upper(),
                     "region": region,
                     "distributor": distributor,
                     "metric": question,
@@ -505,11 +505,13 @@ if (
 
                     if grade in do_not_exist_grades:
                         name = None
+                    else:
+                        name = name.upper()
 
                     rows_to_insert.append({
                         "submission_id": submission_id,
                         "submitted_at": submitted_at,
-                        "representative_name": representative_name.strip(),
+                        "representative_name": representative_name.strip().upper(),
                         "region": region,
                         "distributor": distributor,
                         "metric": question,
@@ -530,11 +532,13 @@ if (
 
                 if grade in do_not_exist_grades:
                     raw_name = None
+                else:
+                    raw_name = raw_name.upper()
 
                 rows_to_insert.append({
                     "submission_id": submission_id,
                     "submitted_at": submitted_at,
-                    "representative_name": representative_name.strip(),
+                    "representative_name": representative_name.strip().upper(),
                     "region": region,
                     "distributor": distributor,
                     "metric": question,
