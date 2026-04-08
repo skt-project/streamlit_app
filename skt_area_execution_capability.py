@@ -199,8 +199,8 @@ questions = {
     },
     "BAD STOCK HANDLING PERFORMANCE": {
         "A": ("100% compliance", 2),
-        "B": ("≥ 90%", 1),
-        "C": ("< 70%", 0),
+        "B": ("≥ 80%", 1),
+        "C": ("< 80%", 0),
     },
     "BANK GUARANTEE UPDATE COMPLIANCE": {
         "A": ("100% BG updated within agreed timeline", 4),
