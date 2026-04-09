@@ -104,10 +104,6 @@ GENDER_OPTIONS    = ["Male", "Female"]
 EDUCATION_OPTIONS = ["SD", "SMP", "SMA", "S1", "S2"]
 DAY_OPTIONS       = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
 WEEK_OPTIONS      = ["Minggu Ganjil", "Minggu Genap", "Minggu Ganjil + Genap"]
-# F4+ = lebih dari 1 kali dalam seminggu
-# F4  = 1 minggu sekali
-# F2  = 2 minggu sekali
-# F1  = 1 bulan sekali
 FREQUENCY_OPTIONS = ["F4+", "F4", "F2", "F1"]
 
 SALESMAN_COLS = [
@@ -131,7 +127,6 @@ SALESMAN_COLS = [
     ("Tanggal Join di G2G",                                 True,  "date"),
 ]
 
-# "Toko" split into "Kode Toko" (user selects from dropdown) + "Nama Toko" (auto-filled)
 PJP_COLS = [
     ("ASM",                                                 True,  "cascade"),
     ("Region",                                              True,  "cascade"),
@@ -206,7 +201,6 @@ def _build_lookup_and_named_ranges(
     asm_list = sorted(dist_df["asm"].dropna().unique().tolist())
     cur_col  = 1
 
-    # Col A: all ASMs
     lk.cell(row=1, column=cur_col, value="__ALL_ASM__")
     for i, asm in enumerate(asm_list, start=2):
         lk.cell(row=i, column=cur_col, value=asm)
@@ -215,7 +209,6 @@ def _build_lookup_and_named_ranges(
     wb.defined_names[nm] = DefinedName(nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(asm_list)}")
     cur_col += 1
 
-    # One col per ASM: its regions
     for asm in asm_list:
         regions = sorted(dist_df.loc[dist_df["asm"] == asm, "region"].unique().tolist())
         lk.cell(row=1, column=cur_col, value=f"__ASM_{asm}__")
@@ -226,7 +219,6 @@ def _build_lookup_and_named_ranges(
         wb.defined_names[nm] = DefinedName(nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(regions)}")
         cur_col += 1
 
-    # One col per (ASM, Region): distributor names
     for asm in asm_list:
         regions = sorted(dist_df.loc[dist_df["asm"] == asm, "region"].unique().tolist())
         for region in regions:
@@ -240,7 +232,6 @@ def _build_lookup_and_named_ranges(
             wb.defined_names[nm] = DefinedName(nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(names)}")
             cur_col += 1
 
-    # Two-col block: distributor_name | distributor_code (NR_DIST_LOOKUP)
     name_col = cur_col
     code_col = cur_col + 1
     lk.cell(row=1, column=name_col, value="__DIST_NAME__")
@@ -263,9 +254,7 @@ def _build_lookup_and_named_ranges(
     )
     cur_col += 2
 
-    # Store named ranges + store code→name lookup table
     if store_df is not None and not store_df.empty:
-        # Per-distributor: one col of store_codes (for Kode Toko dropdown)
         dist_names_with_stores = sorted(store_df["distributor_name"].dropna().unique().tolist())
         for dist_name in dist_names_with_stores:
             codes = sorted(
@@ -282,7 +271,6 @@ def _build_lookup_and_named_ranges(
             )
             cur_col += 1
 
-        # Two-col block: store_code | store_name (NR_STORE_LOOKUP) for Nama Toko VLOOKUP
         sc_col = cur_col
         sn_col = cur_col + 1
         lk.cell(row=1, column=sc_col, value="__STORE_CODE__")
@@ -319,7 +307,6 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     asm_ref = f"{cl('ASM')}{first_data}"
     reg_ref = f"{cl('Region')}{first_data}"
 
-    # ASM
     dv_asm = DataValidation(
         type="list", formula1=_safe_name("ALL_ASM"), allow_blank=True,
         showInputMessage=True, promptTitle="Langkah 1 - ASM",
@@ -330,7 +317,6 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     ws.add_data_validation(dv_asm)
     dv_asm.sqref = sqref("ASM")
 
-    # Region
     asm_clean = _indirect_clean(asm_ref)
     dv_reg = DataValidation(
         type="list", formula1=f'INDIRECT("NR_"&{asm_clean})', allow_blank=True,
@@ -342,7 +328,6 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     ws.add_data_validation(dv_reg)
     dv_reg.sqref = sqref("Region")
 
-    # Nama Distributor
     reg_clean = _indirect_clean(reg_ref)
     dv_nama = DataValidation(
         type="list",
@@ -356,7 +341,6 @@ def _attach_cascade_dvs(ws, col_names: list, first_data: int, last_data: int):
     ws.add_data_validation(dv_nama)
     dv_nama.sqref = sqref("Nama Distributor")
 
-    # Kode Toko (PJP only) — dropdown of store codes filtered by distributor
     if "Kode Toko" in col_names:
         nama_dist_ref = f"{cl('Nama Distributor')}{first_data}"
         dist_clean    = _indirect_clean(nama_dist_ref)
@@ -680,7 +664,6 @@ def create_pjp_excel(
         )
         ws.add_data_validation(dv); dv.sqref = dr(col_name)
 
-    # Frekuensi dropdown — now includes F4+
     frekuensi_dv = DataValidation(
         type="list",
         formula1='"' + ",".join(FREQUENCY_OPTIONS) + '"',
@@ -713,7 +696,6 @@ def create_pjp_excel(
             cell  = ws.cell(row=excel_row, column=ci)
             ctype = col_types.get(cn, "text")
 
-            # ── Auto-filled / locked columns ────────────────────────────────
             if cn == "Kode Distributor":
                 cell.value = f'=IFERROR(VLOOKUP({nama_cl}{excel_row},NR_DIST_LOOKUP,2,0),"")'
                 cell.fill       = _fill("D6E4F0")
@@ -725,7 +707,6 @@ def create_pjp_excel(
                 continue
 
             if cn == "Nama Toko":
-                # VLOOKUP: Kode Toko → store name via NR_STORE_LOOKUP (col 2)
                 cell.value = (
                     f'=IFERROR(VLOOKUP({kode_toko_cl}{excel_row},NR_STORE_LOOKUP,2,0),"")'
                 )
@@ -737,7 +718,6 @@ def create_pjp_excel(
                 cell.protection = Protection(locked=True)
                 continue
 
-            # ── Regular editable columns ─────────────────────────────────────
             cell.number_format = "@"
             if has_data:
                 val = df_reindexed.iloc[dfi].get(cn, "")
@@ -923,7 +903,6 @@ def read_template_sheet(uploaded_file, sheet_name, header_row, distributor_map, 
             lambda x: name_to_code.get(str(x).strip(), "") if pd.notna(x) else ""
         )
 
-    # Auto-fill Nama Toko from Kode Toko when reading back PJP template
     if store_df is not None and "Kode Toko" in df.columns:
         code_to_name = dict(zip(store_df["store_code"], store_df["store_name"]))
         df["Nama Toko"] = df["Kode Toko"].apply(
@@ -983,7 +962,8 @@ def push_to_bigquery(df: pd.DataFrame, col_map: dict, table_id: str) -> tuple[bo
         job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND", autodetect=True)
         job = client.load_table_from_dataframe(bq_df, table_id, job_config=job_config)
         job.result()
-        return True, f"Berhasil menyimpan {len(bq_df)} baris ke `{table_id}`."
+        # ✅ Fixed: no table name in success message
+        return True, f"Berhasil menyimpan {len(bq_df)} baris ke Database."
     except Exception as e:
         return False, f"Gagal menyimpan ke Database: {e}"
 
@@ -1233,9 +1213,10 @@ with tab_upload:
                 if sal_can_upload and not sal_errors and not sal_warnings:
                     if st.button("☁️ Simpan Salesman ke Database", key="bq_sal", type="primary"):
                         with st.spinner("Menyimpan data Salesman ke Database..."):
-                            ok, msg = "Data tersimpan di Database"
+                            # ✅ Fixed: actually calls push_to_bigquery
+                            ok, msg = push_to_bigquery(sal_df, _SAL_COL_MAP, SAL_TABLE)
                         if ok:
-                            st.success(msg)
+                            st.success(f"✅ Berhasil menyimpan {len(sal_df)} baris data Salesman ke Database.")
                         else:
                             st.error(msg)
                 else:
@@ -1266,9 +1247,10 @@ with tab_upload:
                 if pjp_can_upload and not pjp_errors and not pjp_warnings:
                     if st.button("☁️ Simpan PJP ke Database", key="bq_pjp", type="primary"):
                         with st.spinner("Menyimpan data PJP ke Database..."):
-                            ok, msg = "Data tersimpan di Database"
+                            # ✅ Fixed: actually calls push_to_bigquery
+                            ok, msg = push_to_bigquery(pjp_df, _PJP_COL_MAP, PJP_TABLE)
                         if ok:
-                            st.success(msg)
+                            st.success(f"✅ Berhasil menyimpan {len(pjp_df)} baris data PJP ke Database.")
                         else:
                             st.error(msg)
                 else:
