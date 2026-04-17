@@ -783,7 +783,7 @@ def _get_unique_distributors(df: pd.DataFrame, col: str = "Kode Distributor") ->
 def validate_row_completeness(df: pd.DataFrame, required_cols: list, sheet_label: str) -> list:
     errors = []
     for i, row in df.iterrows():
-        n = i + 1
+        n = i + 4
         values    = {c: row.get(c, "") for c in required_cols}
         non_empty = [c for c, v in values.items() if not _is_empty(v)]
         empty     = [c for c, v in values.items() if _is_empty(v)]
@@ -810,7 +810,7 @@ def validate_salesman_df(df, distributor_map, asm_options, region_options):
         return errors, warnings
 
     for i, row in df.iterrows():
-        n = i + 1
+        n = i + 4
         if pd.notna(row.get("ASM")) and row["ASM"] not in asm_options:
             warnings.append(f"Baris {n}: ASM '{row['ASM']}' tidak ada di daftar")
         if pd.notna(row.get("Region")) and row["Region"] not in region_options:
@@ -875,7 +875,7 @@ def validate_pjp_df(df, distributor_map, store_df: pd.DataFrame | None = None):
         valid_store_codes = set(store_df["store_code"].dropna().tolist())
 
     for i, row in df.iterrows():
-        n = i + 1
+        n = i + 4
         kode = str(row.get("Kode Distributor", "")).strip()
         if kode and kode not in distributor_map:
             errors.append(f"Baris {n}: Kode Distributor '{kode}' tidak valid")
@@ -899,6 +899,18 @@ def validate_pjp_df(df, distributor_map, store_df: pd.DataFrame | None = None):
 def read_template_sheet(uploaded_file, sheet_name, header_row, distributor_map, store_df=None):
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=header_row)
     df = df.dropna(how="all")
+    
+    if "Hari" in df.columns:
+        df["Hari"] = df["Hari"].astype(str).str.strip().str.title()
+    
+    if "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap" in df.columns:
+        df["Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap"] = (
+            df["Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap"]
+            .astype(str).str.strip().str.title()
+        )
+    
+    if "Frekuensi" in df.columns:
+        df["Frekuensi"] = df["Frekuensi"].astype(str).str.strip().str.upper()
 
     name_to_code = {v: k for k, v in distributor_map.items()}
     if "Nama Distributor" in df.columns:
