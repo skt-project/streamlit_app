@@ -155,7 +155,10 @@ def _safe_name(text: str) -> str:
 
 
 def _indirect_clean(cell_ref: str) -> str:
-    special = [" ", "-", "/", "(", ")", "+", "&", "."]
+    # ✅ FIX: Added "'" (apostrophe) to the substitution list so that ASM names
+    # like "MUHAMAD SYARIFUDDIN MA'RIFATULLAH" are correctly sanitised at
+    # runtime to match the named-range keys produced by _safe_name().
+    special = [" ", "-", "/", "(", ")", "+", "&", ".", "'"]
     expr = cell_ref
     for ch in special:
         expr = f'SUBSTITUTE({expr},"{ch}","_")'
@@ -962,7 +965,6 @@ def push_to_bigquery(df: pd.DataFrame, col_map: dict, table_id: str) -> tuple[bo
         job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND", autodetect=True)
         job = client.load_table_from_dataframe(bq_df, table_id, job_config=job_config)
         job.result()
-        # ✅ Fixed: no table name in success message
         return True, f"Berhasil menyimpan {len(bq_df)} baris ke Database."
     except Exception as e:
         return False, f"Gagal menyimpan ke Database: {e}"
@@ -1213,7 +1215,6 @@ with tab_upload:
                 if sal_can_upload and not sal_errors and not sal_warnings:
                     if st.button("☁️ Simpan Salesman ke Database", key="bq_sal", type="primary"):
                         with st.spinner("Menyimpan data Salesman ke Database..."):
-                            # ✅ Fixed: actually calls push_to_bigquery
                             ok, msg = push_to_bigquery(sal_df, _SAL_COL_MAP, SAL_TABLE)
                         if ok:
                             st.success(f"✅ Berhasil menyimpan {len(sal_df)} baris data Salesman ke Database.")
@@ -1247,7 +1248,6 @@ with tab_upload:
                 if pjp_can_upload and not pjp_errors and not pjp_warnings:
                     if st.button("☁️ Simpan PJP ke Database", key="bq_pjp", type="primary"):
                         with st.spinner("Menyimpan data PJP ke Database..."):
-                            # ✅ Fixed: actually calls push_to_bigquery
                             ok, msg = push_to_bigquery(pjp_df, _PJP_COL_MAP, PJP_TABLE)
                         if ok:
                             st.success(f"✅ Berhasil menyimpan {len(pjp_df)} baris data PJP ke Database.")
