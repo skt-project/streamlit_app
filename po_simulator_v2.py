@@ -761,7 +761,7 @@ h1,h2,h3,h4,h5,h6 { color: #FFFFFF !important; }
 [data-testid="stSidebar"] input {
     background: rgba(255,255,255,0.1) !important;
     border: 1px solid rgba(255,255,255,0.2) !important;
-    color: #FFFFFF !important; border-radius: 8px !important;
+    color: #2D1B26 !important; border-radius: 8px !important;
 }
 [data-testid="stSidebar"] input::placeholder { color: rgba(255,255,255,0.4) !important; }
 [data-testid="stSidebar"] [data-baseweb="select"] > div {
