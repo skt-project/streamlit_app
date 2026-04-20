@@ -137,7 +137,7 @@ def _logo_src() -> str:
     if local.exists():
         b64 = base64.b64encode(local.read_bytes()).decode()
         return f"data:image/png;base64,{b64}"
-    return "https://glad2glow.com/cdn/shop/files/logo.png?height=628&pad_color=ffffff&v=1745724802&width=1200"
+    return "https://glad2glow.com/cdn/shop/files/logo.png?height=628&pad_color=ffff00&v=1745724802&width=1200"
 
 LOGO_URL = _logo_src()
 
@@ -1282,8 +1282,7 @@ with st.sidebar:
         st.rerun()
 
     st.markdown(
-        "<div style='text-align:center;color:rgba(255,255,255,0.25);font-size:0.62rem;margin-top:1rem;'>DataFlow v1.0 · Glad2Glow"
-        "<div style='text-align:center;color:rgba(255,255,255,0.25);font-size:0.62rem;margin-top:0.1rem;'> Created by shaltsa </div>",
+        "<div style='text-align:center;color:rgba(255,255,255,0.25);font-size:0.62rem;margin-top:1rem;'>DataFlow v1.0 · Glad2Glow",
         unsafe_allow_html=True
     )
 
