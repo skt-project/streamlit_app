@@ -653,7 +653,7 @@ def check_password():
         <style>
         body, p, div, span, label, input, button, h1, h2, h3, h4, h5, h6 { font-family: 'Trebuchet MS', sans-serif; }
         html, body, [data-testid="stAppViewContainer"] {
-            background: #f2c4d0 !important;
+            background: #fde8ef !important;
             min-height: 50vh;
         }
         [data-testid="stSidebar"] { display: none !important; }
