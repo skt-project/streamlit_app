@@ -3,4 +3,4 @@ primaryColor = "#E6656F"
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f0f2f6"
 textColor = "#262730"
-base = "light"  # This forces the Light Theme
+base = "dark"  # This forces the Light Theme
