@@ -18,3 +18,4 @@ reportlab
 bcrypt
 streamlit-js-eval
 pytz
+matplotlib
