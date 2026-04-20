@@ -713,7 +713,7 @@ def check_password():
 
             st.markdown("""
             <div style="text-align:center; margin-top:1.5rem; color:#6E253A; font-size:0.72rem;">
-                🌸 Secured with Streamlit Secrets &nbsp;·&nbsp; Glad2Glow
+                Glad2Glow
             </div>
             </div>
             """, unsafe_allow_html=True)
