@@ -137,7 +137,7 @@ def _logo_src() -> str:
     if local.exists():
         b64 = base64.b64encode(local.read_bytes()).decode()
         return f"data:image/png;base64,{b64}"
-    return "https://glad2glow.com/cdn/shop/files/logo.png?height=628&pad_color=00ffffff&v=1745724802&width=1200"
+    return "https://glad2glow.com/cdn/shop/files/logo.png?height=628&v=1745724802&width=1200"
 
 LOGO_URL = _logo_src()
 
