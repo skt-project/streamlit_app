@@ -928,7 +928,7 @@ hr { border-color: #E8EAED !important; margin: 1.2rem 0 !important; }
 .banner-stat-label { font-size: 0.78rem; color: rgba(255,255,255,0.55) !important; margin-top: 0.2rem; }
 </style>
 """
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+#st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 def detect_date_columns(df: pd.DataFrame) -> list:
     date_cols = []
