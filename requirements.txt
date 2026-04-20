@@ -19,3 +19,6 @@ bcrypt
 streamlit-js-eval
 pytz
 matplotlib
+xutils
+Pillow
+xlwt
