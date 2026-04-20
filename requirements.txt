@@ -19,5 +19,3 @@ bcrypt
 streamlit-js-eval
 pytz
 matplotlib
-openpyxl.utils.dataframe
-openpyxl.styles
