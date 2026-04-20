@@ -9,8 +9,11 @@ import base64
 import urllib.request
 from pathlib import Path
 import openpyxl
-
-# --- BigQuery Imports ---
+import numpy as np
+from typing import List
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils.dataframe import dataframe_to_rows
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 from google.oauth2 import service_account
@@ -26,18 +29,19 @@ except ImportError:
 st.set_page_config(
     page_title="DataFlow — Glad2Glow",
     layout="wide",
-    page_icon='📁',
+    page_icon= '📁',
     initial_sidebar_state="expanded",
 )
 
 DASHBOARD_URL_DEFAULT = "https://po-simulator.streamlit.app/"
 
 # Google Drive share link untuk po_template.xlsx
+# Format: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
 TEMPLATE_DRIVE_URL = "https://docs.google.com/spreadsheets/d/1FD2WN8PutkwzXXRYSj1jpA4EyxqzAfStyg2KC3grR30/edit?usp=sharing"
 
-# =========================
-# BigQuery Configuration
-# =========================
+BQ_DATASET = "rsa"
+BQ_TABLE = "stock_analysis"
+
 try:
     gcp_secrets = st.secrets["connections"]["bigquery"]
     private_key = gcp_secrets["private_key"].replace("\\n", "\n")
@@ -56,9 +60,19 @@ try:
         }
     )
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
+    
 except Exception:
-    _bq_credentials = None
+    #_bq_credentials = None
+    #GCP_PROJECT_ID = "skintific-data-warehouse"
+    # Fallback for local testing if secrets are not configured
+    GCP_CREDENTIALS_PATH = r"C:\Users\Shaltsa Nadya\Documents\try python\streamlit\skintific-data-warehouse-ea77119e2e7a.json"
     GCP_PROJECT_ID = "skintific-data-warehouse"
+    BQ_DATASET = "rsa"
+    BQ_TABLE = "stock_analysis"
+    _bq_credentials = service_account.Credentials.from_service_account_file(
+    GCP_CREDENTIALS_PATH
+    )
+
 
 
 @st.cache_resource(show_spinner=False)
@@ -90,14 +104,16 @@ CUSTOMER_NAMES = fetch_customer_names()
 
 def _drive_to_direct(url: str) -> str:
     """Convert Google Drive / Google Sheets share URL → direct download URL."""
+    # Google Sheets: export as xlsx
     m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
     if m:
         return f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=xlsx"
+    # Google Drive file: use usercontent domain (works for public files)
     m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
     if m:
         return f"https://drive.usercontent.google.com/download?id={m.group(1)}&export=download&authuser=0"
+    # Already a direct link — return as-is
     return url
-
 
 @st.cache_data(show_spinner=False)
 def _fetch_template_bytes(url: str) -> bytes:
@@ -116,14 +132,12 @@ def _fetch_template_bytes(url: str) -> bytes:
         )
     return data
 
-
 def _logo_src() -> str:
     local = Path(__file__).parent / "logo.png"
     if local.exists():
         b64 = base64.b64encode(local.read_bytes()).decode()
         return f"data:image/png;base64,{b64}"
     return "https://glad2glow.com/cdn/shop/files/logo.png?height=628&pad_color=ffffff&v=1745724802&width=1200"
-
 
 LOGO_URL = _logo_src()
 
@@ -139,6 +153,497 @@ PO_TEMPLATE_COLS = [
 
 PO_IMG_COLS = PO_TEMPLATE_COLS[6:13]
 PO_COLS_copy = PO_TEMPLATE_COLS[:13]
+#
+#CUSTOMER_NAMES = sorted([
+#    "CV ANDIRA DAHAYU", "CV BELIA BERKAT", "CV BELIA BERKAT ABADI",
+#    "CV BERKAT SEJAHTERA ABADI", "CV BORNEO RETAIL KOSMETIKA", "CV CECE",
+#    "CV CRISENDO DAMA DISTRINDO", "CV DEWI AYU ABADI", "CV DIMAS BLITAR",
+#    "CV DIMAS KEDIRI", "CV DIMAS MADIUN", "CV DIMAS MALANG",
+#    "CV DIMAS TULUNGAGUNG", "CV EKA", "CV GENDHIS RIAU GEMILANG",
+#    "CV GUDANG BAKUL KOSMETIK", "CV JAYATAMA", "CV JELITA COSMETIC",
+#    "CV KEVINDO JEMBER", "CV KEVINDO MALANG", "CV MITRA JAYA MANDIRI PRATAMA",
+#    "CV MITRA MAKMUR MANDIRI", "CV MITRA MAKMUR MANDIRI - BAU BAU",
+#    "CV MITRA MAKMUR MANDIRI - KENDARI", "CV MITRA MAKMUR MANDIRI - KOLAKA",
+#    "CV MITRA PEMENANG", "CV MITRA PEMENANG KUPANG", "CV MITRA SEKAWAN",
+#    "CV MUTIARA", "CV NATURAL BEAUTY INDONESIA",
+#    "CV NATURAL BEAUTY INDONESIA - PALANGKARAYA",
+#    "CV REJEKI MAKMUR KUPANG", "CV REJEKI MAKMUR MAUMERE",
+#    "CV SAUDARA JAYA", "CV SEJATI MANDIRI - BAUBAU", "CV SEJATI MANDIRI - RAHA",
+#    "CV SENDISTAR UTAMA ABADI", "CV SINAR ABADI MIMIKA", "CV SINAR PUTRA JAYA",
+#    "CV SINAR SAKTI", "CV SUKSES ABADI BERSAMA", "CV SURYA INDO PERKASA - MANOKWARI",
+#    "CV SUTANTO GROUP MAKMUR", "CV SUTANTO GROUP MAKMUR - SOLO",
+#    "CV SUTANTO GROUP MAKMUR - YOGYAKARTA", "CV TELAGA MAS",
+#    "CV TELAGA MAS - BENGKULU", "CV WIRAMART", "CV YADA - BANDUNG",
+#    "CV YADA - BEKASI", "CV YADA - BOGOR", "CV YADA - TANGERANG",
+#    "CV ALVARO PRIMA", "CV ANDIRA DAHAYU - BENGKULU", "CV ANDIRA DAHAYU - LINGGAU",
+#    "CV BUANA DISTRIBUSINDO UTAMA", "CV FNB PRATAMA", "CV HARMONI BERKAT ABADI",
+#    "CV MARKETINDO - GORONTALO", "CV MARKETINDO - MARISA", "CV MAWAR MERA",
+#    "CV SETIA TUNGGAL", "CV. JAZA VENUS",
+#    "DIRECT HO",
+#    "AGUNG TERNATE",
+#    "INDRAJAYA - RUTENG", "INDRAJAYA - LABUAN BAJO", "INDRAJAYA - ENDE",
+#    "INDRAJAYA - MAUMERE",
+#    "MDS TAMAN ANGGREK JKT",
+#    "MTI - JABODETABEK", "MTI - JABODETABEK 2", "MTI - JABODETABEK 3",
+#    "MTI - JABODETABEK 4", "MTI - JAWA BARAT", "MTI - JAWA TIMUR",
+#    "MTI - YOGYA", "MTI - YOMART",
+#    "PT ALAM SUKSES BERSAMA-LUWUK", "PT ALAM SUKSES BERSAMA-MAROWALI",
+#    "PT ANUGERAH KHARISMA PERKASA", "PT ANUGERAH NIAGA JAYA",
+#    "PT ANUGRAH KHARISMA PERKASA",
+#    "PT ARJUNA BANYUWANGI", "PT ARJUNA JEMBER",
+#    "PT AROMA WANGI INDONESIA - BANGKA", "PT AROMA WANGI INDONESIA - BELITUNG",
+#    "PT BANGUN BANGKA BERSAMA - BANGKA", "PT BANGUN BANGKA BERSAMA - BELITUNG",
+#    "PT BENIH KASIH SEJAHTERA MANDIRI",
+#    "PT BINTANG MAS SURYA - BUNGO", "PT BINTANG MAS SURYA - JAMBI",
+#    "PT BINTANG MAS SURYA - SAROLANGUN",
+#    "PT BORWITA CITRA PRIMA", "PT BORWITA CITRA PRIMA - West Java",
+#    "PT BUANA MEDISTRA PHARMA",
+#    "PT BUMI PEMBANGUNAN PERTIWI BOJONEGORO",
+#    "PT BUMI PEMBANGUNAN PERTIWI GRESIK",
+#    "PT BUMI PEMBANGUNAN PERTIWI KEDIRI",
+#    "PT BUMI PEMBANGUNAN PERTIWI MADIUN",
+#    "PT CAHAYA ADITAMA TIMIKA", "PT CAHAYA MITRA ABADISUKSES",
+#    "PT CATUR SENTOSA ANUGERAH - BANDAR LAMPUNG",
+#    "PT CATUR SENTOSA ANUGERAH - BANGKA",
+#    "PT CATUR SENTOSA ANUGERAH - BATURAJA",
+#    "PT CATUR SENTOSA ANUGERAH - BELITUNG",
+#    "PT CATUR SENTOSA ANUGERAH - JAKARTA BARAT",
+#    "PT CATUR SENTOSA ANUGERAH - KOTABUMI",
+#    "PT CATUR SENTOSA ANUGERAH - LAHAT",
+#    "PT CATUR SENTOSA ANUGERAH - METRO",
+#    "PT CATUR SENTOSA ANUGERAH - OTHERS JAKARTA",
+#    "PT CATUR SENTOSA ANUGERAH - PALEMBANG",
+#    "PT Deltapusaka Pratama",
+#    "PT DISTRINDO BINTANG AGUNG - BANDA ACEH",
+#    "PT DISTRINDO BINTANG AGUNG - LANGSA",
+#    "PT DISTRINDO BINTANG AGUNG - LHOKSEUMAWE",
+#    "PT DWI SURYA PERKASA",
+#    "PT GLOBAL MITRA PRIMA - BANDA ACEH", "PT GLOBAL MITRA PRIMA - LANGSA",
+#    "PT GLOBAL MITRA PRIMA - LHOKSEUMAWE", "PT GLOBAL MITRA PRIMA - MEDAN",
+#    "PT GLOBAL MITRA PRIMA - PADANG SIDEMPUAN",
+#    "PT GLOBAL MITRA PRIMA - RANTAU PRAPAT", "PT GLOBAL MITRA PRIMA - SIANTAR",
+#    "PT HERTA SUKSES GEMILANG",
+#    "PT Henriko Prima Utama",
+#    "PT JAYA PALEMBANG SUKSES",
+#    "PT Jaya Pinang Sukses - Tanjung Pinang",
+#    "PT JAYA PINANG SUKSES - TANJUNG BALAI",
+#    "PT KAIMANO SAMALONA JAYA",
+#    "PT KARAWANG INDAH SUKSES",
+#    "PT Karyaindo Putra Kencana",
+#    "PT KARYA ANANDA SUKSES - BAU BAU",
+#    "PT KARYA ANANDA SUKSES - BIMA",
+#    "PT KARYA ANANDA SUKSES - BONE",
+#    "PT KARYA ANANDA SUKSES - GORONTALO",
+#    "PT KARYA ANANDA SUKSES - JEMBER",
+#    "PT KARYA ANANDA SUKSES - KEDIRI",
+#    "PT KARYA ANANDA SUKSES - KENDARI",
+#    "PT KARYA ANANDA SUKSES - KUPANG",
+#    "PT KARYA ANANDA SUKSES - MADIUN",
+#    "PT KARYA ANANDA SUKSES - MAKASSAR",
+#    "PT KARYA ANANDA SUKSES - MAMUJU",
+#    "PT KARYA ANANDA SUKSES - MANADO",
+#    "PT KARYA ANANDA SUKSES - MATARAM",
+#    "PT KARYA ANANDA SUKSES - MAUMERE",
+#    "PT KARYA ANANDA SUKSES - OUTER SURABAYA",
+#    "PT KARYA ANANDA SUKSES - PALU",
+#    "PT KARYA ANANDA SUKSES - PARE PARE",
+#    "PT KARYA ANANDA SUKSES - PASURUAN PROBOLINGGO",
+#    "PT KARYA ANANDA SUKSES - PATI",
+#    "PT KARYA ANANDA SUKSES - POSO",
+#    "PT KARYA ANANDA SUKSES - PURWOKERTO",
+#    "PT KARYA ANANDA SUKSES - RUTENG",
+#    "PT KARYA ANANDA SUKSES - SEMARANG",
+#    "PT KARYA ANANDA SUKSES - SOLO",
+#    "PT KARYA ANANDA SUKSES - SURABAYA",
+#    "PT KARYA ANANDA SUKSES - SUMBA TIMUR",
+#    "PT KARYA ANANDA SUKSES - TEGAL",
+#    "PT KARYA ANANDA SUKSES - TERNATE",
+#    "PT KARYA ANANDA SUKSES - YOGYAKARTA",
+#    "PT KOKO PRATAMA", "PT KOTTY CENTRAL NUSANTARA", "PT KURNIA MAJU PERKASA",
+#    "PT LANCAR ABADI SEKAWAN - BENGKULU",
+#    "PT LANCAR ABADI SEKAWAN - CURUP",
+#    "PT LANCAR ABADI SEKAWAN - LUBUK LINGGAU",
+#    "PT LAUT INDAH JAYA - BARABAI", "PT LAUT INDAH JAYA - BANJARBARU",
+#    "PT LAUT INDAH JAYA - BANJARMASIN", "PT LAUT INDAH JAYA - BATULICIN",
+#    "PT LAUT INDAH JAYA - KAPUAS", "PT LAUT INDAH JAYA - KOTABARU",
+#    "PT LAUT INDAH JAYA - MUARA TEWEH", "PT LAUT INDAH JAYA - PALANGKARAYA",
+#    "PT LAUT INDAH JAYA - PANGKALAN BUN", "PT LAUT INDAH JAYA - SAMPIT",
+#    "PT LAUT INDAH JAYA - TANJUNG",
+#    "PT LENTERA MITRA ABADI",
+#    "PT MENSA BINASUKSES - BANDUNG", "PT MENSA BINASUKSES - BEKASI",
+#    "PT MENSA BINASUKSES - BOGOR", "PT MENSA BINASUKSES - DENPASAR",
+#    "PT MILENIAL MANDIRI INDONESIA",
+#    "PT MITRA KECANTIKAN GLOBAL (DOBE)",
+#    "PT OGAN SAKTI PRATAMA - JAMBI KOTA",
+#    "PT OGAN SAKTI PRATAMA - MUARA BUNGO",
+#    "PT OMEGA SUKSES ABADI", "PT OMEGA SURYA ANUGRAH",
+#    "PT PANJUNAN - BANDUNG", "PT PANJUNAN - BANJAR", "PT PANJUNAN - BOGOR",
+#    "PT PANJUNAN - CIANJUR", "PT PANJUNAN - CIKAMPEK", "PT PANJUNAN - CIREBON",
+#    "PT PANJUNAN - GARUT", "PT PANJUNAN - JATIBARANG", "PT PANJUNAN - KUNINGAN",
+#    "PT PANJUNAN - MAJALENGKA", "PT PANJUNAN - SUBANG", "PT PANJUNAN - SUKABUMI",
+#    "PT PANJUNAN - SUMEDANG", "PT PANJUNAN - TASIKMALAYA",
+#    "PT Perdana Adhi Lestari - Bandar Lampung",
+#    "PT Perdana Adhi Lestari - Kotabumi", "PT Perdana Adhi Lestari - Metro",
+#    "PT PERMANA MAKMUR ABADI", "PT PERMATA SURYA BAHARI",
+#    "PT PERMATA SURYA BAHARI - RENGAT",
+#    "PT PULAU BARU SENTOSA - BERAU", "PT PULAU BARU SENTOSA - TANJUNG SELOR",
+#    "PT PULAU BARU SENTOSA - TARAKAN",
+#    "PT RAMASURYA PERKASA DISTRINDO",
+#    "PT SAMUDRA JAYA ANUGERAH",
+#    "PT SENTRA SARANA MEDIKA", "SINERGI GLOBAL DISTRINDO",
+#    "PT SINAR PONTI LESTARI - PONTIANAK", "PT SINAR PONTI LESTARI - SANGGAU",
+#    "PT SINAR PONTI LESTARI - SINGKAWANG",
+#    "PT SRIJAYA RAYA PERKASA",
+#    "PT SUKSES JAYA MAKMUR ABADI - BANDA ACEH",
+#    "PT SUKSES RIAU PERMATA - BUKIT TINGGI", "PT SUKSES RIAU PERMATA - PEKANBARU",
+#    "PT SURAINDA PANJIJAYA - BALIKPAPAN", "PT SURAINDA PANJIJAYA - GROGOT",
+#    "PT SURAINDA PANJIJAYA - MELAK",
+#    "PT SURYA DONASIN - BALARAJA", "PT SURYA DONASIN - BANDUNG",
+#    "PT SURYA DONASIN - BANDUNG 2", "PT SURYA DONASIN - BANDUNG BARAT",
+#    "PT SURYA DONASIN - BEKASI", "PT SURYA DONASIN - BOGOR",
+#    "PT SURYA DONASIN - CIANJUR", "PT SURYA DONASIN - CIMAHI",
+#    "PT SURYA DONASIN - CIREBON", "PT SURYA DONASIN - DEPOK",
+#    "PT SURYA DONASIN - GARUT", "PT SURYA DONASIN - INDRAMAYU",
+#    "PT SURYA DONASIN - JATIBARANG", "PT SURYA DONASIN - KARAWANG",
+#    "PT SURYA DONASIN - PURWAKARTA", "PT SURYA DONASIN - SERANG",
+#    "PT SURYA DONASIN - SERANG BALARAJA", "PT SURYA DONASIN - SUBANG",
+#    "PT SURYA DONASIN - SUKABUMI", "PT SURYA DONASIN - SUMEDANG",
+#    "PT SURYA DONASIN - TANGERANG", "PT SURYA DONASIN - TASIKMALAYA",
+#    "PT SURYA PANGAN SEJAHTERA", 
+#    "PT SURYA PANGAN SEJAHTERA - BEKASI", "PT SURYA PANGAN SEJAHTERA - JAKARTA",
+#    "PT TRI SAMUDRA", "PT TRI SAMUDRA - TUAL",
+#    "PT TRIJAYA ADHIRAJA ABADI",
+#    "PT TRIJAYA ADHIRAJA ABADI - BALIKPAPAN",
+#    "PT TRIJAYA ADHIRAJA ABADI - BANJARMASIN",
+#    "PT TRIJAYA ADHIRAJA ABADI - BARABAI",
+#    "PT TRIJAYA ADHIRAJA ABADI - BATULICIN",
+#    "PT TRIJAYA ADHIRAJA ABADI - BERAU",
+#    "PT TRIJAYA ADHIRAJA ABADI - BONTANG",
+#    "PT TRIJAYA ADHIRAJA ABADI - GROGOT",
+#    "PT TRIJAYA ADHIRAJA ABADI - PALANGKARAYA",
+#    "PT TRIJAYA ADHIRAJA ABADI - PANGKALAN BUN",
+#    "PT TRIJAYA ADHIRAJA ABADI - SAMPIT",
+#    "PT TRIJAYA ADHIRAJA ABADI - SAMARINDA",
+#    "PT TRIJAYA ADHIRAJA ABADI - TARAKAN",
+#    "PT TRIMANUNGGAL SUKSES JAYA UTAMA - BONTANG",
+#    "PT TRIMANUNGGAL SUKSES JAYA UTAMA - SAMARINDA",
+#    "PT TRIMANUNGGAL SUKSES JAYA UTAMA - SANGATTA",
+#    "PT Trikarsa Raya Mandiri",
+#    "PT UNIRAMA DUTA NIAGA - BABAT", "PT UNIRAMA DUTA NIAGA - BANYUWANGI",
+#    "PT UNIRAMA DUTA NIAGA - BLORA", "PT UNIRAMA DUTA NIAGA - CILACAP",
+#    "PT UNIRAMA DUTA NIAGA - GRESIK", "PT UNIRAMA DUTA NIAGA - JEMBER",
+#    "PT UNIRAMA DUTA NIAGA - KUDUS", "PT UNIRAMA DUTA NIAGA - MADURA",
+#    "PT UNIRAMA DUTA NIAGA - MAGELANG", "PT UNIRAMA DUTA NIAGA - PASURUAN",
+#    "PT UNIRAMA DUTA NIAGA - PROBOLINGGO", "PT UNIRAMA DUTA NIAGA - PURWOKERTO",
+#    "PT UNIRAMA DUTA NIAGA - SEMARANG", "PT UNIRAMA DUTA NIAGA - SIDOARJO",
+#    "PT UNIRAMA DUTA NIAGA - SURABAYA", "PT UNIRAMA DUTA NIAGA - SURAKARTA",
+#    "PT UNIRAMA DUTA NIAGA - TEGAL", "PT UNIRAMA DUTA NIAGA - YOGYAKARTA",
+#    "PT USAHA BARU LESTARI",
+#    "PT VERAUS WIRATAMA TRADING",
+#    "PT WINADA ANUGERAH - BATURAJA", "PT WINADA ANUGERAH - LAHAT",
+#    "PT WINADA ANUGERAH - PALEMBANG", "PT WINADA ANUGERAH - SEKAYU",
+#    "PT WIRA TUNAS KENCANA",
+#    "PT YAFINDO MITRA PERMATA - BUKITTINGGI",
+#    "PT YAFINDO MITRA PERMATA - KISARAN",
+#    "PT YAFINDO MITRA PERMATA - MEDAN",
+#    "PT YAFINDO MITRA PERMATA - PADANG",
+#    "PT YAFINDO MITRA PERMATA - SOLOK",
+#    "TOKO GUDANG ADA",
+#    "UD HIKMAT", "UD MAKIN JAYA", "UD MAKIN JAYA - KUDUS",
+#    "UD MAKIN JAYA - SEMARANG",
+#    "UD Mitra Kencana - Gorontalo", "UD Mitra Kencana - Kotamobagu",
+#    "UD Mitra Kencana - Manado",
+#    "PT. MILENIAL MANDIRI INDONESIA", "PT. PERMATA SURYA BAHARI",
+#])
+
+@st.cache_data(ttl=21600, show_spinner="Fetching SKU data from BigQuery...")
+def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
+    if not sku_list:
+        return pd.DataFrame()
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.gt_schema.master_product"
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        sku,
+        product_name,
+        price_for_distri
+    FROM `{table_id}`
+    WHERE UPPER(sku) IN ({sku_list_str})
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching SKU data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
+
+@st.cache_data(ttl=21600, show_spinner="Fetching NPD Allocation data from BigQuery...")
+def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
+    if not sku_list:
+        return pd.DataFrame()
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.gt_schema.npd_allocation"
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        calendar_date,
+        region,
+        sku
+    FROM `{table_id}`
+
+    WHERE sku IN ({sku_list_str})
+    AND calendar_date = '2026-04-01'
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching NPD data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=21600, show_spinner="Fetching Stock Analysis data from BigQuery...")
+def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
+    if not sku_list:
+        return pd.DataFrame()
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        UPPER(region) AS region,
+        UPPER(distributor) AS distributor,
+        sku,
+        assortment,
+        supply_control_status_gt,
+        total_stock,
+        buffer_plan_by_lm_qty_adj,
+        avg_weekly_st_lm_qty,
+        buffer_plan_by_lm_val_adj,
+        remaining_allocation_qty_region,
+        woi_end_of_month_by_lm
+    FROM `{table_id}`
+    WHERE UPPER(distributor) = '{distributor_name}'
+    AND (
+        UPPER(sku) IN ({sku_list_str})
+        OR buffer_plan_by_lm_qty_adj > 0
+    )
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching Stock Analysis data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
+def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Series) -> pd.Series:
+    """
+    Calculates Weeks of Inventory (WOI) based on the formula:
+    (Stock + PO Quantity) / Average Weekly Sales LM
+    """
+    return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
+
+
+def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame, regions: List[str], is_in: bool) -> pd.DataFrame:
+    """
+    Auto-rejects specific SKUs based on a provided list and region rules.
+
+    Args:
+        sku_list: List of SKUs to apply rules to
+        df: DataFrame containing the data
+        regions: List of allowed regions
+        is_in: If False, only allow SKUs in the specified regions (reject all others)
+               If True, reject SKUs in the specified regions
+    """
+    regions_upper = [r.upper() for r in regions]
+
+    if "SKU" not in df.columns or "region" not in df.columns:
+        return df
+
+    if not is_in:
+        condition = (df["SKU"].isin(sku_list)) & (~df["region"].str.upper().isin(regions_upper))
+    else:
+        condition = (df["SKU"].isin(sku_list)) & (df["region"].str.upper().isin(regions_upper))
+
+    df.loc[condition, "Remark"] = "Reject (Stop by Steve)"
+
+    return df
+
+
+def to_excel_with_styling(dfs: dict, npd_sku_list: List[str] = None) -> bytes:
+    """
+    Converts a pandas DataFrame to an Excel file with special styling for the first 7 columns.
+    Applies specific color to 'Remaining Allocation (By Region)' column if SKU is in npd_sku_list.
+    """
+    output = io.BytesIO()
+    wb = Workbook()
+
+    del wb["Sheet"]
+
+    po_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+    suggestion_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    npd_fill = PatternFill(start_color="B1DBF0", end_color="B1DBF0", fill_type="solid")
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    header_alignment = Alignment(horizontal='left', vertical='center')
+
+    proceed_font = Font(bold=True, color="54CE54")
+    reject_font = Font(bold=True, color="D73E3E")
+    suggest_font = Font(bold=True, color="F3C94C")
+
+    for sheet_name, df in dfs.items():
+        ws = wb.create_sheet(title=sheet_name[:31])
+
+        is_po_sku_series = df["is_po_sku"]
+        df_no_flag = df.drop("is_po_sku", axis=1)
+
+        rows = dataframe_to_rows(df_no_flag, index=False, header=True)
+
+        headers = list(df_no_flag.columns)
+        col_map = {col: i for i, col in enumerate(headers)}
+
+        currency_cols = ["PO Value", "Suggested PO Value"]
+        integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
+        decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI", "WOI After Buffer (Stock + Suggested Qty)", "Stock + Suggested Qty WOI (Projection at EOM)"]
+
+        for r_idx, row in enumerate(rows, 1):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+                if r_idx == 1:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
+
+                if c_idx <= 11 and r_idx > 1:
+                    original_row_index = (r_idx - 2)
+                    is_po_row = is_po_sku_series.iloc[original_row_index]
+
+                    if is_po_row:
+                        cell.fill = po_fill
+                    else:
+                        cell.fill = suggestion_fill
+
+                if r_idx > 1:
+                    col_name = headers[c_idx - 1]
+
+                    if col_name in currency_cols:
+                        cell.number_format = "#,##0.00"
+                    elif col_name in integer_cols:
+                        cell.number_format = "#,##0"
+                    elif col_name in decimal_cols:
+                        cell.number_format = "0.00"
+
+                    if col_name == "Remark":
+                        remark_value = row[c_idx - 1]
+                        if "Proceed" in remark_value:
+                            cell.font = proceed_font
+                        elif "Reject" in remark_value:
+                            cell.font = reject_font
+                        elif "Additional" in remark_value:
+                            cell.font = suggest_font
+
+                    if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list is not None:
+                        sku_col_index = col_map.get("SKU")
+                        if sku_col_index is not None:
+                            sku_value = row[sku_col_index]
+                            if sku_value in npd_sku_list:
+                                cell.fill = npd_fill
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def to_excel_single_sheet(df: pd.DataFrame, npd_sku_list: List[str] = None) -> bytes:
+    """
+    Converts a single pandas DataFrame (all distributors stacked)
+    to an Excel file with special styling.
+    """
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PO Simulator"
+
+    po_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+    suggestion_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    npd_fill = PatternFill(start_color="B1DBF0", end_color="B1DBF0", fill_type="solid")
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    header_alignment = Alignment(horizontal='left', vertical='center')
+
+    proceed_font = Font(bold=True, color="54CE54")
+    reject_font = Font(bold=True, color="D73E3E")
+    suggest_font = Font(bold=True, color="F3C94C")
+
+    is_po_sku_series = df["is_po_sku"]
+    df_no_flag = df.drop("is_po_sku", axis=1)
+
+    rows = dataframe_to_rows(df_no_flag, index=False, header=True)
+
+    headers = list(df_no_flag.columns)
+    col_map = {col: i for i, col in enumerate(headers)}
+
+    currency_cols = ["PO Value", "Suggested PO Value"]
+    integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
+    decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI", "WOI After Buffer (Stock + Suggested Qty)", "Stock + Suggested Qty WOI (Projection at EOM)"]
+
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+            if r_idx == 1:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+
+            if c_idx <= 11 and r_idx > 1:
+                original_row_index = (r_idx - 2)
+                is_po_row = is_po_sku_series.iloc[original_row_index]
+
+                if is_po_row:
+                    cell.fill = po_fill
+                else:
+                    cell.fill = suggestion_fill
+
+            if r_idx > 1:
+                col_name = headers[c_idx - 1]
+
+                if col_name in currency_cols:
+                    cell.number_format = "#,##0.00"
+                elif col_name in integer_cols:
+                    cell.number_format = "#,##0"
+                elif col_name in decimal_cols:
+                    cell.number_format = "0.00"
+
+                if col_name == "Remark":
+                    remark_value = row[c_idx - 1]
+                    if "Proceed" in remark_value:
+                        cell.font = proceed_font
+                    elif "Reject" in remark_value:
+                        cell.font = reject_font
+                    elif "Additional" in remark_value:
+                        cell.font = suggest_font
+
+                if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list is not None:
+                    sku_col_index = col_map.get("SKU")
+                    if sku_col_index is not None:
+                        sku_value = row[sku_col_index]
+                        if sku_value in npd_sku_list:
+                            cell.fill = npd_fill
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
 
 
 def check_password():
@@ -172,6 +677,7 @@ def check_password():
 
         _, col, _ = st.columns([1, 1.5, 1])
         with col:
+
             st.markdown(
                 f'<div style="text-align:center;padding:0.5rem 0 0.2rem;">'
                 f'<img src="{LOGO_URL}" style="max-width:200px;height:auto;display:inline-block;background:transparent;" />'
@@ -217,7 +723,6 @@ def check_password():
 
     login_form()
     return False
-
 
 if not check_password():
     st.stop()
@@ -425,7 +930,6 @@ hr { border-color: #E8EAED !important; margin: 1.2rem 0 !important; }
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-
 def detect_date_columns(df: pd.DataFrame) -> list:
     date_cols = []
     for col in df.columns:
@@ -444,13 +948,11 @@ def detect_date_columns(df: pd.DataFrame) -> list:
                 pass
     return date_cols
 
-
 def safe_to_datetime(series: pd.Series) -> pd.Series:
     try:
         return pd.to_datetime(series, errors='coerce')
     except Exception:
         return series
-
 
 def _convert_to_xlsx(fname: str, fbytes: bytes) -> tuple[str, bytes]:
     """Convert xls/csv to xlsx bytes. Returns (new_fname, xlsx_bytes). Preserves sheet visibility."""
@@ -482,30 +984,31 @@ def _convert_to_xlsx(fname: str, fbytes: bytes) -> tuple[str, bytes]:
         return base + ".xlsx", _buf.getvalue()
     return fname, fbytes
 
-
 def _append_to_template(df: pd.DataFrame, template_bytes: bytes, start_row: int = 9) -> bytes:
-    """Tulis df ke po_template.xlsx mulai start_row, concat ke bawah row demi row."""
     wb = openpyxl.load_workbook(io.BytesIO(template_bytes))
     ws = wb.active
 
+    # Baca header template dari baris tepat sebelum start_row
     header_row_idx = start_row - 1
-    tpl_headers = {}
+    tpl_headers = {}  # {nama_kolom_lower: col_idx (1-based)}
     for col_idx in range(1, ws.max_column + 1):
         val = ws.cell(row=header_row_idx, column=col_idx).value
         if val is not None:
             tpl_headers[str(val).strip().lower()] = col_idx
 
+    # Bersihkan data lama mulai start_row
     for row in ws.iter_rows(min_row=start_row):
         for cell in row:
             cell.value = None
 
+    # Tulis baris demi baris ke bawah (concat ke bawah)
     df_cols = [str(c).strip() for c in df.columns]
     for r_offset, row_data in enumerate(df.itertuples(index=False)):
         cur_row = start_row + r_offset
         for c_idx, col_name in enumerate(df_cols):
             tpl_col = tpl_headers.get(col_name.lower())
             if tpl_col is None:
-                continue
+                continue  # kolom tidak ada di template, lewati
             val = row_data[c_idx]
             ws.cell(row=cur_row, column=tpl_col).value = (
                 None if (val is None or str(val).strip() in ("", "nan")) else val
@@ -514,7 +1017,6 @@ def _append_to_template(df: pd.DataFrame, template_bytes: bytes, start_row: int 
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
-
 
 def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Sheet1") -> bytes:
     buf = io.BytesIO()
@@ -527,7 +1029,6 @@ def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Sheet1") -> bytes:
             ws.column_dimensions[col_cells[0].column_letter].width = min(max(max_len, header_len) + 3, 50)
     return buf.getvalue()
 
-
 def create_zip_of_files(file_dict: dict) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -535,13 +1036,11 @@ def create_zip_of_files(file_dict: dict) -> bytes:
             zf.writestr(fname, data)
     return buf.getvalue()
 
-
 def split_dataframe(df: pd.DataFrame, max_rows: int = 7500) -> list:
     if len(df) <= max_rows:
         return [df]
     n_chunks = math.ceil(len(df) / max_rows)
     return [df.iloc[i * max_rows:(i + 1) * max_rows].reset_index(drop=True) for i in range(n_chunks)]
-
 
 def split_by_po_groups(df: pd.DataFrame, po_column: str | None, max_rows: int = 7500) -> list:
     if po_column is None or po_column not in df.columns:
@@ -560,11 +1059,14 @@ def split_by_po_groups(df: pd.DataFrame, po_column: str | None, max_rows: int = 
         po_size = int(po_sizes.get(po_val, 0))
         if po_size == 0:
             continue
+
         if current_pos and current_size + po_size > max_rows:
+
             mask = df[po_column].isin(current_pos)
             chunks.append(df[mask].reset_index(drop=True))
             current_pos = []
             current_size = 0
+
         current_pos.append(po_val)
         current_size += po_size
 
@@ -573,7 +1075,6 @@ def split_by_po_groups(df: pd.DataFrame, po_column: str | None, max_rows: int = 
         chunks.append(df[mask].reset_index(drop=True))
 
     return chunks if chunks else [df.reset_index(drop=True)]
-
 
 def gsheet_to_csv_url(url: str):
     match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', url)
@@ -585,12 +1086,10 @@ def gsheet_to_csv_url(url: str):
     csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     return csv_url, sheet_id
 
-
 def attach_po_counts(df: pd.DataFrame, po_column: str) -> tuple:
     grouped = df.groupby(po_column).size().reset_index(name='count')
     grouped = grouped.sort_values('count', ascending=False).reset_index(drop=True)
     return df.merge(grouped, on=po_column, how='left'), grouped
-
 
 def numeric_coerce(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
@@ -602,7 +1101,6 @@ def numeric_coerce(df: pd.DataFrame) -> pd.DataFrame:
             pass
     return df
 
-
 _REMARK_STYLES = [
     ('reject with suggestion', '#FFF3CD', '#856404'),
     ('reject (stop by steve',  '#F8D7DA', '#721C24'),
@@ -611,7 +1109,6 @@ _REMARK_STYLES = [
     ('proceed',                '#D4EDDA', '#155724'),
     ('additional suggestion',  '#D1ECF1', '#0C5460'),
 ]
-
 
 def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
     if not MATPLOTLIB_OK:
@@ -663,11 +1160,9 @@ def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
     plt.close(fig)
     return buf.getvalue()
 
-
 def validate_po_template(df: pd.DataFrame) -> tuple[bool, list]:
     missing = [c for c in PO_TEMPLATE_COLS if c not in df.columns]
     return len(missing) == 0, missing
-
 
 def _get_sheet_names(file_bytes: bytes, engine: str) -> list[str]:
     """Kembalikan daftar sheet yang visible/unhide saja."""
@@ -675,6 +1170,7 @@ def _get_sheet_names(file_bytes: bytes, engine: str) -> list[str]:
         if engine == 'xlrd':
             import xlrd
             book = xlrd.open_workbook(file_contents=file_bytes)
+            # xlrd 2.x: visibility disimpan di book.sheet_visibility (0=visible, 1=hidden, 2=veryHidden)
             if hasattr(book, 'sheet_visibility'):
                 return [book.sheet_name(i) for i in range(book.nsheets)
                         if book.sheet_visibility[i] == 0]
@@ -682,13 +1178,13 @@ def _get_sheet_names(file_bytes: bytes, engine: str) -> list[str]:
                 return [book.sheet_name(i) for i in range(book.nsheets)
                         if getattr(book.sheet_by_index(i), 'visibility', 0) == 0]
         else:
+           
             wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
             sheets = [ws.title for ws in wb.worksheets if ws.sheet_state == 'visible']
             wb.close()
             return sheets
     except Exception:
         return []
-
 
 def _excel_engine(fname: str) -> str:
     if fname.lower().endswith('.xls'):
@@ -701,7 +1197,6 @@ def _excel_engine(fname: str) -> str:
             )
         return 'xlrd'
     return 'openpyxl'
-
 
 def detect_header_row(file_bytes: bytes, fname: str = "", max_scan: int = 15, sheet_name=0) -> int:
     engine = _excel_engine(fname)
@@ -722,17 +1217,14 @@ def detect_header_row(file_bytes: bytes, fname: str = "", max_scan: int = 15, sh
             best_row = i
     return best_row
 
-
-# =========================
-# Sidebar
-# =========================
 with st.sidebar:
+
     st.markdown(
-        f'<div style="text-align:center;padding:0.5rem 0 0.2rem;">'
-        f'<img src="{LOGO_URL}" style="max-width:200px;height:auto;display:inline-block;background:transparent;" />'
-        f'</div>',
-        unsafe_allow_html=True
-    )
+                f'<div style="text-align:center;padding:0.5rem 0 0.2rem;">'
+                f'<img src="{LOGO_URL}" style="max-width:200px;height:auto;display:inline-block;background:transparent;" />'
+                f'</div>',
+                unsafe_allow_html=True
+            )
     if 'page' not in st.session_state:
         st.session_state['page'] = 'extractor'
 
@@ -748,11 +1240,14 @@ with st.sidebar:
     if st.button("PO Changer", use_container_width=True, key="nav_po"):
         st.session_state['page'] = 'po_changer'
         st.rerun()
+    #if st.button("Template PO", use_container_width=True, key="nav_tpl_po"):
+    #    st.session_state['page'] = 'tpl_po'
+    #    st.rerun()
 
     st.link_button(
-        "PO SIMULATOR",
-        DASHBOARD_URL_DEFAULT,
-        use_container_width=True)
+    "PO SIMULATOR",
+    DASHBOARD_URL_DEFAULT,
+    use_container_width=True)
 
     st.divider()
     st.markdown(
@@ -772,6 +1267,13 @@ with st.sidebar:
     )
 
     st.divider()
+
+    #if st.link_button("PO SIMULATOR", use_container_width=True):
+    #    st.markdown(
+    #        f'<script>window.open("{DASHBOARD_URL_DEFAULT}", "_blank");</script>',
+    #        unsafe_allow_html=True
+    #    )
+
     st.divider()
     if st.button("Logout", use_container_width=True):
         st.session_state["authenticated"] = False
@@ -785,9 +1287,165 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
-# =========================
-# PO Changer Page
-# =========================
+#if st.session_state.get('page') == 'tpl_po':
+#    st.markdown("""
+#    <div class="hero-wrap">
+#        <div class="hero-tag">✦ Template PO</div>
+#        <div class="hero-title">Upload Template PO</div>
+#    </div>
+#    """, unsafe_allow_html=True)
+#
+#    st.markdown("""
+#    <div class="pipeline-step active">
+#        <span class="step-number">1</span>
+#        <strong>Upload File Template</strong>
+#    </div>
+#    """, unsafe_allow_html=True)
+#
+#    tpl_files = st.file_uploader("Upload template (.xlsx / .xls)",
+#                             type=["xlsx", "xls"],
+#                             accept_multiple_files=True,
+#                             key="tpl_uploader")
+#
+#    for _fi, tpl_file in enumerate(tpl_files or []):
+#        with st.container(border=True):
+#            st.markdown(f"**#{_fi+1} &nbsp; {tpl_file.name}**")
+#    
+#            tpl_bytes = tpl_file.read()
+#            _tpl_name, tpl_bytes = _convert_to_xlsx(tpl_file.name, tpl_bytes)
+#            if tpl_file.name.rsplit(".", 1)[-1].lower() != "xlsx":
+#                st.caption(f"🔄 Auto-convert: {tpl_file.name} → {_tpl_name}")
+#            _tpl_engine = "openpyxl"
+#    
+#            
+#            tpl_sheets = _get_sheet_names(tpl_bytes, _tpl_engine)
+#            if not tpl_sheets:
+#                st.warning("⚠️ Tidak ada sheet visible.")
+#                continue
+#            sc1, sc2 = st.columns([2, 1])
+#            with sc1:
+#                if len(tpl_sheets) > 1:
+#                    tpl_selected_sheet = st.selectbox(
+#                        f"Sheet ({len(tpl_sheets)} visible):",
+#                        options=tpl_sheets,
+#                        key=f"tpl_sheet_sel_{_fi}",
+#                    )
+#                else:
+#                    tpl_selected_sheet = tpl_sheets[0]
+#                    st.caption(f"📄 Sheet: **{tpl_selected_sheet}**")
+#            with sc2:
+#                _auto_hrow = detect_header_row(tpl_bytes, _tpl_name, sheet_name=tpl_selected_sheet)
+#                _hrow_input = st.number_input(
+#                    "Header row (baris ke-)", min_value=1,
+#                    value=int(_auto_hrow) + 1, step=1,
+#                    key=f"tpl_hrow_{_fi}",
+#                )
+#            _tpl_hrow = int(_hrow_input) - 1  # 0-indexed for pandas
+#
+#            try:
+#                tpl_df = pd.read_excel(io.BytesIO(tpl_bytes), sheet_name=tpl_selected_sheet,
+#                                       header=_tpl_hrow, engine=_tpl_engine, dtype=str)
+#                tpl_df = tpl_df.loc[:, ~tpl_df.columns.str.startswith('Unnamed')]
+#                tpl_df = tpl_df.dropna(how='all').reset_index(drop=True)
+#            except Exception as e:
+#                st.error(f"❌ Gagal membaca file: {e}")
+#                continue
+#
+#          
+#            st.caption(f"**{len(tpl_df):,} baris · {len(tpl_df.columns)} kolom**")
+#            with st.expander("👁 Preview data", expanded=False):
+#                st.dataframe(tpl_df, use_container_width=True, hide_index=True)
+#
+#            # ── Kosongkan Quantity ────────────────────────────────────
+#            qty_col_t = next((c for c in tpl_df.columns
+#                              if any(k in c.lower() for k in ['qty', 'quantity'])), None)
+#            sku_col_t = next((c for c in tpl_df.columns
+#                              if any(k in c.lower() for k in ['sku', 'product code', 'kode', 'code'])), None)
+#
+#            if qty_col_t and sku_col_t:
+#                st.markdown("""
+#                <div class="pipeline-step active">
+#                    <span class="step-number">2</span>
+#                    <strong>Kosongkan Quantity per Product Code</strong>
+#                </div>
+#                """, unsafe_allow_html=True)
+#
+#                with st.container(border=True):
+#                    st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
+#                    mc1, mc2 = st.columns([2, 1])
+#                    with mc1:
+#                        tpl_codes = st.text_area(
+#                            "Daftar Product Code (satu per baris)",
+#                            placeholder="SKU001\nSKU-ABC\nPROD123",
+#                            height=150, key=f"tpl_codes_{_fi}"
+#                        )
+#                    with mc2:
+#                        st.markdown("**Format:**")
+#                        st.code("SKU001\nSKU-ABC", language=None)
+#                        tpl_apply = st.button("🗑 Kosongkan Quantity",
+#                                              use_container_width=True, key=f"tpl_apply_{_fi}")
+#
+#                    if tpl_apply and tpl_codes.strip():
+#                        targets = {c.strip() for c in tpl_codes.strip().splitlines() if c.strip()}
+#                        mask_t = tpl_df[sku_col_t].astype(str).str.strip().isin(targets)
+#
+#                        if mask_t.sum() == 0:
+#                            st.warning("⚠️ Tidak ada Product Code yang cocok.")
+#                        else:
+#                            wb = openpyxl.load_workbook(io.BytesIO(tpl_bytes))
+#                            ws = next((s for s in wb.worksheets
+#                                       if s.title == tpl_selected_sheet), wb.active)
+#                            header_excel_row = _tpl_hrow + 1  # 1-indexed Excel row
+#                            headers_ws = {
+#                                ws.cell(row=header_excel_row, column=c).value: c
+#                                for c in range(1, ws.max_column + 1)
+#                            }
+#                            sku_col_idx = headers_ws.get(sku_col_t)
+#                            qty_col_idx = headers_ws.get(qty_col_t)
+#
+#                            if sku_col_idx and qty_col_idx:
+#                                cleared = 0
+#                                for row in ws.iter_rows(min_row=header_excel_row + 1,
+#                                                        max_row=ws.max_row):
+#                                    if str(row[sku_col_idx - 1].value or "").strip() in targets:
+#                                        row[qty_col_idx - 1].value = None
+#                                        cleared += 1
+#                                out_buf = io.BytesIO()
+#                                wb.save(out_buf)
+#                                st.session_state[f"tpl_out_{_fi}"] = {
+#                                    "buf": out_buf.getvalue(), "mask": mask_t,
+#                                    "sku": sku_col_t, "qty": qty_col_t,
+#                                    "cleared": cleared, "df": tpl_df,
+#                                }
+#                            else:
+#                                st.warning("⚠️ Kolom tidak ditemukan di worksheet asli.")
+#
+#                _res_t = st.session_state.get(f"tpl_out_{_fi}")
+#                if _res_t:
+#                    st.success(f"✅ Quantity dikosongkan untuk **{_res_t['cleared']}** baris.")
+#                    with st.expander("👁 Lihat baris yang diubah", expanded=False):
+#                        st.dataframe(
+#                            _res_t["df"][_res_t["mask"]][[_res_t["sku"], _res_t["qty"]]].reset_index(drop=True),
+#                            use_container_width=True, hide_index=True,
+#                        )
+#                    customer_name = st.text_input("Customer Name (opsional)",
+#                                                  placeholder="Masukkan nama customer",
+#                                                  key=f"tpl_cust_{_fi}")
+#                    file_label = re.sub(r'[\\/*?:"<>|]', "", (customer_name or "").strip()) or "Unnamed_Customer"
+#                    st.download_button(
+#                        label="Download Hasil Modifikasi (.xlsx)",
+#                        data=_res_t["buf"],
+#                        file_name=f"Template Form PO {file_label}.xlsx",
+#                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+#                        use_container_width=True,
+#                        key=f"tpl_dl_{_fi}",
+#                    )
+#            else:
+#                st.info("Kolom SKU / QTY tidak terdeteksi. Periksa header row.")
+#    
+#    st.stop()
+#
+
 if st.session_state.get('page') == 'po_changer':
     st.markdown("""
     <div class="hero-wrap">
@@ -820,6 +1478,10 @@ if st.session_state.get('page') == 'po_changer':
             return df, hrow
 
     def _parse_idx(rng: str):
+        """Parse flexible range string → (start, stop) for iloc.
+        Formats: 'start:end', 'start:', ':end', ':', 'n'
+        end is inclusive → converted to stop = end+1 for iloc.
+        """
         rng = rng.strip()
         if not rng or rng == ":":
             return None, None
@@ -850,11 +1512,12 @@ if st.session_state.get('page') == 'po_changer':
     folder_files = st.file_uploader(
         "📁 Upload File PO (.xlsx / .xls / .csv / .zip)",
         type=["xlsx", "xls", "csv", "zip"],
-        accept_multiple_files=True,
+        accept_multiple_files=True, 
         key="po_folder",
     )
 
     if folder_files:
+
         raw_entries = []
         _converted_names = []
         for uf in folder_files:
@@ -879,18 +1542,21 @@ if st.session_state.get('page') == 'po_changer':
 
         st.markdown("""
         <div class="pipeline-step active">
-            <span class="step-number" style="background:#3B2B5E;">🗂</span>
+            <span class="step-number">1</span>
             <strong>Konfigurasi per File</strong>
         </div>
         """, unsafe_allow_html=True)
 
         parsed = []
         for idx, (fname, fbytes) in enumerate(raw_entries):
+            ext = fname.rsplit(".", 1)[-1].lower()
             with st.container(border=True):
+          
                 hc1, hc2 = st.columns([2, 1])
                 with hc1:
                     st.markdown(f"**#{idx+1} &nbsp; {fname}**")
                 with hc2:
+                
                     try:
                         _wb = openpyxl.load_workbook(io.BytesIO(fbytes), data_only=True)
                         sheets = [ws.title for ws in _wb.worksheets if ws.sheet_state == 'visible']
@@ -910,6 +1576,7 @@ if st.session_state.get('page') == 'po_changer':
                         sheet_sel = 0
                         st.caption("⚠️ Tidak ada sheet visible")
 
+      
                 try:
                     df_f, hrow = _read_one(fname, fbytes, sheet_sel)
                     df_f = df_f.loc[:, ~df_f.columns.astype(str).str.startswith('Unnamed')].dropna(how='all')
@@ -919,8 +1586,10 @@ if st.session_state.get('page') == 'po_changer':
                     df_f, hrow, parse_err = None, "-", str(e)
 
                 if df_f is not None:
+                    
                     df_f.columns = [str(c).strip().upper() for c in df_f.columns]
 
+                   
                     _qty_col = next((c for c in df_f.columns if c.strip().upper() in ("QTY", "QUANTITY")), None)
                     _before_qty = len(df_f)
                     if _qty_col:
@@ -931,15 +1600,17 @@ if st.session_state.get('page') == 'po_changer':
                             try:
                                 return float(s.replace(",", ".")) > 0
                             except ValueError:
-                                return False
+                                return False  
                         df_f = df_f[df_f[_qty_col].apply(_qty_valid)].reset_index(drop=True)
                         _qty_removed = _before_qty - len(df_f)
                         if _qty_removed:
                             st.caption(f"🗑 {_qty_removed:,} baris dibuang (QTY tidak valid — kolom **{_qty_col}**)")
 
+                    
                     _dist_cols = [c for c in df_f.columns if "DISTRIBUTOR" in c.upper()]
                     _has_dist = len(_dist_cols) > 0
 
+      
                     dc1, dc2 = st.columns([1, 2])
                     with dc1:
                         st.caption("Distributor" + (" *(sudah ada di kolom)*" if _has_dist else ""))
@@ -951,6 +1622,7 @@ if st.session_state.get('page') == 'po_changer':
                             label_visibility="collapsed",
                         )
 
+                  
                     _df_preview = df_f.copy()
                     if not _has_dist and dist_val not in ("", "(Pilih)"):
                         _df_preview.insert(0, "DISTRIBUTOR", dist_val)
@@ -967,6 +1639,7 @@ if st.session_state.get('page') == 'po_changer':
                                                 key=f"col_{idx}_{fname}",
                                                 placeholder="0:3 | 2: | :5 | 2")
 
+                 
                     if row_rng.strip() or col_rng.strip():
                         _pv = _apply_range_r(df_f.copy(), row_rng, col_rng)
                         st.caption(f"📍 Preview rentang: {len(_pv)} baris × {_pv.shape[1]} kolom")
@@ -983,6 +1656,7 @@ if st.session_state.get('page') == 'po_changer':
                     parsed.append({"name": fname, "df": None, "row_rng": "", "col_rng": "",
                                    "dist_val": "", "has_dist": False, "error": parse_err})
 
+       
         ready = [p for p in parsed if p["df"] is not None]
         st.divider()
         if st.button("➕ Gabungkan Semua", disabled=not ready,
@@ -993,7 +1667,7 @@ if st.session_state.get('page') == 'po_changer':
                 if not p["has_dist"] and p["dist_val"] not in ("", "(Pilih)"):
                     _df.insert(0, "DISTRIBUTOR", p["dist_val"])
                 _frames.append(_df)
-
+            
             try:
                 _tpl_bytes = _fetch_template_bytes(TEMPLATE_DRIVE_URL)
                 _twb = openpyxl.load_workbook(io.BytesIO(_tpl_bytes), data_only=True)
@@ -1011,8 +1685,10 @@ if st.session_state.get('page') == 'po_changer':
             _frames = [f.reindex(columns=_ref_cols) for f in _frames]
             combined_df = pd.concat(_frames, ignore_index=True)
             st.session_state["folder_result"] = {"df": combined_df, "tpl_bytes": _tpl_bytes}
+            st.session_state.pop("sim_result", None)
             st.rerun()
 
+        
         _res = st.session_state.get("folder_result")
         if _res is not None:
             combined_df = _res["df"]
@@ -1020,295 +1696,411 @@ if st.session_state.get('page') == 'po_changer':
             if not _dist_label or _dist_label == "(Pilih Distributor)":
                 _dist_label = "Combined"
 
+            #st.markdown("""
+            #<div class="pipeline-step active">
+            #    <span class="step-number" style="background:#2E7D32;">📊</span>
+            #    <strong>Hasil Gabungan</strong>
+            #</div>
+            #""", unsafe_allow_html=True)
             st.success(f"✅ **{len(combined_df):,}** baris · {combined_df.shape[1]} kolom dari {len(ready)} file")
             for col in ['QTY', 'DPP', 'TOTAL PRICE']:
                 if col in combined_df.columns:
                     combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
-            st.dataframe(combined_df.head(10), use_container_width=True, hide_index=True)
+            #st.dataframe(combined_df.head(10), use_container_width=True, hide_index=True)
+            
 
             _ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            _default_fname = f"PO_{_dist_label}_{_ts}"
-            _fname_input = st.text_input(
-                "Nama file (opsional)",
-                value=_default_fname,
-                placeholder=_default_fname,
-                key="folder_dl_fname",
-            )
-            _fname_final = (_fname_input.strip() or _default_fname).removesuffix(".xlsx") + ".xlsx"
+            _fname_final = f"PO_{_dist_label}_{_ts}.xlsx"
+            #st.download_button(
+            #    label="Download Hasil Gabungan (.xlsx)",
+            #    data=to_excel_bytes(combined_df),
+            #    file_name=_fname_final,
+            #    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            #    use_container_width=True,
+            #)
 
-            _tpl_bytes_dl = _res.get("tpl_bytes")
-            if _tpl_bytes_dl is None:
-                try:
-                    _tpl_bytes_dl = _fetch_template_bytes(TEMPLATE_DRIVE_URL)
-                except Exception as _e:
-                    st.error(f"❌ Gagal mengambil template dari Drive: {_e}")
-                    _tpl_bytes_dl = None
-            if _tpl_bytes_dl is not None:
-                st.download_button(
-                    label="Download Template PO",
-                    data=_append_to_template(combined_df, _tpl_bytes_dl, start_row=9),
-                    file_name=_fname_final,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
+#---------------------------PO SIMULATOR LANJUTAN--------------------------------
 
-    st.markdown("""
-    <div class="pipeline-step active">
-        <span class="step-number">1</span>
-        <strong>Upload File PO</strong>
-        <span class="badge badge-info" style="margin-left:0.8rem;">Harus sesuai template</span>
-    </div>
-    """, unsafe_allow_html=True)
-    po_file = st.file_uploader("Upload file PO (.xlsx / .xls)", type=["xlsx", "xls"])
 
-    if po_file is not None:
-        file_bytes = po_file.read()
-        _po_engine = _excel_engine(po_file.name)
+if st.session_state.get('page') == 'po_changer':
+    _MANUAL_REJECT_APPROVAL = ["G2G-252",   "G2G-253"]
+    _MANUAL_REJECT_NO_TOL = [
+        "G2G-29705", "G2G-224", "G2G-247", "G2G-225", "G2G-226", "G2G-228",
+        "G2G-74", "G2G-186", "G2G-202", "G2G-840", "G2G-844", "G2G-841",
+        "G2G-800", "G2G-213", "G2G-217", "G2G-27305", "G2G-30701", "G2G-30702",
+        "G2G-30703", "G2G-30704", "G2G-201", "G2G-31",
+    ]
+    _MANUAL_REJECT_ALL = _MANUAL_REJECT_APPROVAL + _MANUAL_REJECT_NO_TOL
+    _LIMITED_SKUS_QTY = []
+    _MAX_QTY_LIMIT = 500
+    _REJECTED_SKUS_1 = ["G2G-29700", "G2G-27300"]
+    _REGION_LIST_1 = [
+        "Central Sumatera", "Northern Sumatera", "Jakarta (Csa)",
+        "West Kalimantan", "South Kalimantan", "East Kalimantan",
+    ]
 
-        po_sheets = _get_sheet_names(file_bytes, _po_engine)
-        if len(po_sheets) > 1:
-            po_selected_sheet = st.selectbox(
-                f"Sheet tersedia ({len(po_sheets)} sheet):",
-                options=po_sheets,
-                key="po_sheet_sel",
-            )
-        elif po_sheets:
-            po_selected_sheet = po_sheets[0]
-            st.caption(f"Sheet: **{po_selected_sheet}**")
-        else:
-            po_selected_sheet = 0
+    _folder_res = st.session_state.get("folder_result")
+    if _folder_res is not None:
+        _sim_df = _folder_res["df"].copy()
+        _sku_col_sim = next((c for c in _sim_df.columns if c.upper() in ("SKU", "PRODUCT CODE")), None)
+        _qty_col_sim = next((c for c in _sim_df.columns if c.upper() in ("QTY", "QUANTITY")), None)
+        _dist_col_sim = next((c for c in _sim_df.columns if "DISTRIBUTOR" in c.upper()), None)
+        if _sku_col_sim and _qty_col_sim and _dist_col_sim:
+            st.divider()
+            if st.session_state.get("sim_result") is None:
+                _sim_df[_qty_col_sim] = pd.to_numeric(_sim_df[_qty_col_sim], errors="coerce")
+                _sim_df = _sim_df.dropna(subset=[_qty_col_sim])
+                _sim_df = _sim_df[_sim_df[_qty_col_sim] > 0].copy()
+                _sim_df[_dist_col_sim] = _sim_df[_dist_col_sim].astype(str).str.strip().str.upper()
+                _sim_df[_sku_col_sim] = _sim_df[_sku_col_sim].astype(str).str.strip().str.upper()
+                _sim_df = _sim_df.rename(columns={
+                    _dist_col_sim: "Distributor",
+                    _sku_col_sim: "Customer SKU Code",
+                    _qty_col_sim: "PO Qty",
+                })
+                _sim_df["is_po_sku"] = True
+                _sim_df = _sim_df[["Distributor", "Customer SKU Code", "PO Qty", "is_po_sku"]]
+                _all_npd = []
+                _excel_dfs = {}
+                _prog = st.progress(0)
+                _distributors = _sim_df["Distributor"].unique().tolist()
+                for _di, _dist_name in enumerate(_distributors):
+                    _prog.progress((_di + 1) / len(_distributors), f"Processing {_dist_name}...")
+                    _cur_po = _sim_df[_sim_df["Distributor"] == _dist_name].copy()
+                    _sku_list = _cur_po["Customer SKU Code"].unique().tolist()
+                    _sku_df = get_sku_data(tuple(_sku_list))
+                    _stock_df = get_stock_data(_dist_name, tuple(_sku_list))
+                    if _sku_df.empty and _stock_df.empty:
+                        st.warning(f"Tidak ada data untuk distributor: {_dist_name}")
+                        continue
+                    _sku_df = _sku_df.rename(columns={"sku": "Customer SKU Code", "price_for_distri": "SIP", "product_name": "Product Name"})
+                    if "sku" in _stock_df.columns:
+                        _stock_df = _stock_df.rename(columns={"sku": "Customer SKU Code"})
+                    _stock_df = _stock_df.drop(columns=["distributor", "Distributor", "product_name"], errors="ignore")
+                    _skus_in_sku = set(_sku_df["Customer SKU Code"].tolist()) if not _sku_df.empty else set()
+                    _skus_in_stock = set(_stock_df["Customer SKU Code"].tolist()) if not _stock_df.empty else set()
+                    _skus_not_found = set(_sku_list) - (_skus_in_sku | _skus_in_stock)
+                    if _skus_not_found:
+                        st.warning(f"SKU tidak ditemukan ({_dist_name}): {', '.join(sorted(_skus_not_found))}")
+                    _res_df = pd.merge(_cur_po, _sku_df, on="Customer SKU Code", how="left")
+                    _sip_series = _res_df["SIP"] if "SIP" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _res_df["SIP"] = pd.to_numeric(_sip_series, errors="coerce").fillna(0)
+                    _res_df["PO Value"] = _res_df["SIP"] * _res_df["PO Qty"]
+                    _res_df = pd.merge(_res_df, _stock_df, on="Customer SKU Code", how="outer")
+                    _res_df["Distributor"] = _dist_name
+                    _miss_pn = _res_df["Product Name"].isna()
+                    if _miss_pn.any():
+                        _extra_skus = _res_df.loc[_miss_pn, "Customer SKU Code"].unique().tolist()
+                        _extra_df = get_sku_data(tuple(_extra_skus))
+                        if not _extra_df.empty:
+                            _extra_df = _extra_df.rename(columns={"sku": "Customer SKU Code", "product_name": "Product Name"})
+                            _name_map = _extra_df.set_index("Customer SKU Code")["Product Name"].to_dict()
+                            _res_df.loc[_miss_pn, "Product Name"] = _res_df.loc[_miss_pn, "Customer SKU Code"].map(_name_map)
+                    _all_sku_list = _res_df["Customer SKU Code"].unique().tolist()
+                    _npd_df = get_npd_data(tuple(_all_sku_list))
+                    _cur_npd = _npd_df["sku"].unique().tolist() if not _npd_df.empty else []
+                    _all_npd = list(set(_all_npd + _cur_npd))
+                    _res_df["is_po_sku"] = _res_df["is_po_sku"].astype("boolean").fillna(False)
+                    for _fc in ["PO Qty", "PO Value", "total_stock", "buffer_plan_by_lm_qty_adj",
+                                "avg_weekly_st_lm_qty", "buffer_plan_by_lm_val_adj",
+                                "remaining_allocation_qty_region", "woi_end_of_month_by_lm"]:
+                        if _fc in _res_df.columns:
+                            _res_df[_fc] = pd.to_numeric(_res_df[_fc], errors="coerce").fillna(0)
+                    _bp = _res_df["buffer_plan_by_lm_qty_adj"] if "buffer_plan_by_lm_qty_adj" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _res_df = _res_df[(_res_df["PO Qty"] > 0) | (_bp > 0)].copy()
+                    _sugg_mask = _res_df["is_po_sku"] == False
+                    _sc_s = _res_df["supply_control_status_gt"] if "supply_control_status_gt" in _res_df.columns else pd.Series([""]*len(_res_df), index=_res_df.index)
+                    _ra_s = _res_df["remaining_allocation_qty_region"] if "remaining_allocation_qty_region" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _bp_s = _res_df["buffer_plan_by_lm_qty_adj"] if "buffer_plan_by_lm_qty_adj" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _excl = (
+                        _res_df["Customer SKU Code"].isin(_skus_not_found) |
+                        _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_ALL) |
+                        (_ra_s < 0) |
+                        _sc_s.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"]) |
+                        (_bp_s == 0)
+                    )
+                    if _REJECTED_SKUS_1:
+                        _reg_up = [r.upper() for r in _REGION_LIST_1]
+                        _reg_s = _res_df["region"] if "region" in _res_df.columns else pd.Series([""]*len(_res_df), index=_res_df.index)
+                        _excl = _excl | (_res_df["Customer SKU Code"].isin(_REJECTED_SKUS_1) & ~_reg_s.str.upper().isin(_reg_up))
+                    _res_df = _res_df[~(_sugg_mask & _excl)].copy()
+                    _avg = _res_df["avg_weekly_st_lm_qty"] if "avg_weekly_st_lm_qty" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _stk = _res_df["total_stock"] if "total_stock" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _bp2 = _res_df["buffer_plan_by_lm_qty_adj"] if "buffer_plan_by_lm_qty_adj" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _res_df["WOI PO Original"] = calculate_woi(_stk, _res_df["PO Qty"], _avg)
+                    _res_df["WOI Suggest"] = calculate_woi(_stk, _bp2, _avg)
+                    _res_df["Current WOI"] = calculate_woi(_stk, 0, _avg)
+                    _ra2 = _res_df["remaining_allocation_qty_region"] if "remaining_allocation_qty_region" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _sc2 = _res_df["supply_control_status_gt"] if "supply_control_status_gt" in _res_df.columns else pd.Series([""]*len(_res_df), index=_res_df.index)
+                    _bp3 = _res_df["buffer_plan_by_lm_qty_adj"] if "buffer_plan_by_lm_qty_adj" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _avg2 = _res_df["avg_weekly_st_lm_qty"] if "avg_weekly_st_lm_qty" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _conds = [
+                        _res_df["Customer SKU Code"].isin(_skus_not_found),
+                        _res_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY) & (_res_df["PO Qty"] > _MAX_QTY_LIMIT),
+                        _ra2 < 0,
+                        _res_df["is_po_sku"] == False,
+                        _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
+                        _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
+                        _sc2.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"]),
+                        (_avg2 == 0) & (_bp3 == 0) & ~_res_df["Customer SKU Code"].str.upper().isin(_all_npd),
+                        _bp3 == 0,
+                        _res_df["PO Qty"] > _bp3,
+                        _res_df["PO Qty"] < _bp3,
+                        _res_df["PO Qty"] == _bp3,
+                    ]
+                    _choices = [
+                        "Reject (SKU Not Found in System)",
+                        f"Reject (Exceeds Qty Limit of {_MAX_QTY_LIMIT})",
+                        "Reject (Negative Allocation)",
+                        "Additional Suggestion",
+                        "Reject (Stop by Steve - Need approval email)",
+                        "Reject (Stop by Steve - No tolerance to open)",
+                        "Reject",
+                        "Proceed",
+                        "Reject",
+                        "Reject with suggestion",
+                        "Proceed with suggestion",
+                        "Proceed",
+                    ]
+                    _res_df["Remark"] = np.select(_conds, _choices, default="N/A (Missing Data)")
+                    if _REJECTED_SKUS_1:
+                        _res_df = apply_sku_rejection_rules(_REJECTED_SKUS_1, _res_df, _REGION_LIST_1, is_in=False)
+                    _res_df = _res_df.rename(columns={
+                        "Customer SKU Code": "SKU",
+                        "assortment": "Assortment", "supply_control_status_gt": "Supply Control",
+                        "total_stock": "Total Stock (Qty)", "avg_weekly_st_lm_qty": "Avg Weekly Sales LM (Qty)",
+                        "buffer_plan_by_lm_qty_adj": "Suggested PO Qty", "buffer_plan_by_lm_val_adj": "Suggested PO Value",
+                        "WOI PO Original": "WOI (Stock + PO Ori)", "WOI Suggest": "WOI After Buffer (Stock + Suggested Qty)",
+                        "woi_end_of_month_by_lm": "Stock + Suggested Qty WOI (Projection at EOM)",
+                        "remaining_allocation_qty_region": "Remaining Allocation (By Region)",
+                    })
+                    _res_df["RSA Notes"] = ""
+                    _out_cols = [
+                        "Distributor", "SKU", "Product Name", "Assortment", "Supply Control",
+                        "Avg Weekly Sales LM (Qty)", "Total Stock (Qty)", "Current WOI",
+                        "PO Qty", "PO Value", "WOI (Stock + PO Ori)", "Remark",
+                        "Suggested PO Qty", "Suggested PO Value",
+                        "WOI After Buffer (Stock + Suggested Qty)",
+                        "Stock + Suggested Qty WOI (Projection at EOM)",
+                        "Remaining Allocation (By Region)","is_po_sku" ,"RSA Notes",
+                    ]
+                    _res_df = _res_df.reindex(columns=_out_cols)
+                    _res_df.sort_values(by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True)
+                    _excel_dfs[_dist_name] = _res_df.copy()
+                _prog.progress(1.0, "Selesai")
+                st.session_state["sim_result"] = {"dfs": _excel_dfs, "npd": _all_npd}
+                st.rerun()
 
-        try:
-            raw_preview = pd.read_excel(
-                io.BytesIO(file_bytes), sheet_name=po_selected_sheet,
-                header=None, engine=_po_engine, dtype=str, nrows=5
-            )
-        except Exception as e:
-            st.error(f"❌ Gagal membaca file: {e}")
-            st.stop()
+            _sim_out = st.session_state.get("sim_result")
+            if _sim_out is not None:
+                _e_dfs = _sim_out["dfs"]
+                _e_npd = _sim_out["npd"]
+                if _e_dfs:
+                    st.success(f"Simulasi selesai — {len(_e_dfs)} distributor")
+                    _final_disp = pd.concat(_e_dfs.values(), ignore_index=True)
 
-        raw_preview.index = [f"Row {i}" for i in raw_preview.index]
+                    _combined_raw = _folder_res["df"].copy()
+                    _combined_raw[_sku_col_sim] = _combined_raw[_sku_col_sim].astype(str).str.strip().str.upper()
+                    _combined_raw[_dist_col_sim] = _combined_raw[_dist_col_sim].astype(str).str.strip().str.upper()
+                    _combined_raw = _combined_raw.rename(columns={_sku_col_sim: "SKU", _dist_col_sim: "Distributor"})
+                    _sim_col_names_upper = {c.upper() for c in _final_disp.columns}
+                    _exclude = {"SKU", "DISTRIBUTOR", _qty_col_sim.upper()}
+                    _extra_cols = [
+                        c for c in _combined_raw.columns
+                        if c.upper() not in _exclude and c.upper() not in _sim_col_names_upper
+                    ]
+                    if _extra_cols:
+                        _combined_agg = (
+                            _combined_raw.groupby(["SKU", "Distributor"], as_index=False)[_extra_cols]
+                            .first()
+                        )
+                        _final_disp = _final_disp.merge(_combined_agg, on=["SKU", "Distributor"], how="left")
 
-        try:
-            po_df = pd.read_excel(
-                io.BytesIO(file_bytes), sheet_name=po_selected_sheet,
-                header=int(0), engine=_po_engine, dtype=str
-            )
-            po_df = po_df.loc[:, ~po_df.columns.str.startswith('Unnamed')]
-            po_df = po_df.dropna(how='all')
-        except Exception as e:
-            st.error(f"❌ Gagal membaca file: {e}")
-            st.stop()
+                    woi_col = next((c for c in _final_disp.columns if "woi" in c.lower() and "stock" in c.lower()), None)
+                    if woi_col is None:
+                        woi_col = next((c for c in _final_disp.columns if "woi" in c.lower()), "Current WOI")
 
-        st.success("✅ Format file valid — sesuai template PO.")
+                    st.markdown("""
+                    <div class="pipeline-step active">
+                        <span class="step-number">2</span>
+                        <strong>Preview Data — Top 10 WOI</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-        next_step = 2
-        st.markdown(f"""
-        <div class="pipeline-step active">
-            <span class="step-number">{next_step}</span>
-            <strong>Preview Data — Top 10 WOI</strong>
-        </div>
-        """, unsafe_allow_html=True)
+                    _prev_df = _final_disp[_final_disp["Remark"].str.contains("Reject", na=False)].copy()
+                    _prev_df[woi_col] = pd.to_numeric(_prev_df[woi_col], errors="coerce")
+                    _top10 = _prev_df.nlargest(10, woi_col)[PO_IMG_COLS].reset_index(drop=True)
+                    _styled = _top10.style.set_properties(**{
+                        "background-color": "#D6EAF8",
+                        "color": "#1a1a2e",
+                        "border": "1px solid #AED6F1",
+                    }).format(na_rep="-")
+                    st.dataframe(_styled, use_container_width=True, hide_index=True)
+                    _final_disp = pd.concat(_e_dfs.values(), ignore_index=True)
+                    #st.dataframe(_final_disp, use_container_width=True, hide_index=True)
+                    st.caption(f"Menampilkan 10 baris dengan nilai **{woi_col}** terbesar · kolom Distributor s/d Remark")
 
-        woi_col = next((c for c in po_df.columns if 'woi' in c.lower() and 'stock' in c.lower()), None)
-        if woi_col is None:
-            woi_col = next((c for c in po_df.columns if 'woi' in c.lower()), 'Current WOI')
+                    alloc_col = next((c for c in _final_disp.columns if "allocation" in c.lower()), None)
+                    if alloc_col:
+                        st.markdown("""
+                        <div class="pipeline-step active">
+                            <span class="step-number">3</span>
+                            <strong>Remaining Allocation (per Distributor)</strong>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        _alloc_df = _final_disp.copy()
+                        _alloc_df[alloc_col] = pd.to_numeric(_alloc_df[alloc_col], errors="coerce")
+                        _alloc_df = _alloc_df[_alloc_df[alloc_col].notna() & (_alloc_df[alloc_col] != 0)]
+                        _show_cols = list(dict.fromkeys([c for c in PO_IMG_COLS + [alloc_col] if c in _alloc_df.columns]))
+                        if _alloc_df.empty:
+                            st.info("Tidak ada baris dengan allocation tersedia.")
+                        else:
+                            for _dist_alloc, _grp in _alloc_df.groupby("Distributor"):
+                                with st.expander(f"📦 {_dist_alloc} — {len(_grp)} baris", expanded=True):
+                                    st.dataframe(_grp[_show_cols].reset_index(drop=True), use_container_width=True, hide_index=True)
 
-        preview_df = po_df.copy()
-        preview_df = preview_df[preview_df['Remark'].str.contains('Reject', na=False)]
-        preview_df[woi_col] = pd.to_numeric(preview_df[woi_col], errors='coerce')
-        top10 = preview_df.nlargest(10, woi_col)[PO_IMG_COLS].reset_index(drop=True)
-
-        styled = top10.style.set_properties(**{
-            'background-color': '#D6EAF8',
-            'color': '#1a1a2e',
-            'border': '1px solid #AED6F1',
-        }).format(na_rep='-')
-        st.dataframe(styled, use_container_width=True, hide_index=True)
-        st.caption(f"Menampilkan 10 baris dengan nilai **{woi_col}** terbesar · kolom Distributor s/d Remark")
-
-        alloc_col = next((c for c in po_df.columns if 'allocation' in c.lower()), None)
-        if alloc_col:
-            st.markdown(f"""
-            <div class="pipeline-step active">
-                <span class="step-number">{next_step + 1}</span>
-                <strong>Remaining Allocation (tidak kosong &amp; tidak negatif)</strong>
-            </div>
-            """, unsafe_allow_html=True)
-            _alloc_df = po_df.copy()
-            _alloc_df[alloc_col] = pd.to_numeric(_alloc_df[alloc_col], errors='coerce')
-            _alloc_df = _alloc_df[_alloc_df[alloc_col].notna() & (_alloc_df[alloc_col] > 0)]
-            _show_cols = [c for c in PO_IMG_COLS + [alloc_col] if c in _alloc_df.columns]
-            _show_cols = list(dict.fromkeys(_show_cols))
-            if _alloc_df.empty:
-                st.info("Tidak ada baris dengan allocation tersedia.")
-            else:
-                st.caption(f"**{len(_alloc_df):,}** baris · kolom **{alloc_col}** ≥ 0")
-                st.dataframe(
-                    _alloc_df[_show_cols].reset_index(drop=True),
-                    use_container_width=True, hide_index=True,
-                )
-
-        final_step = next_step + (2 if alloc_col else 1)
-        st.markdown(f"""
-        <div class="pipeline-step active">
-            <span class="step-number">{final_step}</span>
-            <strong>Auto Kategorisasi &amp; Download Gambar</strong>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if not MATPLOTLIB_OK:
-            st.error("❌ Library matplotlib tidak tersedia. Tambahkan ke requirements.txt.")
-            st.stop()
-
-        img_df = po_df[PO_COLS_copy].copy()
-        sc_col     = 'Supply Control'
-        remark_col = 'Remark'
-        stop_keywords   = ['STOP PO', 'OOS', 'DISCONTINUE', 'UNAVAILABLE']
-        sc_col = next(
-            (c for c in img_df.columns if 'supply' in c.lower() and 'control' in c.lower()),
-            None)
-        stop_mask = img_df[sc_col].str.strip().str.upper().isin([k.upper() for k in stop_keywords])
-
-        stop_df = img_df[stop_mask].reset_index(drop=True)
-        cat1_col, cat2_col, cat3_col = st.columns(3)
-
-        with cat1_col:
-            st.markdown("""
-            <div class="metric-card" style="text-align:center;border-left:4px solid #CA6180;margin-bottom:0.6rem;">
-                <div style="font-size:1.6rem;">🚫</div>
-                <div style="font-weight:700;color:#CA6180;">Product Stop PO</div>
-                <div style="color:#A8849A;font-size:0.78rem;">Supply Control: STOP PO / OOS / DISCONTINUE</div>
-            </div>""", unsafe_allow_html=True)
-            if stop_df.empty:
-                st.info("Tidak ada data kategori ini.")
-            else:
-                st.caption(f"{len(stop_df)} baris ditemukan")
-                try:
-                    img_bytes = df_to_image_bytes(stop_df, title="Product Stop PO")
+                    _final_step = 3 + (1 if alloc_col else 0)
+                    _dl_data = to_excel_single_sheet(_final_disp, _e_npd)
                     st.download_button(
-                        label="Download product stop po (.png)",
-                        data=img_bytes,
-                        file_name=f"product_stop_po_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                        mime="image/png",
+                        label=f"⬇ Download PO Result.xlsx ({len(_final_disp)} baris)",
+                        data=_dl_data,
+                        file_name=f"PO Result {datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
-                except Exception as e:
-                    st.error(f"Gagal generate gambar: {e}")
 
-        non_stop_df = img_df[~stop_mask].copy()
-        col = non_stop_df[remark_col].str.lower()
-        steve_mask = (col.str.contains(
-            "reject (stop by steve", na=False, regex=False) |
-            col.str.contains("reject (negative allocation)", na=False, regex=False))
+                    st.markdown(f"""
+                    <div class="pipeline-step active">
+                        <span class="step-number">{_final_step}</span>
+                        <strong>Auto Kategorisasi &amp; Download Gambar</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-        steve_df = non_stop_df[steve_mask].reset_index(drop=True)
+                    if not MATPLOTLIB_OK:
+                        st.error("❌ Library matplotlib tidak tersedia. Tambahkan ke requirements.txt.")
+                        st.stop()
 
-        with cat2_col:
-            st.markdown("""
-            <div class="metric-card" style="text-align:center;border-left:4px solid #FCB7C7;margin-bottom:0.6rem;">
-                <div style="font-size:1.6rem;">❌</div>
-                <div style="font-weight:700;color:#CA6180;">Reject by Steve</div>
-                <div style="color:#A8849A;font-size:0.78rem;">Remark: reject by steve</div>
-            </div>""", unsafe_allow_html=True)
-            if steve_df.empty:
-                st.info("Tidak ada data kategori ini.")
-            else:
-                st.caption(f"{len(steve_df)} baris ditemukan")
-                try:
-                    img_bytes = df_to_image_bytes(steve_df, title="Reject by Steve")
-                    st.download_button(
-                        label="⬇ Download reject by steve (.png)",
-                        data=img_bytes,
-                        file_name=f"reject_by_steve_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                        mime="image/png",
-                        use_container_width=True,
+                    _img_df = _final_disp[PO_COLS_copy].copy()
+                    _remark_col = "Remark"
+                    _stop_keywords = ["STOP PO", "OOS", "DISCONTINUE", "UNAVAILABLE"]
+                    _sc_col = next((c for c in _img_df.columns if "supply" in c.lower() and "control" in c.lower()), None)
+                    _stop_mask = _img_df[_sc_col].str.strip().str.upper().isin([k.upper() for k in _stop_keywords])
+                    _stop_df = _img_df[_stop_mask].reset_index(drop=True)
+                    _cat1_col, _cat2_col, _cat3_col = st.columns(3)
+
+                    with _cat1_col:
+                        st.markdown("""
+                        <div class="metric-card" style="text-align:center;border-left:4px solid #CA6180;margin-bottom:0.6rem;">
+                            <div style="font-size:1.6rem;">🚫</div>
+                            <div style="font-weight:700;color:#CA6180;">Product Stop PO</div>
+                            <div style="color:#A8849A;font-size:0.78rem;">Supply Control: STOP PO / OOS / DISCONTINUE</div>
+                        </div>""", unsafe_allow_html=True)
+                        if _stop_df.empty:
+                            st.info("Tidak ada data kategori ini.")
+                        else:
+                            st.caption(f"{len(_stop_df)} baris ditemukan")
+                            try:
+                                _img_bytes = df_to_image_bytes(_stop_df, title="Product Stop PO")
+                                st.download_button(
+                                    label='Download product stop po (.png)',
+                                    data=_img_bytes,
+                                    file_name=f"product_stop_po_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                    mime="image/png",
+                                    use_container_width=True,
+                                )
+                            except Exception as _e:
+                                st.error(f"Gagal generate gambar: {_e}")
+
+                    _non_stop_df = _img_df[~_stop_mask].copy()
+                    _steve_mask = (
+                        _non_stop_df[_remark_col].str.lower().str.contains("reject (stop by steve", na=False, regex=False)
+                        | _non_stop_df[_remark_col].str.lower().str.contains("reject (negative allocation)", na=False, regex=False)
                     )
-                except Exception as e:
-                    st.error(f"Gagal generate gambar: {e}")
+                    _steve_df = _non_stop_df[_steve_mask].reset_index(drop=True)
 
-        approval_keywords = ['Reject', 'Reject with suggestion']
-        approval_mask = (
-            non_stop_df[remark_col]
-            .str.strip()
-            .str.lower()
-            .isin([k.lower() for k in approval_keywords])
-            & ~steve_mask)
-        approval_df = non_stop_df[approval_mask].reset_index(drop=True)
+                    with _cat2_col:
+                        st.markdown("""
+                        <div class="metric-card" style="text-align:center;border-left:4px solid #FCB7C7;margin-bottom:0.6rem;">
+                            <div style="font-size:1.6rem;">❌</div>
+                            <div style="font-weight:700;color:#CA6180;">Reject by Steve</div>
+                            <div style="color:#A8849A;font-size:0.78rem;">Remark: reject by steve</div>
+                        </div>""", unsafe_allow_html=True)
+                        if _steve_df.empty:
+                            st.info("Tidak ada data kategori ini.")
+                        else:
+                            st.caption(f"{len(_steve_df)} baris ditemukan")
+                            try:
+                                _img_bytes = df_to_image_bytes(_steve_df, title="Reject by Steve")
+                                st.download_button(
+                                    label='Download reject by steve (.png)',
+                                    data=_img_bytes,
+                                    file_name=f"reject_by_steve_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                    mime="image/png",
+                                    use_container_width=True,
+                                )
+                            except Exception as _e:
+                                st.error(f"Gagal generate gambar: {_e}")
 
-        with cat3_col:
-            st.markdown("""
-            <div class="metric-card" style="text-align:center;border-left:4px solid #A84D6A;margin-bottom:0.6rem;">
-                <div style="font-size:1.6rem;">⚠️</div>
-                <div style="font-weight:700;color:#CA6180;">Products Need Approval</div>
-                <div style="color:#A8849A;font-size:0.78rem;">Remark: reject / reject by suggestion</div>
-            </div>""", unsafe_allow_html=True)
-            if approval_df.empty:
-                st.info("Tidak ada data kategori ini.")
-            else:
-                st.caption(f"{len(approval_df)} baris ditemukan")
-                try:
-                    img_bytes = df_to_image_bytes(approval_df, title="Products Need Approval")
-                    st.download_button(
-                        label="Download products need approval (.png)",
-                        data=img_bytes,
-                        file_name=f"products_need_approval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                        mime="image/png",
-                        use_container_width=True,
+                    _approval_mask = (
+                        _non_stop_df[_remark_col].str.strip().str.lower().isin(["reject", "reject with suggestion"])
+                        & ~_steve_mask
                     )
-                except Exception as e:
-                    st.error(f"Gagal generate gambar: {e}")
+                    _approval_df = _non_stop_df[_approval_mask].reset_index(drop=True)
 
-        st.markdown("""
-        <div class="pipeline-step active">
-            <span class="step-number">4</span>
-            <strong>Product Code yang Harus Dihapus</strong>
-        </div>
-        """, unsafe_allow_html=True)
+                    with _cat3_col:
+                        st.markdown("""
+                        <div class="metric-card" style="text-align:center;border-left:4px solid #A84D6A;margin-bottom:0.6rem;">
+                            <div style="font-size:1.6rem;">⚠️</div>
+                            <div style="font-weight:700;color:#CA6180;">Products Need Approval</div>
+                            <div style="color:#A8849A;font-size:0.78rem;">Remark: reject / reject by suggestion</div>
+                        </div>""", unsafe_allow_html=True)
+                        if _approval_df.empty:
+                            st.info("Tidak ada data kategori ini.")
+                        else:
+                            st.caption(f"{len(_approval_df)} baris ditemukan")
+                            try:
+                                _img_bytes = df_to_image_bytes(_approval_df, title="Products Need Approval")
+                                st.download_button(
+                                    label='Download products need approval (.png)',
+                                    data=_img_bytes,
+                                    file_name=f"products_need_approval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                    mime="image/png",
+                                    use_container_width=True,
+                                )
+                            except Exception as _e:
+                                st.error(f"Gagal generate gambar: {_e}")
 
-        _sku_col = 'SKU'
-        _sku_series = []
-        for _sdf in (stop_df, steve_df):
-            if _sku_col in _sdf.columns:
-                _sku_series.append(_sdf[_sku_col].dropna().astype(str).str.strip())
-        _remark_series = []
-        if 'Supply Control' in stop_df.columns:
-            _remark_series.append(
-                stop_df['Supply Control'].dropna().astype(str).str.strip()
-            )
-        if 'Remark' in steve_df.columns:
-            _remark_series.append(
-                steve_df['Remark'].dropna().astype(str).str.strip()
-            )
-        _sku_all = (
-            pd.concat(_sku_series).pipe(lambda s: s[s != ''])
-            .drop_duplicates().sort_values().reset_index(drop=True)
-            if _sku_series else pd.Series(dtype=str)
-        )
-        _remark_all = (
-            pd.concat(_remark_series, ignore_index=True)
-            .astype(str)
-            .str.strip()
-            .loc[lambda s: s.ne('')]
-            .drop_duplicates()
-            .sort_values()
-            .reset_index(drop=True)
-            if _remark_series else pd.Series(dtype="string")
-        )
+                    st.markdown(f"""
+                    <div class="pipeline-step active">
+                        <span class="step-number">{_final_step + 1}</span>
+                        <strong>Product Code yang Harus Dihapus</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-        if _sku_all.empty:
-            st.info("Tidak ada product code yang perlu dihapus.")
-        else:
-            _pc1, _pc2 = st.columns([1, 1])
-            with _pc1:
-                st.dataframe(
-                    pd.DataFrame({"Remark/Supply Control": _remark_all}),
-                    use_container_width=True, hide_index=True,
-                )
-            with _pc2:
-                with st.expander("📋 Copy SKU"):
-                    st.code("\n".join(_sku_all.tolist()), language=None)
-
+                    _sku_series = [_sdf["SKU"].dropna().astype(str).str.strip() for _sdf in (_stop_df, _steve_df) if "SKU" in _sdf.columns]
+                    _remark_series = []
+                    if "Supply Control" in _stop_df.columns:
+                        _remark_series.append(_stop_df["Supply Control"].dropna().astype(str).str.strip())
+                    if "Remark" in _steve_df.columns:
+                        _remark_series.append(_steve_df["Remark"].dropna().astype(str).str.strip())
+                    _sku_all = (
+                        pd.concat(_sku_series).pipe(lambda s: s[s != ""]).drop_duplicates().sort_values().reset_index(drop=True)
+                        if _sku_series else pd.Series(dtype=str)
+                    )
+                    _remark_all = (
+                        pd.concat(_remark_series, ignore_index=True).astype(str).str.strip()
+                        .loc[lambda s: s.ne("")].drop_duplicates().sort_values().reset_index(drop=True)
+                        if _remark_series else pd.Series(dtype="string")
+                    )
+                    if _sku_all.empty:
+                        st.info("Tidak ada product code yang perlu dihapus.")
+                    else:
+                        _pc1, _pc2 = st.columns([1, 1])
+                        with _pc1:
+                            st.dataframe(pd.DataFrame({"Remark/Supply Control": _remark_all}), use_container_width=True, hide_index=True)
+                        with _pc2:
+                            with st.expander("📋 Copy SKU"):
+                                st.code("\n".join(_sku_all.tolist()), language=None)
     st.markdown("""
      <div class="hero-wrap">
          <div class="hero-tag">✦ Template PO</div>
@@ -1317,25 +2109,27 @@ if st.session_state.get('page') == 'po_changer':
      """, unsafe_allow_html=True)
     st.markdown("""
      <div class="pipeline-step active">
-         <span class="step-number">5</span>
+         <span class="step-number">1</span>
          <strong>Upload File Template</strong>
      </div>
      """, unsafe_allow_html=True)
     tpl_files = st.file_uploader("Upload template (.xlsx / .xls)",
-                                 type=["xlsx", "xls"],
-                                 accept_multiple_files=True,
-                                 key="tpl_uploader")
+                             type=["xlsx", "xls"],
+                             accept_multiple_files=True,
+                             key="tpl_uploader")
 
     for _fi, tpl_file in enumerate(tpl_files or []):
         with st.container(border=True):
             st.markdown(f"**#{_fi+1} &nbsp; {tpl_file.name}**")
-
-            tpl_bytes = tpl_file.read()
-            _tpl_name, tpl_bytes = _convert_to_xlsx(tpl_file.name, tpl_bytes)
-            if tpl_file.name.rsplit(".", 1)[-1].lower() != "xlsx":
+    
+            tpl_orig_bytes = tpl_file.read()
+            tpl_orig_ext = tpl_file.name.rsplit(".", 1)[-1].lower()
+            _tpl_name, tpl_bytes = _convert_to_xlsx(tpl_file.name, tpl_orig_bytes)
+            if tpl_orig_ext != "xlsx":
                 st.caption(f"🔄 Auto-convert: {tpl_file.name} → {_tpl_name}")
             _tpl_engine = "openpyxl"
-
+    
+            
             tpl_sheets = _get_sheet_names(tpl_bytes, _tpl_engine)
             if not tpl_sheets:
                 st.warning("⚠️ Tidak ada sheet visible.")
@@ -1358,7 +2152,7 @@ if st.session_state.get('page') == 'po_changer':
                     value=int(_auto_hrow) + 1, step=1,
                     key=f"tpl_hrow_{_fi}",
                 )
-            _tpl_hrow = int(_hrow_input) - 1
+            _tpl_hrow = int(_hrow_input) - 1  
 
             try:
                 tpl_df = pd.read_excel(io.BytesIO(tpl_bytes), sheet_name=tpl_selected_sheet,
@@ -1369,6 +2163,7 @@ if st.session_state.get('page') == 'po_changer':
                 st.error(f"❌ Gagal membaca file: {e}")
                 continue
 
+          
             st.caption(f"**{len(tpl_df):,} baris · {len(tpl_df.columns)} kolom**")
             with st.expander("👁 Preview data", expanded=False):
                 st.dataframe(tpl_df, use_container_width=True, hide_index=True)
@@ -1382,63 +2177,255 @@ if st.session_state.get('page') == 'po_changer':
                 st.markdown("""
                 <div class="pipeline-step active">
                     <span class="step-number">2</span>
-                    <strong>Kosongkan Quantity per Product Code</strong>
+                    <strong>Modifikasi Quantity per Product Code</strong>
                 </div>
                 """, unsafe_allow_html=True)
 
-                with st.container(border=True):
-                    st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
-                    mc1, mc2 = st.columns([2, 1])
-                    with mc1:
+                _tpl_mode = st.radio(
+                    "Pilih Aksi",
+                    ["🗑 Kosongkan Quantity", "➖ Kurangi Quantity"],
+                    horizontal=True,
+                    key=f"tpl_mode_{_fi}",
+                )
+
+                # ── helper: save modified file ──────────────────────────────
+                def _save_tpl_file(tpl_orig_bytes, tpl_orig_ext, tpl_selected_sheet,
+                                   _tpl_hrow, cell_writer):
+                    """
+                    cell_writer(sku_val, current_qty_val) → new_qty_val | None
+                    Returns (out_bytes, changed_count).
+                    """
+                    out_buf = io.BytesIO()
+                    changed = 0
+                    if tpl_orig_ext == "xls":
+                        import xlrd as _xlrd
+                        from xlutils.copy import copy as _xlcopy
+                        _rb = _xlrd.open_workbook(
+                            file_contents=tpl_orig_bytes, formatting_info=True
+                        )
+                        _wb = _xlcopy(_rb)
+                        _snames = [_rb.sheet_by_index(i).name for i in range(_rb.nsheets)]
+                        _si = _snames.index(tpl_selected_sheet) if tpl_selected_sheet in _snames else 0
+                        _rs = _rb.sheet_by_index(_si)
+                        _ws = _wb.get_sheet(_si)
+                        _hdr_vals = [str(_rs.cell_value(_tpl_hrow, c)) for c in range(_rs.ncols)]
+                        _sku_ci = next((i for i, h in enumerate(_hdr_vals) if h == sku_col_t), None)
+                        _qty_ci = next((i for i, h in enumerate(_hdr_vals) if h == qty_col_t), None)
+                        if _sku_ci is not None and _qty_ci is not None:
+                            for _ri in range(_tpl_hrow + 1, _rs.nrows):
+                                _sv = str(_rs.cell_value(_ri, _sku_ci)).strip()
+                                _qv = _rs.cell_value(_ri, _qty_ci)
+                                _new = cell_writer(_sv, _qv)
+                                if _new is not None:
+                                    _ws.write(_ri, _qty_ci, _new)
+                                    changed += 1
+                        _wb.save(out_buf)
+                    else:
+                        _wb = openpyxl.load_workbook(
+                            io.BytesIO(tpl_orig_bytes), keep_links=False, data_only=True
+                        )
+                        _ws = next(
+                            (s for s in _wb.worksheets if s.title == tpl_selected_sheet),
+                            _wb.active,
+                        )
+                        _hdr_row = _tpl_hrow + 1
+                        _hdrs = {
+                            _ws.cell(row=_hdr_row, column=c).value: c
+                            for c in range(1, _ws.max_column + 1)
+                        }
+                        _sku_ci = _hdrs.get(sku_col_t)
+                        _qty_ci = _hdrs.get(qty_col_t)
+                        if _sku_ci and _qty_ci:
+                            for _row in _ws.iter_rows(min_row=_hdr_row + 1, max_row=_ws.max_row):
+                                _sv = str(_row[_sku_ci - 1].value or "").strip()
+                                _qv = _row[_qty_ci - 1].value
+                                _new = cell_writer(_sv, _qv)
+                                if _new is not None:
+                                    _row[_qty_ci - 1].value = _new
+                                    changed += 1
+                        _wb.save(out_buf)
+                    return out_buf.getvalue(), changed
+
+                _out_ext = tpl_orig_ext
+                _out_mime = (
+                    "application/vnd.ms-excel"
+                    if tpl_orig_ext == "xls"
+                    else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+                # ── MODE 1: Hapus Baris ─────────────────────────────────────
+                if _tpl_mode == "🗑 Kosongkan Quantity":
+                    with st.container(border=True):
+                        st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
                         tpl_codes = st.text_area(
                             "Daftar Product Code (satu per baris)",
                             placeholder="SKU001\nSKU-ABC\nPROD123",
                             height=150, key=f"tpl_codes_{_fi}"
                         )
-                    with mc2:
-                        st.markdown("**Format:**")
-                        st.code("SKU001\nSKU-ABC", language=None)
-                        tpl_apply = st.button("🗑 Kosongkan Quantity",
-                                              use_container_width=True, key=f"tpl_apply_{_fi}")
+                        tpl_apply = st.button(
+                            "🗑 Hapus Baris",
+                            use_container_width=True, key=f"tpl_apply_{_fi}"
+                        )
 
-                    if tpl_apply and tpl_codes.strip():
-                        targets = {c.strip() for c in tpl_codes.strip().splitlines() if c.strip()}
-                        mask_t = tpl_df[sku_col_t].astype(str).str.strip().isin(targets)
-
-                        if mask_t.sum() == 0:
-                            st.warning("⚠️ Tidak ada Product Code yang cocok.")
-                        else:
-                            wb = openpyxl.load_workbook(io.BytesIO(tpl_bytes))
-                            ws = next((s for s in wb.worksheets
-                                       if s.title == tpl_selected_sheet), wb.active)
-                            header_excel_row = _tpl_hrow + 1
-                            headers_ws = {
-                                ws.cell(row=header_excel_row, column=c).value: c
-                                for c in range(1, ws.max_column + 1)
-                            }
-                            sku_col_idx = headers_ws.get(sku_col_t)
-                            qty_col_idx = headers_ws.get(qty_col_t)
-
-                            if sku_col_idx and qty_col_idx:
-                                cleared = 0
-                                for row in ws.iter_rows(min_row=header_excel_row + 1,
-                                                        max_row=ws.max_row):
-                                    if str(row[sku_col_idx - 1].value or "").strip() in targets:
-                                        row[qty_col_idx - 1].value = None
-                                        cleared += 1
-                                out_buf = io.BytesIO()
-                                wb.save(out_buf)
-                                st.session_state[f"tpl_out_{_fi}"] = {
-                                    "buf": out_buf.getvalue(), "mask": mask_t,
-                                    "sku": sku_col_t, "qty": qty_col_t,
-                                    "cleared": cleared, "df": tpl_df,
-                                }
+                        if tpl_apply and tpl_codes.strip():
+                            targets = {c.strip() for c in tpl_codes.strip().splitlines() if c.strip()}
+                            mask_t = tpl_df[sku_col_t].astype(str).str.strip().isin(targets)
+                            if mask_t.sum() == 0:
+                                st.warning("⚠️ Tidak ada Product Code yang cocok.")
                             else:
-                                st.warning("⚠️ Kolom tidak ditemukan di worksheet asli.")
+                                _del_buf = io.BytesIO()
+                                _del_cnt = 0
+                                if tpl_orig_ext == "xls":
+                                    import xlrd as _xlrd
+                                    from xlutils.copy import copy as _xlcopy
+                                    _rb = _xlrd.open_workbook(
+                                        file_contents=tpl_orig_bytes, formatting_info=True
+                                    )
+                                    _wb = _xlcopy(_rb)
+                                    _snames = [_rb.sheet_by_index(i).name for i in range(_rb.nsheets)]
+                                    _si = _snames.index(tpl_selected_sheet) if tpl_selected_sheet in _snames else 0
+                                    _rs = _rb.sheet_by_index(_si)
+                                    _ws = _wb.get_sheet(_si)
+                                    _hdr_vals = [str(_rs.cell_value(_tpl_hrow, c)) for c in range(_rs.ncols)]
+                                    _sku_ci = next((i for i, h in enumerate(_hdr_vals) if h == sku_col_t), None)
+                                    if _sku_ci is not None:
+                                        for _ri in range(_tpl_hrow + 1, _rs.nrows):
+                                            if str(_rs.cell_value(_ri, _sku_ci)).strip() in targets:
+                                                for _ci in range(_rs.ncols):
+                                                    _ws.write(_ri, _ci, "")
+                                                _del_cnt += 1
+                                    _wb.save(_del_buf)
+                                else:
+                                    _wb = openpyxl.load_workbook(
+                                        io.BytesIO(tpl_orig_bytes), keep_links=False, data_only=True
+                                    )
+                                    _ws = next(
+                                        (s for s in _wb.worksheets if s.title == tpl_selected_sheet),
+                                        _wb.active,
+                                    )
+                                    _hdr_row = _tpl_hrow + 1
+                                    _hdrs = {
+                                        _ws.cell(row=_hdr_row, column=c).value: c
+                                        for c in range(1, _ws.max_column + 1)
+                                    }
+                                    _sku_ci = _hdrs.get(sku_col_t)
+                                    if _sku_ci:
+                                        _rows_to_del = []
+                                        for _ri in range(_hdr_row + 1, _ws.max_row + 1):
+                                            _sv = str(_ws.cell(row=_ri, column=_sku_ci).value or "").strip()
+                                            if _sv in targets:
+                                                _rows_to_del.append(_ri)
+                                        for _ri in reversed(_rows_to_del):
+                                            _ws.delete_rows(_ri)
+                                        _del_cnt = len(_rows_to_del)
+                                    _wb.save(_del_buf)
+                                st.session_state[f"tpl_out_{_fi}"] = {
+                                    "buf": _del_buf.getvalue(), "mask": mask_t,
+                                    "sku": sku_col_t, "qty": qty_col_t,
+                                    "cleared": _del_cnt, "df": tpl_df,
+                                    "ext": _out_ext, "mime": _out_mime,
+                                    "mode": "hapus",
+                                }
 
+                # ── MODE 2: Kurangi ─────────────────────────────────────────
+                else:
+                    with st.container(border=True):
+                        st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
+                        reduce_codes = st.text_area(
+                            "Daftar Product Code (satu per baris)",
+                            placeholder="SKU001\nSKU-ABC\nPROD123",
+                            height=150, key=f"tpl_reduce_codes_{_fi}",
+                        )
+                        load_skus_btn = st.button(
+                            "📋 Tampilkan SKU",
+                            use_container_width=True, key=f"tpl_load_skus_{_fi}"
+                        )
+
+                        if load_skus_btn and reduce_codes.strip():
+                            _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
+                            st.session_state[f"reduce_skus_{_fi}"] = _parsed
+                        elif load_skus_btn:
+                            st.warning("⚠️ Tidak ada SKU yang valid")
+                    _skus_r = st.session_state.get(f"reduce_skus_{_fi}", [])
+                    if _skus_r:
+                        st.markdown("**Atur jumlah pengurangan per Product Code:**")
+                        _sku_qty_map = (
+                            tpl_df[[sku_col_t, qty_col_t]]
+                            .dropna(subset=[sku_col_t])
+                            .assign(**{sku_col_t: lambda d: d[sku_col_t].astype(str).str.strip()})
+                            .set_index(sku_col_t)[qty_col_t]
+                            .to_dict()
+                        )
+                        for _sku_r in _skus_r:
+                            with st.container(border=True):
+                                _rc1, _rc2, _rc3 = st.columns([3, 2, 3])
+                                with _rc1:
+                                    st.markdown(f"**{_sku_r}**")
+                                with _rc2:
+                                    _cur_q = _sku_qty_map.get(_sku_r, "-")
+                                    st.caption(f"QTY saat ini")
+                                    st.markdown(f"**{_cur_q}**")
+                                with _rc3:
+                                    st.number_input(
+                                        "Kurangi sebesar",
+                                        min_value=0,
+                                        value=0,
+                                        step=1,
+                                        key=f"reduce_val_{_fi}_{_sku_r}",
+                                    )
+
+                        reduce_apply = st.button(
+                            "➖ Terapkan Pengurangan",
+                            use_container_width=True,
+                            key=f"tpl_reduce_apply_{_fi}",
+                        )
+                        if reduce_apply:
+                            _reduce_map = {
+                                _sku_r: st.session_state.get(f"reduce_val_{_fi}_{_sku_r}", 0)
+                                for _sku_r in _skus_r
+                            }
+                            mask_t = tpl_df[sku_col_t].astype(str).str.strip().isin(set(_skus_r))
+
+                            def _reduce_writer(sku_val, qty_val):
+                                if sku_val not in _reduce_map:
+                                    return None
+                                try:
+                                    _cur = float(qty_val) if qty_val not in (None, "") else 0.0
+                                except (ValueError, TypeError):
+                                    _cur = 0.0
+                                _new = max(0.0, _cur - float(_reduce_map[sku_val]))
+                                return int(_new) if _new == int(_new) else _new
+
+                            _buf, _cnt = _save_tpl_file(
+                                tpl_orig_bytes, tpl_orig_ext, tpl_selected_sheet,
+                                _tpl_hrow, _reduce_writer
+                            )
+                            st.session_state[f"tpl_out_{_fi}"] = {
+                                "buf": _buf, "mask": mask_t,
+                                "sku": sku_col_t, "qty": qty_col_t,
+                                "cleared": _cnt, "df": tpl_df,
+                                "ext": _out_ext, "mime": _out_mime,
+                                "mode": "kurangi",
+                                "reduce_map": _reduce_map,
+                            }
+
+                # ── Hasil & Download ────────────────────────────────────────
                 _res_t = st.session_state.get(f"tpl_out_{_fi}")
                 if _res_t:
-                    st.success(f"✅ Quantity dikosongkan untuk **{_res_t['cleared']}** baris.")
+                    _mode_res = _res_t.get("mode", "hapus")
+                    if _mode_res == "hapus":
+                        st.success(f"✅ **{_res_t['cleared']}** baris dihapus dari file.")
+                    else:
+                        st.success(f"✅ Quantity dikurangi untuk **{_res_t['cleared']}** baris.")
+                        _rm = _res_t.get("reduce_map", {})
+                        if _rm:
+                            with st.expander("📋 Rincian pengurangan", expanded=False):
+                                st.dataframe(
+                                    pd.DataFrame(
+                                        [{"Product Code": k, "Dikurangi": v} for k, v in _rm.items()]
+                                    ),
+                                    use_container_width=True, hide_index=True,
+                                )
                     with st.expander("👁 Lihat baris yang diubah", expanded=False):
                         st.dataframe(
                             _res_t["df"][_res_t["mask"]][[_res_t["sku"], _res_t["qty"]]].reset_index(drop=True),
@@ -1451,22 +2438,23 @@ if st.session_state.get('page') == 'po_changer':
                         label_visibility="collapsed",
                     )
                     file_label = re.sub(r'[\\/*?:"<>|]', "", (customer_name or "").strip()) or "Unnamed_Customer"
+                    _dl_ext = _res_t.get("ext", "xlsx")
+                    _dl_mime = _res_t.get("mime", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                     st.download_button(
-                        label="Download Hasil Modifikasi (.xlsx)",
+                        label=f"⬇ Download Hasil Modifikasi (.{_dl_ext})",
                         data=_res_t["buf"],
-                        file_name=f"Form PO {file_label}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        file_name=f"Form PO {file_label}.{_dl_ext}",
+                        mime=_dl_mime,
                         use_container_width=True,
                         key=f"tpl_dl_{_fi}",
                     )
             else:
-                st.info("Kolom SKU / QTY tidak terdeteksi. Periksa header row.")
+                st.info("ℹ️ Kolom SKU / QTY tidak terdeteksi. Periksa header row.")
+    
+#   st.stop()
 
     st.stop()
 
-# =========================
-# Data Extractor Page
-# =========================
 st.markdown("""
     <div class="hero-wrap">
         <div class="hero-tag">✦ Raw Data Sales</div>
@@ -1532,10 +2520,13 @@ if st.session_state.get('page') == 'extractor':
                 file_name = uploaded_file.name.lower()
 
                 with st.spinner("🌸 Memproses file..."):
+
                     if file_name.endswith(".csv"):
                         df_loaded = pd.read_csv(uploaded_file, dtype=str)
+
                     elif file_name.endswith(".xlsx") or file_name.endswith(".xls"):
                         df_loaded = pd.read_excel(uploaded_file, dtype=str)
+
                     else:
                         st.error("❌ Format file tidak didukung.")
                         df_loaded = None
@@ -1623,6 +2614,7 @@ with col4:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+
 with st.expander('📊 Raw Data Preview', expanded=False):
     st.dataframe(raw_df.head(50), use_container_width=True, height=280)
 
@@ -1634,6 +2626,7 @@ st.markdown("""
     <strong>Schema Mapping — Format ST Data Template</strong>
 </div>
 """, unsafe_allow_html=True)
+
 
 OUTPUT_MAPPING = [
     ("*Customer Code",         ["brand", "customer code", "kode customer"],      True),
@@ -1652,7 +2645,6 @@ OUTPUT_MAPPING = [
 
 src_options = ["(Kosongkan)"] + raw_df.columns.tolist()
 
-
 def _auto_detect(hints, cols):
     clean_cols = [c.lower().lstrip("*").strip() for c in cols]
     for hint in hints:
@@ -1660,7 +2652,6 @@ def _auto_detect(hints, cols):
             if hint in cc or cc in hint:
                 return cols[i]
     return None
-
 
 with st.container(border=True):
     st.caption("Petakan kolom sumber ke kolom output ST Data Template. 🔴 = wajib")
@@ -1715,6 +2706,64 @@ else:
     work_df = raw_df
 
 st.divider()
+
+#st.markdown("""
+#<div class="pipeline-step active">
+#    <span class="step-number">4</span>
+#    <strong>Filter Data by Date Range</strong>
+#</div>
+#""", unsafe_allow_html=True)
+#
+#date_cols = detect_date_columns(work_df)
+#if not date_cols and "*PO Date" in work_df.columns:
+#    date_cols = ["*PO Date"]
+#
+#if date_cols:
+#    selected_date_col = st.selectbox(
+#        "Pilih kolom tanggal untuk filter",
+#        options=date_cols,
+#    )
+#
+#    df_work = work_df.copy()
+#    df_work[selected_date_col] = safe_to_datetime(df_work[selected_date_col])
+#    valid_dates = df_work[selected_date_col].dropna()
+#
+#    if len(valid_dates) > 0:
+#        min_date = valid_dates.min().date()
+#        max_date = valid_dates.max().date()
+#
+#        fcol1, fcol2 = st.columns(2)
+#        with fcol1:
+#            start_date = st.date_input("📅 Tanggal Mulai", value=min_date, min_value=min_date, max_value=max_date)
+#        with fcol2:
+#            end_date = st.date_input("📅 Tanggal Akhir", value=max_date, min_value=min_date, max_value=max_date)
+#
+#        if start_date > end_date:
+#            st.error("⚠️ Tanggal mulai tidak boleh lebih besar dari tanggal akhir!")
+#            st.stop()
+#
+#        mask = (df_work[selected_date_col].dt.date >= start_date) & (df_work[selected_date_col].dt.date <= end_date)
+#        filtered_df = df_work[mask].copy()
+#        filtered_df[selected_date_col] = filtered_df[selected_date_col].dt.strftime('%Y-%m-%d')
+#
+#        st.markdown(f"""
+#        <div style="display:flex; gap:1rem; margin:0.8rem 0;">
+#            <div class="badge badge-success">✓ {len(filtered_df):,} rows matched</div>
+#            <div class="badge badge-warning">{len(work_df) - len(filtered_df):,} rows excluded</div>
+#        </div>
+#        """, unsafe_allow_html=True)
+#
+#        with st.expander("👀 Preview Filtered Data", expanded=False):
+#            st.dataframe(filtered_df.head(100), use_container_width=True, height=300)
+#    else:
+#        st.warning("⚠️ Tidak ada data tanggal valid di kolom yang dipilih.")
+#        filtered_df = work_df.copy()
+#else:
+#    st.info("ℹ️ Tidak ditemukan kolom tanggal. Semua data akan digunakan tanpa filter.")
+#    filtered_df = work_df.copy()
+#    selected_date_col = None
+#
+#st.divider()
 
 st.markdown("""
 <div class="pipeline-step active">
@@ -1847,7 +2896,7 @@ with dl1:
         </div>
         """, unsafe_allow_html=True)
         st.download_button(
-            label="⬇ Download Customer Grouping (.xlsx)",
+            label="Download Customer Grouping (.xlsx)",
             data=cust_excel,
             file_name=f"customer_grouping_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1914,3 +2963,4 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
