@@ -1244,10 +1244,10 @@ with st.sidebar:
     #    st.session_state['page'] = 'tpl_po'
     #    st.rerun()
 
-    st.link_button(
-    "PO SIMULATOR",
-    DASHBOARD_URL_DEFAULT,
-    use_container_width=True)
+    #st.link_button(
+    #"PO SIMULATOR",
+    #DASHBOARD_URL_DEFAULT,
+    #use_container_width=True)
 
     st.divider()
     st.markdown(
