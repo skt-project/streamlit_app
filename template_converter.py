@@ -373,9 +373,11 @@ def intelligent_mapping(
     static_fields: Dict[str, str],
     mapping: Dict[str, str],
     brand_prefix: str,
+    distributor: str,   # ✅ required
     enable_fuzzy: bool = True,
     fuzzy_cutoff: float = 0.6,
 ) -> Tuple[pd.DataFrame, Dict[str, str], List[str]]:
+
     out = pd.DataFrame()
     effective_mapping = {}
     failed_columns = []
@@ -395,9 +397,7 @@ def intelligent_mapping(
         src = mapping_lower.get(target, "")
         if src and src in df.columns:
             if target == "PO Date":
-                out[target] = pd.to_datetime(df[src], errors="coerce").dt.strftime(
-                    "%Y-%m-%d"
-                )
+                out[target] = pd.to_datetime(df[src], errors="coerce").dt.strftime("%Y-%m-%d")
             else:
                 out[target] = df[src]
             effective_mapping[target] = src
@@ -416,6 +416,13 @@ def intelligent_mapping(
                     effective_mapping[target] = src
                 else:
                     failed_columns.append(target)
+
+    # ✅ PREFIX LOGIC (SAFE)
+    if distributor.upper() == "CV SINAR SAKTI":
+        out["PO Number"] = out["PO Number"].astype(str)
+        out["PO Number"] = out["PO Number"].apply(
+            lambda x: x if x.startswith("SS") else "SS" + x
+        )
 
     branch_code_prefix = static_fields.get("Customer Branch Code", "")
     original_store_code_col = effective_mapping.get("Customer Store Code")
@@ -642,8 +649,12 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         return
 
     try:
-        mapped, effective_map, failed_columns = intelligent_mapping(
-            df, cfg["static_fields"], cfg["mapping"], brand_prefix
+        mmapped, effective_map, failed_columns = intelligent_mapping(
+            df,
+            cfg["static_fields"],
+            cfg["mapping"],
+            brand_prefix,
+            distributor=dist
         )
     except Exception as e:
         st.error(f"Error during data mapping: {e}")
