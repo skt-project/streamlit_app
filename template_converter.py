@@ -649,7 +649,7 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         return
 
     try:
-        mmapped, effective_map, failed_columns = intelligent_mapping(
+        mapped, effective_map, failed_columns = intelligent_mapping(
             df,
             cfg["static_fields"],
             cfg["mapping"],
