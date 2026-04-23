@@ -2639,7 +2639,7 @@ if st.session_state.get('page') == 'po_changer':
                         _res_df["Customer SKU Code"].isin(_skus_not_found) |
                         _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_ALL) |
                         (_ra_s < 0) |
-                        _sc_s.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"]) |
+                        _sc_s.str.upper().isin(["STOP PO", "DISCONTINUEDD", "OOS", "UNAVAILABLE"]) |
                         (
                             _res_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY) &
                             (_bp_s > _MAX_QTY_LIMIT)
@@ -2676,13 +2676,13 @@ if st.session_state.get('page') == 'po_changer':
                         # 6. Manual reject — no tolerance
                         _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
                         # 7. Supply control stop/discontinued/OOS
-                        _sc2.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"]),
+                        _sc2.str.upper().isin(["STOP PO", "DISCONTINUEDD", "OOS", "UNAVAILABLE"]),
                         # 8. Tidak ada riwayat sales & buffer, bukan NPD → Proceed (no trend data)
                         (
                             (_avg2 == 0) &
                             (_bp3 == 0) &
                             ~_res_df["Customer SKU Code"].str.upper().isin(_npd_sku_upper) &
-                            ~_sc2.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"])
+                            ~_sc2.str.upper().isin(["STOP PO", "DISCONTINUEDD", "OOS"])
                         ),
                         # 9. Buffer = 0 → Reject
                         _bp3 == 0,
@@ -2871,7 +2871,7 @@ if st.session_state.get('page') == 'po_changer':
 
                     _img_df = _final_disp[PO_COLS_copy].copy()
                     _remark_col = "Remark"
-                    _stop_keywords = ["STOP PO", "OOS", "DISCONTINUE", "UNAVAILABLE"]
+                    _stop_keywords = ["STOP PO", "OOS", "DISCONTINUED", "UNAVAILABLE"]
                     _sc_col = next((c for c in _img_df.columns if "supply" in c.lower() and "control" in c.lower()), None)
                     _stop_mask = _img_df[_sc_col].str.strip().str.upper().isin([k.upper() for k in _stop_keywords])
                     _stop_df = _img_df[_stop_mask].reset_index(drop=True)
@@ -2882,7 +2882,7 @@ if st.session_state.get('page') == 'po_changer':
                         <div class="metric-card" style="text-align:center;border-left:4px solid #CA6180;margin-bottom:0.6rem;">
                             <div style="font-size:1.6rem;">🚫</div>
                             <div style="font-weight:700;color:#CA6180;">Product Stop PO</div>
-                            <div style="color:#A8849A;font-size:0.78rem;">Supply Control: STOP PO / OOS / DISCONTINUE</div>
+                            <div style="color:#A8849A;font-size:0.78rem;">Supply Control: STOP PO / OOS / DISCONTINUED</div>
                         </div>""", unsafe_allow_html=True)
                         if _stop_df.empty:
                             st.info("Tidak ada data kategori ini.")
