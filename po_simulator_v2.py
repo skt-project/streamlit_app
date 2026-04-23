@@ -930,6 +930,232 @@ hr { border-color: #E8EAED !important; margin: 1.2rem 0 !important; }
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+LIGHT_CSS = """
+<style>
+/* ==== Light mode overrides ==== */
+html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+.main, .block-container { background: #FFFFFF !important; }
+[data-testid="stHeader"] { background: #FFFFFF !important; }
+
+/* Force ALL text elements dark — override global #FFFFFF rules */
+[data-testid="stMain"] *:not(svg):not(path):not(button) {
+    color: #1F1F1F !important;
+}
+[data-testid="stMain"] h1, [data-testid="stMain"] h2, [data-testid="stMain"] h3,
+[data-testid="stMain"] h4, [data-testid="stMain"] h5, [data-testid="stMain"] h6,
+[data-testid="stMain"] p, [data-testid="stMain"] span, [data-testid="stMain"] div,
+[data-testid="stMain"] label, [data-testid="stMain"] li, [data-testid="stMain"] td,
+[data-testid="stMain"] th, [data-testid="stMain"] strong, [data-testid="stMain"] em,
+[data-testid="stMain"] small, [data-testid="stMain"] caption,
+[data-testid="stMain"] [data-testid="stMarkdownContainer"],
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] * {
+    color: #1F1F1F !important;
+}
+/* Muted / secondary text */
+[data-testid="stMain"] .stCaption *,
+[data-testid="stMain"] [data-testid="stCaptionContainer"] * { color: #5A5A5A !important; }
+
+[data-testid="stMain"] input, [data-testid="stMain"] textarea {
+    color: #1F1F1F !important; background: #FFFFFF !important;
+    border: 1.5px solid #C9C9C9 !important;
+}
+[data-testid="stMain"] input::placeholder,
+[data-testid="stMain"] textarea::placeholder { color: #8A8A8A !important; }
+[data-testid="stMain"] .stSelectbox > div > div {
+    color: #1F1F1F !important; background: #FFFFFF !important;
+    border: 1.5px solid #C9C9C9 !important;
+}
+[data-testid="stMain"] [data-baseweb="select"] span,
+[data-testid="stMain"] [data-baseweb="select"] div { color: #1F1F1F !important; }
+
+/* Gray buttons with visible dark text */
+[data-testid="stMain"] .stDownloadButton > button,
+[data-testid="stMain"] .stButton > button {
+    background: #D9D9D9 !important;
+    color: #111111 !important;
+    border: 1px solid #B0B0B0 !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+    font-weight: 700 !important;
+}
+[data-testid="stMain"] .stDownloadButton > button:hover,
+[data-testid="stMain"] .stButton > button:hover {
+    background: #C2C2C2 !important;
+    color: #000000 !important;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.12) !important;
+}
+
+/* Hero / pipeline */
+[data-testid="stMain"] .hero-title { color: #1F1F1F !important; }
+[data-testid="stMain"] .hero-sub { color: rgba(31,31,31,0.75) !important; }
+[data-testid="stMain"] .hero-tag {
+    background: #F7C8D6 !important; color: #6E253A !important;
+    border: 1px solid #E0B4C4 !important;
+}
+
+/* Cards */
+[data-testid="stMain"] .metric-card, [data-testid="stMain"] .feat-card {
+    background: #FAFAFA !important; border: 1px solid #E0E0E0 !important;
+}
+[data-testid="stMain"] .metric-label { color: #ffffff !important; }
+[data-testid="stMain"] .metric-value { color: #1F1F1F !important; }
+[data-testid="stMain"] .feat-title { color: #1F1F1F !important; }
+[data-testid="stMain"] .feat-desc  { color: #5A5A5A !important; }
+
+/* Badges */
+[data-testid="stMain"] .badge-info {
+    background: #EEE !important; color: #1F1F1F !important;
+    border: 1px solid #CCC !important;
+}
+
+/* Dividers & containers */
+[data-testid="stMain"] hr { border-color: #E0E0E0 !important; }
+[data-testid="stMain"] [data-testid="stVerticalBlockBorderWrapper"] {
+    border-color: #E0E0E0 !important;
+}
+
+/* Expander header + content */
+[data-testid="stMain"] details summary { color: #1F1F1F !important; }
+[data-testid="stMain"] [data-testid="stExpander"] { background: #FAFAFA !important; }
+
+/* Captions */
+[data-testid="stMain"] [data-testid="stCaptionContainer"],
+[data-testid="stMain"] .stCaption { color: #5A5A5A !important; }
+
+/* File uploader dropzone */
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"],
+[data-testid="stMain"] [data-testid="stFileUploader"] section {
+    background: #FAFBFC !important;
+    border: 1.5px dashed #D8DEE5 !important;
+    border-radius: 10px !important;
+    color: #1F1F1F !important;
+    padding: 0.8rem 1rem !important;
+}
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"] *,
+[data-testid="stMain"] [data-testid="stFileUploader"] section * {
+    color: #1F1F1F !important;
+}
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"] small,
+[data-testid="stMain"] [data-testid="stFileUploader"] small { color: #5A5A5A !important; }
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"] button {
+    background: #D9D9D9 !important; color: #111111 !important;
+    border: 1px solid #B0B0B0 !important; border-radius: 8px !important;
+    font-weight: 700 !important;
+}
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"] button:hover {
+    background: #C2C2C2 !important;
+}
+/* Uploaded file card — force ALL descendants to light bg (incl. icon wrapper) */
+[data-testid="stMain"] [data-testid="stFileUploader"] *:not(svg):not(path) {
+    background: #F5F7FA !important;
+    background-color: #F5F7FA !important;
+    color: #1F1F1F !important;
+}
+[data-testid="stMain"] [data-testid="stFileUploader"] section {
+    background: #FAFBFC !important;
+    background-color: #FAFBFC !important;
+    border: 1.5px dashed #D8DEE5 !important;
+}
+[data-testid="stMain"] [data-testid="stFileUploaderFile"],
+[data-testid="stMain"] [data-testid="stFileUploader"] ul li {
+    border: 1px solid #D5DAE0 !important;
+    border-radius: 8px !important;
+}
+/* File icon (svg) — make it dark rose for visibility on light bg */
+[data-testid="stMain"] [data-testid="stFileUploader"] svg,
+[data-testid="stMain"] [data-testid="stFileUploader"] svg path {
+    fill: #8B2040 !important; color: #8B2040 !important;
+}
+/* Ensure icon wrapper around svg is also light */
+[data-testid="stMain"] [data-testid="stFileUploader"] svg,
+[data-testid="stMain"] [data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > div:first-child,
+[data-testid="stMain"] [data-testid="stFileUploaderFile"] div:has(> svg) {
+    background: transparent !important;
+    background-color: transparent !important;
+}
+[data-testid="stMain"] [data-testid="stFileUploaderDeleteBtn"],
+[data-testid="stMain"] [data-testid="stFileUploaderFile"] button {
+    background: transparent !important;
+    background-color: transparent !important;
+    color: #1F1F1F !important; border: none !important;
+}
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"] button {
+    background: #D9D9D9 !important; background-color: #D9D9D9 !important;
+    color: #111111 !important; border: 1px solid #B0B0B0 !important;
+}
+
+/* Preview data (dataframe) — gray background */
+[data-testid="stMain"] [data-testid="stDataFrame"],
+[data-testid="stMain"] [data-testid="stDataFrameResizable"],
+[data-testid="stMain"] [data-testid="stDataFrame"] > div {
+    background: #F0F2F5 !important;
+    border: 1px solid #D5DAE0 !important;
+    border-radius: 8px !important;
+}
+[data-testid="stMain"] [data-testid="stDataFrame"] * { color: #F0F2F5 !important; }
+[data-testid="stMain"] [data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stMain"] [data-testid="stDataFrame"] [role="columnheader"] {
+    background: #F0F2F5 !important; color: #F0F2F5 !important;
+}
+/* Expander (Preview data) */
+[data-testid="stMain"] [data-testid="stExpander"],
+[data-testid="stMain"] details {
+    background: #F0F2F5 !important;
+    border: 1px solid #D5DAE0 !important;
+    border-radius: 8px !important;
+}
+[data-testid="stMain"] details summary { background: #F0F2F5 !important; color: #D5DAE0 !important; }
+
+/* Tighter spacing between sections in light mode */
+[data-testid="stMain"] .pipeline-step {
+    margin-bottom: 0.5rem !important;
+    padding: 0.65rem 1rem !important;
+    background: #F5EEF2 !important;
+    border: 1px solid #E6D7DF !important;
+    box-shadow: none !important;
+}
+[data-testid="stMain"] .pipeline-step.active { background: #F0D9E2 !important; border-color: #E0BDCC !important; }
+[data-testid="stMain"] .pipeline-step.completed { background: #DFF0E7 !important; border-color: #BFDCCB !important; }
+[data-testid="stMain"] .pipeline-step,
+[data-testid="stMain"] .pipeline-step *,
+[data-testid="stMain"] .pipeline-step strong,
+[data-testid="stMain"] .pipeline-step code { color: #5A1E38 !important; }
+[data-testid="stMain"] .pipeline-step .step-number {
+    background: #8B2040 !important; color: #FFFFFF !important;
+}
+[data-testid="stMain"] .hero-wrap { padding: 0.3rem 0 0.6rem !important; }
+[data-testid="stMain"] hr { margin: 0.6rem 0 !important; }
+[data-testid="stMain"] [data-testid="stVerticalBlock"] { gap: 0.5rem !important; }
+
+/* Number input +/- steppers */
+[data-testid="stMain"] [data-testid="stNumberInput"] button {
+    background: #D9D9D9 !important; color: #111111 !important;
+    border: 1px solid #B0B0B0 !important;
+}
+[data-testid="stMain"] [data-testid="stNumberInput"] input {
+    background: #FFFFFF !important; color: #1F1F1F !important;
+}
+
+/* Text area */
+[data-testid="stMain"] [data-testid="stTextArea"] textarea {
+    background: #FFFFFF !important; color: #1F1F1F !important;
+    border: 1.5px solid #C9C9C9 !important;
+}
+
+/* Tabs */
+[data-testid="stMain"] [data-baseweb="tab-list"] { border-bottom-color: #D0D0D0 !important; }
+[data-testid="stMain"] [data-baseweb="tab"] { color: #5A5A5A !important; }
+[data-testid="stMain"] [data-baseweb="tab"][aria-selected="true"] { color: #1F1F1F !important; }
+
+/* Alerts keep their tinted bg but use darker text */
+[data-testid="stMain"] .stAlert, [data-testid="stMain"] .stAlert * {
+    color: #1F1F1F !important;
+}
+</style>
+"""
+
+if st.session_state.get("light_mode", False):
+    st.markdown(LIGHT_CSS, unsafe_allow_html=True)
+
 def detect_date_columns(df: pd.DataFrame) -> list:
     date_cols = []
     for col in df.columns:
@@ -954,6 +1180,130 @@ def safe_to_datetime(series: pd.Series) -> pd.Series:
     except Exception:
         return series
 
+def _convert_via_excel(fbytes: bytes, src_ext: str, dst_ext: str) -> bytes | None:
+    """High-fidelity Excel format conversion via COM (pywin32). Preserves
+    formulas & formatting. src_ext/dst_ext are 'xls' or 'xlsx' (no dot).
+    Returns converted bytes on success, None if Excel/pywin32 unavailable."""
+    _fmt_map = {"xlsx": 51, "xls": 56}  # 51=xlOpenXMLWorkbook, 56=xlExcel8
+    if dst_ext not in _fmt_map:
+        return None
+    try:
+        import tempfile, os
+        import win32com.client as _wc  # type: ignore
+        import pythoncom  # type: ignore
+    except Exception:
+        return None
+    _fin_path = _fout_path = None
+    _xl = None
+    try:
+        pythoncom.CoInitialize()
+        with tempfile.NamedTemporaryFile(suffix=f".{src_ext}", delete=False) as _fin:
+            _fin.write(fbytes)
+            _fin_path = _fin.name
+        _fout_path = _fin_path.rsplit(".", 1)[0] + f"_out.{dst_ext}"
+        _xl = _wc.DispatchEx("Excel.Application")
+        _xl.Visible = False
+        _xl.DisplayAlerts = False
+        _wb = _xl.Workbooks.Open(_fin_path, UpdateLinks=0, ReadOnly=True)
+        _wb.SaveAs(_fout_path, FileFormat=_fmt_map[dst_ext])
+        _wb.Close(SaveChanges=False)
+        with open(_fout_path, "rb") as _f:
+            return _f.read()
+    except Exception:
+        return None
+    finally:
+        try:
+            if _xl is not None:
+                _xl.Quit()
+        except Exception:
+            pass
+        for _p in (_fin_path, _fout_path):
+            if _p:
+                try:
+                    os.remove(_p)
+                except Exception:
+                    pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
+def _xls_to_xlsx_via_excel(fbytes: bytes) -> bytes | None:
+    return _convert_via_excel(fbytes, "xls", "xlsx")
+
+def _edit_qty_via_excel_com(xlsx_bytes: bytes, sheet_name: str, hdr_row_0: int,
+                            sku_col_name: str, qty_col_name: str,
+                            cell_writer) -> tuple[bytes, int] | None:
+    """Edit qty cells via Excel COM (pywin32). Preserves all formatting,
+    formulas, images. cell_writer(sku_val, qty_val) → new_qty | None.
+    Returns (bytes, changed_count) on success, None on failure."""
+    try:
+        import tempfile, os
+        import win32com.client as _wc  # type: ignore
+        import pythoncom  # type: ignore
+    except Exception:
+        return None
+    _fin_path = None
+    _xl = None
+    try:
+        pythoncom.CoInitialize()
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as _fin:
+            _fin.write(xlsx_bytes)
+            _fin_path = _fin.name
+        _xl = _wc.DispatchEx("Excel.Application")
+        _xl.Visible = False
+        _xl.DisplayAlerts = False
+        _wb = _xl.Workbooks.Open(_fin_path, UpdateLinks=0)
+        _ws = None
+        for _s in _wb.Worksheets:
+            if _s.Name == sheet_name:
+                _ws = _s
+                break
+        if _ws is None:
+            _ws = _wb.Worksheets(1)
+        _hdr_row = hdr_row_0 + 1  # COM is 1-based
+        _used = _ws.UsedRange
+        _max_col = _used.Columns.Count + _used.Column - 1
+        _max_row = _used.Rows.Count + _used.Row - 1
+        _sku_ci = _qty_ci = None
+        for _c in range(1, _max_col + 1):
+            _v = _ws.Cells(_hdr_row, _c).Value
+            if _v == sku_col_name:
+                _sku_ci = _c
+            elif _v == qty_col_name:
+                _qty_ci = _c
+        changed = 0
+        if _sku_ci and _qty_ci:
+            for _r in range(_hdr_row + 1, _max_row + 1):
+                _sv = _ws.Cells(_r, _sku_ci).Value
+                _sv_str = str(_sv or "").strip()
+                _qv = _ws.Cells(_r, _qty_ci).Value
+                _new = cell_writer(_sv_str, _qv)
+                if _new is not None:
+                    _ws.Cells(_r, _qty_ci).Value = _new
+                    changed += 1
+        _wb.Save()
+        _wb.Close(SaveChanges=False)
+        with open(_fin_path, "rb") as _f:
+            return _f.read(), changed
+    except Exception:
+        return None
+    finally:
+        try:
+            if _xl is not None:
+                _xl.Quit()
+        except Exception:
+            pass
+        if _fin_path:
+            try:
+                os.remove(_fin_path)
+            except Exception:
+                pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
 def _convert_to_xlsx(fname: str, fbytes: bytes) -> tuple[str, bytes]:
     """Convert xls/csv to xlsx bytes. Returns (new_fname, xlsx_bytes). Preserves sheet visibility."""
     ext = fname.rsplit(".", 1)[-1].lower()
@@ -961,21 +1311,36 @@ def _convert_to_xlsx(fname: str, fbytes: bytes) -> tuple[str, bytes]:
     if ext == "xlsx":
         return fname, fbytes
     elif ext == "xls":
-        import xlrd as _xlrd
-        _book = _xlrd.open_workbook(file_contents=fbytes)
-        _wb = openpyxl.Workbook()
-        _wb.remove(_wb.active)
-        _vis_map = {0: 'visible', 1: 'hidden', 2: 'veryHidden'}
-        for _si in range(_book.nsheets):
-            _ws_old = _book.sheet_by_index(_si)
-            _ws_new = _wb.create_sheet(title=_ws_old.name)
-            _vis = getattr(_book, 'sheet_visibility', None)
-            _ws_new.sheet_state = _vis_map.get(_vis[_si] if _vis else 0, 'visible')
-            for _r in range(_ws_old.nrows):
-                for _c in range(_ws_old.ncols):
-                    _ws_new.cell(row=_r + 1, column=_c + 1, value=_ws_old.cell_value(_r, _c))
+        # Try Excel COM first for high-fidelity conversion (keeps formulas & formatting)
+        _hifi = _xls_to_xlsx_via_excel(fbytes)
+        if _hifi is not None:
+            return base + ".xlsx", _hifi
+        # Fallback 1: xlrd (values-only, may fail for some .xls variants)
+        try:
+            import xlrd as _xlrd
+            _book = _xlrd.open_workbook(file_contents=fbytes)
+            _wb = openpyxl.Workbook()
+            _wb.remove(_wb.active)
+            _vis_map = {0: 'visible', 1: 'hidden', 2: 'veryHidden'}
+            for _si in range(_book.nsheets):
+                _ws_old = _book.sheet_by_index(_si)
+                _ws_new = _wb.create_sheet(title=_ws_old.name)
+                _vis = getattr(_book, 'sheet_visibility', None)
+                _ws_new.sheet_state = _vis_map.get(_vis[_si] if _vis else 0, 'visible')
+                for _r in range(_ws_old.nrows):
+                    for _c in range(_ws_old.ncols):
+                        _ws_new.cell(row=_r + 1, column=_c + 1, value=_ws_old.cell_value(_r, _c))
+            _buf = io.BytesIO()
+            _wb.save(_buf)
+            return base + ".xlsx", _buf.getvalue()
+        except Exception:
+            pass
+        # Fallback 2: pandas (auto-picks engine)
+        _all_sheets = pd.read_excel(io.BytesIO(fbytes), sheet_name=None, dtype=object)
         _buf = io.BytesIO()
-        _wb.save(_buf)
+        with pd.ExcelWriter(_buf, engine="openpyxl") as _wr:
+            for _nm, _df in _all_sheets.items():
+                _df.to_excel(_wr, sheet_name=str(_nm)[:31], index=False)
         return base + ".xlsx", _buf.getvalue()
     elif ext == "csv":
         _df = pd.read_csv(io.BytesIO(fbytes), dtype=str, encoding_errors="replace")
@@ -1227,6 +1592,14 @@ with st.sidebar:
             )
     if 'page' not in st.session_state:
         st.session_state['page'] = 'extractor'
+
+    _prev_light = st.session_state.get("light_mode", False)
+    _new_light = st.toggle(
+        "☀️ Light Mode" if _prev_light else "🌙 Dark Mode",
+        value=_prev_light, key="light_mode",
+    )
+    if _new_light != _prev_light:
+        st.rerun()
 
     st.markdown(
         "<div style='padding:0 0.4rem 0.3rem;;text-align:center;font-size:1rem;font-weight:700;"
@@ -1623,8 +1996,11 @@ if st.session_state.get('page') == 'po_changer':
 
                   
                     _df_preview = df_f.copy()
-                    if not _has_dist and dist_val not in ("", "(Pilih)"):
-                        _df_preview.insert(0, "DISTRIBUTOR", dist_val)
+                    if dist_val not in ("", "(Pilih)"):
+                        if _has_dist:
+                            _df_preview["DISTRIBUTOR"] = dist_val
+                        else:
+                            _df_preview.insert(0, "DISTRIBUTOR", dist_val)
                     with st.expander(f"👁 Lihat isi  ·  header row {hrow}  ·  {len(_df_preview)} baris  ·  {_df_preview.shape[1]} kolom  ·  indeks 0–{_df_preview.shape[1]-1}", expanded=False):
                         st.dataframe(_df_preview.iloc[:,:6].reset_index(drop=True), use_container_width=True)
 
@@ -1663,8 +2039,11 @@ if st.session_state.get('page') == 'po_changer':
             _frames = []
             for p in ready:
                 _df = _apply_range_r(p["df"].copy(), p["row_rng"], p["col_rng"])
-                if not p["has_dist"] and p["dist_val"] not in ("", "(Pilih)"):
-                    _df.insert(0, "DISTRIBUTOR", p["dist_val"])
+                if p["dist_val"] not in ("", "(Pilih)"):
+                    if p["has_dist"]:
+                        _df["DISTRIBUTOR"] = p["dist_val"]
+                    else:
+                        _df.insert(0, "DISTRIBUTOR", p["dist_val"])
                 _frames.append(_df)
             
             try:
@@ -1705,7 +2084,8 @@ if st.session_state.get('page') == 'po_changer':
             for col in ['QTY', 'DPP', 'TOTAL PRICE']:
                 if col in combined_df.columns:
                     combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
-            #st.dataframe(combined_df.head(10), use_container_width=True, hide_index=True)
+            st.subheader("📊 Hasil Gabungan")
+            st.dataframe(combined_df, use_container_width=True, hide_index=True)
             
 
             _ts = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1719,16 +2099,438 @@ if st.session_state.get('page') == 'po_changer':
             #)
 
 #---------------------------PO SIMULATOR LANJUTAN--------------------------------
+import io
+import streamlit as st
+import pandas as pd
+import numpy as np
+from typing import List
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils.dataframe import dataframe_to_rows
+
+# --- BigQuery Imports ---
+from google.cloud import bigquery
+from google.api_core.exceptions import NotFound
+from google.oauth2 import service_account
+
+# =========================
+# BigQuery Configuration
+# =========================
+# Use Streamlit secrets if available, fallback to local path
+try:
+    gcp_secrets = st.secrets["connections"]["bigquery"]
+    private_key = gcp_secrets["private_key"].replace("\\n", "\n")
+    credentials = service_account.Credentials.from_service_account_info(
+        {
+            "type": gcp_secrets["type"],
+            "project_id": gcp_secrets["project_id"],
+            "private_key_id": gcp_secrets["private_key_id"],
+            "private_key": private_key,
+            "client_email": gcp_secrets["client_email"],
+            "client_id": gcp_secrets["client_id"],
+            "auth_uri": gcp_secrets["auth_uri"],
+            "token_uri": gcp_secrets["token_uri"],
+            "auth_provider_x509_cert_url": gcp_secrets["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
+        }
+    )
+    GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
+    BQ_DATASET = st.secrets["bigquery"]["dataset"]
+    BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
+except Exception:
+    # Fallback for local testing if secrets are not configured
+    #GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
+    GCP_PROJECT_ID = "skintific-data-warehouse"
+    BQ_DATASET = "rsa"
+    BQ_TABLE = "stock_analysis"
+    credentials = service_account.Credentials.from_service_account_file(
+        GCP_CREDENTIALS_PATH
+    )
 
 
+@st.cache_resource(show_spinner=False)
+def get_bq_client() -> bigquery.Client:
+    """Initializes and returns a BigQuery client."""
+    return bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
+
+
+@st.cache_data(ttl=21600, show_spinner="Fetching distributor data from BigQuery...")
+def get_distributor_data() -> List[str]:
+    """Fetches unique customer and branch codes from BigQuery."""
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+    try:
+        query = f"""
+        SELECT DISTINCT distributor
+        FROM `{table_id}`
+        ORDER BY distributor
+        """
+        rows = client.query(query).result()
+        return [r.distributor for r in rows]
+    except NotFound:
+        st.error(f"Error: BigQuery table '{table_id}' not found.")
+        return []
+    except Exception as e:
+        st.error(f"An error occurred while fetching data from BigQuery: {e}")
+        return []
+
+
+@st.cache_data(ttl=21600, show_spinner="Fetching SKU data from BigQuery...")
+def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
+    """
+    Fetches SKU data (including product_name) for a given list of SKUs from BigQuery.
+    Uses UPPER() on the sku column to handle case-insensitive matching.
+    """
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.gt_schema.master_product"
+
+    # Create a string of the SKUs for the IN clause (already uppercased)
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        sku,
+        product_name,
+        price_for_distri
+    FROM `{table_id}`
+    WHERE UPPER(sku) IN ({sku_list_str})
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching SKU data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=21600, show_spinner="Fetching NPD Allocation data from BigQuery...")
+def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
+    """
+    Fetches NPD Allocation data for a given list of SKUs from BigQuery.
+    """
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.gt_schema.npd_allocation"
+
+    # Create a string of the SKUs for the IN clause
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        calendar_date,
+        region,
+        sku
+    FROM `{table_id}`
+    WHERE sku IN ({sku_list_str})
+    AND calendar_date = '2026-04-01'
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching NPD data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=21600, show_spinner="Fetching Stock Analysis data from BigQuery...")
+def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
+    """
+    Fetches stock and sales data for a given list of SKUs from BigQuery.
+    Uses UPPER() on the sku column to handle case-insensitive matching.
+    """
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+
+    # Create a string of the SKUs for the IN clause
+    sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
+
+    query = f"""
+    SELECT
+        UPPER(region) AS region,
+        UPPER(distributor) AS distributor,
+        sku,
+        assortment,
+        supply_control_status_gt,
+        total_stock,
+        buffer_plan_by_lm_qty_adj,
+        avg_weekly_st_lm_qty,
+        buffer_plan_by_lm_val_adj,
+        remaining_allocation_qty_region,
+        woi_end_of_month_by_lm
+    FROM `{table_id}`
+    WHERE UPPER(distributor) = '{distributor_name}'
+    AND (
+        UPPER(sku) IN ({sku_list_str})
+        OR buffer_plan_by_lm_qty_adj > 0
+    )
+    """
+    try:
+        df_sku_data = client.query(query).to_dataframe()
+        return df_sku_data
+    except Exception as e:
+        st.error(f"Error fetching Stock Analysis data from BigQuery: {e}")
+        return pd.DataFrame()
+
+
+def calculate_woi(stock: pd.Series, po_qty: pd.Series, avg_weekly_sales: pd.Series) -> pd.Series:
+    """
+    Calculates Weeks of Inventory (WOI) based on the formula:
+    (Stock + PO Quantity) / Average Weekly Sales LM
+    """
+    return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
+
+
+def apply_sku_rejection_rules(sku_list: List, df: pd.DataFrame, regions: List[str], is_in: bool) -> pd.DataFrame:
+    """
+    Auto-rejects specific SKUs based on a provided list and region rules.
+
+    Args:
+        sku_list: List of SKUs to apply rules to
+        df: DataFrame containing the data
+        regions: List of allowed regions
+        is_in: If False, only allow SKUs in the specified regions (reject all others)
+               If True, reject SKUs in the specified regions
+    """
+    regions_upper = [r.upper() for r in regions]
+
+    if not is_in:
+        condition = (df["SKU"].isin(sku_list)) & (~df["region"].str.upper().isin(regions_upper))
+    else:
+        condition = (df["SKU"].isin(sku_list)) & (df["region"].str.upper().isin(regions_upper))
+
+    df.loc[condition, "Remark"] = "Reject (Stop by Steve)"
+
+    return df
+
+
+def to_excel_with_styling(dfs: dict, npd_sku_list: List[str] = None) -> bytes:
+    """
+    Converts a pandas DataFrame to an Excel file with special styling for the first 7 columns.
+    Applies specific color to 'Remaining Allocation (By Region)' column if SKU is in npd_sku_list.
+    """
+    output = io.BytesIO()
+    wb = Workbook()
+
+    del wb["Sheet"]
+
+    po_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+    suggestion_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    npd_fill = PatternFill(start_color="B1DBF0", end_color="B1DBF0", fill_type="solid")
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    header_alignment = Alignment(horizontal='left', vertical='center')
+
+    proceed_font = Font(bold=True, color="54CE54")
+    reject_font = Font(bold=True, color="D73E3E")
+    suggest_font = Font(bold=True, color="F3C94C")
+
+    for sheet_name, df in dfs.items():
+        ws = wb.create_sheet(title=sheet_name[:31])
+
+        is_po_sku_series = df["is_po_sku"]
+        df_no_flag = df.drop("is_po_sku", axis=1)
+
+        rows = dataframe_to_rows(df_no_flag, index=False, header=True)
+
+        headers = list(df_no_flag.columns)
+        col_map = {col: i for i, col in enumerate(headers)}
+
+        currency_cols = ["PO Value", "Suggested PO Value"]
+        integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
+        decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI", "WOI After Buffer (Stock + Suggested Qty)", "Stock + Suggested Qty WOI (Projection at EOM)"]
+
+        for r_idx, row in enumerate(rows, 1):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+                if r_idx == 1:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
+
+                if c_idx <= 11 and r_idx > 1:
+                    original_row_index = (r_idx - 2)
+                    is_po_row = is_po_sku_series.iloc[original_row_index]
+
+                    if is_po_row:
+                        cell.fill = po_fill
+                    else:
+                        cell.fill = suggestion_fill
+
+                if r_idx > 1:
+                    col_name = headers[c_idx - 1]
+
+                    if col_name in currency_cols:
+                        cell.number_format = "#,##0.00"
+                    elif col_name in integer_cols:
+                        cell.number_format = "#,##0"
+                    elif col_name in decimal_cols:
+                        cell.number_format = "0.00"
+
+                    if col_name == "Remark":
+                        remark_value = row[c_idx - 1]
+                        if "Proceed" in remark_value:
+                            cell.font = proceed_font
+                        elif "Reject" in remark_value:
+                            cell.font = reject_font
+                        elif "Additional" in remark_value:
+                            cell.font = suggest_font
+
+                    if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list is not None:
+                        sku_col_index = col_map.get("SKU")
+                        if sku_col_index is not None:
+                            sku_value = row[sku_col_index]
+                            if sku_value in npd_sku_list:
+                                cell.fill = npd_fill
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def to_excel_single_sheet(df: pd.DataFrame, npd_sku_list: List[str] = None) -> bytes:
+    """
+    Converts a single pandas DataFrame (all distributors stacked)
+    to an Excel file with special styling.
+    """
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PO Simulator"
+
+    po_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+    suggestion_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    npd_fill = PatternFill(start_color="B1DBF0", end_color="B1DBF0", fill_type="solid")
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    header_alignment = Alignment(horizontal='left', vertical='center')
+
+    proceed_font = Font(bold=True, color="54CE54")
+    reject_font = Font(bold=True, color="D73E3E")
+    suggest_font = Font(bold=True, color="F3C94C")
+
+    is_po_sku_series = df["is_po_sku"]
+    df_no_flag = df.drop("is_po_sku", axis=1)
+
+    rows = dataframe_to_rows(df_no_flag, index=False, header=True)
+
+    headers = list(df_no_flag.columns)
+    col_map = {col: i for i, col in enumerate(headers)}
+
+    currency_cols = ["PO Value", "Suggested PO Value"]
+    integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
+    decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI", "WOI After Buffer (Stock + Suggested Qty)", "Stock + Suggested Qty WOI (Projection at EOM)"]
+
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+            if r_idx == 1:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+
+            if c_idx <= 11 and r_idx > 1:
+                original_row_index = (r_idx - 2)
+                is_po_row = is_po_sku_series.iloc[original_row_index]
+
+                if is_po_row:
+                    cell.fill = po_fill
+                else:
+                    cell.fill = suggestion_fill
+
+            if r_idx > 1:
+                col_name = headers[c_idx - 1]
+
+                if col_name in currency_cols:
+                    cell.number_format = "#,##0.00"
+                elif col_name in integer_cols:
+                    cell.number_format = "#,##0"
+                elif col_name in decimal_cols:
+                    cell.number_format = "0.00"
+
+                if col_name == "Remark":
+                    remark_value = row[c_idx - 1]
+                    if "Proceed" in remark_value:
+                        cell.font = proceed_font
+                    elif "Reject" in remark_value:
+                        cell.font = reject_font
+                    elif "Additional" in remark_value:
+                        cell.font = suggest_font
+
+                if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list is not None:
+                    sku_col_index = col_map.get("SKU")
+                    if sku_col_index is not None:
+                        sku_value = row[sku_col_index]
+                        if sku_value in npd_sku_list:
+                            cell.fill = npd_fill
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def create_po_template_excel() -> bytes:
+    """
+    Creates a blank Excel template file with the required headers.
+    """
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PO Template"
+
+    ws["A2"] = "PUCHASE ORDER FORM"
+    ws["A3"] = "CUSTOMER NAME :"
+    ws["A4"] = "NPWP / ID CARD :"
+    ws["A5"] = "ADDRESS :"
+    ws["D3"] = "DATE :"
+    ws["D4"] = "Berlaku Sampai"
+    ws["D5"] = "Issued by"
+
+    ws["A2"].font = Font(bold=True, size=16)
+
+    headers = ["DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY", "DPP", "TOTAL PRICE"]
+
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=8, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+
+    ws.freeze_panes = "A9"
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+#-------------------------------------------------------------------------------------
 if st.session_state.get('page') == 'po_changer':
     _MANUAL_REJECT_APPROVAL = ["G2G-252",   "G2G-253"]
     _MANUAL_REJECT_NO_TOL = [
-        "G2G-29705", "G2G-224", "G2G-247", "G2G-225", "G2G-226", "G2G-228",
-        "G2G-74", "G2G-186", "G2G-202", "G2G-840", "G2G-844", "G2G-841",
-        "G2G-800", "G2G-213", "G2G-217", "G2G-27305", "G2G-30701", "G2G-30702",
-        "G2G-30703", "G2G-30704", "G2G-201", "G2G-31",
+        "G2G-29705",
+        "G2G-224",
+        "G2G-247",
+        "G2G-225",
+        "G2G-226",
+        "G2G-228",
+        "G2G-74",
+        "G2G-186",
+        "G2G-202",
+        "G2G-840",
+        "G2G-844",
+        "G2G-841",
+        "G2G-800",
+        "G2G-213",
+        "G2G-217",
+        "G2G-27305",
+        "G2G-30701",
+        "G2G-30702",
+        "G2G-30703",
+        "G2G-30704",
+        "G2G-201",
+        "G2G-31"
     ]
+
     _MANUAL_REJECT_ALL = _MANUAL_REJECT_APPROVAL + _MANUAL_REJECT_NO_TOL
     _LIMITED_SKUS_QTY = []
     _MAX_QTY_LIMIT = 500
@@ -1737,6 +2539,9 @@ if st.session_state.get('page') == 'po_changer':
         "Central Sumatera", "Northern Sumatera", "Jakarta (Csa)",
         "West Kalimantan", "South Kalimantan", "East Kalimantan",
     ]
+    _REJECTED_SKUS_2 = []
+    _REGION_LIST_2 = []
+    _WOI_STANDARD = 12  # Threshold WOI (weeks) — reject jika Current WOI melebihi nilai ini
 
     _folder_res = st.session_state.get("folder_result")
     if _folder_res is not None:
@@ -1773,8 +2578,12 @@ if st.session_state.get('page') == 'po_changer':
                         st.warning(f"Tidak ada data untuk distributor: {_dist_name}")
                         continue
                     _sku_df = _sku_df.rename(columns={"sku": "Customer SKU Code", "price_for_distri": "SIP", "product_name": "Product Name"})
+                    if "Customer SKU Code" in _sku_df.columns:
+                        _sku_df["Customer SKU Code"] = _sku_df["Customer SKU Code"].astype(str).str.strip().str.upper()
                     if "sku" in _stock_df.columns:
                         _stock_df = _stock_df.rename(columns={"sku": "Customer SKU Code"})
+                    if "Customer SKU Code" in _stock_df.columns:
+                        _stock_df["Customer SKU Code"] = _stock_df["Customer SKU Code"].astype(str).str.strip().str.upper()
                     _stock_df = _stock_df.drop(columns=["distributor", "Distributor", "product_name"], errors="ignore")
                     _skus_in_sku = set(_sku_df["Customer SKU Code"].tolist()) if not _sku_df.empty else set()
                     _skus_in_stock = set(_stock_df["Customer SKU Code"].tolist()) if not _stock_df.empty else set()
@@ -1792,9 +2601,21 @@ if st.session_state.get('page') == 'po_changer':
                         _extra_skus = _res_df.loc[_miss_pn, "Customer SKU Code"].unique().tolist()
                         _extra_df = get_sku_data(tuple(_extra_skus))
                         if not _extra_df.empty:
-                            _extra_df = _extra_df.rename(columns={"sku": "Customer SKU Code", "product_name": "Product Name"})
+                            _extra_df = _extra_df.rename(columns={
+                                "sku": "Customer SKU Code",
+                                "product_name": "Product Name",
+                                "price_for_distri": "SIP",   # ← tambahan: ambil SIP juga
+                            })
+                            _extra_df["Customer SKU Code"] = _extra_df["Customer SKU Code"].astype(str).str.strip().str.upper()
                             _name_map = _extra_df.set_index("Customer SKU Code")["Product Name"].to_dict()
                             _res_df.loc[_miss_pn, "Product Name"] = _res_df.loc[_miss_pn, "Customer SKU Code"].map(_name_map)
+                            # ← tambahan: isi SIP untuk suggested SKUs yang belum punya SIP
+                            if "SIP" in _extra_df.columns:
+                                _sip_map = _extra_df.set_index("Customer SKU Code")["SIP"].to_dict()
+                                _miss_sip = _res_df["SIP"].isna() | (_res_df["SIP"] == 0)
+                                _res_df.loc[_miss_sip, "SIP"] = (
+                                    _res_df.loc[_miss_sip, "Customer SKU Code"].map(_sip_map)
+                                )
                     _all_sku_list = _res_df["Customer SKU Code"].unique().tolist()
                     _npd_df = get_npd_data(tuple(_all_sku_list))
                     _cur_npd = _npd_df["sku"].unique().tolist() if not _npd_df.empty else []
@@ -1805,17 +2626,34 @@ if st.session_state.get('page') == 'po_changer':
                                 "remaining_allocation_qty_region", "woi_end_of_month_by_lm"]:
                         if _fc in _res_df.columns:
                             _res_df[_fc] = pd.to_numeric(_res_df[_fc], errors="coerce").fillna(0)
+                    # Fallback: jika buffer_plan_by_lm_val_adj = 0 tapi qty > 0 dan SIP tersedia,
+                    # hitung ulang Suggested PO Value = SIP × Suggested PO Qty
+                    _res_df["SIP"] = pd.to_numeric(_res_df["SIP"], errors="coerce").fillna(0)
+                    _zero_sugg_val = (
+                        (_res_df["buffer_plan_by_lm_val_adj"] == 0) &
+                        (_res_df["buffer_plan_by_lm_qty_adj"] > 0) &
+                        (_res_df["SIP"] > 0)
+                    )
+                    _res_df.loc[_zero_sugg_val, "buffer_plan_by_lm_val_adj"] = (
+                        _res_df.loc[_zero_sugg_val, "SIP"] *
+                        _res_df.loc[_zero_sugg_val, "buffer_plan_by_lm_qty_adj"]
+                    )
                     _bp = _res_df["buffer_plan_by_lm_qty_adj"] if "buffer_plan_by_lm_qty_adj" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
                     _res_df = _res_df[(_res_df["PO Qty"] > 0) | (_bp > 0)].copy()
                     _sugg_mask = _res_df["is_po_sku"] == False
                     _sc_s = _res_df["supply_control_status_gt"] if "supply_control_status_gt" in _res_df.columns else pd.Series([""]*len(_res_df), index=_res_df.index)
                     _ra_s = _res_df["remaining_allocation_qty_region"] if "remaining_allocation_qty_region" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
                     _bp_s = _res_df["buffer_plan_by_lm_qty_adj"] if "buffer_plan_by_lm_qty_adj" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _npd_sku_upper = [s.upper() for s in _cur_npd]
                     _excl = (
                         _res_df["Customer SKU Code"].isin(_skus_not_found) |
                         _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_ALL) |
                         (_ra_s < 0) |
                         _sc_s.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"]) |
+                        (
+                            _res_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY) &
+                            (_bp_s > _MAX_QTY_LIMIT)
+                        ) |
                         (_bp_s == 0)
                     )
                     if _REJECTED_SKUS_1:
@@ -1833,38 +2671,56 @@ if st.session_state.get('page') == 'po_changer':
                     _sc2 = _res_df["supply_control_status_gt"] if "supply_control_status_gt" in _res_df.columns else pd.Series([""]*len(_res_df), index=_res_df.index)
                     _bp3 = _res_df["buffer_plan_by_lm_qty_adj"] if "buffer_plan_by_lm_qty_adj" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
                     _avg2 = _res_df["avg_weekly_st_lm_qty"] if "avg_weekly_st_lm_qty" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
+                    _cur_woi = _res_df["Current WOI"]
                     _conds = [
+                        # 1. SKU tidak ditemukan di sistem
                         _res_df["Customer SKU Code"].isin(_skus_not_found),
+                        # 2. Melebihi batas qty
                         _res_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY) & (_res_df["PO Qty"] > _MAX_QTY_LIMIT),
+                        # 3. Alokasi regional negatif
                         _ra2 < 0,
+                        # 4. Bukan dari PO original → Additional Suggestion
                         _res_df["is_po_sku"] == False,
+                        # 5. Manual reject — butuh approval email
                         _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
+                        # 6. Manual reject — no tolerance
                         _res_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
+                        # 7. Supply control stop/discontinued/OOS
                         _sc2.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"]),
-                        (_avg2 == 0) & (_bp3 == 0) & ~_res_df["Customer SKU Code"].str.upper().isin(_all_npd),
+                        # 8. Tidak ada riwayat sales & buffer, bukan NPD → Proceed (no trend data)
+                        (
+                            (_avg2 == 0) &
+                            (_bp3 == 0) &
+                            ~_res_df["Customer SKU Code"].str.upper().isin(_npd_sku_upper) &
+                            ~_sc2.str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"])
+                        ),
+                        # 9. Buffer = 0 → Reject
                         _bp3 == 0,
+                        # 10. PO > buffer → Reject with suggestion
                         _res_df["PO Qty"] > _bp3,
+                        # 11. PO < buffer → Proceed with suggestion
                         _res_df["PO Qty"] < _bp3,
+                        # 12. PO == buffer → Proceed
                         _res_df["PO Qty"] == _bp3,
                     ]
                     _choices = [
-                        "Reject (SKU Not Found in System)",
-                        f"Reject (Exceeds Qty Limit of {_MAX_QTY_LIMIT})",
-                        "Reject (Negative Allocation)",
-                        "Additional Suggestion",
-                        "Reject (Stop by Steve - Need approval email)",
-                        "Reject (Stop by Steve - No tolerance to open)",
-                        "Reject",
-                        "Proceed",
-                        "Reject",
-                        "Reject with suggestion",
-                        "Proceed with suggestion",
-                        "Proceed",
+                        "Reject (SKU Not Found in System)",              # 1
+                        f"Reject (Exceeds Qty Limit of {_MAX_QTY_LIMIT})",  # 2
+                        "Reject (Negative Allocation)",                   # 3
+                        "Additional Suggestion",                          # 4
+                        "Reject (Stop by Steve - Need approval email)",   # 5
+                        "Reject (Stop by Steve - No tolerance to open)",  # 6
+                        "Reject",                                         # 7
+                        "Proceed",                                        # 8
+                        "Reject",                                         # 9
+                        "Reject with suggestion",                         # 10
+                        "Proceed with suggestion",                        # 11
+                        "Proceed",                                        # 12
                     ]
+
                     _res_df["Remark"] = np.select(_conds, _choices, default="N/A (Missing Data)")
-                    if _REJECTED_SKUS_1:
-                        _res_df = apply_sku_rejection_rules(_REJECTED_SKUS_1, _res_df, _REGION_LIST_1, is_in=False)
                     _res_df = _res_df.rename(columns={
+                        "distributor_name":"Distributor",
                         "Customer SKU Code": "SKU",
                         "assortment": "Assortment", "supply_control_status_gt": "Supply Control",
                         "total_stock": "Total Stock (Qty)", "avg_weekly_st_lm_qty": "Avg Weekly Sales LM (Qty)",
@@ -1873,6 +2729,10 @@ if st.session_state.get('page') == 'po_changer':
                         "woi_end_of_month_by_lm": "Stock + Suggested Qty WOI (Projection at EOM)",
                         "remaining_allocation_qty_region": "Remaining Allocation (By Region)",
                     })
+                    if _REJECTED_SKUS_1:
+                        _res_df = apply_sku_rejection_rules(_REJECTED_SKUS_1, _res_df, _REGION_LIST_1, is_in=False)
+                    if _REJECTED_SKUS_2:
+                        _res_df = apply_sku_rejection_rules(_REJECTED_SKUS_2, _res_df, _REGION_LIST_2, is_in=False)
                     _res_df["RSA Notes"] = ""
                     _out_cols = [
                         "Distributor", "SKU", "Product Name", "Assortment", "Supply Control",
@@ -1885,6 +2745,18 @@ if st.session_state.get('page') == 'po_changer':
                     ]
                     _res_df = _res_df.reindex(columns=_out_cols)
                     _res_df.sort_values(by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True)
+
+                    # Diagnose rows with Suggested PO Qty = 0
+                    _zero_sugg = _res_df[
+                        (_res_df["Suggested PO Qty"] == 0) & (_res_df["is_po_sku"] == True)
+                    ][["SKU", "Product Name", "PO Qty", "Suggested PO Qty", "Remark"]]
+                    if not _zero_sugg.empty:
+                        st.warning(
+                            f"⚠️ **{_dist_name}** — {len(_zero_sugg)} SKU memiliki **Suggested PO Qty = 0** "
+                            f"(data `buffer_plan_by_lm_qty_adj` tidak ada / 0 di BigQuery):"
+                        )
+                        st.dataframe(_zero_sugg, use_container_width=True, hide_index=True)
+
                     _excel_dfs[_dist_name] = _res_df.copy()
                 _prog.progress(1.0, "Selesai")
                 st.session_state["sim_result"] = {"dfs": _excel_dfs, "npd": _all_npd}
@@ -1936,6 +2808,34 @@ if st.session_state.get('page') == 'po_changer':
                     }).format(na_rep="-")
                     st.dataframe(_styled, use_container_width=True, hide_index=True)
                     _final_disp = pd.concat(_e_dfs.values(), ignore_index=True)
+                    
+                    # Format columns for display (create a copy so Excel export uses raw numbers)
+                    _final_disp_fmt = _final_disp.copy()
+                    _final_disp_fmt["PO Value"] = _final_disp_fmt["PO Value"].apply(
+                        lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
+                    )
+                    _final_disp_fmt["Suggested PO Value"] = _final_disp_fmt["Suggested PO Value"].apply(
+                        lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
+                    )
+                    _final_disp_fmt["Remaining Allocation (By Region)"] = _final_disp_fmt["Remaining Allocation (By Region)"].apply(
+                        lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
+                    )
+                    _final_disp_fmt["Avg Weekly Sales LM (Qty)"] = _final_disp_fmt["Avg Weekly Sales LM (Qty)"].apply(
+                        lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
+                    )
+                    _final_disp_fmt["WOI (Stock + PO Ori)"] = _final_disp_fmt["WOI (Stock + PO Ori)"].apply(
+                        lambda x: f"{x:.2f}" if pd.notnull(x) else ""
+                    )
+                    _final_disp_fmt["Stock + Suggested Qty WOI (Projection at EOM)"] = _final_disp_fmt["Stock + Suggested Qty WOI (Projection at EOM)"].apply(
+                        lambda x: f"{x:.2f}" if pd.notnull(x) else ""
+                    )
+                    _final_disp_fmt["Current WOI"] = _final_disp_fmt["Current WOI"].apply(
+                        lambda x: f"{x:.2f}" if pd.notnull(x) else ""
+                    )
+                    _final_disp_fmt["WOI After Buffer (Stock + Suggested Qty)"] = _final_disp_fmt["WOI After Buffer (Stock + Suggested Qty)"].apply(
+                        lambda x: f"{x:.2f}" if pd.notnull(x) else ""
+                    )
+
                     #st.dataframe(_final_disp, use_container_width=True, hide_index=True)
                     st.caption(f"Menampilkan 10 baris dengan nilai **{woi_col}** terbesar · kolom Distributor s/d Remark")
 
@@ -2112,8 +3012,8 @@ if st.session_state.get('page') == 'po_changer':
          <strong>Upload File Template</strong>
      </div>
      """, unsafe_allow_html=True)
-    tpl_files = st.file_uploader("Upload template (.xlsx / .xls)",
-                             type=["xlsx", "xls"],
+    tpl_files = st.file_uploader("Upload template (.xlsx)",
+                             type=["xlsx"],
                              accept_multiple_files=True,
                              key="tpl_uploader")
 
@@ -2180,256 +3080,150 @@ if st.session_state.get('page') == 'po_changer':
                 </div>
                 """, unsafe_allow_html=True)
 
-                _tpl_mode = st.radio(
-                    "Pilih Aksi",
-                    ["🗑 Kosongkan Quantity", "➖ Kurangi Quantity"],
-                    horizontal=True,
-                    key=f"tpl_mode_{_fi}",
-                )
-
                 # ── helper: save modified file ──────────────────────────────
-                def _save_tpl_file(tpl_orig_bytes, tpl_orig_ext, tpl_selected_sheet,
-                                   _tpl_hrow, cell_writer):
+                def _save_tpl_file(tpl_selected_sheet, _tpl_hrow, cell_writer):
                     """
-                    cell_writer(sku_val, current_qty_val) → new_qty_val | None
+                    Try Excel COM first (perfect fidelity); fall back to
+                    openpyxl if pywin32/Excel not available.
                     Returns (out_bytes, changed_count).
                     """
+                    _com_res = _edit_qty_via_excel_com(
+                        tpl_bytes, tpl_selected_sheet, _tpl_hrow,
+                        sku_col_t, qty_col_t, cell_writer,
+                    )
+                    if _com_res is not None:
+                        return _com_res
+                    # Fallback: openpyxl
                     out_buf = io.BytesIO()
                     changed = 0
-                    if tpl_orig_ext == "xls":
-                        import xlrd as _xlrd
-                        from xlutils.copy import copy as _xlcopy
-                        _rb = _xlrd.open_workbook(
-                            file_contents=tpl_orig_bytes, formatting_info=True
-                        )
-                        _wb = _xlcopy(_rb)
-                        _snames = [_rb.sheet_by_index(i).name for i in range(_rb.nsheets)]
-                        _si = _snames.index(tpl_selected_sheet) if tpl_selected_sheet in _snames else 0
-                        _rs = _rb.sheet_by_index(_si)
-                        _ws = _wb.get_sheet(_si)
-                        _hdr_vals = [str(_rs.cell_value(_tpl_hrow, c)) for c in range(_rs.ncols)]
-                        _sku_ci = next((i for i, h in enumerate(_hdr_vals) if h == sku_col_t), None)
-                        _qty_ci = next((i for i, h in enumerate(_hdr_vals) if h == qty_col_t), None)
-                        if _sku_ci is not None and _qty_ci is not None:
-                            for _ri in range(_tpl_hrow + 1, _rs.nrows):
-                                _sv = str(_rs.cell_value(_ri, _sku_ci)).strip()
-                                _qv = _rs.cell_value(_ri, _qty_ci)
-                                _new = cell_writer(_sv, _qv)
-                                if _new is not None:
-                                    _ws.write(_ri, _qty_ci, _new)
-                                    changed += 1
-                        _wb.save(out_buf)
-                    else:
-                        _wb = openpyxl.load_workbook(
-                            io.BytesIO(tpl_orig_bytes), keep_links=False, data_only=True
-                        )
-                        _ws = next(
-                            (s for s in _wb.worksheets if s.title == tpl_selected_sheet),
-                            _wb.active,
-                        )
-                        _hdr_row = _tpl_hrow + 1
-                        _hdrs = {
-                            _ws.cell(row=_hdr_row, column=c).value: c
-                            for c in range(1, _ws.max_column + 1)
-                        }
-                        _sku_ci = _hdrs.get(sku_col_t)
-                        _qty_ci = _hdrs.get(qty_col_t)
-                        if _sku_ci and _qty_ci:
-                            for _row in _ws.iter_rows(min_row=_hdr_row + 1, max_row=_ws.max_row):
-                                _sv = str(_row[_sku_ci - 1].value or "").strip()
-                                _qv = _row[_qty_ci - 1].value
-                                _new = cell_writer(_sv, _qv)
-                                if _new is not None:
-                                    _row[_qty_ci - 1].value = _new
-                                    changed += 1
-                        _wb.save(out_buf)
+                    _wb = openpyxl.load_workbook(
+                        io.BytesIO(tpl_bytes), data_only=False
+                    )
+                    _ws = next(
+                        (s for s in _wb.worksheets if s.title == tpl_selected_sheet),
+                        _wb.active,
+                    )
+                    _hdr_row = _tpl_hrow + 1
+                    _hdrs = {
+                        _ws.cell(row=_hdr_row, column=c).value: c
+                        for c in range(1, _ws.max_column + 1)
+                    }
+                    _sku_ci = _hdrs.get(sku_col_t)
+                    _qty_ci = _hdrs.get(qty_col_t)
+                    if _sku_ci and _qty_ci:
+                        for _row in _ws.iter_rows(min_row=_hdr_row + 1, max_row=_ws.max_row):
+                            _sv = str(_row[_sku_ci - 1].value or "").strip()
+                            _qcell = _row[_qty_ci - 1]
+                            _qv = _qcell.value
+                            _new = cell_writer(_sv, _qv)
+                            if _new is not None:
+                                _qcell.value = _new
+                                changed += 1
+                    _wb.save(out_buf)
                     return out_buf.getvalue(), changed
 
-                _out_ext = tpl_orig_ext
-                _out_mime = (
-                    "application/vnd.ms-excel"
-                    if tpl_orig_ext == "xls"
-                    else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                _out_ext = "xlsx"
+                _out_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-                # ── MODE 1: Hapus Baris ─────────────────────────────────────
-                if _tpl_mode == "🗑 Kosongkan Quantity":
-                    with st.container(border=True):
-                        st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
-                        tpl_codes = st.text_area(
-                            "Daftar Product Code (satu per baris)",
-                            placeholder="SKU001\nSKU-ABC\nPROD123",
-                            height=150, key=f"tpl_codes_{_fi}"
+                # ── Edit Quantity ───────────────────────────────────────────
+                with st.container(border=True):
+                    st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
+                    reduce_codes = st.text_area(
+                        "Daftar Product Code (satu per baris)",
+                        placeholder="SKU001\nSKU-ABC\nPROD123",
+                        height=150, key=f"tpl_reduce_codes_{_fi}",
+                    )
+                    load_skus_btn = st.button(
+                        "📋 Tampilkan SKU",
+                        use_container_width=True, key=f"tpl_load_skus_{_fi}"
+                    )
+
+                    if load_skus_btn and reduce_codes.strip():
+                        _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
+                        st.session_state[f"reduce_skus_{_fi}"] = _parsed
+                    elif load_skus_btn:
+                        st.warning("⚠️ Tidak ada SKU yang valid")
+                _skus_r = st.session_state.get(f"reduce_skus_{_fi}", [])
+                if _skus_r:
+                    st.markdown("**Atur quantity baru per Product Code:**")
+                    _sku_qty_map = (
+                        tpl_df[[sku_col_t, qty_col_t]]
+                        .dropna(subset=[sku_col_t])
+                        .assign(**{sku_col_t: lambda d: d[sku_col_t].astype(str).str.strip()})
+                        .set_index(sku_col_t)[qty_col_t]
+                        .to_dict()
+                    )
+                    for _sku_r in _skus_r:
+                        _cur_q = _sku_qty_map.get(_sku_r, None)
+                        try:
+                            _cur_q_int = int(float(_cur_q)) if _cur_q not in (None, "") else 0
+                        except (ValueError, TypeError):
+                            _cur_q_int = 0
+                        _def_key = f"edit_val_{_fi}_{_sku_r}"
+                        if _def_key not in st.session_state:
+                            st.session_state[_def_key] = _cur_q_int
+                        with st.container(border=True):
+                            _rc1, _rc2, _rc3 = st.columns([3, 2, 3])
+                            with _rc1:
+                                st.markdown(f"**{_sku_r}**")
+                            with _rc2:
+                                st.caption(f"QTY saat ini")
+                                st.markdown(f"**{_cur_q if _cur_q is not None else '-'}**")
+                            with _rc3:
+                                st.number_input(
+                                    "Quantity baru",
+                                    min_value=0,
+                                    step=1,
+                                    key=_def_key,
+                                )
+
+                    reduce_apply = st.button(
+                        "✏️ Terapkan Edit Quantity",
+                        use_container_width=True,
+                        key=f"tpl_reduce_apply_{_fi}",
+                    )
+                    if reduce_apply:
+                        _edit_map = {
+                            _sku_r: st.session_state.get(f"edit_val_{_fi}_{_sku_r}", 0)
+                            for _sku_r in _skus_r
+                        }
+                        mask_t = tpl_df[sku_col_t].astype(str).str.strip().isin(set(_skus_r))
+
+                        def _edit_writer(sku_val, qty_val):
+                            if sku_val not in _edit_map:
+                                return None
+                            _new = float(_edit_map[sku_val])
+                            return int(_new) if _new == int(_new) else _new
+
+                        _buf, _cnt = _save_tpl_file(
+                            tpl_selected_sheet, _tpl_hrow, _edit_writer
                         )
-                        tpl_apply = st.button(
-                            "🗑 Hapus Baris",
-                            use_container_width=True, key=f"tpl_apply_{_fi}"
-                        )
-
-                        if tpl_apply and tpl_codes.strip():
-                            targets = {c.strip() for c in tpl_codes.strip().splitlines() if c.strip()}
-                            mask_t = tpl_df[sku_col_t].astype(str).str.strip().isin(targets)
-                            if mask_t.sum() == 0:
-                                st.warning("⚠️ Tidak ada Product Code yang cocok.")
-                            else:
-                                _del_buf = io.BytesIO()
-                                _del_cnt = 0
-                                if tpl_orig_ext == "xls":
-                                    import xlrd as _xlrd
-                                    from xlutils.copy import copy as _xlcopy
-                                    _rb = _xlrd.open_workbook(
-                                        file_contents=tpl_orig_bytes, formatting_info=True
-                                    )
-                                    _wb = _xlcopy(_rb)
-                                    _snames = [_rb.sheet_by_index(i).name for i in range(_rb.nsheets)]
-                                    _si = _snames.index(tpl_selected_sheet) if tpl_selected_sheet in _snames else 0
-                                    _rs = _rb.sheet_by_index(_si)
-                                    _ws = _wb.get_sheet(_si)
-                                    _hdr_vals = [str(_rs.cell_value(_tpl_hrow, c)) for c in range(_rs.ncols)]
-                                    _sku_ci = next((i for i, h in enumerate(_hdr_vals) if h == sku_col_t), None)
-                                    if _sku_ci is not None:
-                                        for _ri in range(_tpl_hrow + 1, _rs.nrows):
-                                            if str(_rs.cell_value(_ri, _sku_ci)).strip() in targets:
-                                                for _ci in range(_rs.ncols):
-                                                    _ws.write(_ri, _ci, "")
-                                                _del_cnt += 1
-                                    _wb.save(_del_buf)
-                                else:
-                                    _wb = openpyxl.load_workbook(
-                                        io.BytesIO(tpl_orig_bytes), keep_links=False, data_only=True
-                                    )
-                                    _ws = next(
-                                        (s for s in _wb.worksheets if s.title == tpl_selected_sheet),
-                                        _wb.active,
-                                    )
-                                    _hdr_row = _tpl_hrow + 1
-                                    _hdrs = {
-                                        _ws.cell(row=_hdr_row, column=c).value: c
-                                        for c in range(1, _ws.max_column + 1)
-                                    }
-                                    _sku_ci = _hdrs.get(sku_col_t)
-                                    if _sku_ci:
-                                        _rows_to_del = []
-                                        for _ri in range(_hdr_row + 1, _ws.max_row + 1):
-                                            _sv = str(_ws.cell(row=_ri, column=_sku_ci).value or "").strip()
-                                            if _sv in targets:
-                                                _rows_to_del.append(_ri)
-                                        for _ri in reversed(_rows_to_del):
-                                            _ws.delete_rows(_ri)
-                                        _del_cnt = len(_rows_to_del)
-                                    _wb.save(_del_buf)
-                                st.session_state[f"tpl_out_{_fi}"] = {
-                                    "buf": _del_buf.getvalue(), "mask": mask_t,
-                                    "sku": sku_col_t, "qty": qty_col_t,
-                                    "cleared": _del_cnt, "df": tpl_df,
-                                    "ext": _out_ext, "mime": _out_mime,
-                                    "mode": "hapus",
-                                }
-
-                # ── MODE 2: Kurangi ─────────────────────────────────────────
-                else:
-                    with st.container(border=True):
-                        st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
-                        reduce_codes = st.text_area(
-                            "Daftar Product Code (satu per baris)",
-                            placeholder="SKU001\nSKU-ABC\nPROD123",
-                            height=150, key=f"tpl_reduce_codes_{_fi}",
-                        )
-                        load_skus_btn = st.button(
-                            "📋 Tampilkan SKU",
-                            use_container_width=True, key=f"tpl_load_skus_{_fi}"
-                        )
-
-                        if load_skus_btn and reduce_codes.strip():
-                            _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
-                            st.session_state[f"reduce_skus_{_fi}"] = _parsed
-                        elif load_skus_btn:
-                            st.warning("⚠️ Tidak ada SKU yang valid")
-                    _skus_r = st.session_state.get(f"reduce_skus_{_fi}", [])
-                    if _skus_r:
-                        st.markdown("**Atur jumlah pengurangan per Product Code:**")
-                        _sku_qty_map = (
-                            tpl_df[[sku_col_t, qty_col_t]]
-                            .dropna(subset=[sku_col_t])
-                            .assign(**{sku_col_t: lambda d: d[sku_col_t].astype(str).str.strip()})
-                            .set_index(sku_col_t)[qty_col_t]
-                            .to_dict()
-                        )
-                        for _sku_r in _skus_r:
-                            with st.container(border=True):
-                                _rc1, _rc2, _rc3 = st.columns([3, 2, 3])
-                                with _rc1:
-                                    st.markdown(f"**{_sku_r}**")
-                                with _rc2:
-                                    _cur_q = _sku_qty_map.get(_sku_r, "-")
-                                    st.caption(f"QTY saat ini")
-                                    st.markdown(f"**{_cur_q}**")
-                                with _rc3:
-                                    st.number_input(
-                                        "Kurangi sebesar",
-                                        min_value=0,
-                                        value=0,
-                                        step=1,
-                                        key=f"reduce_val_{_fi}_{_sku_r}",
-                                    )
-
-                        reduce_apply = st.button(
-                            "➖ Terapkan Pengurangan",
-                            use_container_width=True,
-                            key=f"tpl_reduce_apply_{_fi}",
-                        )
-                        if reduce_apply:
-                            _reduce_map = {
-                                _sku_r: st.session_state.get(f"reduce_val_{_fi}_{_sku_r}", 0)
-                                for _sku_r in _skus_r
-                            }
-                            mask_t = tpl_df[sku_col_t].astype(str).str.strip().isin(set(_skus_r))
-
-                            def _reduce_writer(sku_val, qty_val):
-                                if sku_val not in _reduce_map:
-                                    return None
-                                try:
-                                    _cur = float(qty_val) if qty_val not in (None, "") else 0.0
-                                except (ValueError, TypeError):
-                                    _cur = 0.0
-                                _new = max(0.0, _cur - float(_reduce_map[sku_val]))
-                                return int(_new) if _new == int(_new) else _new
-
-                            _buf, _cnt = _save_tpl_file(
-                                tpl_orig_bytes, tpl_orig_ext, tpl_selected_sheet,
-                                _tpl_hrow, _reduce_writer
-                            )
-                            st.session_state[f"tpl_out_{_fi}"] = {
-                                "buf": _buf, "mask": mask_t,
-                                "sku": sku_col_t, "qty": qty_col_t,
-                                "cleared": _cnt, "df": tpl_df,
-                                "ext": _out_ext, "mime": _out_mime,
-                                "mode": "kurangi",
-                                "reduce_map": _reduce_map,
-                            }
+                        st.session_state[f"tpl_out_{_fi}"] = {
+                            "buf": _buf, "mask": mask_t,
+                            "sku": sku_col_t, "qty": qty_col_t,
+                            "cleared": _cnt, "df": tpl_df,
+                            "ext": _out_ext, "mime": _out_mime,
+                            "edit_map": _edit_map,
+                        }
 
                 # ── Hasil & Download ────────────────────────────────────────
                 _res_t = st.session_state.get(f"tpl_out_{_fi}")
                 if _res_t:
-                    _mode_res = _res_t.get("mode", "hapus")
-                    if _mode_res == "hapus":
-                        st.success(f"✅ **{_res_t['cleared']}** baris dihapus dari file.")
-                    else:
-                        st.success(f"✅ Quantity dikurangi untuk **{_res_t['cleared']}** baris.")
-                        _rm = _res_t.get("reduce_map", {})
-                        if _rm:
-                            with st.expander("📋 Rincian pengurangan", expanded=False):
-                                st.dataframe(
-                                    pd.DataFrame(
-                                        [{"Product Code": k, "Dikurangi": v} for k, v in _rm.items()]
-                                    ),
-                                    use_container_width=True, hide_index=True,
-                                )
-                    with st.expander("👁 Lihat baris yang diubah", expanded=False):
-                        st.dataframe(
-                            _res_t["df"][_res_t["mask"]][[_res_t["sku"], _res_t["qty"]]].reset_index(drop=True),
-                            use_container_width=True, hide_index=True,
-                        )
+                    st.success(f"✅ Quantity diubah untuk **{_res_t['cleared']}** baris.")
+                    #_em = _res_t.get("edit_map", {})
+                    #if _em:
+                    #    with st.expander("📋 Rincian perubahan", expanded=False):
+                    #        st.dataframe(
+                    #            pd.DataFrame(
+                    #                [{"Product Code": k, "Qty Baru": v} for k, v in _em.items()]
+                    #            ),
+                    #            use_container_width=True, hide_index=True,
+                    #        )
+                    #with st.expander("👁 Lihat baris yang diubah", expanded=False):
+                    #    st.dataframe(
+                    #        _res_t["df"][_res_t["mask"]][[_res_t["sku"], _res_t["qty"]]].reset_index(drop=True),
+                    #        use_container_width=True, hide_index=True,
+                    #    )
                     customer_name = st.selectbox(
                         "Distributor",
                         options=["(Pilih)"] + CUSTOMER_NAMES,
@@ -2962,4 +3756,3 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
-
