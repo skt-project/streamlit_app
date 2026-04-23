@@ -62,16 +62,10 @@ try:
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     
 except Exception:
-    #_bq_credentials = None
-    #GCP_PROJECT_ID = "skintific-data-warehouse"
-    # Fallback for local testing if secrets are not configured
-    GCP_CREDENTIALS_PATH = r"C:\Users\Shaltsa Nadya\Documents\try python\streamlit\skintific-data-warehouse-ea77119e2e7a.json"
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "rsa"
     BQ_TABLE = "stock_analysis"
-    _bq_credentials = service_account.Credentials.from_service_account_file(
-    GCP_CREDENTIALS_PATH
-    )
+    credentials = _bq_credentials
 
 
 
