@@ -4,3 +4,10 @@ backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f0f2f6"
 textColor = "#262730"
 base = "light"  # This forces the Light Theme
+
+[client]
+toolbarMode = "viewer"
+showSidebarNavigation = true
+
+[runner]
+fastReruns = true
