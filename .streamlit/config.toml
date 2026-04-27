@@ -1,13 +1,1 @@
-[theme]
-primaryColor = "#E6656F"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
-base = "light" 
 
-[client]
-toolbarMode = "auto"
-showSidebarNavigation = true
-
-[runner]
-fastReruns = true
