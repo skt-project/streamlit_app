@@ -1193,9 +1193,59 @@ def _convert_via_excel(fbytes: bytes, src_ext: str, dst_ext: str) -> bytes | Non
 def _xls_to_xlsx_via_excel(fbytes: bytes) -> bytes | None:
     return _convert_via_excel(fbytes, "xls", "xlsx")
 
+def _sanitize_xlsx_bytes(xlsx_bytes: bytes) -> bytes:
+    """Strip external links & dangling externalReference entries that trigger
+    Excel's 'We found a problem with some content' recovery prompt after an
+    openpyxl re-save."""
+    import zipfile, re
+    _src = io.BytesIO(xlsx_bytes)
+    _dst = io.BytesIO()
+    try:
+        with zipfile.ZipFile(_src, "r") as _zin:
+            names = _zin.namelist()
+            rels_name = "xl/_rels/workbook.xml.rels"
+            drop_rids: set[str] = set()
+            if rels_name in names:
+                _rels_txt = _zin.read(rels_name).decode("utf-8", "ignore")
+                for _m in re.finditer(
+                    r'<Relationship\b[^>]*?Id="([^"]+)"[^>]*?Type="[^"]*externalLink[^"]*"[^>]*/>',
+                    _rels_txt,
+                ):
+                    drop_rids.add(_m.group(1))
+            with zipfile.ZipFile(_dst, "w", zipfile.ZIP_DEFLATED) as _zout:
+                for name in names:
+                    if name.startswith("xl/externalLinks/"):
+                        continue
+                    data = _zin.read(name)
+                    if name == "xl/workbook.xml":
+                        _txt = data.decode("utf-8", "ignore")
+                        _txt = re.sub(
+                            r"<externalReferences>.*?</externalReferences>",
+                            "",
+                            _txt,
+                            flags=re.DOTALL,
+                        )
+                        data = _txt.encode("utf-8")
+                    elif name == rels_name and drop_rids:
+                        _txt = data.decode("utf-8", "ignore")
+                        for _rid in drop_rids:
+                            _txt = re.sub(
+                                rf'<Relationship\b[^>]*?Id="{re.escape(_rid)}"[^>]*/>',
+                                "",
+                                _txt,
+                            )
+                        data = _txt.encode("utf-8")
+                    _zout.writestr(name, data)
+        return _dst.getvalue()
+    except Exception:
+        return xlsx_bytes
+
 def _edit_qty_via_excel_com(xlsx_bytes: bytes, sheet_name: str, hdr_row_0: int,
                             sku_col_name: str, qty_col_name: str,
                             cell_writer) -> tuple[bytes, int] | None:
+ """Edit qty cells via Excel COM (pywin32). Preserves all formatting,
+    formulas, images. cell_writer(sku_val, qty_val) → new_qty | None.
+    Returns (bytes, changed_count) on success, None on failure."""
     try:
         import tempfile, os
         import win32com.client as _wc  # type: ignore
@@ -1244,7 +1294,7 @@ def _edit_qty_via_excel_com(xlsx_bytes: bytes, sheet_name: str, hdr_row_0: int,
         _wb.Save()
         _wb.Close(SaveChanges=False)
         with open(_fin_path, "rb") as _f:
-            return _f.read(), changed
+            return _sanitize_xlsx_bytes(_f.read()), changed
     except Exception:
         return None
     finally:
@@ -1306,7 +1356,7 @@ def _convert_to_xlsx(fname: str, fbytes: bytes) -> tuple[str, bytes]:
     return fname, fbytes
 
 def _append_to_template(df: pd.DataFrame, template_bytes: bytes, start_row: int = 9) -> bytes:
-    wb = openpyxl.load_workbook(io.BytesIO(template_bytes))
+    wb = openpyxl.load_workbook(io.BytesIO(template_bytes), keep_links=False)
     ws = wb.active
     header_row_idx = start_row - 1
     tpl_headers = {}
@@ -1330,7 +1380,7 @@ def _append_to_template(df: pd.DataFrame, template_bytes: bytes, start_row: int 
             )
     buf = io.BytesIO()
     wb.save(buf)
-    return buf.getvalue()
+    return _sanitize_xlsx_bytes(buf.getvalue())
 
 def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Sheet1") -> bytes:
     buf = io.BytesIO()
