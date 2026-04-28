@@ -439,7 +439,8 @@ def main():
         "G2G-31",
         "G2G-2115",
         "G2G-2116",
-        "G2G-2117"
+        "G2G-2117",
+        "G2G-2721"
     ]
 
     MANUAL_REJECT_SKUS = MANUAL_REJECT_SKUS_APPROVAL + MANUAL_REJECT_SKUS_NO_TOLERANCE
