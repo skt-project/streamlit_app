@@ -1243,7 +1243,7 @@ def _sanitize_xlsx_bytes(xlsx_bytes: bytes) -> bytes:
 def _edit_qty_via_excel_com(xlsx_bytes: bytes, sheet_name: str, hdr_row_0: int,
                             sku_col_name: str, qty_col_name: str,
                             cell_writer) -> tuple[bytes, int] | None:
- """Edit qty cells via Excel COM (pywin32). Preserves all formatting,
+    """Edit qty cells via Excel COM (pywin32). Preserves all formatting,
     formulas, images. cell_writer(sku_val, qty_val) → new_qty | None.
     Returns (bytes, changed_count) on success, None on failure."""
     try:
