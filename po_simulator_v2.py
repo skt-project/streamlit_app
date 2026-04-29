@@ -26,8 +26,15 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 )
-pdfmetrics.registerFont(TTFont('Trebuchet', 'trebuc.ttf'))
-pdfmetrics.registerFont(TTFont('Trebuchet-Bold', 'trebucbd.ttf'))
+BASE_DIR = os.path.dirname(__file__)
+
+pdfmetrics.registerFont(
+    TTFont('Trebuchet', os.path.join(BASE_DIR, 'fonts/trebuc.ttf'))
+)
+pdfmetrics.registerFont(
+    TTFont('Trebuchet-Bold', os.path.join(BASE_DIR, 'fonts/trebucbd.ttf'))
+#pdfmetrics.registerFont(TTFont('Trebuchet', 'trebuc.ttf'))
+#pdfmetrics.registerFont(TTFont('Trebuchet-Bold', 'trebucbd.ttf'))
 try:
     import matplotlib
     matplotlib.use('Agg')
