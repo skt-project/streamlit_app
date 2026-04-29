@@ -2735,30 +2735,22 @@ with tabs[0]:
                         
                         with urllib.request.urlopen(req, timeout=30) as resp:
                             data = resp.read()
-                            
-                        # Load data from the downloaded bytes
-                        # Try encodings in order until one works
-                    for _enc in ("utf-8", "cp1252", "latin-1", "iso-8859-1"):
-                        try:
-                            df_loaded = pd.read_csv(io.BytesIO(data), dtype=str, encoding=_enc)
-                            df_column = pd.read_csv(io.BytesIO(data), header=9, encoding=_enc)
-                            break
-                        except (UnicodeDecodeError, Exception):
-                            continue
-                    else:
-    # Last resort: ignore undecodable bytes
-                        df_loaded = pd.read_csv(
-                        io.BytesIO(data), dtype=str,
-                        encoding="utf-8", encoding_errors="replace"
-                        )
-                        df_column = pd.read_csv(
-                        io.BytesIO(data), header=9,
-                        encoding="utf-8", encoding_errors="replace"
-                    )
-                        #df_loaded = pd.read_csv(io.BytesIO(data), dtype=str)
-                        #df_column = pd.read_csv(io.BytesIO(data), header=9)
+                
+                        def _read_csv_safe(raw: bytes, **kwargs) -> pd.DataFrame:
+                            for _enc in ("utf-8", "cp1252", "latin-1", "iso-8859-1"):
+                                try:
+                                    return pd.read_csv(io.BytesIO(raw), encoding=_enc, **kwargs)
+                                except UnicodeDecodeError:
+                                    continue
+                            return pd.read_csv(
+                                io.BytesIO(raw), encoding="utf-8",
+                                encoding_errors="replace", **kwargs
+                            )
+                
+                        df_loaded = _read_csv_safe(data, dtype=str)      # <-- hasil ganti
+                        df_column = _read_csv_safe(data, header=9)       # <-- hasil ganti
                         df_loaded = numeric_coerce(df_loaded)
-                        
+                                        
                         # Store in session state only after successful load
                         st.session_state['raw_df']      = df_loaded
                         st.session_state['df']          = df_column
