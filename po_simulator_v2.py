@@ -2697,14 +2697,16 @@ st.markdown("""
 #---------------------------SPV SIMULATOR------------------
 st.markdown("<br>", unsafe_allow_html=True)
 
-RSA = ['Aqil', 'Alfaridi', 'Erliana', 'Rizky', 'Geira', 'Rintan', 'Shaltsa', 'Daffa']
+RSA = ['Aqil', 'Alfaridi', 'Erliana', 'Rizky', 'Geirda', 'Rintan', 'Shaltsa', 'Daffa']
 with st.popover("ⓘ Info Tutorial"):
     st.markdown("""
     **Tentang PO File:**
-    1. Paste link Spreadsheet yang sudah di buat Make copy.
-    2. Pilih Distributor(Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
-    3. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
-    3. Export File bisa dalam bentuk PDF atau Excel.
+    1. Paste link Spreadsheet yang sudah di buat **Make Copy**.
+    2. Buat Share File jadi **Anyone with Link**.
+    3. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
+    4. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
+    5. Export File bisa dalam bentuk PDF atau Excel.
+    
     📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
     """)
 tabs = st.tabs(["🔗 Google Spreadsheet"])
