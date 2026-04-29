@@ -2701,8 +2701,8 @@ RSA = ['Aqil', 'Alfaradi', 'Erliana', 'Rizky', 'Geirda', 'Rintan', 'Shaltsa', 'D
 with st.popover("ⓘ Info Tutorial"):
     st.markdown("""
     **Tentang PO File:**
-    1. Paste link Spreadsheet yang sudah di buat **Make Copy**.
-    2. Buat Share File jadi **Anyone with Link**.
+    1. Buat Share File jadi **Anyone with Link**.
+    2. Paste link Spreadsheet yang sudah di buat **Make Copy**.
     3. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
     4. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
     5. Export File bisa dalam bentuk PDF atau Excel.
