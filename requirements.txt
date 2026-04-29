@@ -23,3 +23,4 @@ xutils
 Pillow
 xlwt
 reportlab
+pyarrow
