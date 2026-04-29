@@ -2697,7 +2697,7 @@ st.markdown("""
 #---------------------------SPV SIMULATOR------------------
 st.markdown("<br>", unsafe_allow_html=True)
 
-RSA = ['Aqil', 'Alfaridi', 'Erliana', 'Rizky', 'Geirda', 'Rintan', 'Shaltsa', 'Daffa']
+RSA = ['Aqil', 'Alfaradi', 'Erliana', 'Rizky', 'Geirda', 'Rintan', 'Shaltsa', 'Daffa']
 with st.popover("ⓘ Info Tutorial"):
     st.markdown("""
     **Tentang PO File:**
