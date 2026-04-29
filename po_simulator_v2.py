@@ -17,7 +17,17 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 from google.oauth2 import service_account
-
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+)
+pdfmetrics.registerFont(TTFont('Trebuchet', 'trebuc.ttf'))
+pdfmetrics.registerFont(TTFont('Trebuchet-Bold', 'trebucbd.ttf'))
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -37,8 +47,9 @@ DASHBOARD_URL_DEFAULT = "https://po-simulator.streamlit.app/"
 
 # Google Drive share link untuk po_template.xlsx
 # Format: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-TEMPLATE_DRIVE_URL = "https://docs.google.com/spreadsheets/d/1FD2WN8PutkwzXXRYSj1jpA4EyxqzAfStyg2KC3grR30/edit?usp=sharing"
-
+TEMPLATE_DRIVE_URL = "https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/edit?gid=0#gid=0"
+#"https://docs.google.com/spreadsheets/d/1FD2WN8PutkwzXXRYSj1jpA4EyxqzAfStyg2KC3grR30/edit?usp=sharing"
+TEMPLATE_PO_URL="https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/edit?gid=0#gid=0"
 BQ_DATASET = "rsa"
 BQ_TABLE = "stock_analysis"
 
@@ -62,10 +73,15 @@ try:
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
     
 except Exception:
+
+    GCP_CREDENTIALS_PATH = r"C:\Users\Shaltsa Nadya\Documents\try python\streamlit\skintific-data-warehouse-ea77119e2e7a.json"
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "rsa"
     BQ_TABLE = "stock_analysis"
-    credentials = _bq_credentials
+    _bq_credentials = service_account.Credentials.from_service_account_file(
+    GCP_CREDENTIALS_PATH
+    )
+
 
 
 @st.cache_resource(show_spinner=False)
@@ -896,7 +912,7 @@ hr { border-color: #E8EAED !important; margin: 1.2rem 0 !important; }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
+#----------------------------CHANGE TO DARK MODE-----------------------
 LIGHT_CSS = """
 <style>
 /* ==== Light mode overrides ==== */
@@ -1118,8 +1134,10 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"],
 </style>
 """
 
-if st.session_state.get("light_mode", False):
-    st.markdown(LIGHT_CSS, unsafe_allow_html=True)
+#if st.session_state.get("light_mode", False):
+#    st.markdown(LIGHT_CSS, unsafe_allow_html=True)
+# Force light mode selalu aktif
+st.markdown(LIGHT_CSS, unsafe_allow_html=True)
 
 def detect_date_columns(df: pd.DataFrame) -> list:
     date_cols = []
@@ -1587,13 +1605,15 @@ with st.sidebar:
     if 'page' not in st.session_state:
         st.session_state['page'] = 'extractor'
 
-    _prev_light = st.session_state.get("light_mode", False)
-    _new_light = st.toggle(
-        "☀️ Light Mode" if _prev_light else "🌙 Dark Mode",
-        value=_prev_light, key="light_mode",
-    )
-    if _new_light != _prev_light:
-        st.rerun()
+    
+    #st.session_state.get("light_mode", False)
+    #_prev_light= st.session_state.get("light_mode", False)
+    #_new_light = st.toggle(
+    #    "☀️ Light Mode" if _prev_light else "🌙 Dark Mode",
+    #    value=_prev_light, key="light_mode",
+    #)
+    #if _new_light != _prev_light:
+    #    st.rerun()
 
     st.markdown(
         "<div style='padding:0 0.4rem 0.3rem;;text-align:center;font-size:1rem;font-weight:700;"
@@ -1601,31 +1621,35 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
-    if st.button("Data Extractor", use_container_width=True, key="nav_extractor"):
-        st.session_state['page'] = 'extractor'
+    #if st.button("Data Extractor", use_container_width=True, key="nav_extractor"):
+    #    st.session_state['page'] = 'extractor'
+    #    st.rerun()
+    if st.button("Request PO", use_container_width = True, key="nav_spv"):
+        st.session_state['page'] = 'spv'
         st.rerun()
     if st.button("PO Changer", use_container_width=True, key="nav_po"):
         st.session_state['page'] = 'po_changer'
         st.rerun()
+    
 
-    st.divider()
-    st.markdown(
-        "<div style='padding:0 0.6rem;font-size:0.6rem;font-weight:700;letter-spacing:2px;"
-        "color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:0.6rem;'>CONFIGURATION</div>",
-        unsafe_allow_html=True
-    )
-    max_rows_per_file = st.number_input(
-        "Max rows per file",
-        min_value=100, max_value=100000, value=7500, step=500,
-        help="Batas baris per file output"
-    )
-    po_col_override = st.text_input(
-        "Nama kolom PO (opsional)",
-        placeholder="Auto-detect",
-        help="Kosongkan untuk auto-detect kolom PO"
-    )
-
-    st.divider()
+    #st.divider()
+    #st.markdown(
+    #    "<div style='padding:0 0.6rem;font-size:0.6rem;font-weight:700;letter-spacing:2px;"
+    #    "color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:0.6rem;'>CONFIGURATION</div>",
+    #    unsafe_allow_html=True
+    #)
+    #max_rows_per_file = st.number_input(
+    #    "Max rows per file",
+    #    min_value=100, max_value=100000, value=7500, step=500,
+    #    help="Batas baris per file output"
+    #)
+    #po_col_override = st.text_input(
+    #    "Nama kolom PO (opsional)",
+    #    placeholder="Auto-detect",
+    #    help="Kosongkan untuk auto-detect kolom PO"
+    #)
+    st.markdown("<div style='height:200px;'></div>", unsafe_allow_html=True)
+    #st.divider()
 
     st.divider()
     if st.button("Logout", use_container_width=True):
@@ -1856,20 +1880,25 @@ if st.session_state.get('page') == 'po_changer':
 
             try:
                 _tpl_bytes = _fetch_template_bytes(TEMPLATE_DRIVE_URL)
-                _twb = openpyxl.load_workbook(io.BytesIO(_tpl_bytes), data_only=True)
-                _tws = _twb.active
-                _ref_cols = [
-                    str(_tws.cell(row=8, column=c).value).strip().upper()
-                    for c in range(1, _tws.max_column + 1)
-                    if _tws.cell(row=8, column=c).value is not None
-                ]
-                _twb.close()
             except Exception:
                 _tpl_bytes = None
-                _ref_cols = _frames[0].columns.tolist()
 
+            # ── Build ref_cols dari kolom-kolom semua file (union, urutan terjaga) ──
+            _seen = set()
+            _ref_cols = []
+            for f in _frames:
+                for c in f.columns:
+                    c_str = str(c).strip()
+                    if c_str and c_str not in _seen:
+                        _seen.add(c_str)
+                        _ref_cols.append(c_str)
+
+            # Reindex semua frame ke ref_cols yang sama, lalu concat
             _frames = [f.reindex(columns=_ref_cols) for f in _frames]
             combined_df = pd.concat(_frames, ignore_index=True)
+
+            # Drop duplicate columns (safety net)
+            combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
             st.session_state["folder_result"] = {"df": combined_df, "tpl_bytes": _tpl_bytes}
             st.session_state.pop("sim_result", None)
             st.rerun()
@@ -2412,38 +2441,37 @@ if st.session_state.get('page') == 'po_changer':
                         with _pc2:
                             with st.expander("📋 Copy SKU"):
                                 st.code("\n".join(_sku_all.tolist()), language=None)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Template PO section (always shown at bottom of PO Changer page)
+# ─────────────────────────────────────────────────────────────────────────
+    # Hapus SKU dari File PO (pakai file dari Upload File PO di atas)
     # ─────────────────────────────────────────────────────────────────────────
     st.markdown("""
      <div class="hero-wrap">
-         <div class="hero-tag">✦ Template PO</div>
-         <div class="hero-title">Upload Template PO</div>
+         <div class="hero-tag">✦ Edit PO</div>
+         <div class="hero-title">Hapus SKU dari File PO</div>
      </div>
      """, unsafe_allow_html=True)
+
+    if not folder_files:
+        st.info("ℹ️ Upload file PO di section atas terlebih dahulu untuk modifikasi.")
+        st.stop()
+
     st.markdown("""
      <div class="pipeline-step active">
          <span class="step-number">1</span>
-         <strong>Upload File Template</strong>
+         <strong>Pilih File untuk Modifikasi</strong>
      </div>
      """, unsafe_allow_html=True)
-    tpl_files = st.file_uploader("Upload template (.xlsx)",
-                             type=["xlsx"],
-                             accept_multiple_files=True,
-                             key="tpl_uploader")
 
-    for _fi, tpl_file in enumerate(tpl_files or []):
+   # Loop pakai raw_entries dari section Upload File PO di atas
+    for _fi, (tpl_fname, tpl_orig_bytes) in enumerate(raw_entries):
         with st.container(border=True):
-            st.markdown(f"**#{_fi+1} &nbsp; {tpl_file.name}**")
+            st.markdown(f"**#{_fi+1} &nbsp; {tpl_fname}**")
 
-            tpl_orig_bytes = tpl_file.read()
-            tpl_orig_ext   = tpl_file.name.rsplit(".", 1)[-1].lower()
-            _tpl_name, tpl_bytes = _convert_to_xlsx(tpl_file.name, tpl_orig_bytes)
+            tpl_orig_ext = tpl_fname.rsplit(".", 1)[-1].lower()
+            _tpl_name, tpl_bytes = _convert_to_xlsx(tpl_fname, tpl_orig_bytes)
             if tpl_orig_ext != "xlsx":
-                st.caption(f"🔄 Auto-convert: {tpl_file.name} → {_tpl_name}")
+                st.caption(f"🔄 Auto-convert: {tpl_fname} → {_tpl_name}")
             _tpl_engine = "openpyxl"
-
             tpl_sheets = _get_sheet_names(tpl_bytes, _tpl_engine)
             if not tpl_sheets:
                 st.warning("⚠️ Tidak ada sheet visible.")
@@ -2583,7 +2611,7 @@ if st.session_state.get('page') == 'po_changer':
                                 )
 
                     reduce_apply = st.button(
-                        "✏️ Terapkan Edit Quantity",
+                        "Change QTY",
                         use_container_width=True,
                         key=f"tpl_reduce_apply_{_fi}",
                     )
@@ -2640,8 +2668,8 @@ if st.session_state.get('page') == 'po_changer':
 
 st.markdown("""
     <div class="hero-wrap">
-        <div class="hero-tag">✦ Raw Data Sales</div>
-        <div class="hero-title">Data Extractor</div>
+        <div class="hero-tag">✦ PO REQUEST</div>
+        <div class="hero-title">PO REQUEST</div>
         <div class="hero-sub"></div>
     </div>
     """, unsafe_allow_html=True)
@@ -2650,440 +2678,421 @@ st.divider()
 st.markdown("""
 <div class="pipeline-step active">
     <span class="step-number">1</span>
-    <strong>Pilih Sumber Data</strong>
-    <span class="badge badge-info" style="margin-left:0.8rem;">REQUIRED</span>
+    <strong>ISI DATA</strong>
+    <span class="badge badge-info" style="margin-left:0.8rem;">Mandatory</span>
 </div>
 """, unsafe_allow_html=True)
-if st.session_state.get('page') == 'extractor':
-    tab1, tab2 = st.tabs(["🔗 Google Spreadsheet", "📂 Upload File"])
-
-    with tab1:
-        st.session_state["extractor"] = "google_sheet"
-
-        gsheet_url = st.text_input(
-            "Google Spreadsheet URL",
-            placeholder="https://docs.google.com/spreadsheets/d/...",
-            help="Pastikan sheet sudah public (view access)",
-            label_visibility="collapsed"
-        )
-
-        load_gsheet = st.button("Load Data")
-
-        if load_gsheet:
-            if not gsheet_url.strip():
-                st.warning("Masukkan link Google Spreadsheet dulu.")
-            else:
-                csv_url, sheet_id = gsheet_to_csv_url(gsheet_url)
-
-                if csv_url is None:
-                    st.error("Link tidak valid.")
-                else:
-                    with st.spinner("Loading data..."):
-                        df_loaded = pd.read_csv(csv_url, dtype=str)
-                        df_loaded = numeric_coerce(df_loaded)
-
-                        st.session_state['raw_df'] = df_loaded
-                        st.session_state['data_source'] = f"Google Sheet ({sheet_id[:10]}...)"
-                        st.session_state['source_type'] = 'GSHEET'
-
-                        st.success(f"Loaded {len(df_loaded):,} rows")
-
-    with tab2:
-        st.session_state["extractor"] = "upload_file"
-
-        uploaded_file = st.file_uploader(
-            "Upload file data",
-            type=["csv", "xlsx", "xls"],
-            help="Format yang didukung: CSV, Excel (.xlsx, .xls)",
-            label_visibility="collapsed"
-        )
-
-        if uploaded_file is not None:
-            try:
-                file_name = uploaded_file.name.lower()
-
-                with st.spinner("🌸 Memproses file..."):
-
-                    if file_name.endswith(".csv"):
-                        df_loaded = pd.read_csv(uploaded_file, dtype=str)
-
-                    elif file_name.endswith(".xlsx") or file_name.endswith(".xls"):
-                        df_loaded = pd.read_excel(uploaded_file, dtype=str)
-
-                    else:
-                        st.error("❌ Format file tidak didukung.")
-                        df_loaded = None
-
-                    if df_loaded is not None:
-                        df_loaded = numeric_coerce(df_loaded)
-
-                        st.session_state['raw_df'] = df_loaded
-                        st.session_state['data_source'] = f"Upload File ({uploaded_file.name})"
-                        st.session_state['source_type'] = 'UPLOAD'
-
-                        st.success(f"✅ File berhasil diproses — {len(df_loaded):,} baris.")
-
-            except Exception as e:
-                st.error(f"❌ Gagal membaca file: {e}")
-
-if 'raw_df' not in st.session_state or st.session_state['raw_df'] is None:
-    st.markdown("<br>", unsafe_allow_html=True)
-    ec1, ec2, ec3 = st.columns(3)
-    with ec1:
-        st.markdown("""
-        <div class="feat-card">
-            <div class="feat-icon">🕐</div>
-            <div class="feat-title">Auto Timestamp</div>
-            <div class="feat-desc">
-                Kolom <code style="background:#000000;padding:1px 5px;border-radius:4px;
-                font-size:0.8rem;">waktu_extract</code> otomatis ditambahkan ke setiap dataset
-            </div>
-        </div>""", unsafe_allow_html=True)
-    with ec2:
-        st.markdown("""
-        <div class="feat-card">
-            <div class="feat-icon">✨</div>
-            <div class="feat-title">Smart Filter</div>
-            <div class="feat-desc">
-                Auto-detect kolom tanggal dan filter berdasarkan date range yang dipilih
-            </div>
-        </div>""", unsafe_allow_html=True)
-    with ec3:
-        st.markdown("""
-        <div class="feat-card">
-            <div class="feat-icon">📦</div>
-            <div class="feat-title">Group &amp; Split</div>
-            <div class="feat-desc">
-                Group by PO Number, agregat count, dan split otomatis maks 7.500 baris per file
-            </div>
-        </div>""", unsafe_allow_html=True)
-
-    st.stop()
-
-raw_df = st.session_state['raw_df'].copy()
-source_type = st.session_state.get('source_type', 'FILE')
-
-extract_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.markdown(f"""
-    <div class="metric-card metric-rose">
-        <div class="metric-label">Total Rows</div>
-        <div class="metric-value">{len(raw_df):,}</div>
-    </div>""", unsafe_allow_html=True)
-with col2:
-    raw_df['NETTO'] = pd.to_numeric(raw_df['NETTO'], errors='coerce')
-    total_netto = raw_df['NETTO'].sum()
-    st.markdown(f"""
-    <div class="metric-card metric-pink">
-        <div class="metric-label">Total NETTO Distributor</div>
-        <div class="metric-value">{
-            f"{total_netto:,.0f}".replace(",", ".")
-            }</div>
-    </div>""", unsafe_allow_html=True)
-with col3:
-    st.markdown(f"""
-    <div class="metric-card metric-muted">
-        <div class="metric-label">Source Type</div>
-        <div class="metric-value" style="font-size:1.1rem;">{source_type}</div>
-    </div>""", unsafe_allow_html=True)
-with col4:
-    st.markdown(f"""
-    <div class="metric-card metric-blush">
-        <div class="metric-label">Extract Time</div>
-        <div class="metric-value" style="font-size:0.88rem;">{extract_time}</div>
-    </div>""", unsafe_allow_html=True)
-
+#---------------------------SPV SIMULATOR------------------
 st.markdown("<br>", unsafe_allow_html=True)
 
-with st.expander('📊 Raw Data Preview', expanded=False):
-    st.dataframe(raw_df.head(50), use_container_width=True, height=280)
-
-st.divider()
-
-st.markdown("""
-<div class="pipeline-step active">
-    <span class="step-number">3</span>
-    <strong>Schema Mapping — Format ST Data Template</strong>
-</div>
-""", unsafe_allow_html=True)
-
-
-OUTPUT_MAPPING = [
-    ("*Customer Code",         ["brand", "customer code", "kode customer"],      True),
-    ("Customer Name",          ["customer name", "nama customer"],                False),
-    ("*Customer Branch Code",  ["branch code", "customer branch code", "kdsls"],  True),
-    ("Customer Branch Name",   ["branch name", "customer branch name", "branch"], False),
-    ("Customer Address",       ["address", "alamat", "customer address"],         False),
-    ("*PO Date",               ["po date", "tanggal", "tgl", "date"],             True),
-    ("*PO Number",             ["po number", "nofaktur", "no faktur", "po no"],   True),
-    ("*Customer Store Code",   ["store code", "customer store code", "kdoutlet"], True),
-    ("Customer Store Name",    ["store name", "customer store name", "nama outlet", "outlet"], False),
-    ("*Customer SKU Code",     ["sku code", "customer sku code", "pcode"],        True),
-    ("Customer SKU Name",      ["sku name", "customer sku name", "nama barang"],  False),
-    ("*Qty",                   ["qty", "quantity", "jumlah"],                     True),
-]
-
-src_options = ["(Kosongkan)"] + raw_df.columns.tolist()
-
-def _auto_detect(hints, cols):
-    clean_cols = [c.lower().lstrip("*").strip() for c in cols]
-    for hint in hints:
-        for i, cc in enumerate(clean_cols):
-            if hint in cc or cc in hint:
-                return cols[i]
-    return None
-
-with st.container(border=True):
-    st.caption("Petakan kolom sumber ke kolom output ST Data Template. 🔴 = wajib")
-
-    b1, b2 = st.columns([1, 1])
-    with b1:
-        _a = _auto_detect(OUTPUT_MAPPING[0][1], raw_df.columns.tolist())
-        _i = src_options.index(_a) if _a in src_options else 0
-        st.selectbox("🔴 *Customer Code ← sumber", src_options, index=_i, key="sm_0")
-    with b2:
-        cust_filter = st.multiselect(
-            "🔍 Filter Customer (opsional — filter baris berdasarkan nilai kolom ini)",
-            options=CUSTOMER_NAMES,
-            placeholder="Ketik nama customer untuk mencari...",
-            key="sm_cust_filter",
-        )
-
-    mc1, mc2 = st.columns(2)
-    for _i, (_out, _hints, _req) in enumerate(OUTPUT_MAPPING[1:], start=1):
-        _a = _auto_detect(_hints, raw_df.columns.tolist())
-        _idx = src_options.index(_a) if _a in src_options else 0
-        _lbl = ("🔴 " if _req else "") + _out + " ← sumber"
-        with (mc1 if _i % 2 == 1 else mc2):
-            st.selectbox(_lbl, src_options, index=_idx, key=f"sm_{_i}")
-
-    apply_map = st.button("▶ Terapkan Mapping", use_container_width=True, key="apply_schema_map")
-
-if apply_map:
-    _rows = {}
-    for _i, (_out, _hints, _req) in enumerate(OUTPUT_MAPPING):
-        _src = st.session_state.get(f"sm_{_i}")
-        if _src and _src != "(Kosongkan)" and _src in raw_df.columns:
-            _rows[_out] = raw_df[_src].values
-        else:
-            _rows[_out] = [""] * len(raw_df)
-    _mdf = pd.DataFrame(_rows)
-    _cf = st.session_state.get("sm_cust_filter") or []
-    if _cf:
-        _src0 = st.session_state.get("sm_0")
-        if _src0 and _src0 != "(Kosongkan)" and _src0 in raw_df.columns:
-            _mdf = _mdf[_mdf["*Customer Code"].astype(str).isin(_cf)].reset_index(drop=True)
-    _dist = st.session_state.get("sm_distributor") or ""
-    if _dist and _dist != "(Pilih Distributor)":
-        _mdf.insert(0, "Distributor", _dist)
-    st.session_state["mapped_df"] = _mdf
-
-if "mapped_df" in st.session_state:
-    work_df = st.session_state["mapped_df"]
-    st.success(f"✅ Mapping diterapkan — {work_df.shape[0]:,} baris · {work_df.shape[1]} kolom output")
-    st.dataframe(work_df.head(20), use_container_width=True, hide_index=True)
-else:
-    work_df = raw_df
-
-st.divider()
-
-st.markdown("""
-<div class="pipeline-step active">
-    <span class="step-number">5</span>
-    <strong>Group by PO Number &amp; Count</strong>
-</div>
-""", unsafe_allow_html=True)
-
-po_column = None
-if po_col_override and po_col_override.strip():
-    if po_col_override.strip() in work_df.columns:
-        po_column = po_col_override.strip()
-    else:
-        st.error(f"❌ Kolom '{po_col_override}' tidak ditemukan dalam data!")
-
-if po_column is None:
-    po_candidates = [c for c in work_df.columns
-                     if any(k in c.lower().lstrip("*").strip()
-                            for k in ["po number", "nofaktur", "po num", "po no"])]
-    if not po_candidates:
-        po_candidates = [c for c in work_df.columns if "po" in c.lower()]
-    if po_candidates:
-        po_column = po_candidates[0]
-
-if po_column:
-    st.success(f"🌸 Kolom PO terdeteksi: **{po_column}**")
-    processed_df, po_grouped = attach_po_counts(work_df, po_column)
-
-    gcol1, gcol2, gcol3 = st.columns(3)
-    with gcol1:
-        st.markdown(f"""
-        <div class="metric-card metric-rose">
-            <div class="metric-label">Unique PO Numbers</div>
-            <div class="metric-value">{len(po_grouped):,}</div>
-        </div>""", unsafe_allow_html=True)
-    with gcol2:
-        st.markdown(f"""
-        <div class="metric-card metric-pink">
-            <div class="metric-label">Total Records</div>
-            <div class="metric-value">{len(processed_df):,}</div>
-        </div>""", unsafe_allow_html=True)
-    with gcol3:
-        avg_count = po_grouped['count'].mean()
-        st.markdown(f"""
-        <div class="metric-card metric-muted">
-            <div class="metric-label">Avg Count / PO</div>
-            <div class="metric-value">{avg_count:.1f}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    tab_summary, tab_detail = st.tabs(["📈 PO Summary", "📋 Full Data"])
-    with tab_summary:
-        st.dataframe(po_grouped.head(100), use_container_width=True, height=300)
-    with tab_detail:
-        st.dataframe(processed_df.drop(columns=['count'], errors='ignore').head(100),
-                     use_container_width=True, height=300)
-else:
-    st.warning("⚠️ Kolom PO Number tidak ditemukan. Pilih secara manual atau pastikan mapping *PO Number sudah diisi.")
-    manual_po = st.selectbox("Pilih kolom PO secara manual:", options=["(Lewati)"] + work_df.columns.tolist())
-    if manual_po != "(Lewati)":
-        po_column = manual_po
-        processed_df, po_grouped = attach_po_counts(work_df, po_column)
-        st.dataframe(po_grouped.head(50), use_container_width=True)
-    else:
-        processed_df = work_df.copy()
-
-st.divider()
-
-st.markdown(f"""
-<div class="pipeline-step active">
-    <span class="step-number">6</span>
-    <strong>Split Processed Data</strong>
-    <span class="badge badge-info" style="margin-left:0.8rem;">MAX {max_rows_per_file:,} ROWS/FILE</span>
-</div>
-""", unsafe_allow_html=True)
-
-_out_df = processed_df.drop(columns=['count'], errors='ignore')
-split_dfs = split_by_po_groups(_out_df, po_column, max_rows=max_rows_per_file)
-n_files = len(split_dfs)
-
-po_note = " · PO Number tidak dipisah antar file" if po_column else ""
-st.markdown(f"""
-<div class="split-info">
-    🌸 <strong>Split Result:</strong> {len(_out_df):,} rows → <strong>{n_files} file(s)</strong>
-    &nbsp;|&nbsp; Maks {max_rows_per_file:,} rows/file{po_note}
-</div>
-""", unsafe_allow_html=True)
-
-if n_files > 1:
-    split_cols = st.columns(min(n_files, 4))
-    for i, sdf in enumerate(split_dfs):
-        with split_cols[i % 4]:
-            n_po_in_file = sdf[po_column].nunique() if po_column and po_column in sdf.columns else "-"
-            st.markdown(f"""
-            <div class="metric-card metric-rose" style="text-align:center;margin-bottom:0.5rem;">
-                <div class="metric-label">File {i + 1}</div>
-                <div class="metric-value" style="font-size:1.2rem;">{len(sdf):,}</div>
-                <div style="color:#888888;font-size:0.72rem;">rows · {n_po_in_file} PO</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-st.divider()
-
-st.markdown("""
-<div class="pipeline-step active">
-    <span class="step-number">7</span>
-    <strong>Download Outputs</strong>
-    <span class="badge badge-success" style="margin-left:0.8rem;">READY</span>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-cust_code_col = "*Customer Code" if "*Customer Code" in _out_df.columns else None
-if cust_code_col is None:
-    cust_code_col = next((c for c in _out_df.columns if "customer" in c.lower() and "code" in c.lower()), None)
-
-dl1, dl2 = st.columns(2)
-
-with dl1:
-    if cust_code_col:
-        cust_grouped = _out_df.groupby(cust_code_col).size().reset_index(name='Total Rows')
-        cust_grouped = cust_grouped.sort_values('Total Rows', ascending=False).reset_index(drop=True)
-        cust_excel = to_excel_bytes(cust_grouped, "Customer Grouping")
-        st.markdown(f"""
-        <div class="metric-card" style="text-align:center;border-left:4px solid #CA6180;margin-bottom:0.6rem;">
-            <div style="font-size:1.8rem;margin-bottom:0.3rem;">📊</div>
-            <div style="font-weight:700;color:#CA6180;margin-bottom:0.2rem;">Customer Grouping</div>
-            <div style="color:#A8849A;font-size:0.78rem;">Group by {cust_code_col}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.download_button(
-            label="Download Customer Grouping (.xlsx)",
-            data=cust_excel,
-            file_name=f"customer_grouping_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-    else:
-        st.info("ℹ️ Kolom *Customer Code belum dimapping.")
-
-with dl2:
+RSA = ['Aqil', 'Alfaridi', 'Erliana', 'Rizky', 'Geira', 'Rintan', 'Shaltsa', 'Daffa']
+with st.popover("ⓘ Info Tutorial"):
     st.markdown("""
-    <div class="metric-card" style="text-align:center;border-left:4px solid #CA6180;margin-bottom:0.6rem;">
-        <div style="font-size:1.8rem;margin-bottom:0.3rem;">📦</div>
-        <div style="font-weight:700;color:#CA6180;margin-bottom:0.2rem;">ST Data Output</div>
-        <div style="color:#A8849A;font-size:0.78rem;">Format ST Data Template — siap import</div>
-    </div>
-    """, unsafe_allow_html=True)
-    if n_files == 1:
-        proc_excel = to_excel_bytes(split_dfs[0], "ST Data")
-        st.download_button(
-            label="⬇ Download ST Data (.xlsx)",
-            data=proc_excel,
-            file_name=f"st_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+    **Tentang PO File:**
+    1. Paste link Spreadsheet yang sudah di buat Make copy.
+    2. Pilih Distributor(Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
+    3. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
+    3. Export File bisa dalam bentuk PDF atau Excel.
+    📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
+    """)
+tabs = st.tabs(["🔗 Google Spreadsheet"])
+
+with tabs[0]:
+    st.session_state["extractor"] = "google_sheet"
+
+    gsheet_url = st.text_input(
+        "Google Spreadsheet URL",
+        placeholder="https://docs.google.com/spreadsheets/d/...",
+        help="Pastikan sheet sudah public (view access)",
+        label_visibility="collapsed"
+    )
+
+    if st.button("Load Data"):
+        if not gsheet_url.strip():
+            st.warning("Masukkan link Google Spreadsheet dulu.")
+        else:
+            csv_url, sheet_id = gsheet_to_csv_url(gsheet_url)
+            if csv_url is None:
+                st.error("Link tidak valid.")
+            else:
+                with st.spinner("🌸 Loading data..."):
+                    df_loaded = pd.read_csv(csv_url, dtype=str)
+                    df_column = pd.read_csv(csv_url, header=8)
+                    df_loaded = numeric_coerce(df_loaded)
+                    st.session_state['raw_df']      = df_loaded
+                    st.session_state['df']          = df_column
+                    st.session_state['gsheet_url']  = gsheet_url
+                    st.session_state['data_source'] = f"Google Sheet ({sheet_id[0]}...)"
+                    st.session_state['source_type'] = 'GSHEET'
+                    st.session_state.pop('export_bytes', None)
+                st.success("✅ Data berhasil dimuat!")
+
+    if 'df' not in st.session_state:
+        st.stop()
+
+    df = st.session_state['df'].copy()
+
+    # ── Input: Distributor & RSA ───────────────────────────────────────────
+    with st.container(border=True):
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            pilih = st.selectbox(
+                "DISTRIBUTOR",
+                options=["(Pilih)"] + CUSTOMER_NAMES,
+                key="distri",
+                label_visibility="collapsed",
+            )
+        with col2:
+            rsa_pilih = st.selectbox(
+                "RSA NAME",
+                options=["(Pilih)"] + RSA,
+                key="rsa",
+                label_visibility="collapsed",
+            )
+
+    if pilih == "(Pilih)":
+        st.info("Silakan pilih Distributor terlebih dahulu.")
+        st.stop()
+
+    # ── Isi kolom DISTRIBUTOR ──────────────────────────────────────────────
+    if 'DISTRIBUTOR' not in df.columns:
+        df['DISTRIBUTOR'] = pilih
     else:
-        file_dict = {f"st_data_part_{i+1}.xlsx": to_excel_bytes(sdf, f"Part {i+1}") for i, sdf in enumerate(split_dfs)}
-        zip_data = create_zip_of_files(file_dict)
-        st.download_button(
-            label=f"⬇ Download All ({n_files} files .zip)",
-            data=zip_data,
-            file_name=f"st_data_split_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-            mime="application/zip",
-            use_container_width=True,
+        df['DISTRIBUTOR'] = df['DISTRIBUTOR'].fillna(pilih)
+
+    # ── Bersihkan & konversi TOTAL PRICE ──────────────────────────────────
+    df['TOTAL PRICE'] = (
+        df['TOTAL PRICE']
+        .astype(str)
+        .str.replace('.', '', regex=False)
+        .str.replace(',', '.', regex=False)
+        .astype(float)
+    )
+
+    discount    = 0
+    sub_total   = df['TOTAL PRICE'].sum()
+    tax         = sub_total * 0.11
+    grand_total = sub_total - discount + tax
+    count_sku   = df['PRODUCT CODE'].notna().sum()
+
+    summary = pd.DataFrame([
+        {"PRODUCT CODE": "", "DESCRIPTION": "", "QTY": "SUB-TOTAL",  "DPP": "", "TOTAL PRICE": sub_total},
+        {"PRODUCT CODE": "", "DESCRIPTION": "", "QTY": "DISCOUNTS",  "DPP": "", "TOTAL PRICE": -discount},
+        {"PRODUCT CODE": "", "DESCRIPTION": "", "QTY": "Tax (11%)",  "DPP": "", "TOTAL PRICE": tax},
+        {"PRODUCT CODE": "", "DESCRIPTION": "", "QTY": "GRAND TOTAL","DPP": "", "TOTAL PRICE": grand_total},
+    ])
+
+    df_final = pd.concat([df, summary], ignore_index=True).iloc[:, 0:6]
+    with st.expander(
+            f"👁 Lihat isi · {len(df_final)} baris · {df_final.shape[1]} kolom · indeks 0–{df_final.shape[1]-1}",
+            expanded=False):
+            st.dataframe(df_final.iloc[:, :6].reset_index(drop=True), use_container_width=True)
+            st.success(f"GRAND TOTAL: Rp {grand_total:,.0f} | Total SKU: {count_sku}")
+
+        # ── Lookup LIFECYCLE STATUS dari Product List ──────────────────────────
+    PRODUCT_LIST_URL = "https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/export?format=csv&gid=91084545"
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_product_list() -> pd.DataFrame:
+        try:
+            df_raw = pd.read_csv(PRODUCT_LIST_URL, header=None, nrows=10)
+            header_row = 0
+            for i, row in df_raw.iterrows():
+                row_str = ' '.join(row.astype(str).str.upper().tolist())
+                if 'PRODUCT' in row_str or 'SKU' in row_str or 'CODE' in row_str:
+                    header_row = i
+                    break
+            df_p = pd.read_csv(PRODUCT_LIST_URL, header=header_row)
+            df_p.columns = [str(c).strip().upper() for c in df_p.columns]
+            return df_p
+        except Exception as e:
+            st.warning(f"Gagal load Product List: {e}")
+            return pd.DataFrame()
+    df_product = load_product_list()
+    lifecycle_col    = next((c for c in df_product.columns if any(k in c for k in ['LIFECYCLE', 'LIFE CYCLE', 'LIFESTYLE', 'STATUS'])), None)
+    product_code_col = next((c for c in df_product.columns if any(k in c for k in ['PRODUCT CODE', 'SKU', 'CODE'])), None)
+    if lifecycle_col and product_code_col:
+        df = df.merge(
+            df_product[[product_code_col, lifecycle_col]].rename(columns={
+                product_code_col: 'PRODUCT CODE',
+                lifecycle_col:    'LIFECYCLE STATUS',
+            }),
+            on='PRODUCT CODE',
+            how='left'
+        )
+        _preview_cols = [c for c in ['PRODUCT CODE', 'DESCRIPTION', 'LIFECYCLE STATUS'] if c in df.columns]
+        _df_preview   = df[_preview_cols].dropna(subset=['PRODUCT CODE']).copy()
+        _matched      = _df_preview['LIFECYCLE STATUS'].notna().sum()
+        _unmatched    = _df_preview['LIFECYCLE STATUS'].isna().sum()
+        with st.expander(
+            f"🔗 Preview Lifecycle Status · {_matched} matched · {_unmatched} not found",
+            expanded=False):
+            st.dataframe(_df_preview.reset_index(drop=True), use_container_width=True, hide_index=True)
+    else:
+        st.warning(f"Kolom lifecycle/product tidak ditemukan di Product List — cek: {df_product.columns.tolist()}")
+    st.divider()
+    # ── Helper: Export to template ─────────────────────────────────────────
+    @st.cache_data(show_spinner=False)
+    def fetch_template_xlsx(url: str) -> bytes | None:
+        m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
+        if not m:
+            return None
+        gid_match  = re.search(r'gid=(\d+)', url)
+        gid        = gid_match.group(1) if gid_match else '0'
+        export_url = (
+            f"https://docs.google.com/spreadsheets/d/{m.group(1)}"
+            f"/export?format=xlsx&gid={gid}&single=true"
+        )
+        req = urllib.request.Request(export_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+
+        wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=False, keep_links=False)
+        for sheet_name in wb.sheetnames[1:]:
+            del wb[sheet_name]
+        # ── Truncate: max 200 rows × kolom A–H ─────────────────────────────
+        ws = wb.active
+        MAX_ROW = 200
+        MAX_COL = 8  # A=1, B=2, ..., H=8
+
+        # Hapus baris di atas 200
+        if ws.max_row > MAX_ROW:
+            ws.delete_rows(MAX_ROW + 1, ws.max_row - MAX_ROW)
+
+        # Hapus kolom setelah H
+        if ws.max_column > MAX_COL:
+            ws.delete_cols(MAX_COL + 1, ws.max_column - MAX_COL)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    
+    def export_to_template(
+        df_data: pd.DataFrame,
+        template_bytes: bytes,
+        distributor: str,
+        rsa_name: str,
+        discount: float,
+    ) -> bytes:
+        wb = openpyxl.load_workbook(io.BytesIO(template_bytes), data_only=False, keep_links=False)
+        ws = wb.active
+
+        # Isi header
+        ws['B3'] = distributor
+        ws['E3'] = datetime.now().strftime("%d %B %Y")
+        ws['E5'] = rsa_name
+
+        COL_MAP = {
+            'DISTRIBUTOR':  1,  # A
+            'PRODUCT CODE': 2,  # B
+            'DESCRIPTION':  3,  # C
+            'QTY':          4,  # D
+            'DPP':          5,  # E
+            'TOTAL PRICE':  6,  # F
+        }
+        START_ROW      = 10
+        SUMMARY_LABELS = ['SUB-TOTAL', 'DISCOUNTS', 'Tax (11%)', 'GRAND TOTAL']
+
+        df_export = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
+
+        # Tulis data + formula TOTAL PRICE = QTY * DPP
+        for r_offset, (_, row) in enumerate(df_export.iterrows()):
+            excel_row = START_ROW + r_offset
+            for col_name, col_idx in COL_MAP.items():
+                if col_name == 'TOTAL PRICE':
+                    ws.cell(row=excel_row, column=col_idx, value=f"=D{excel_row}*E{excel_row}")
+                else:
+                    val = row.get(col_name, "")
+                    if pd.isna(val) or str(val).strip() in ('', 'nan', 'None'):
+                        val = None
+                    ws.cell(row=excel_row, column=col_idx, value=val)
+
+        # Tulis summary dengan formula Excel
+        last_data_row = START_ROW + len(df_export) - 1
+        summary_start = last_data_row + 2
+        sub_row, disc_row, tax_row, grand_row = (
+            summary_start, summary_start + 1, summary_start + 2, summary_start + 3
         )
 
-st.markdown("<br>", unsafe_allow_html=True)
+        for row_idx, label, formula in [
+            (sub_row,   "SUB-TOTAL",   f"=SUM(F{START_ROW}:F{last_data_row})"),
+            (disc_row,  "DISCOUNTS",   f"=0"),
+            (tax_row,   "Tax (11%)",   f"=F{sub_row}*0.11"),
+            (grand_row, "GRAND TOTAL", f"=F{sub_row}-F{disc_row}+F{tax_row}"),
+        ]:
+            ws.cell(row=row_idx, column=4, value=label)
+            ws.cell(row=row_idx, column=6, value=formula)
 
-all_files = {}
-if cust_code_col:
-    all_files["01_customer_grouping.xlsx"] = to_excel_bytes(cust_grouped, "Customer Grouping")
-for i, sdf in enumerate(split_dfs):
-    all_files[f"0{i+2}_st_data_part_{i+1}.xlsx"] = to_excel_bytes(sdf, f"Part {i+1}")
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+    def excel_to_pdf(
+        df_data: pd.DataFrame,
+        distributor: str,
+        rsa_name: str,
+        sub_total: float,
+        tax: float,
+        grand_total: float,
+        discount: float = 0,
+    ) -> bytes:
+        """Generate PDF PO menggunakan reportlab (pure Python)."""
+        SUMMARY_LABELS = ['SUB-TOTAL', 'DISCOUNTS', 'Tax (11%)', 'GRAND TOTAL']
+        df_clean = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
 
-all_zip = create_zip_of_files(all_files)
-st.download_button(
-    label="⬇ Download Complete Bundle (.zip)",
-    data=all_zip,
-    file_name=f"dataflow_complete_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-    mime="application/zip",
-    use_container_width=True,
-)
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buf, pagesize=A4,
+            leftMargin=15*mm, rightMargin=15*mm,
+            topMargin=15*mm, bottomMargin=15*mm,
+        )
+        elements = []
+        styles   = getSampleStyleSheet()
 
-st.divider()
-st.markdown("""
-<div style="background:linear-gradient(135deg,rgba(202,97,128,0.08) 0%,rgba(252,183,199,0.12) 100%);
-            border:1px solid rgba(202,97,128,0.2); border-radius:14px;
-            padding:1.2rem 1.5rem; text-align:center;">
-    <div style="font-size:1.1rem;font-weight:700;color:#CA6180;margin-bottom:0.3rem;">
-        🌸 Pipeline Complete
-    </div>
-    <div style="color:#A8849A;font-size:0.85rem;">
-        Output dalam format ST Data Template — siap diimport ke sistem.
-    </div>
-</div>
-""", unsafe_allow_html=True)
+        # ── Title & header ─────────────────────────────────────────────────
+        title_style = ParagraphStyle(
+            'Title', parent=styles['Title'],fontName='Trebuchet-Bold',
+            fontSize=12 , textColor=colors.HexColor("#B53473"),
+            alignment=1, spaceAfter=12,
+        )
+        elements.append(Paragraph("PURCHASE ORDER", title_style))
+
+        # Info header (Distributor, Date, RSA)
+        info_data = [
+            ['Distributor:',  distributor,
+             'Date:',         datetime.now().strftime("%d %B %Y")],
+            ['RSA:',          rsa_name,
+             '',              ''],
+        ]
+        info_tbl = Table(info_data, colWidths=[20*mm, 85*mm, 20*mm, 50*mm])
+        info_tbl.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Trebuchet'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('FONTNAME', (0, 0), (0, -1), 'Trebuchet-Bold'),
+            ('FONTNAME', (2, 0), (2, -1), 'Trebuchet-Bold'),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(info_tbl)
+        elements.append(Spacer(1, 8*mm))
+
+        # ── Data table ─────────────────────────────────────────────────────
+        header = ['No', 'PRODUCT CODE', 'DESCRIPTION', 'QTY', 'DPP', 'TOTAL PRICE']
+        data   = [header]
+        for i, (_, row) in enumerate(df_clean.iterrows(), start=1):
+            qty   = row.get('QTY', '')
+            dpp   = row.get('DPP', '')
+            total = row.get('TOTAL PRICE', 0)
+            data.append([
+                str(i),
+                str(row.get('PRODUCT CODE', '')),
+                str(row.get('DESCRIPTION', ''))[:40],
+                f"{qty}" if pd.notna(qty) else "",
+                f"{dpp:,.0f}" if isinstance(dpp, (int, float)) else str(dpp),
+                f"{total:,.0f}" if isinstance(total, (int, float)) else str(total),
+            ])
+
+        # Summary rows
+        data.append(['', '', '', '', 'SUB-TOTAL',   f"{sub_total:,.0f}"])
+        data.append(['', '', '', '', 'DISCOUNTS',   f"-{discount:,.0f}"])
+        data.append(['', '', '', '', 'Tax (11%)',   f"{tax:,.0f}"])
+        data.append(['', '', '', '', 'GRAND TOTAL', f"{grand_total:,.0f}"])
+
+        tbl = Table(data, colWidths=[10*mm, 25*mm, 70*mm, 20*mm, 20*mm, 30*mm])
+        tbl.setStyle(TableStyle([
+            # Header
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#BF3979')),
+            ('FONTNAME',   (4, -4), (-1, -1), 'Trebuchet-Bold'),
+            ('TEXTCOLOR',  (0, 0), (-1, 0), colors.white),
+            ('FONTSIZE',   (0, 0), (-1, 0), 7),
+            ('ALIGN',      (0, 0), (-1, 0), 'CENTER'),
+            # Body
+            ('FONTNAME',   (0, 1), (-1, -5), 'Trebuchet'),
+            ('FONTSIZE',   (0, 1), (-1, -1), 6),
+            ('ALIGN',      (3, 1), (-1, -1), 'RIGHT'),
+            ('ALIGN',      (0, 1), (0, -5),  'CENTER'),
+            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
+            # Grid
+            ('GRID',       (0, 0), (-1, -5), 0.4, colors.HexColor('#FFB6C1')),
+            # Summary section
+            ('FONTNAME',   (4, -4), (-1, -1), 'Trebuchet-Bold'),
+            ('LINEABOVE',  (4, -4), (-1, -4), 0.8, colors.HexColor('#FFB6C1')),
+            ('BACKGROUND', (4, -1), (-1, -1), colors.HexColor('#FFB6C1')),
+            ('TEXTCOLOR',  (4, -1), (-1, -1), colors.black),
+            # Padding
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING',    (0, 0), (-1, -1), 4),
+            # Row banding
+            ('ROWBACKGROUNDS', (0, 1), (-1, -5),
+             [colors.white, colors.HexColor('#FAFAFA')]),
+        ]))
+        elements.append(tbl)
+
+        doc.build(elements)
+        return buf.getvalue()
+    # ── Export section ─────────────────────────────────────────────────────
+    if st.button("🔄 Generate", use_container_width=True):
+        with st.spinner("Prepare file..."):
+            try:
+                tpl_bytes    = fetch_template_xlsx(st.session_state['gsheet_url'])
+                export_bytes = export_to_template(df_final, tpl_bytes, pilih, rsa_pilih, discount)
+                st.session_state['export_bytes'] = export_bytes
+            except Exception as e:
+              
+                st.error(f"Gagal generate file: {e}")
+                st.session_state.pop('export_bytes', None)
+   
+
+    if 'export_bytes' in st.session_state:
+        prog = st.progress(0)
+        for i in range(101):
+            prog.progress(i, text="Processing complete" if i == 100 else f"Loading... {i}%")
+
+        # ── Custom CSS pink mentah ─────────────────────────────────────────
+        st.markdown("""
+        <style>
+        div[data-testid="stDownloadButton"] button {
+            background-color: #FFB6C1 !important;
+            color: #000000 !important;
+            border: 1px solid #FF8FA3 !important;
+            font-weight: 600 !important;
+        }
+        div[data-testid="stDownloadButton"] button:hover {
+            background-color: #FF99B0 !important;
+            color: #000000 !important;
+        }
+        div[data-testid="stDownloadButton"] button * {
+            color: #000000 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # ── Two-button layout ──────────────────────────────────────────────
+        dl_col1, dl_col2 = st.columns(2)
+
+        with dl_col1:
+            st.download_button(
+                label="Export Excel",
+                data=st.session_state['export_bytes'],
+                file_name=f"PO_{pilih}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="dl_excel",
+            )
+
+        with dl_col2:
+            try:
+                pdf_bytes = excel_to_pdf(
+                    df_final, pilih, rsa_pilih,
+                    sub_total, tax, grand_total, discount,
+                )
+                st.download_button(
+                    label="📄 Export PDF",
+                    data=pdf_bytes,
+                    file_name=f"PO_{pilih}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="dl_pdf",
+                )
+            except Exception as e:
+                st.error(f"Gagal generate PDF: {e}")
