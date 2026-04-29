@@ -262,29 +262,29 @@ def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=21600, show_spinner="Fetching SKU master list from BigQuery...")
-def get_sku_master_data(brand: str = None) -> pd.DataFrame:
-    """Fetches SKU master list from BigQuery, optionally filtered by brand."""
-    client = get_bq_client()
-    table_id = f"{GCP_PROJECT_ID}.gt_schema.master_product"
-    where_clause = f"WHERE LOWER(brand) = LOWER('{brand}')" if brand else ""
-    query = f"""
-    SELECT
-        sku,
-        product_name,
-        brand,
-        product_life_cycle,
-        price_for_distri
-    FROM `{table_id}`
-    {where_clause}
-    ORDER BY sku
-    """
-    try:
-        return client.query(query).to_dataframe()
-    except Exception as e:
-        st.error(f"Error fetching SKU master data: {e}")
-        return pd.DataFrame()
-
+#@st.cache_data(ttl=21600, show_spinner="Fetching SKU master list from BigQuery...")
+#def get_sku_master_data(brand: str = None) -> pd.DataFrame:
+#    """Fetches SKU master list from BigQuery, optionally filtered by brand."""
+#    client = get_bq_client()
+#    table_id = f"{GCP_PROJECT_ID}.gt_schema.master_product"
+#    where_clause = f"WHERE LOWER(brand) = LOWER('{brand}')" if brand else ""
+#    query = f"""
+#    SELECT
+#        sku,
+#        product_name,
+#        brand,
+#        product_life_cycle,
+#        price_for_distri
+#    FROM `{table_id}`
+#    {where_clause}
+#    ORDER BY sku
+#    """
+#    try:
+#        return client.query(query).to_dataframe()
+#    except Exception as e:
+#        st.error(f"Error fetching SKU master data: {e}")
+#        return pd.DataFrame()
+#
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_brand_list() -> list:
@@ -584,62 +584,62 @@ def to_excel_single_sheet_with_sku(
                             cell.fill = npd_fill
 
     # ── Sheet 2: SKU Master List ───────────────────────────────────────────
-    if sku_master_df is not None and not sku_master_df.empty:
-        ws2 = wb.create_sheet(title="SKU Master List")
-
-        # Header styling — dark navy background, white bold text
-        sku_hdr_fill  = PatternFill(start_color="1A1A2E", end_color="1A1A2E", fill_type="solid")
-        sku_hdr_font  = Font(bold=True, color="FFFFFF")
-        sku_hdr_align = Alignment(horizontal="left", vertical="center")
-
-        # Alternating row fill
-        even_fill = PatternFill(start_color="EBF5FB", end_color="EBF5FB", fill_type="solid")
-
-        # Rename columns for a clean display
-        _display_df = sku_master_df.rename(columns={
-            "sku":               "SKU",
-            "product_name":      "Product Name",
-            "brand":             "Brand",
-            "product_life_cycle": "Product Life Cycle",
-            "price_for_distri":  "Price (Distributor)",
-        })
-
-        sku_rows = list(dataframe_to_rows(_display_df, index=False, header=True))
-        sku_headers = list(_display_df.columns)
-
-        for r_idx, row in enumerate(sku_rows, 1):
-            for c_idx, value in enumerate(row, 1):
-                cell = ws2.cell(row=r_idx, column=c_idx, value=value)
-
-                if r_idx == 1:
-                    # Header row
-                    cell.font      = sku_hdr_font
-                    cell.fill      = sku_hdr_fill
-                    cell.alignment = sku_hdr_align
-                else:
-                    # Alternating rows
-                    if r_idx % 2 == 0:
-                        cell.fill = even_fill
-                    # Number format for price column
-                    col_name = sku_headers[c_idx - 1]
-                    if col_name == "Price (Distributor)":
-                        cell.number_format = "#,##0.00"
-
-        # Auto-fit column widths (cap at 50)
-        for col_cells in ws2.columns:
-            max_len = max(
-                (len(str(cell.value)) if cell.value is not None else 0)
-                for cell in col_cells
-            )
-            ws2.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 50)
-
-        # Freeze header row
-        ws2.freeze_panes = "A2"
-
+    #if sku_master_df is not None and not sku_master_df.empty:
+    #    ws2 = wb.create_sheet(title="SKU Master List")
+#
+    #    # Header styling — dark navy background, white bold text
+    #    sku_hdr_fill  = PatternFill(start_color="1A1A2E", end_color="1A1A2E", fill_type="solid")
+    #    sku_hdr_font  = Font(bold=True, color="FFFFFF")
+    #    sku_hdr_align = Alignment(horizontal="left", vertical="center")
+#
+    #    # Alternating row fill
+    #    even_fill = PatternFill(start_color="EBF5FB", end_color="EBF5FB", fill_type="solid")
+#
+    #    # Rename columns for a clean display
+    #    _display_df = sku_master_df.rename(columns={
+    #        "sku":               "SKU",
+    #        "product_name":      "Product Name",
+    #        "brand":             "Brand",
+    #        "product_life_cycle": "Product Life Cycle",
+    #        "price_for_distri":  "Price (Distributor)",
+    #    })
+#
+    #    sku_rows = list(dataframe_to_rows(_display_df, index=False, header=True))
+    #    sku_headers = list(_display_df.columns)
+#
+    #    for r_idx, row in enumerate(sku_rows, 1):
+    #        for c_idx, value in enumerate(row, 1):
+    #            cell = ws2.cell(row=r_idx, column=c_idx, value=value)
+#
+    #            if r_idx == 1:
+    #                # Header row
+    #                cell.font      = sku_hdr_font
+    #                cell.fill      = sku_hdr_fill
+    #                cell.alignment = sku_hdr_align
+    #            else:
+    #                # Alternating rows
+    #                if r_idx % 2 == 0:
+    #                    cell.fill = even_fill
+    #                # Number format for price column
+    #                col_name = sku_headers[c_idx - 1]
+    #                if col_name == "Price (Distributor)":
+    #                    cell.number_format = "#,##0.00"
+#
+    #    # Auto-fit column widths (cap at 50)
+    #    for col_cells in ws2.columns:
+    #        max_len = max(
+    #            (len(str(cell.value)) if cell.value is not None else 0)
+    #            for cell in col_cells
+    #        )
+    #        ws2.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 50)
+#
+    #    # Freeze header row
+    #    ws2.freeze_panes = "A2"
+#
     wb.save(output)
     output.seek(0)
     return output.getvalue()
-
+#
 
 def check_password():
 
@@ -2277,41 +2277,41 @@ if st.session_state.get('page') == 'po_changer':
                     _final_step = 3 + (1 if alloc_col else 0)
 
                     # ── Brand selector for Sheet 2 ────────────────────────
-                    st.markdown(f"""
-                    <div class="pipeline-step active">
-                        <span class="step-number">{_final_step}</span>
-                        <strong>SKU Master List — Sheet 2 (Filter by Brand)</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    _brand_options_raw = get_brand_list()
-                    _selected_brand = st.selectbox(
-                        "Filter SKU Master by Brand (akan ditambahkan sebagai Sheet 2 di Excel):",
-                        options=["(All Brands)"] + _brand_options_raw,
-                        key="sku_master_brand_sel",
-                    )
-                    _brand_filter = None if _selected_brand == "(All Brands)" else _selected_brand
-                    _sku_master_df = get_sku_master_data(_brand_filter)
-
-                    if not _sku_master_df.empty:
-                        st.caption(
-                            f"📋 **{len(_sku_master_df):,} SKU** ditemukan"
-                            f"{'  ·  Brand: **' + _selected_brand + '**' if _brand_filter else ' (semua brand)'}"
-                            f" — akan ditulis ke Sheet 2"
-                        )
-                        with st.expander("👁 Preview SKU Master List", expanded=False):
-                            st.dataframe(_sku_master_df.head(50), use_container_width=True, hide_index=True)
-                    else:
-                        st.info("Tidak ada data SKU master yang ditemukan untuk brand ini.")
+                    #st.markdown(f"""
+                    #<div class="pipeline-step active">
+                    #    <span class="step-number">{_final_step}</span>
+                    #    <strong>SKU Master List — Sheet 2 (Filter by Brand)</strong>
+                    #</div>
+                    #""", unsafe_allow_html=True)
+#
+                    #_brand_options_raw = get_brand_list()
+                    #_selected_brand = st.selectbox(
+                    #    "Filter SKU Master by Brand (akan ditambahkan sebagai Sheet 2 di Excel):",
+                    #    options=["(All Brands)"] + _brand_options_raw,
+                    #    key="sku_master_brand_sel",
+                    #)
+                    #_brand_filter = None if _selected_brand == "(All Brands)" else _selected_brand
+                    #_sku_master_df = get_sku_master_data(_brand_filter)
+#
+                    #if not _sku_master_df.empty:
+                    #    st.caption(
+                    #        f"📋 **{len(_sku_master_df):,} SKU** ditemukan"
+                    #        f"{'  ·  Brand: **' + _selected_brand + '**' if _brand_filter else ' (semua brand)'}"
+                    #        f" — akan ditulis ke Sheet 2"
+                    #    )
+                    #    with st.expander("👁 Preview SKU Master List", expanded=False):
+                    #        st.dataframe(_sku_master_df.head(50), use_container_width=True, hide_index=True)
+                    #else:
+                    #    st.info("Tidak ada data SKU master yang ditemukan untuk brand ini.")
 
                     # ── Download button ───────────────────────────────────
                     _dl_data = to_excel_single_sheet_with_sku(
                         _final_disp,
                         _e_npd,
-                        _sku_master_df if not _sku_master_df.empty else None,
+                        #_sku_master_df if not _sku_master_df.empty else None,
                     )
                     st.download_button(
-                        label=f"⬇ Download PO Result.xlsx ({len(_final_disp)} baris · 2 sheets)",
+                        label=f"Download PO Result.xlsx ({len(_final_disp)} baris · 2 sheets)",
                         data=_dl_data,
                         file_name=f"PO Result {datetime.now().strftime('%Y%m%d')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2459,7 +2459,7 @@ if st.session_state.get('page') == 'po_changer':
     st.markdown("""
      <div class="hero-wrap">
          <div class="hero-tag">✦ Edit PO</div>
-         <div class="hero-title">Hapus SKU dari File PO</div>
+         <div class="hero-title">EDIT QTY dari File PO</div>
      </div>
      """, unsafe_allow_html=True)
 
@@ -2719,6 +2719,12 @@ with tabs[0]:
         label_visibility="collapsed"
     )
 
+    #sheet2_gid = st.text_input(
+    #    "GID Sheet ke-2 (opsional)",
+    #    placeholder="",
+    #    help="Isi GID tab sheet lain yang ingin ditampilkan. Bisa dilihat di URL setelah gid=",
+    #)
+
     if st.button("Load Data"):
         if not gsheet_url.strip():
             st.warning("Masukkan link Google Spreadsheet dulu.")
@@ -2731,35 +2737,34 @@ with tabs[0]:
                     try:
                         direct_url = _drive_to_direct(csv_url)
                         headers = {"User-Agent": "Mozilla/5.0"}
-                        req = urllib.request.Request(csv_url, headers=headers)
-                        
+                        _sid = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', gsheet_url).group(1)
+                        _xlsx_url = f"https://docs.google.com/spreadsheets/d/{_sid}/export?format=xlsx"
+                        req = urllib.request.Request(_xlsx_url, headers=headers)
                         with urllib.request.urlopen(req, timeout=30) as resp:
-                            data = resp.read()
-                
-                        def _read_csv_safe(raw: bytes, **kwargs) -> pd.DataFrame:
-                            for _enc in ("utf-8", "cp1252", "latin-1", "iso-8859-1"):
-                                try:
-                                    return pd.read_csv(
-                                        io.BytesIO(raw), encoding=_enc,
-                                        on_bad_lines='skip',
-                                        engine='python',   # <-- lebih toleran dari C engine
-                                        **kwargs
-                                    )
-                                except UnicodeDecodeError:
-                                    continue
-                                except Exception:
-                                    continue
-                            return pd.read_csv(
-                                io.BytesIO(raw), encoding="utf-8",
-                                encoding_errors="replace",
-                                on_bad_lines='skip',
-                                engine='python',
-                                **kwargs
-                            )
-                
-                        df_loaded = _read_csv_safe(data, dtype=str)      # <-- hasil ganti
-                        df_column = _read_csv_safe(data, header=8)       # <-- hasil ganti
+                            _xlsx_bytes = resp.read()
+
+                        _all_sheets = pd.read_excel(
+                            io.BytesIO(_xlsx_bytes), sheet_name=None, header=None, dtype=str
+                        )
+                        _sheet_names = list(_all_sheets.keys())
+
+                        _raw = _all_sheets[_sheet_names[0]].copy()
+                        _raw.columns = _raw.iloc[8]
+                        df_column = _raw.iloc[9:].reset_index(drop=True)
+                        df_column.columns = [str(c).strip().upper() for c in df_column.columns]
+                        df_column = df_column.dropna(how='all').reset_index(drop=True)
+
+                        df_loaded = _all_sheets[_sheet_names[0]].copy()
                         df_loaded = numeric_coerce(df_loaded)
+
+                        _other_sheets = {}
+                        for _sname in _sheet_names[1:]:
+                            _sdf = _all_sheets[_sname].copy()
+                            _sdf.columns = [str(c).strip().upper() for c in _sdf.iloc[0]]
+                            _sdf = _sdf.iloc[1:].reset_index(drop=True)
+                            _sdf = _sdf.dropna(how='all').reset_index(drop=True)
+                            _other_sheets[_sname] = _sdf
+                        st.session_state['other_sheets'] = _other_sheets
                                         
                         # Store in session state only after successful load
                         st.session_state['raw_df']      = df_loaded
@@ -2866,7 +2871,7 @@ with tabs[0]:
     # Pastikan tipe data sama sebelum merge
         df['PRODUCT CODE'] = df['PRODUCT CODE'].astype(str).str.strip()
         df_product[product_code_col] = df_product[product_code_col].astype(str).str.strip()
-    
+
         df = df.merge(
             df_product[[product_code_col, lifecycle_col]].rename(columns={
                 product_code_col: 'PRODUCT CODE',
