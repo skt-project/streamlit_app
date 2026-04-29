@@ -2731,7 +2731,7 @@ with tabs[0]:
                     try:
                         direct_url = _drive_to_direct(csv_url)
                         headers = {"User-Agent": "Mozilla/5.0"}
-                        req = urllib.request.Request(direct_url, headers=headers)
+                        req = urllib.request.Request(csv_url, headers=headers)
                         
                         with urllib.request.urlopen(req, timeout=30) as resp:
                             data = resp.read()
