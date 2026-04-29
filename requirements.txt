@@ -22,3 +22,4 @@ matplotlib
 xutils
 Pillow
 xlwt
+reportlab
