@@ -2758,7 +2758,7 @@ with tabs[0]:
                             )
                 
                         df_loaded = _read_csv_safe(data, dtype=str)      # <-- hasil ganti
-                        df_column = _read_csv_safe(data, header=9)       # <-- hasil ganti
+                        df_column = _read_csv_safe(data, header=8)       # <-- hasil ganti
                         df_loaded = numeric_coerce(df_loaded)
                                         
                         # Store in session state only after successful load
