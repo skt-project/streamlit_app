@@ -1878,7 +1878,7 @@ if st.session_state.get('page') == 'po_changer':
 
         ready = [p for p in parsed if p["df"] is not None]
         st.divider()
-        if st.button("➕ Gabungkan Semua", disabled=not ready,
+        if st.button("🔎 Cek Semua File", disabled=not ready,
                      use_container_width=True, key="folder_concat_btn"):
             _frames = []
             for p in ready:
