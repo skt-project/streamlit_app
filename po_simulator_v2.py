@@ -2737,8 +2737,26 @@ with tabs[0]:
                             data = resp.read()
                             
                         # Load data from the downloaded bytes
-                        df_loaded = pd.read_csv(io.BytesIO(data), dtype=str)
-                        df_column = pd.read_csv(io.BytesIO(data), header=9)
+                        # Try encodings in order until one works
+                    for _enc in ("utf-8", "cp1252", "latin-1", "iso-8859-1"):
+                        try:
+                            df_loaded = pd.read_csv(io.BytesIO(data), dtype=str, encoding=_enc)
+                            df_column = pd.read_csv(io.BytesIO(data), header=9, encoding=_enc)
+                            break
+                        except (UnicodeDecodeError, Exception):
+                            continue
+                    else:
+    # Last resort: ignore undecodable bytes
+                        df_loaded = pd.read_csv(
+                        io.BytesIO(data), dtype=str,
+                        encoding="utf-8", encoding_errors="replace"
+                        )
+                        df_column = pd.read_csv(
+                        io.BytesIO(data), header=9,
+                        encoding="utf-8", encoding_errors="replace"
+                    )
+                        #df_loaded = pd.read_csv(io.BytesIO(data), dtype=str)
+                        #df_column = pd.read_csv(io.BytesIO(data), header=9)
                         df_loaded = numeric_coerce(df_loaded)
                         
                         # Store in session state only after successful load
