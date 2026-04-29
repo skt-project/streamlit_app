@@ -2728,16 +2728,27 @@ with tabs[0]:
                 st.error("Link tidak valid.")
             else:
                 with st.spinner("🌸 Loading data..."):
-                    df_loaded = pd.read_csv(csv_url, dtype=str)
-                    df_column = pd.read_csv(csv_url, header=8)
-                    df_loaded = numeric_coerce(df_loaded)
-                    st.session_state['raw_df']      = df_loaded
-                    st.session_state['df']          = df_column
-                    st.session_state['gsheet_url']  = gsheet_url
-                    st.session_state['data_source'] = f"Google Sheet ({sheet_id[0]}...)"
-                    st.session_state['source_type'] = 'GSHEET'
-                    st.session_state.pop('export_bytes', None)
-                st.success("✅ Data berhasil dimuat!")
+                    try:
+                        direct_url = _drive_to_direct(csv_url)
+                        headers = {"User-Agent": "Mozilla/5.0"}
+                        req = urllib.request.Request(direct_url, headers=headers)
+    
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            data = resp.read()
+                            df_loaded = pd.read_csv(io.BytesIO(data), dtype=str)
+                            df_column = pd.read_csv(io.BytesIO(data), header=8)
+                            df_loaded = numeric_coerce(df_loaded)
+                    #df_loaded = pd.read_csv(csv_url, dtype=str)
+                
+                    #df_column = pd.read_csv(csv_url, header=8)
+                    
+                            st.session_state['raw_df']      = df_loaded
+                            st.session_state['df']          = df_column
+                            st.session_state['gsheet_url']  = gsheet_url
+                            st.session_state['data_source'] = f"Google Sheet ({sheet_id[0]}...)"
+                            st.session_state['source_type'] = 'GSHEET'
+                            st.session_state.pop('export_bytes', None)
+                            st.success("✅ Data berhasil dimuat!")
 
     if 'df' not in st.session_state:
         st.stop()
