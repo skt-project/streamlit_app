@@ -2732,24 +2732,32 @@ with tabs[0]:
                         direct_url = _drive_to_direct(csv_url)
                         headers = {"User-Agent": "Mozilla/5.0"}
                         req = urllib.request.Request(direct_url, headers=headers)
-    
+                        
                         with urllib.request.urlopen(req, timeout=30) as resp:
                             data = resp.read()
-                            df_loaded = pd.read_csv(io.BytesIO(data), dtype=str)
-                            df_column = pd.read_csv(io.BytesIO(data), header=8)
-                            df_loaded = numeric_coerce(df_loaded)
-                    #df_loaded = pd.read_csv(csv_url, dtype=str)
-                
-                    #df_column = pd.read_csv(csv_url, header=8)
-                    
-                            st.session_state['raw_df']      = df_loaded
-                            st.session_state['df']          = df_column
-                            st.session_state['gsheet_url']  = gsheet_url
-                            st.session_state['data_source'] = f"Google Sheet ({sheet_id[0]}...)"
-                            st.session_state['source_type'] = 'GSHEET'
-                            st.session_state.pop('export_bytes', None)
-                            st.success("✅ Data berhasil dimuat!")
+                            
+                        # Load data from the downloaded bytes
+                        df_loaded = pd.read_csv(io.BytesIO(data), dtype=str)
+                        df_column = pd.read_csv(io.BytesIO(data), header=8)
+                        df_loaded = numeric_coerce(df_loaded)
+                        
+                        # Store in session state only after successful load
+                        st.session_state['raw_df']      = df_loaded
+                        st.session_state['df']          = df_column
+                        st.session_state['gsheet_url']  = gsheet_url
+                        st.session_state['data_source'] = f"Google Sheet ({sheet_id[0]}...)"
+                        st.session_state['source_type'] = 'GSHEET'
+                        st.session_state.pop('export_bytes', None)
+                        
+                        st.success("✅ Data berhasil dimuat!")
+                        st.rerun() # Refresh to clear the 'st.stop()' below
+                        
+                    except Exception as e:
+                        # This block is what was missing!
+                        st.error(f"⚠️ Gagal memuat data dari Google Sheets: {e}")
+                        st.info("Pastikan link sudah diset ke 'Anyone with the link' (Public).")
 
+    # The app will pause here until 'df' exists in session state
     if 'df' not in st.session_state:
         st.stop()
 
