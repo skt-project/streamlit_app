@@ -49,7 +49,7 @@ except ImportError:
     MATPLOTLIB_OK = False
 
 st.set_page_config(
-    page_title="DataFlow — Glad2Glow",
+    page_title="PO Simulator — Glad2Glow",
     layout="wide",
     page_icon= '📁',
     initial_sidebar_state="expanded",
