@@ -2795,18 +2795,21 @@ with tabs[0]:
     with st.container(border=True):
         col1, col2 = st.columns([1, 1])
         with col1:
+            st.markdown("**DISTRIBUTOR**")
             pilih = st.selectbox(
-                "DISTRIBUTOR",
-                options=("DISTRIBUTOR"+(["(Pilih)"]) + CUSTOMER_NAMES),
+                "",
+                options=["(Pilih)"] + CUSTOMER_NAMES,
                 key="distri",
-                label_visibility="collapsed",
+                label_visibility="collapsed"
             )
+
         with col2:
+            st.markdown("**RSA NAME**")
             rsa_pilih = st.selectbox(
-                "RSA NAME",
+                "",
                 options=["(Pilih)"] + RSA,
                 key="rsa",
-                label_visibility="collapsed",
+                label_visibility="collapsed"
             )
 
     if pilih == "(Pilih)":
