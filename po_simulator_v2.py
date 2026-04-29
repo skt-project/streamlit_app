@@ -26,13 +26,18 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 )
+import os
+
 BASE_DIR = os.path.dirname(__file__)
 
+print("BASE_DIR:", BASE_DIR)
+print("FILES:", os.listdir(BASE_DIR))
+
 pdfmetrics.registerFont(
-    TTFont('Trebuchet', os.path.join(BASE_DIR, 'fonts/trebuc.ttf'))
+    TTFont('Trebuchet', os.path.join(BASE_DIR, 'trebuc.ttf'))
 )
 pdfmetrics.registerFont(
-    TTFont('Trebuchet-Bold', os.path.join(BASE_DIR, 'fonts/trebucbd.ttf'))
+    TTFont('Trebuchet-Bold', os.path.join(BASE_DIR, 'trebucbd.ttf'))
 #pdfmetrics.registerFont(TTFont('Trebuchet', 'trebuc.ttf'))
 #pdfmetrics.registerFont(TTFont('Trebuchet-Bold', 'trebucbd.ttf'))
 try:
