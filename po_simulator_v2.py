@@ -2797,7 +2797,7 @@ with tabs[0]:
         with col1:
             pilih = st.selectbox(
                 "DISTRIBUTOR",
-                options=["(Pilih)"] + CUSTOMER_NAMES,
+                options=("DISTRIBUTOR"+(["(Pilih)"]) + CUSTOMER_NAMES),
                 key="distri",
                 label_visibility="collapsed",
             )
