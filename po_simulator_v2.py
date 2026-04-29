@@ -2739,12 +2739,15 @@ with tabs[0]:
                         def _read_csv_safe(raw: bytes, **kwargs) -> pd.DataFrame:
                             for _enc in ("utf-8", "cp1252", "latin-1", "iso-8859-1"):
                                 try:
-                                    return pd.read_csv(io.BytesIO(raw), encoding=_enc, **kwargs)
+                                    return pd.read_csv(
+                                        io.BytesIO(raw), encoding=_enc,
+                                        on_bad_lines='skip', **kwargs
+                                    )
                                 except UnicodeDecodeError:
                                     continue
                             return pd.read_csv(
                                 io.BytesIO(raw), encoding="utf-8",
-                                encoding_errors="replace", **kwargs
+                                encoding_errors="replace", on_bad_lines='skip', **kwargs
                             )
                 
                         df_loaded = _read_csv_safe(data, dtype=str)      # <-- hasil ganti
