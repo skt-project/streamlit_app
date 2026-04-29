@@ -2737,34 +2737,35 @@ with tabs[0]:
                     try:
                         direct_url = _drive_to_direct(csv_url)
                         headers = {"User-Agent": "Mozilla/5.0"}
-                        _sid = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', gsheet_url).group(1)
-                        _xlsx_url = f"https://docs.google.com/spreadsheets/d/{_sid}/export?format=xlsx"
-                        req = urllib.request.Request(_xlsx_url, headers=headers)
+                        req = urllib.request.Request(csv_url, headers=headers)
+                        
                         with urllib.request.urlopen(req, timeout=30) as resp:
-                            _xlsx_bytes = resp.read()
-
-                        _all_sheets = pd.read_excel(
-                            io.BytesIO(_xlsx_bytes), sheet_name=None, header=None, dtype=str
-                        )
-                        _sheet_names = list(_all_sheets.keys())
-
-                        _raw = _all_sheets[_sheet_names[0]].copy()
-                        _raw.columns = _raw.iloc[8]
-                        df_column = _raw.iloc[9:].reset_index(drop=True)
-                        df_column.columns = [str(c).strip().upper() for c in df_column.columns]
-                        df_column = df_column.dropna(how='all').reset_index(drop=True)
-
-                        df_loaded = _all_sheets[_sheet_names[0]].copy()
+                            data = resp.read()
+                
+                        def _read_csv_safe(raw: bytes, **kwargs) -> pd.DataFrame:
+                            for _enc in ("utf-8", "cp1252", "latin-1", "iso-8859-1"):
+                                try:
+                                    return pd.read_csv(
+                                        io.BytesIO(raw), encoding=_enc,
+                                        on_bad_lines='skip',
+                                        engine='python',   # <-- lebih toleran dari C engine
+                                        **kwargs
+                                    )
+                                except UnicodeDecodeError:
+                                    continue
+                                except Exception:
+                                    continue
+                            return pd.read_csv(
+                                io.BytesIO(raw), encoding="utf-8",
+                                encoding_errors="replace",
+                                on_bad_lines='skip',
+                                engine='python',
+                                **kwargs
+                            )
+                
+                        df_loaded = _read_csv_safe(data, dtype=str)      # <-- hasil ganti
+                        df_column = _read_csv_safe(data, header=8)       # <-- hasil ganti
                         df_loaded = numeric_coerce(df_loaded)
-
-                        _other_sheets = {}
-                        for _sname in _sheet_names[1:]:
-                            _sdf = _all_sheets[_sname].copy()
-                            _sdf.columns = [str(c).strip().upper() for c in _sdf.iloc[0]]
-                            _sdf = _sdf.iloc[1:].reset_index(drop=True)
-                            _sdf = _sdf.dropna(how='all').reset_index(drop=True)
-                            _other_sheets[_sname] = _sdf
-                        st.session_state['other_sheets'] = _other_sheets
                                         
                         # Store in session state only after successful load
                         st.session_state['raw_df']      = df_loaded
@@ -2908,7 +2909,7 @@ with tabs[0]:
             raw = resp.read()
 
         wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=False, keep_links=False)
-        for sheet_name in wb.sheetnames[1:]:
+        for sheet_name in wb.sheetnames[2:]:
             del wb[sheet_name]
         # ── Truncate: max 200 rows × kolom A–H ─────────────────────────────
         ws = wb.active
