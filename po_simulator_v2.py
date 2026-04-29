@@ -36,10 +36,10 @@ print("FILES:", os.listdir(BASE_DIR))
 pdfmetrics.registerFont(
     TTFont('Trebuchet', os.path.join(BASE_DIR, 'trebuc.ttf'))
 )
+
 pdfmetrics.registerFont(
     TTFont('Trebuchet-Bold', os.path.join(BASE_DIR, 'trebucbd.ttf'))
-#pdfmetrics.registerFont(TTFont('Trebuchet', 'trebuc.ttf'))
-#pdfmetrics.registerFont(TTFont('Trebuchet-Bold', 'trebucbd.ttf'))
+)
 try:
     import matplotlib
     matplotlib.use('Agg')
