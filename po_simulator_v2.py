@@ -2863,6 +2863,10 @@ with tabs[0]:
     lifecycle_col    = next((c for c in df_product.columns if any(k in c for k in ['LIFECYCLE', 'LIFE CYCLE', 'LIFESTYLE', 'STATUS'])), None)
     product_code_col = next((c for c in df_product.columns if any(k in c for k in ['PRODUCT CODE', 'SKU', 'CODE'])), None)
     if lifecycle_col and product_code_col:
+    # Pastikan tipe data sama sebelum merge
+        df['PRODUCT CODE'] = df['PRODUCT CODE'].astype(str).str.strip()
+        df_product[product_code_col] = df_product[product_code_col].astype(str).str.strip()
+    
         df = df.merge(
             df_product[[product_code_col, lifecycle_col]].rename(columns={
                 product_code_col: 'PRODUCT CODE',
