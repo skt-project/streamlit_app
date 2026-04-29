@@ -2738,7 +2738,7 @@ with tabs[0]:
                             
                         # Load data from the downloaded bytes
                         df_loaded = pd.read_csv(io.BytesIO(data), dtype=str)
-                        df_column = pd.read_csv(io.BytesIO(data), header=8)
+                        df_column = pd.read_csv(io.BytesIO(data), header=9)
                         df_loaded = numeric_coerce(df_loaded)
                         
                         # Store in session state only after successful load
