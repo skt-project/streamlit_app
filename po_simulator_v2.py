@@ -2984,6 +2984,33 @@ with tabs[0]:
         ]:
             ws.cell(row=row_idx, column=4, value=label)
             ws.cell(row=row_idx, column=6, value=formula)
+# ── Tulis sheet ke-2 dari Google Sheet ──
+        _other = st.session_state.get('other_sheets', {})
+        if _other:
+            _sheet2_name = list(_other.keys())[0]
+            _sheet2_df   = _other[_sheet2_name]
+
+            # Kalau template sudah punya sheet ke-2, pakai itu
+            # Kalau belum, buat baru
+            if len(wb.sheetnames) >= 2:
+                ws2 = wb[wb.sheetnames[1]]
+                # Kosongkan dulu
+                for row in ws2.iter_rows():
+                    for cell in row:
+                        cell.value = None
+            else:
+                ws2 = wb.create_sheet(title=_sheet2_name[:31])
+
+            # Tulis header
+            for c_idx, col_name in enumerate(_sheet2_df.columns, 1):
+                ws2.cell(row=1, column=c_idx, value=col_name)
+
+            # Tulis data
+            for r_idx, row_data in enumerate(_sheet2_df.itertuples(index=False), 2):
+                for c_idx, val in enumerate(row_data, 1):
+                    ws2.cell(row=r_idx, column=c_idx, value=(
+                        None if pd.isna(val) or str(val).strip() in ('', 'nan') else val
+                    ))
 
         buf = io.BytesIO()
         wb.save(buf)
