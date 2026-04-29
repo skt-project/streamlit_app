@@ -2741,13 +2741,20 @@ with tabs[0]:
                                 try:
                                     return pd.read_csv(
                                         io.BytesIO(raw), encoding=_enc,
-                                        on_bad_lines='skip', **kwargs
+                                        on_bad_lines='skip',
+                                        engine='python',   # <-- lebih toleran dari C engine
+                                        **kwargs
                                     )
                                 except UnicodeDecodeError:
                                     continue
+                                except Exception:
+                                    continue
                             return pd.read_csv(
                                 io.BytesIO(raw), encoding="utf-8",
-                                encoding_errors="replace", on_bad_lines='skip', **kwargs
+                                encoding_errors="replace",
+                                on_bad_lines='skip',
+                                engine='python',
+                                **kwargs
                             )
                 
                         df_loaded = _read_csv_safe(data, dtype=str)      # <-- hasil ganti
