@@ -1725,7 +1725,7 @@ if st.session_state.get('page') == 'po_changer':
     """, unsafe_allow_html=True)
 
     st.divider()
-    with st.popover("ⓘ Info Tutorial"):
+with st.popover("ⓘ Info Tutorial"):
         st.markdown("""
     **Tentang PO File:**
     1. Klik **Make a Copy** setelah pilih Distributor.
