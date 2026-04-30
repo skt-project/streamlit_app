@@ -1725,19 +1725,7 @@ if st.session_state.get('page') == 'po_changer':
     """, unsafe_allow_html=True)
 
     st.divider()
-with st.popover("ⓘ Info Tutorial"):
-        st.markdown("""
-    **Tentang PO File:**
-    1. Klik **Make a Copy** setelah pilih Distributor.
-    2. Copy SKU dan QTY untuk dimasukkan dalam Spreadsheet.
-    3. Buat Share File jadi **Anyone with Link - View** - Wajib.
-    4. Paste link Spreadsheet yang sudah di buat **Make Copy**.
-    5. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
-    6. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
-    7. Export File bisa dalam bentuk PDF atau Excel.
     
-    📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
-    """)
     _INVALID_QTY = {"-", "null", "none", "", "0", "0.0"}
 
     def _read_one(fname: str, fbytes: bytes, sheet_name=0):
@@ -2876,8 +2864,8 @@ with st.popover("ⓘ Info Tutorial"):
 
 st.markdown("""
     <div class="hero-wrap">
-        <div class="hero-tag">✦ PO REQUEST</div>
-        <div class="hero-title">PO REQUEST</div>
+        <div class="hero-tag">✦ REQUEST PO</div>
+        <div class="hero-title">REQUEST PO</div>
         <div class="hero-sub"></div>
     </div>
     """, unsafe_allow_html=True)
@@ -2891,8 +2879,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 #---------------------------SPV SIMULATOR------------------
-st.divider()
-    with st.popover("ⓘ Info Tutorial"):
+with st.popover("ⓘ Info Tutorial"):
         st.markdown("""
     **Tentang PO File:**
     1. Klik **Make a Copy** setelah pilih Distributor.
