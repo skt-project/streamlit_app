@@ -225,7 +225,32 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
         st.error(f"Error fetching NPD data from BigQuery: {e}")
         return pd.DataFrame()
 
-
+@st.cache_data(ttl=21600, show_spinner="Fetching SKU suggestions from BigQuery...")
+def get_distributor_suggestions(distributor_name: str) -> pd.DataFrame:
+    """Fetch all SKU suggestions for a distributor from stock_analysis."""
+    if not distributor_name:
+        return pd.DataFrame()
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+    query = f"""
+    SELECT
+        UPPER(region) AS region,
+        UPPER(distributor) AS distributor_name,
+        sku,
+        buffer_plan_by_lm_qty_adj AS suggestion_qty,
+        remaining_allocation_qty_region,
+        woi_end_of_month_by_lm
+    FROM `{table_id}`
+    WHERE UPPER(distributor) = '{distributor_name.upper()}'
+      AND buffer_plan_by_lm_qty_adj > 0
+    ORDER BY suggestion_qty DESC
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Error fetching distributor suggestions: {e}")
+        return pd.DataFrame()
+    
 @st.cache_data(ttl=21600, show_spinner="Fetching Stock Analysis data from BigQuery...")
 def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
     if not sku_list:
@@ -2958,8 +2983,6 @@ with st.container(border=True):
 
 st.divider()
 
-
-
 RSA = ['Aqil', 'Alfaradi', 'Erliana', 'Rizky', 'Geirda', 'Rintan', 'Shaltsa', 'Daffa']
 with st.popover("ⓘ Info Tutorial"):
     st.markdown("""
@@ -2990,13 +3013,6 @@ with tabs[0]:
     #    placeholder="",
     #    help="Isi GID tab sheet lain yang ingin ditampilkan. Bisa dilihat di URL setelah gid=",
     #)
-    st.markdown("**DISTRIBUTOR**")
-            pilih = st.selectbox(
-                "",
-                options=["(Pilih)"] + CUSTOMER_NAMES,
-                key="distri",
-                label_visibility="collapsed"
-            )
     if st.button("Load Data"):
         if not gsheet_url.strip():
             st.warning("Masukkan link Google Spreadsheet dulu.")
