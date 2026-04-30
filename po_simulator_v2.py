@@ -2600,12 +2600,12 @@ if st.session_state.get('page') == 'po_changer':
 # ─────────────────────────────────────────────────────────────────────────
     # Hapus SKU dari File PO (pakai file dari Upload File PO di atas)
     # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("""
-     <div class="hero-wrap">
-         <div class="hero-tag">✦ Edit PO</div>
-         <div class="hero-title">EDIT QTY dari File PO</div>
-     </div>
-     """, unsafe_allow_html=True)
+    #st.markdown("""
+    #<div class="hero-wrap">
+    #    <div class="hero-tag">✦ Edit PO</div>
+    #   <div class="hero-title">EDIT QTY dari File PO</div>
+    #</div>
+    #""", unsafe_allow_html=True)
 
     if not folder_files:
         st.info("ℹ️ Upload file PO di section atas terlebih dahulu untuk modifikasi.")
