@@ -2584,15 +2584,15 @@ if st.session_state.get('page') == 'po_changer':
                         f"Summary PO dari Distributor {_dist_sum} - PO Date: {_po_date_str}\n"
                         f"\n"
                         f"• Total SKU: {_total_sku:,}\n"
-                        f"• Grand Total PO (sebelum pengurangan): {_rp(_grand_total_po)}\n"
+                        f"• Current Grand Total PO: {_rp(_grand_total_po)}\n"
                         f"\n"
                         f"• {_stop_label}: {_stop_count:,} SKU dengan value {_rp(_stop_value)}\n"
                         f"• {_steve_label}: {_steve_count:,} SKU dengan value {_rp(_steve_value)}\n"
-                        f"• Need Approval (Reject / Reject with Suggestion): {_approval_count:,} SKU "
-                        f"dengan value {_rp(_approval_value)}\n"
+                        #f"• Need Approval (Reject / Reject with Suggestion): {_approval_count:,} SKU "
+                        #f"dengan value {_rp(_approval_value)}\n"
                         f"\n"
                         f"• Total pengurangan: {_rp(_total_reduction)}\n"
-                        f"• Grand Total setelah pengurangan: {_rp(_grand_total_after)}"
+                        f"• Grand Total Setelah Pengurangan: {_rp(_grand_total_after)}"
                     )
                     
                         #with st.expander(f"📋 Copy Summary — {_dist_sum}", expanded=False):
