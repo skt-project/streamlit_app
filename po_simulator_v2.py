@@ -2524,12 +2524,12 @@ if st.session_state.get('page') == 'po_changer':
                             </div>
                             <ul style="margin:0;padding-left:1.2rem;color:#1F1F1F;font-size:0.88rem;line-height:1.7;">
                                 <li>Total SKU: <strong>{_total_sku:,}</strong></li>
-                                <li>Discontinued / Stop PO: <strong>{_stop_count:,}</strong> SKU dengan value <strong>{_rp(_stop_value)}</strong>
-                                    <span style="color:#5A5A5A;">(kondisi: Discontinued, Stop PO, OOS, Unavailable)</span></li>
-                                <li>Reject by Steve: <strong>{_steve_count:,}</strong> SKU dengan value <strong>{_rp(_steve_value)}</strong></li>
+                                <li>Grand Total PO (sebelum pengurangan): <strong>{_rp(_grand_total_po)}</strong></li>
+                                <li>{_stop_label}: <strong>{_stop_count:,}</strong> SKU dengan value <strong>{_rp(_stop_value)}</strong></li>
+                                <li>{_steve_label}: <strong>{_steve_count:,}</strong> SKU dengan value <strong>{_rp(_steve_value)}</strong></li>
                                 <li>Need Approval (Reject / Reject with Suggestion): <strong>{_approval_count:,}</strong> SKU dengan value <strong>{_rp(_approval_value)}</strong></li>
-                                <li>Total pengurangan dari Grand Total: <strong>{_rp(_total_reduction)}</strong>
-                                    <span style="color:#5A5A5A;">(dari Grand Total PO {_rp(_grand_total_po)})</span></li>
+                                <li>Total pengurangan: <strong>{_rp(_total_reduction)}</strong></li>
+                                <li>Grand Total setelah pengurangan: <strong>{_rp(_grand_total_after)}</strong></li>
                             </ul>
                         </div>
                         """
@@ -2561,16 +2561,19 @@ if st.session_state.get('page') == 'po_changer':
                         f"Summary PO dari Distributor {_dist_sum} - PO Date: {_po_date_str}\n"
                         f"\n"
                         f"• Total SKU: {_total_sku:,}\n"
+                        f"• Grand Total PO (sebelum pengurangan): {_rp(_grand_total_po)}\n"
+                        f"\n"
                         f"• {_stop_label}: {_stop_count:,} SKU dengan value {_rp(_stop_value)}\n"
                         f"• {_steve_label}: {_steve_count:,} SKU dengan value {_rp(_steve_value)}\n"
                         f"• Need Approval (Reject / Reject with Suggestion): {_approval_count:,} SKU "
                         f"dengan value {_rp(_approval_value)}\n"
-                        f"• Total pengurangan dari Grand Total: {_rp(_total_reduction)} "
-                        f"(dari Grand Total PO {_rp(_grand_total_po)})"
-                        )
+                        f"\n"
+                        f"• Total pengurangan: {_rp(_total_reduction)}\n"
+                        f"• Grand Total setelah pengurangan: {_rp(_grand_total_after)}"
+                    )
                     
-                        with st.expander(f"📋 Copy Summary — {_dist_sum}", expanded=False):
-                                st.code(_summary_text, language=None)
+                        #with st.expander(f"📋 Copy Summary — {_dist_sum}", expanded=False):
+                        #        st.code(_summary_text, language=None)
     
 # ─────────────────────────────────────────────────────────────────────────
     # Hapus SKU dari File PO (pakai file dari Upload File PO di atas)
