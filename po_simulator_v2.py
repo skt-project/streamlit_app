@@ -2989,12 +2989,15 @@ with st.container(border=True):
                     return "background-color: #FADBD8; color: #922B21; font-weight: 600;"
                 return ""
 
+            _decimal_cols = [c for c in ["CURRENT_WOI", "WOI_AFTER_PO"] if c in _tbl_df.columns]
+            _format_dict = {c: "{:.2f}" for c in _decimal_cols}
+
             if "STATUS_ALOKASI" in _tbl_df.columns:
                 _styled_tbl = _tbl_df.style.map(
                     _highlight_alokasi, subset=["STATUS_ALOKASI"]
-                )
+                ).format(_format_dict)
             else:
-                _styled_tbl = _tbl_df.style
+                _styled_tbl = _tbl_df.style.format(_format_dict)
 
             st.dataframe(_styled_tbl, use_container_width=True, hide_index=True)
 
