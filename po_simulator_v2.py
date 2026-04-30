@@ -115,7 +115,7 @@ def fetch_customer_names() -> list:
         rows = client.query(query).result()
         return [r.distributor for r in rows if r.distributor]
     except Exception as e:
-        st.warning(f"⚠️ Gagal memuat daftar distributor dari BigQuery: {e}")
+        st.warning(f"⚠️ Gagal memuat daftar distributor: {e}")
         return []
 
 
@@ -2910,7 +2910,7 @@ with st.container(border=True):
 
     with _drill_col1:
         _drill_dist = st.selectbox(
-            "Pilih Distributor untuk lihat suggestion SKU dari BigQuery",
+            "Pilih Distributor untuk lihat suggestion SKU",
             options=["(Pilih Distributor)"] + CUSTOMER_NAMES,
             key="drill_distri",
         )
