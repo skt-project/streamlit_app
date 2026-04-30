@@ -49,7 +49,7 @@ except ImportError:
     MATPLOTLIB_OK = False
 
 st.set_page_config(
-    page_title="PO Simulator - G2G",
+    page_title="PO Simulator — Glad2Glow",
     layout="wide",
     page_icon= '📁',
     initial_sidebar_state="expanded",
@@ -115,7 +115,7 @@ def fetch_customer_names() -> list:
         rows = client.query(query).result()
         return [r.distributor for r in rows if r.distributor]
     except Exception as e:
-        st.warning(f"⚠️ Gagal memuat daftar distributor: {e}")
+        st.warning(f"⚠️ Gagal memuat daftar distributor dari BigQuery: {e}")
         return []
 
 
@@ -252,7 +252,7 @@ def get_distributor_suggestions(distributor_name: str, brand_name: str = "All") 
         remaining_allocation_qty_region AS REMAINING_ALLOCATION,
         CASE 
             WHEN remaining_allocation_qty_region >0 THEN 'Terdapat Alokasi' 
-            else 'Alokasi Habis' 
+            when remaining_allocation_qty_region<=0 then 'Alokasi Habis' else NULL
         END AS STATUS_ALOKASI
     FROM `{table_id}`
     WHERE UPPER(distributor) = '{distributor_name.upper()}'
@@ -1666,21 +1666,20 @@ with st.sidebar:
     #)
     #if _new_light != _prev_light:
     #    st.rerun()
-    st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
+
     st.markdown(
         "<div style='padding:0 0.4rem 0.3rem;;text-align:center;font-size:1rem;font-weight:700;"
         "letter-spacing:2.5px;color:rgba(255,255,255,0.35);text-transform:uppercase;'>MENU</div>",
         unsafe_allow_html=True
     )
-    
 
     #if st.button("Data Extractor", use_container_width=True, key="nav_extractor"):
     #    st.session_state['page'] = 'extractor'
     #    st.rerun()
-    if st.button("Request PO (For SPV)", use_container_width = True, key="nav_spv"):
+    if st.button("Request PO", use_container_width = True, key="nav_spv"):
         st.session_state['page'] = 'spv'
         st.rerun()
-    if st.button("PO Changer (For RSA)", use_container_width=True, key="nav_po"):
+    if st.button("PO Changer", use_container_width=True, key="nav_po"):
         st.session_state['page'] = 'po_changer'
         st.rerun()
     
@@ -1726,7 +1725,19 @@ if st.session_state.get('page') == 'po_changer':
     """, unsafe_allow_html=True)
 
     st.divider()
+    with st.popover("ⓘ Info Tutorial"):
+        st.markdown("""
+    **Tentang PO File:**
+    1. Klik **Make a Copy** setelah pilih Distributor.
+    2. Copy SKU dan QTY untuk dimasukkan dalam Spreadsheet.
+    3. Buat Share File jadi **Anyone with Link - View** - Wajib.
+    4. Paste link Spreadsheet yang sudah di buat **Make Copy**.
+    5. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
+    6. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
+    7. Export File bisa dalam bentuk PDF atau Excel.
     
+    📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
+    """)
     _INVALID_QTY = {"-", "null", "none", "", "0", "0.0"}
 
     def _read_one(fname: str, fbytes: bytes, sheet_name=0):
@@ -2881,19 +2892,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 #---------------------------SPV SIMULATOR------------------
 st.markdown("<br>", unsafe_allow_html=True)
-with st.popover("ⓘ Info Tutorial"):
-        st.markdown("""
-    **Tentang PO File:**
-    1. Klik **Make a Copy** setelah pilih Distributor.
-    2. Copy SKU dan QTY untuk dimasukkan dalam Spreadsheet.
-    3. Buat Share File jadi **Anyone with Link - View** - Wajib.
-    4. Paste link Spreadsheet yang sudah di buat **Make Copy**.
-    5. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
-    6. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
-    7. Export File bisa dalam bentuk PDF atau Excel.
-    
-    📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
-    """)
 # ─────────────────────────────────────────────────────────────────────────
 # DRILL-DOWN per Customer (BigQuery Suggestions)
 # ─────────────────────────────────────────────────────────────────────────
@@ -2910,7 +2908,7 @@ with st.container(border=True):
 
     with _drill_col1:
         _drill_dist = st.selectbox(
-            "Pilih Distributor untuk lihat suggestion SKU",
+            "Pilih Distributor untuk lihat suggestion SKU dari BigQuery",
             options=["(Pilih Distributor)"] + CUSTOMER_NAMES,
             key="drill_distri",
         )
