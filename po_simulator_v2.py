@@ -2953,27 +2953,17 @@ with st.container(border=True):
             st.markdown(
                 f"""
                 <div style="margin-top:1rem;padding:0.9rem 1.2rem;
-                            background-color:#FFF5F8 !important;
-                            border:1px solid #F0C8D6 !important;
-                            border-radius:10px;
-                            display:flex;
-                            align-items:center;
+                            background:#FFF5F8;border:1px solid #F0C8D6;
+                            border-radius:10px;display:flex;align-items:center;
                             justify-content:space-between;">
-                    <span style="font-size:0.88rem;color:#5A1E38 !important;">
+                    <div style="font-size:0.88rem;color:#5A1E38;">
                         📄 Gunakan template PO ini, lalu isi dengan data suggestion di atas
-                    </span>
+                    </div>
                     <a href="{_copy_url}" target="_blank"
-                       style="background-color:#FFB6C1 !important;
-                              color:#000000 !important;
-                              text-decoration:none !important;
-                              padding:0.45rem 1.1rem !important;
-                              border-radius:8px !important;
-                              font-size:0.85rem !important;
-                              font-weight:700 !important;
-                              white-space:nowrap !important;
-                              margin-left:1rem !important;
-                              display:inline-block !important;
-                              border:none !important;">
+                       style="background:#F49CB6;color:#fff !important;
+                              text-decoration:none;padding:0.45rem 1.1rem;
+                              border-radius:8px;font-size:0.85rem;font-weight:700;
+                              white-space:nowrap;margin-left:1rem;">
                         📝 Make a Copy Template PO
                     </a>
                 </div>
