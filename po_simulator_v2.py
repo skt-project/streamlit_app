@@ -2514,6 +2514,29 @@ if st.session_state.get('page') == 'po_changer':
                         # Total reduction
                         _total_reduction = _stop_value + _steve_value + _approval_value
                         _grand_total_po  = _grp_po["PO Value"].sum()
+                        # ── Label dinamis dari kategori yang muncul di data ──
+                        _stop_categories = (
+                            _stop_grp["Supply Control"]
+                            .dropna()
+                            .astype(str)
+                            .str.strip()
+                            .str.title()
+                            .replace({"Stop Po": "Stop PO", "Oos": "OOS"})
+                            .unique()
+                            .tolist()
+                        )
+                        _stop_categories = [c for c in _stop_categories if c]
+                        _stop_label = ", ".join(_stop_categories) if _stop_categories else "Discontinued / Stop PO"
+
+                        _steve_categories = []
+                        if _steve_count > 0:
+                            if _grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False).any():
+                                _steve_categories.append("Stop by Steve")
+                            if _grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False).any():
+                                _steve_categories.append("Negative Allocation")
+                        _steve_label = ", ".join(_steve_categories) if _steve_categories else "Reject by Steve"
+
+                        _grand_total_after = _grand_total_po - _total_reduction
                     
                         # ── Visual card (HTML, biar enak dilihat) ──
                         _summary_html = f"""
