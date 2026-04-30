@@ -226,12 +226,16 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 @st.cache_data(ttl=21600, show_spinner="Fetching SKU suggestions from BigQuery...")
-def get_distributor_suggestions(distributor_name: str) -> pd.DataFrame:
-    """Fetch all SKU suggestions for a distributor from stock_analysis."""
+def get_distributor_suggestions(distributor_name: str, brand_name: str = "All") -> pd.DataFrame:
     if not distributor_name:
         return pd.DataFrame()
     client = get_bq_client()
     table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+
+    _brand_filter = ""
+    if brand_name and brand_name != "All":
+        _brand_filter = f"AND UPPER(brand) = UPPER('{brand_name}')"
+    
     query = f"""
     SELECT
         UPPER(region) AS REGION,
@@ -253,6 +257,7 @@ def get_distributor_suggestions(distributor_name: str) -> pd.DataFrame:
     FROM `{table_id}`
     WHERE UPPER(distributor) = '{distributor_name.upper()}'
       AND buffer_plan_by_lm_qty_adj > 0
+      {_brand_filter}
     ORDER BY SUGGESTION_QTY DESC
     """
     try:
@@ -2899,14 +2904,25 @@ st.markdown("<br>", unsafe_allow_html=True)
 #""", unsafe_allow_html=True)
 
 with st.container(border=True):
-    _drill_dist = st.selectbox(
-        "Pilih Distributor untuk lihat suggestion SKU dari BigQuery",
-        options=["(Pilih Distributor)"] + CUSTOMER_NAMES,
-        key="drill_distri",
-    )
+    _drill_col1, _drill_col2 = st.columns([2, 1])
+
+    with _drill_col1:
+        _drill_dist = st.selectbox(
+            "Pilih Distributor untuk lihat suggestion SKU dari BigQuery",
+            options=["(Pilih Distributor)"] + CUSTOMER_NAMES,
+            key="drill_distri",
+        )
+
+    with _drill_col2:
+        _brand_options = get_brand_list()
+        _drill_brand = st.selectbox(
+            "Filter Brand",
+            options=["All"] + _brand_options,
+            key="drill_brand",
+        )
 
     if _drill_dist and _drill_dist != "(Pilih Distributor)":
-        _drill_df = get_distributor_suggestions(_drill_dist)
+        _drill_df = get_distributor_suggestions(_drill_dist, _drill_brand)
 
         if _drill_df.empty:
             st.info(f"ℹ️ Tidak ada suggestion SKU untuk **{_drill_dist}**.")
@@ -2926,17 +2942,19 @@ with st.container(border=True):
             )
 
             # Lookup product names
-            _drill_skus = _drill_agg["sku"].astype(str).str.upper().tolist()
+            # Lookup product names
+            _drill_skus = _drill_agg["SKU"].astype(str).str.upper().tolist()
             _drill_names = get_sku_data(tuple(_drill_skus))
             if not _drill_names.empty:
-                _drill_names = _drill_names.rename(columns={"sku": "sku", "product_name": "product_name"})
                 _drill_names["sku"] = _drill_names["sku"].astype(str).str.upper()
-                _drill_agg["sku"] = _drill_agg["sku"].astype(str).str.upper()
+                _drill_agg["SKU"] = _drill_agg["SKU"].astype(str).str.upper()
                 _drill_agg = _drill_agg.merge(
-                    _drill_names[["sku", "product_name"]], on="sku", how="left"
+                    _drill_names[["sku", "product_name"]].rename(columns={"sku": "SKU", "product_name": "PRODUCT_NAME"}),
+                    on="SKU",
+                    how="left"
                 )
             else:
-                _drill_agg["product_name"] = ""
+                _drill_agg["PRODUCT_NAME"] = ""
 
             st.caption(
                 f"📦 **{_drill_dist}** — {len(_drill_agg):,} SKU dengan suggestion QTY > 0"
@@ -2953,11 +2971,9 @@ with st.container(border=True):
             _page_df = _drill_agg.reset_index(drop=True)
 
             # Header row
-            # ── Tabel SKU + Suggestion QTY ──
-            _display_cols = ["SKU", "product_name", "SUGGESTION_QTY", "CURRENT_WOI", "WOI_AFTER_PO", "REMAINING_ALLOCATION", "STATUS_ALOKASI"]
+            _display_cols = ["SKU", "PRODUCT_NAME", "SUGGESTION_QTY", "CURRENT_WOI", "WOI_AFTER_PO", "REMAINING_ALLOCATION", "STATUS_ALOKASI"]
             _display_cols = [c for c in _display_cols if c in _page_df.columns]
             _tbl_df = _page_df[_display_cols].copy()
-            _tbl_df = _tbl_df.rename(columns={"product_name": "PRODUCT NAME"})
             if "SUGGESTION_QTY" in _tbl_df.columns:
                 _tbl_df["SUGGESTION_QTY"] = _tbl_df["SUGGESTION_QTY"].apply(
                     lambda x: int(x) if pd.notna(x) else 0
