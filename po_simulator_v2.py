@@ -1710,7 +1710,19 @@ if st.session_state.get('page') == 'po_changer':
     """, unsafe_allow_html=True)
 
     st.divider()
-
+    with st.popover("ⓘ Info Tutorial"):
+        st.markdown("""
+    **Tentang PO File:**
+    1. Klik **Make a Copy** setelah pilih Distributor.
+    2. Copy SKU dan QTY untuk dimasukkan dalam Spreadsheet.
+    3. Buat Share File jadi **Anyone with Link - View** - Wajib.
+    4. Paste link Spreadsheet yang sudah di buat **Make Copy**.
+    5. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
+    6. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
+    7. Export File bisa dalam bentuk PDF atau Excel.
+    
+    📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
+    """)
     _INVALID_QTY = {"-", "null", "none", "", "0", "0.0"}
 
     def _read_one(fname: str, fbytes: bytes, sheet_name=0):
@@ -2887,7 +2899,7 @@ with st.container(border=True):
         _drill_df = get_distributor_suggestions(_drill_dist)
 
         if _drill_df.empty:
-            st.info(f"ℹ️ Tidak ada suggestion SKU untuk **{_drill_dist}** di BigQuery.")
+            st.info(f"ℹ️ Tidak ada suggestion SKU untuk **{_drill_dist}**.")
         else:
             # Aggregate per SKU (sum across regions)
             _drill_agg = (
@@ -2974,18 +2986,7 @@ with st.container(border=True):
 st.divider()
 
 RSA = ['Aqil', 'Alfaradi', 'Erliana', 'Rizky', 'Geirda', 'Rintan', 'Shaltsa', 'Daffa']
-with st.popover("ⓘ Info Tutorial"):
-    st.markdown("""
-    **Tentang PO File:**
-    1. Klik Info Tutorial dan Template link di dalamnya untuk melakukan "Make Copy" Spreadsheet.
-    2. Buat Share File jadi **Anyone with Link - View** - Wajib.
-    3. Paste link Spreadsheet yang sudah di buat **Make Copy**.
-    4. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
-    5. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
-    6. Export File bisa dalam bentuk PDF atau Excel.
-    
-    📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
-    """)
+
 tabs = st.tabs(["🔗 Google Spreadsheet"])
 
 with tabs[0]:
