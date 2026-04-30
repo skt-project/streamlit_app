@@ -3176,8 +3176,8 @@ with tabs[0]:
                     )
             else:
                 _val_errors.append(
-                    "⚠️ Tidak dapat memvalidasi PRODUCT CODE ke BigQuery — "
-                    "pastikan koneksi BigQuery aktif."
+                    "⚠️ Tidak dapat memvalidasi PRODUCT CODE ke BigQuery"
+                    
                 )
 
     # 5. Tampilkan semua error/warning
