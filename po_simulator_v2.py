@@ -2868,13 +2868,13 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ─────────────────────────────────────────────────────────────────────────
 # DRILL-DOWN per Customer (BigQuery Suggestions)
 # ─────────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="pipeline-step active">
-    <span class="step-number">2</span>
-    <strong>Drill Down per Customer</strong>
-    <span class="badge badge-info" style="margin-left:0.8rem;">Optional</span>
-</div>
-""", unsafe_allow_html=True)
+#st.markdown("""
+#<div class="pipeline-step active">
+#    <span class="step-number">2</span>
+#    <strong>Drill Down per Customer</strong>
+#    <span class="badge badge-info" style="margin-left:0.8rem;">Optional</span>
+#</div>
+#""", unsafe_allow_html=True)
 
 with st.container(border=True):
     _drill_dist = st.selectbox(
@@ -2926,42 +2926,28 @@ with st.container(border=True):
             )
 
             # Pagination — show 20 per page
-            _per_page = 20
-            _total_rows = len(_drill_agg)
-            _total_pages = max(1, (_total_rows + _per_page - 1) // _per_page)
-            _pg_col1, _pg_col2 = st.columns([3, 1])
-            with _pg_col2:
-                _page = st.number_input(
-                    "Page",
-                    min_value=1,
-                    max_value=_total_pages,
-                    value=1,
-                    step=1,
-                    key="drill_page",
-                )
-            with _pg_col1:
-                st.caption(f"Halaman {_page} dari {_total_pages} · {_per_page} SKU per halaman")
-
-            _start = (_page - 1) * _per_page
-            _end = _start + _per_page
-            _page_df = _drill_agg.iloc[_start:_end].reset_index(drop=True)
+            _page_df = _drill_agg.reset_index(drop=True)
 
             # Header row
             # ── Tabel SKU + Suggestion QTY ──
-            _display_cols = ["sku", "product_name", "suggestion_qty"]
+            _display_cols = ["sku", "product_name", "suggestion_qty", "woi_eom"]
             _display_cols = [c for c in _display_cols if c in _page_df.columns]
             _tbl_df = _page_df[_display_cols].copy()
             _tbl_df.columns = (
-                ["SKU", "Product Name", "Suggestion QTY"][:len(_display_cols)]
+                ["SKU", "Product Name", "Suggestion QTY", "WOI EOM"][:len(_display_cols)]
             )
             if "Suggestion QTY" in _tbl_df.columns:
                 _tbl_df["Suggestion QTY"] = _tbl_df["Suggestion QTY"].apply(
                     lambda x: int(x) if pd.notna(x) else 0
                 )
+            if "WOI EOM" in _tbl_df.columns:
+                _tbl_df["WOI EOM"] = _tbl_df["WOI EOM"].apply(
+                    lambda x: round(float(x), 2) if pd.notna(x) else 0.0
+                )
             st.dataframe(_tbl_df, use_container_width=True, hide_index=True)
 
-            with st.expander("📋 Lihat data lengkap (semua region)", expanded=False):
-                st.dataframe(_drill_df, use_container_width=True, hide_index=True)
+            #with st.expander("📋 Lihat data lengkap (semua region)", expanded=False):
+            #    st.dataframe(_drill_df, use_container_width=True, hide_index=True)
 
             # ── Make a Copy Template PO ──
             st.markdown(
@@ -2970,14 +2956,20 @@ with st.container(border=True):
                             background:#FFF5F8;border:1px solid #F0C8D6;
                             border-radius:10px;display:flex;align-items:center;
                             justify-content:space-between;">
-                    <div style="font-size:0.88rem;color:#5A1E38;">
+                    <div style="font-size:0.88rem;color:#5A1E38 !important;">
                         📄 Gunakan template PO ini, lalu isi dengan data suggestion di atas
                     </div>
                     <a href="{_copy_url}" target="_blank"
-                       style="background:#8B2040;color:#fff !important;
-                              text-decoration:none;padding:0.45rem 1.1rem;
-                              border-radius:8px;font-size:0.85rem;font-weight:700;
-                              white-space:nowrap;margin-left:1rem;">
+                       style="background:#8B2040 !important;
+                              color:#ffffff !important;
+                              text-decoration:none !important;
+                              padding:0.45rem 1.1rem;
+                              border-radius:8px;
+                              font-size:0.85rem;
+                              font-weight:700;
+                              white-space:nowrap;
+                              margin-left:1rem;
+                              display:inline-block;">
                         📝 Make a Copy Template PO
                     </a>
                 </div>
@@ -3080,7 +3072,89 @@ with tabs[0]:
         st.stop()
 
     df = st.session_state['df'].copy()
+    # ── Validasi PRODUCT CODE & QTY ───────────────────────────────────────
+    _val_errors = []
 
+    # 1. Cek kolom wajib ada
+    _has_product_code = 'PRODUCT CODE' in df.columns
+    _has_qty = 'QTY' in df.columns
+
+    if not _has_product_code:
+        _val_errors.append("❌ Kolom **PRODUCT CODE** tidak ditemukan di spreadsheet.")
+    if not _has_qty:
+        _val_errors.append("❌ Kolom **QTY** tidak ditemukan di spreadsheet.")
+
+    if _has_qty:
+        # 2. Cek QTY format — harus numeric
+        _df_check = df.copy()
+        _df_check['_qty_num'] = pd.to_numeric(
+            _df_check['QTY'].astype(str)
+            .str.replace('.', '', regex=False)
+            .str.replace(',', '.', regex=False)
+            .str.strip(),
+            errors='coerce'
+        )
+        _invalid_qty = _df_check[
+            _df_check['QTY'].notna() &
+            _df_check['QTY'].astype(str).str.strip().ne('') &
+            _df_check['_qty_num'].isna()
+        ]['QTY'].unique().tolist()
+
+        if _invalid_qty:
+            _val_errors.append(
+                f"❌ Kolom **QTY** memiliki nilai yang bukan angka: "
+                f"`{'`, `'.join([str(v) for v in _invalid_qty[:10]])}`"
+                + (" ..." if len(_invalid_qty) > 10 else "")
+            )
+
+    if _has_product_code:
+        # 3. Cek format PRODUCT CODE — harus match pola G2G-xxx
+        _df_pc = df['PRODUCT CODE'].dropna().astype(str).str.strip()
+        _df_pc = _df_pc[_df_pc != '']
+        _invalid_pc = _df_pc[
+            ~_df_pc.str.upper().str.match(r'^G2G-\S+$')
+        ].unique().tolist()
+
+        if _invalid_pc:
+            _val_errors.append(
+                f"⚠️ **PRODUCT CODE** berikut tidak sesuai format (contoh: G2G-223): "
+                f"`{'`, `'.join([str(v) for v in _invalid_pc[:10]])}`"
+                + (" ..." if len(_invalid_pc) > 10 else "")
+            )
+
+        # 4. Cross-check PRODUCT CODE vs BigQuery SKU master
+        _pc_list = _df_pc.str.upper().unique().tolist()
+        if _pc_list:
+            with st.spinner("🔍 Memvalidasi PRODUCT CODE ke BigQuery..."):
+                _bq_check = get_sku_data(tuple(_pc_list))
+            if not _bq_check.empty:
+                _found_skus = set(_bq_check['sku'].astype(str).str.upper().tolist())
+                _not_found = [p for p in _pc_list if p not in _found_skus]
+                if _not_found:
+                    _val_errors.append(
+                        f"❌ **PRODUCT CODE** berikut tidak ditemukan di sistem (BigQuery): "
+                        f"`{'`, `'.join(_not_found[:10])}`"
+                        + (" ..." if len(_not_found) > 10 else "")
+                    )
+            else:
+                _val_errors.append(
+                    "⚠️ Tidak dapat memvalidasi PRODUCT CODE ke BigQuery — "
+                    "pastikan koneksi BigQuery aktif."
+                )
+
+    # 5. Tampilkan semua error/warning
+    if _val_errors:
+        st.warning("**⚠️ Data perlu dicek ulang sebelum di-generate:**")
+        for _err in _val_errors:
+            st.markdown(f"- {_err}")
+        st.info("💡 Pastikan PRODUCT CODE sesuai format sistem (contoh: **G2G-223**) "
+                "dan kolom QTY berisi angka saja.")
+    else:
+        st.success("✅ Validasi OK — PRODUCT CODE dan QTY sesuai format.")
+
+
+
+    
     # ── Input: Distributor & RSA ───────────────────────────────────────────
     with st.container(border=True):
         col1, col2 = st.columns([1, 1])
