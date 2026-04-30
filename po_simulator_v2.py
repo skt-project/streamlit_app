@@ -2963,8 +2963,8 @@ with st.container(border=True):
                         📄 Gunakan template PO ini, lalu isi dengan data suggestion di atas
                     </span>
                     <a href="{_copy_url}" target="_blank"
-                       style="background-color:#8B2040 !important;
-                              color:#ffffff !important;
+                       style="background-color:#FFB6C1 !important;
+                              color:#000000 !important;
                               text-decoration:none !important;
                               padding:0.45rem 1.1rem !important;
                               border-radius:8px !important;
