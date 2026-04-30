@@ -1672,6 +1672,7 @@ with st.sidebar:
         "letter-spacing:2.5px;color:rgba(255,255,255,0.35);text-transform:uppercase;'>MENU</div>",
         unsafe_allow_html=True
     )
+    st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
 
     #if st.button("Data Extractor", use_container_width=True, key="nav_extractor"):
     #    st.session_state['page'] = 'extractor'
