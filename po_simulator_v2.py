@@ -3049,7 +3049,7 @@ with st.container(border=True):
                 _ws_exp.freeze_panes = "A2"
 
             st.download_button(
-                label="⬇ Export PO Suggestion (.xlsx)",
+                label="Export PO Suggestion (.xlsx)",
                 data=_export_buf.getvalue(),
                 file_name=f"PO_Suggestion_{_drill_dist}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
