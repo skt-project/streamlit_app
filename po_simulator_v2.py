@@ -2456,101 +2456,121 @@ if st.session_state.get('page') == 'po_changer':
                             # ─────────────────────────────────────────────────────
                             # POINT 7 — Summary PO per Distributor
                             # ─────────────────────────────────────────────────────
-                            st.markdown(f"""
-                            <div class="pipeline-step active">
-                                <span class="step-number">{_final_step + 3}</span>
-                                <strong>Summary PO</strong>
+                    st.markdown(f"""
+                    <div class="pipeline-step active">
+                        <span class="step-number">{_final_step + 3}</span>
+                        <strong>Summary PO</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    _summary_df = _final_disp.copy()
+                    _summary_df["PO Value"] = pd.to_numeric(_summary_df["PO Value"], errors="coerce").fillna(0)
+                    _summary_df["Supply Control"] = _summary_df["Supply Control"].fillna("").astype(str)
+                    _summary_df["Remark"] = _summary_df["Remark"].fillna("").astype(str)
+                    
+                    _po_date_str = datetime.now().strftime("%d %B %Y")
+                    _stop_keywords_sum = ["STOP PO", "OOS", "DISCONTINUED", "UNAVAILABLE"]
+                    
+                    def _rp(v):
+                        try:
+                            return f"Rp {v:,.0f}".replace(",", ".")
+                        except Exception:
+                            return "Rp 0"
+                    
+                    for _dist_sum in sorted(_summary_df["Distributor"].dropna().unique()):
+                        _grp = _summary_df[_summary_df["Distributor"] == _dist_sum]
+                        _grp_po = _grp[_grp["is_po_sku"] == True] if "is_po_sku" in _grp.columns else _grp
+                    
+                        # Total SKU
+                        _total_sku = _grp_po["SKU"].nunique()
+                    
+                        # Discontinue / Stop PO
+                        _stop_mask_sum = _grp_po["Supply Control"].str.strip().str.upper().isin(
+                            [k.upper() for k in _stop_keywords_sum]
+                        )
+                        _stop_grp   = _grp_po[_stop_mask_sum]
+                        _stop_count = _stop_grp["SKU"].nunique()
+                        _stop_value = _stop_grp["PO Value"].sum()
+                    
+                        # Reject by Steve
+                        _steve_mask_sum = (
+                            _grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False)
+                            | _grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False)
+                        )
+                        _steve_grp   = _grp_po[_steve_mask_sum]
+                        _steve_count = _steve_grp["SKU"].nunique()
+                        _steve_value = _steve_grp["PO Value"].sum()
+                    
+                        # Need approval
+                        _approval_mask_sum = (
+                            _grp_po["Remark"].str.strip().str.lower().isin(["reject", "reject with suggestion"])
+                            & ~_steve_mask_sum
+                            & ~_stop_mask_sum
+                        )
+                        _approval_grp   = _grp_po[_approval_mask_sum]
+                        _approval_count = _approval_grp["SKU"].nunique()
+                        _approval_value = _approval_grp["PO Value"].sum()
+                    
+                        # Total reduction
+                        _total_reduction = _stop_value + _steve_value + _approval_value
+                        _grand_total_po  = _grp_po["PO Value"].sum()
+                    
+                        # ── Visual card (HTML, biar enak dilihat) ──
+                        _summary_html = f"""
+                        <div style="background:#FFF5F8;border:1px solid #F0C8D6;border-radius:12px;
+                                    padding:1rem 1.2rem;margin:0.6rem 0 0.4rem;">
+                            <div style="font-size:0.95rem;font-weight:700;color:#8B2040;margin-bottom:0.5rem;">
+                                Summary PO dari Distributor <strong>{_dist_sum}</strong> — PO Date: <strong>{_po_date_str}</strong>
                             </div>
-                            """, unsafe_allow_html=True)
-                            
-                            _summary_df = _final_disp.copy()
-                            _summary_df["PO Value"] = pd.to_numeric(_summary_df["PO Value"], errors="coerce").fillna(0)
-                            _summary_df["Supply Control"] = _summary_df["Supply Control"].fillna("").astype(str)
-                            _summary_df["Remark"] = _summary_df["Remark"].fillna("").astype(str)
-                            
-                            _po_date_str = datetime.now().strftime("%d %B %Y")
-                            _stop_keywords_sum = ["STOP PO", "OOS", "DISCONTINUED", "UNAVAILABLE"]
-                            
-                            def _rp(v):
-                                try:
-                                    return f"Rp {v:,.0f}".replace(",", ".")
-                                except Exception:
-                                    return "Rp 0"
-                            
-                            for _dist_sum in sorted(_summary_df["Distributor"].dropna().unique()):
-                                _grp = _summary_df[_summary_df["Distributor"] == _dist_sum]
-                                _grp_po = _grp[_grp["is_po_sku"] == True] if "is_po_sku" in _grp.columns else _grp
-                            
-                                # Total SKU
-                                _total_sku = _grp_po["SKU"].nunique()
-                            
-                                # Discontinue / Stop PO
-                                _stop_mask_sum = _grp_po["Supply Control"].str.strip().str.upper().isin(
-                                    [k.upper() for k in _stop_keywords_sum]
-                                )
-                                _stop_grp   = _grp_po[_stop_mask_sum]
-                                _stop_count = _stop_grp["SKU"].nunique()
-                                _stop_value = _stop_grp["PO Value"].sum()
-                            
-                                # Reject by Steve
-                                _steve_mask_sum = (
-                                    _grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False)
-                                    | _grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False)
-                                )
-                                _steve_grp   = _grp_po[_steve_mask_sum]
-                                _steve_count = _steve_grp["SKU"].nunique()
-                                _steve_value = _steve_grp["PO Value"].sum()
-                            
-                                # Need approval
-                                _approval_mask_sum = (
-                                    _grp_po["Remark"].str.strip().str.lower().isin(["reject", "reject with suggestion"])
-                                    & ~_steve_mask_sum
-                                    & ~_stop_mask_sum
-                                )
-                                _approval_grp   = _grp_po[_approval_mask_sum]
-                                _approval_count = _approval_grp["SKU"].nunique()
-                                _approval_value = _approval_grp["PO Value"].sum()
-                            
-                                # Total reduction
-                                _total_reduction = _stop_value + _steve_value + _approval_value
-                                _grand_total_po  = _grp_po["PO Value"].sum()
-                            
-                                # ── Visual card (HTML, biar enak dilihat) ──
-                                _summary_html = f"""
-                                <div style="background:#FFF5F8;border:1px solid #F0C8D6;border-radius:12px;
-                                            padding:1rem 1.2rem;margin:0.6rem 0 0.4rem;">
-                                    <div style="font-size:0.95rem;font-weight:700;color:#8B2040;margin-bottom:0.5rem;">
-                                        Summary PO dari Distributor <strong>{_dist_sum}</strong> — PO Date: <strong>{_po_date_str}</strong>
-                                    </div>
-                                    <ul style="margin:0;padding-left:1.2rem;color:#1F1F1F;font-size:0.88rem;line-height:1.7;">
-                                        <li>Total SKU: <strong>{_total_sku:,}</strong></li>
-                                        <li>Discontinued / Stop PO: <strong>{_stop_count:,}</strong> SKU dengan value <strong>{_rp(_stop_value)}</strong>
-                                            <span style="color:#5A5A5A;">(kondisi: Discontinued, Stop PO, OOS, Unavailable)</span></li>
-                                        <li>Reject by Steve: <strong>{_steve_count:,}</strong> SKU dengan value <strong>{_rp(_steve_value)}</strong></li>
-                                        <li>Need Approval (Reject / Reject with Suggestion): <strong>{_approval_count:,}</strong> SKU dengan value <strong>{_rp(_approval_value)}</strong></li>
-                                        <li>Total pengurangan dari Grand Total: <strong>{_rp(_total_reduction)}</strong>
-                                            <span style="color:#5A5A5A;">(dari Grand Total PO {_rp(_grand_total_po)})</span></li>
-                                    </ul>
-                                </div>
-                                """
-                                st.markdown(_summary_html, unsafe_allow_html=True)
-                            
-                                # ── Copy-friendly version (plain text dengan tombol copy bawaan st.code) ──
-                                _summary_text = (
-                                    f"Summary PO dari Distributor {_dist_sum} - PO Date: {_po_date_str}\n"
-                                    f"\n"
-                                    f"• Total SKU: {_total_sku:,}\n"
-                                    f"• Discontinued / Stop PO: {_stop_count:,} SKU dengan value {_rp(_stop_value)} "
-                                    f"(kondisi: Discontinued, Stop PO, OOS, Unavailable)\n"
-                                    f"• Reject by Steve: {_steve_count:,} SKU dengan value {_rp(_steve_value)}\n"
-                                    f"• Need Approval (Reject / Reject with Suggestion): {_approval_count:,} SKU "
-                                    f"dengan value {_rp(_approval_value)}\n"
-                                    f"• Total pengurangan dari Grand Total: {_rp(_total_reduction)} "
-                                    f"(dari Grand Total PO {_rp(_grand_total_po)})"
-                                )
-                            
-                                with st.expander(f"📋 Copy Summary — {_dist_sum}", expanded=False):
-                                    st.code(_summary_text, language=None)
+                            <ul style="margin:0;padding-left:1.2rem;color:#1F1F1F;font-size:0.88rem;line-height:1.7;">
+                                <li>Total SKU: <strong>{_total_sku:,}</strong></li>
+                                <li>Discontinued / Stop PO: <strong>{_stop_count:,}</strong> SKU dengan value <strong>{_rp(_stop_value)}</strong>
+                                    <span style="color:#5A5A5A;">(kondisi: Discontinued, Stop PO, OOS, Unavailable)</span></li>
+                                <li>Reject by Steve: <strong>{_steve_count:,}</strong> SKU dengan value <strong>{_rp(_steve_value)}</strong></li>
+                                <li>Need Approval (Reject / Reject with Suggestion): <strong>{_approval_count:,}</strong> SKU dengan value <strong>{_rp(_approval_value)}</strong></li>
+                                <li>Total pengurangan dari Grand Total: <strong>{_rp(_total_reduction)}</strong>
+                                    <span style="color:#5A5A5A;">(dari Grand Total PO {_rp(_grand_total_po)})</span></li>
+                            </ul>
+                        </div>
+                        """
+                        st.markdown(_summary_html, unsafe_allow_html=True)
+                    
+                        # ── Copy-friendly version (plain text dengan tombol copy bawaan st.code) ──
+                        # Ambil kategori Supply Control yang benar-benar muncul di _stop_grp
+                        _stop_categories = (
+                            _stop_grp["Supply Control"]
+                            .dropna()
+                            .astype(str)
+                            .str.strip()
+                            .str.title()           # "STOP PO" → "Stop Po"; lihat fix di bawah
+                            .replace({"Stop Po": "Stop PO", "Oos": "OOS"})  # rapikan kapitalisasi
+                            .unique()
+                            .tolist()
+                        )
+                        _stop_categories = [c for c in _stop_categories if c]  # buang string kosong
+                        _stop_label = ", ".join(_stop_categories) if _stop_categories else "Discontinued / Stop PO"
+                        # Sama untuk Steve (kategori dari Remark)
+                        _steve_categories = []
+                        if _steve_count > 0:
+                            if _grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False).any():
+                                _steve_categories.append("Stop by Steve")
+                            if _grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False).any():
+                                _steve_categories.append("Negative Allocation")
+                        _steve_label = ", ".join(_steve_categories) if _steve_categories else "Reject by Steve"
+                        _summary_text = (
+                        f"Summary PO dari Distributor {_dist_sum} - PO Date: {_po_date_str}\n"
+                        f"\n"
+                        f"• Total SKU: {_total_sku:,}\n"
+                        f"• {_stop_label}: {_stop_count:,} SKU dengan value {_rp(_stop_value)}\n"
+                        f"• {_steve_label}: {_steve_count:,} SKU dengan value {_rp(_steve_value)}\n"
+                        f"• Need Approval (Reject / Reject with Suggestion): {_approval_count:,} SKU "
+                        f"dengan value {_rp(_approval_value)}\n"
+                        f"• Total pengurangan dari Grand Total: {_rp(_total_reduction)} "
+                        f"(dari Grand Total PO {_rp(_grand_total_po)})"
+                        )
+                    
+                        with st.expander(f"📋 Copy Summary — {_dist_sum}", expanded=False):
+                                st.code(_summary_text, language=None)
     
 # ─────────────────────────────────────────────────────────────────────────
     # Hapus SKU dari File PO (pakai file dari Upload File PO di atas)
