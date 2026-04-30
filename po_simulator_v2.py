@@ -1676,10 +1676,10 @@ with st.sidebar:
     #if st.button("Data Extractor", use_container_width=True, key="nav_extractor"):
     #    st.session_state['page'] = 'extractor'
     #    st.rerun()
-    if st.button("Request PO", use_container_width = True, key="nav_spv"):
+    if st.button("Request PO (For SPV)", use_container_width = True, key="nav_spv"):
         st.session_state['page'] = 'spv'
         st.rerun()
-    if st.button("PO Changer", use_container_width=True, key="nav_po"):
+    if st.button("PO Changer (For RSA)", use_container_width=True, key="nav_po"):
         st.session_state['page'] = 'po_changer'
         st.rerun()
     
@@ -2891,6 +2891,20 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 #---------------------------SPV SIMULATOR------------------
+st.divider()
+    with st.popover("ⓘ Info Tutorial"):
+        st.markdown("""
+    **Tentang PO File:**
+    1. Klik **Make a Copy** setelah pilih Distributor.
+    2. Copy SKU dan QTY untuk dimasukkan dalam Spreadsheet.
+    3. Buat Share File jadi **Anyone with Link - View** - Wajib.
+    4. Paste link Spreadsheet yang sudah di buat **Make Copy**.
+    5. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
+    6. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
+    7. Export File bisa dalam bentuk PDF atau Excel.
+    
+    📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
+    """)
 st.markdown("<br>", unsafe_allow_html=True)
 # ─────────────────────────────────────────────────────────────────────────
 # DRILL-DOWN per Customer (BigQuery Suggestions)
