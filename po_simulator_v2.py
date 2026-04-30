@@ -2982,7 +2982,18 @@ with st.container(border=True):
                 _tbl_df["REMAINING_ALLOCATION"] = _tbl_df["REMAINING_ALLOCATION"].apply(
                     lambda x: int(x) if pd.notna(x) else 0
                 )
-            st.dataframe(_tbl_df, use_container_width=True, hide_index=True)
+            def _highlight_alokasi(val):
+                if val == "Terdapat Alokasi":
+                    return "background-color: #D6EAF8; color: #1A5490; font-weight: 600;"
+                elif val == "Alokasi Habis":
+                    return "background-color: #FADBD8; color: #922B21; font-weight: 600;"
+                return ""
+
+            _styled_tbl = _tbl_df.style.applymap(
+                _highlight_alokasi, subset=["STATUS_ALOKASI"]
+            ) if "STATUS_ALOKASI" in _tbl_df.columns else _tbl_df.style
+
+            st.dataframe(_styled_tbl, use_container_width=True, hide_index=True)
 
             #with st.expander("📋 Lihat data lengkap (semua region)", expanded=False):
             #    st.dataframe(_drill_df, use_container_width=True, hide_index=True)
