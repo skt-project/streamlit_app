@@ -250,7 +250,7 @@ def get_distributor_suggestions(distributor_name: str) -> pd.DataFrame:
             WHEN remaining_allocation_qty_region <= 0 THEN 'Alokasi Habis' 
             ELSE 'Terdapat Alokasi' 
         END AS STATUS_ALOKASI
-    FROM `{{table_id}}`
+    FROM `{table_id}`
     WHERE UPPER(distributor) = '{distributor_name.upper()}'
       AND buffer_plan_by_lm_qty_adj > 0
     ORDER BY SUGGESTION_QTY DESC
