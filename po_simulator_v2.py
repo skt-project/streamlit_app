@@ -3001,6 +3001,61 @@ with st.container(border=True):
                 _styled_tbl = _tbl_df.style.format(_format_dict)
 
             st.dataframe(_styled_tbl, use_container_width=True, hide_index=True)
+            # ── Export PO Suggestion ──
+            _export_buf = io.BytesIO()
+            with pd.ExcelWriter(_export_buf, engine='openpyxl') as _writer:
+                _tbl_df.to_excel(_writer, index=False, sheet_name='PO Suggestion')
+                _ws_exp = _writer.sheets['PO Suggestion']
+
+                # Header styling
+                _hdr_fill = PatternFill(start_color="8B2040", end_color="8B2040", fill_type="solid")
+                _hdr_font = Font(bold=True, color="FFFFFF")
+                _alok_blue_fill = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
+                _alok_red_fill = PatternFill(start_color="FADBD8", end_color="FADBD8", fill_type="solid")
+
+                for _cell in _ws_exp[1]:
+                    _cell.fill = _hdr_fill
+                    _cell.font = _hdr_font
+                    _cell.alignment = Alignment(horizontal='center', vertical='center')
+
+                # Highlight STATUS_ALOKASI column
+                _hdrs_exp = {c.value: c.column for c in _ws_exp[1]}
+                _alok_col = _hdrs_exp.get("STATUS_ALOKASI")
+                if _alok_col:
+                    for _r in range(2, _ws_exp.max_row + 1):
+                        _val = _ws_exp.cell(row=_r, column=_alok_col).value
+                        if _val == "Terdapat Alokasi":
+                            _ws_exp.cell(row=_r, column=_alok_col).fill = _alok_blue_fill
+                            _ws_exp.cell(row=_r, column=_alok_col).font = Font(color="1A5490", bold=True)
+                        elif _val == "Alokasi Habis":
+                            _ws_exp.cell(row=_r, column=_alok_col).fill = _alok_red_fill
+                            _ws_exp.cell(row=_r, column=_alok_col).font = Font(color="922B21", bold=True)
+
+                # Number format for decimal columns
+                for _col_name in ["CURRENT_WOI", "WOI_AFTER_PO"]:
+                    _col_idx = _hdrs_exp.get(_col_name)
+                    if _col_idx:
+                        for _r in range(2, _ws_exp.max_row + 1):
+                            _ws_exp.cell(row=_r, column=_col_idx).number_format = "0.00"
+
+                # Auto-fit column widths
+                for _col_cells in _ws_exp.columns:
+                    _max_len = max(
+                        (len(str(_c.value)) if _c.value is not None else 0)
+                        for _c in _col_cells
+                    )
+                    _ws_exp.column_dimensions[_col_cells[0].column_letter].width = min(_max_len + 4, 40)
+
+                _ws_exp.freeze_panes = "A2"
+
+            st.download_button(
+                label="⬇ Export PO Suggestion (.xlsx)",
+                data=_export_buf.getvalue(),
+                file_name=f"PO_Suggestion_{_drill_dist}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="dl_po_suggestion",
+            )
 
             #with st.expander("📋 Lihat data lengkap (semua region)", expanded=False):
             #    st.dataframe(_drill_df, use_container_width=True, hide_index=True)
