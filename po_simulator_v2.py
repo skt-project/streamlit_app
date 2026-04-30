@@ -2840,6 +2840,125 @@ st.markdown("""
 """, unsafe_allow_html=True)
 #---------------------------SPV SIMULATOR------------------
 st.markdown("<br>", unsafe_allow_html=True)
+# ─────────────────────────────────────────────────────────────────────────
+# DRILL-DOWN per Customer (BigQuery Suggestions)
+# ─────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="pipeline-step active">
+    <span class="step-number">2</span>
+    <strong>Drill Down per Customer</strong>
+    <span class="badge badge-info" style="margin-left:0.8rem;">Optional</span>
+</div>
+""", unsafe_allow_html=True)
+
+with st.container(border=True):
+    _drill_dist = st.selectbox(
+        "Pilih Distributor untuk lihat suggestion SKU dari BigQuery",
+        options=["(Pilih Distributor)"] + CUSTOMER_NAMES,
+        key="drill_distri",
+    )
+
+    if _drill_dist and _drill_dist != "(Pilih Distributor)":
+        _drill_df = get_distributor_suggestions(_drill_dist)
+
+        if _drill_df.empty:
+            st.info(f"ℹ️ Tidak ada suggestion SKU untuk **{_drill_dist}** di BigQuery.")
+        else:
+            # Aggregate per SKU (sum across regions)
+            _drill_agg = (
+                _drill_df.groupby("sku", as_index=False)
+                .agg(
+                    suggestion_qty=("suggestion_qty", "sum"),
+                    remaining_allocation=("remaining_allocation_qty_region", "sum"),
+                    woi_eom=("woi_end_of_month_by_lm", "mean"),
+                )
+                .sort_values("suggestion_qty", ascending=False)
+                .reset_index(drop=True)
+            )
+
+            # Lookup product names
+            _drill_skus = _drill_agg["sku"].astype(str).str.upper().tolist()
+            _drill_names = get_sku_data(tuple(_drill_skus))
+            if not _drill_names.empty:
+                _drill_names = _drill_names.rename(columns={"sku": "sku", "product_name": "product_name"})
+                _drill_names["sku"] = _drill_names["sku"].astype(str).str.upper()
+                _drill_agg["sku"] = _drill_agg["sku"].astype(str).str.upper()
+                _drill_agg = _drill_agg.merge(
+                    _drill_names[["sku", "product_name"]], on="sku", how="left"
+                )
+            else:
+                _drill_agg["product_name"] = ""
+
+            st.caption(
+                f"📦 **{_drill_dist}** — {len(_drill_agg):,} SKU dengan suggestion QTY > 0"
+            )
+
+            # Build TEMPLATE PO copy URL
+            _tpl_match = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', TEMPLATE_PO_URL)
+            _copy_url = (
+                f"https://docs.google.com/spreadsheets/d/{_tpl_match.group(1)}/copy"
+                if _tpl_match else TEMPLATE_PO_URL
+            )
+
+            # Pagination — show 20 per page
+            _per_page = 20
+            _total_rows = len(_drill_agg)
+            _total_pages = max(1, (_total_rows + _per_page - 1) // _per_page)
+            _pg_col1, _pg_col2 = st.columns([3, 1])
+            with _pg_col2:
+                _page = st.number_input(
+                    "Page",
+                    min_value=1,
+                    max_value=_total_pages,
+                    value=1,
+                    step=1,
+                    key="drill_page",
+                )
+            with _pg_col1:
+                st.caption(f"Halaman {_page} dari {_total_pages} · {_per_page} SKU per halaman")
+
+            _start = (_page - 1) * _per_page
+            _end = _start + _per_page
+            _page_df = _drill_agg.iloc[_start:_end].reset_index(drop=True)
+
+            # Header row
+            _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([1.5, 3, 1, 1.2, 1, 1.3])
+            with _h1: st.markdown("**SKU**")
+            with _h2: st.markdown("**Product Name**")
+            with _h3: st.markdown("**Sugg. QTY**")
+            with _h4: st.markdown("**Remaining Alloc.**")
+            with _h5: st.markdown("**WOI EOM**")
+            with _h6: st.markdown("**Action**")
+            st.divider()
+
+            for _, _row in _page_df.iterrows():
+                _sku_val = _row["sku"]
+                _pname = _row.get("product_name", "") or "-"
+                _sugg = int(_row["suggestion_qty"]) if pd.notna(_row["suggestion_qty"]) else 0
+                _rem = int(_row["remaining_allocation"]) if pd.notna(_row["remaining_allocation"]) else 0
+                _woi = _row["woi_eom"] if pd.notna(_row["woi_eom"]) else 0
+
+                _c1, _c2, _c3, _c4, _c5, _c6 = st.columns([1.5, 3, 1, 1.2, 1, 1.3])
+                with _c1: st.markdown(f"`{_sku_val}`")
+                with _c2: st.markdown(f"<span style='font-size:0.85rem;'>{_pname}</span>", unsafe_allow_html=True)
+                with _c3: st.markdown(f"**{_sugg:,}**")
+                with _c4: st.markdown(f"{_rem:,}")
+                with _c5: st.markdown(f"{_woi:.2f}")
+                with _c6:
+                    st.markdown(
+                        f'<a href="{_copy_url}" target="_blank" '
+                        f'style="display:inline-block;background:#8B2040;color:#fff !important;'
+                        f'text-decoration:none;padding:0.3rem 0.7rem;border-radius:6px;'
+                        f'font-size:0.78rem;font-weight:600;">📝 Edit PO</a>',
+                        unsafe_allow_html=True,
+                    )
+
+            with st.expander("📋 Lihat data lengkap (semua region)", expanded=False):
+                st.dataframe(_drill_df, use_container_width=True, hide_index=True)
+
+st.divider()
+
+
 
 RSA = ['Aqil', 'Alfaradi', 'Erliana', 'Rizky', 'Geirda', 'Rintan', 'Shaltsa', 'Daffa']
 with st.popover("ⓘ Info Tutorial"):
@@ -2871,7 +2990,13 @@ with tabs[0]:
     #    placeholder="",
     #    help="Isi GID tab sheet lain yang ingin ditampilkan. Bisa dilihat di URL setelah gid=",
     #)
-
+    st.markdown("**DISTRIBUTOR**")
+            pilih = st.selectbox(
+                "",
+                options=["(Pilih)"] + CUSTOMER_NAMES,
+                key="distri",
+                label_visibility="collapsed"
+            )
     if st.button("Load Data"):
         if not gsheet_url.strip():
             st.warning("Masukkan link Google Spreadsheet dulu.")
