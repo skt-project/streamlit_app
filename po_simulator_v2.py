@@ -2947,39 +2947,43 @@ with st.container(border=True):
             _page_df = _drill_agg.iloc[_start:_end].reset_index(drop=True)
 
             # Header row
-            _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([1.5, 3, 1, 1.2, 1, 1.3])
-            with _h1: st.markdown("**SKU**")
-            with _h2: st.markdown("**Product Name**")
-            with _h3: st.markdown("**Sugg. QTY**")
-            with _h4: st.markdown("**Remaining Alloc.**")
-            with _h5: st.markdown("**WOI EOM**")
-            with _h6: st.markdown("**Action**")
-            st.divider()
-
-            for _, _row in _page_df.iterrows():
-                _sku_val = _row["sku"]
-                _pname = _row.get("product_name", "") or "-"
-                _sugg = int(_row["suggestion_qty"]) if pd.notna(_row["suggestion_qty"]) else 0
-                _rem = int(_row["remaining_allocation"]) if pd.notna(_row["remaining_allocation"]) else 0
-                _woi = _row["woi_eom"] if pd.notna(_row["woi_eom"]) else 0
-
-                _c1, _c2, _c3, _c4, _c5, _c6 = st.columns([1.5, 3, 1, 1.2, 1, 1.3])
-                with _c1: st.markdown(f"`{_sku_val}`")
-                with _c2: st.markdown(f"<span style='font-size:0.85rem;'>{_pname}</span>", unsafe_allow_html=True)
-                with _c3: st.markdown(f"**{_sugg:,}**")
-                with _c4: st.markdown(f"{_rem:,}")
-                with _c5: st.markdown(f"{_woi:.2f}")
-                with _c6:
-                    st.markdown(
-                        f'<a href="{_copy_url}" target="_blank" '
-                        f'style="display:inline-block;background:#8B2040;color:#fff !important;'
-                        f'text-decoration:none;padding:0.3rem 0.7rem;border-radius:6px;'
-                        f'font-size:0.78rem;font-weight:600;">📝 Edit PO</a>',
-                        unsafe_allow_html=True,
-                    )
+            # ── Tabel SKU + Suggestion QTY ──
+            _display_cols = ["sku", "product_name", "suggestion_qty"]
+            _display_cols = [c for c in _display_cols if c in _page_df.columns]
+            _tbl_df = _page_df[_display_cols].copy()
+            _tbl_df.columns = (
+                ["SKU", "Product Name", "Suggestion QTY"][:len(_display_cols)]
+            )
+            if "Suggestion QTY" in _tbl_df.columns:
+                _tbl_df["Suggestion QTY"] = _tbl_df["Suggestion QTY"].apply(
+                    lambda x: int(x) if pd.notna(x) else 0
+                )
+            st.dataframe(_tbl_df, use_container_width=True, hide_index=True)
 
             with st.expander("📋 Lihat data lengkap (semua region)", expanded=False):
                 st.dataframe(_drill_df, use_container_width=True, hide_index=True)
+
+            # ── Make a Copy Template PO ──
+            st.markdown(
+                f"""
+                <div style="margin-top:1rem;padding:0.9rem 1.2rem;
+                            background:#FFF5F8;border:1px solid #F0C8D6;
+                            border-radius:10px;display:flex;align-items:center;
+                            justify-content:space-between;">
+                    <div style="font-size:0.88rem;color:#5A1E38;">
+                        📄 Gunakan template PO ini, lalu isi dengan data suggestion di atas
+                    </div>
+                    <a href="{_copy_url}" target="_blank"
+                       style="background:#8B2040;color:#fff !important;
+                              text-decoration:none;padding:0.45rem 1.1rem;
+                              border-radius:8px;font-size:0.85rem;font-weight:700;
+                              white-space:nowrap;margin-left:1rem;">
+                        📝 Make a Copy Template PO
+                    </a>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 st.divider()
 
