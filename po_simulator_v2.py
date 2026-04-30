@@ -234,23 +234,33 @@ def get_distributor_suggestions(distributor_name: str) -> pd.DataFrame:
     table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
     query = f"""
     SELECT
-        UPPER(region) AS region,
-        UPPER(distributor) AS distributor_name,
-        sku,
-        buffer_plan_by_lm_qty_adj AS suggestion_qty,
-        remaining_allocation_qty_region,
-        woi_end_of_month_by_lm
-    FROM `{table_id}`
+        UPPER(region) AS REGION,
+        UPPER(distributor) AS DISTRIBUTOR,
+        UPPER(sku) AS SKU,
+        ROUND(current_woi_by_lm, 2) AS CURRENT_WOI,
+        buffer_plan_by_lm_qty_adj AS SUGGESTION_QTY,
+        ROUND(
+            SAFE_DIVIDE(
+                COALESCE(total_stock, 0) + COALESCE(buffer_plan_by_lm_qty_adj, 0),
+                NULLIF(avg_weekly_st_lm_qty, 0)
+            ), 2
+        ) AS WOI_AFTER_PO,
+        remaining_allocation_qty_region AS REMAINING_ALLOCATION,
+        CASE 
+            WHEN remaining_allocation_qty_region <= 0 THEN 'Alokasi Habis' 
+            ELSE 'Terdapat Alokasi' 
+        END AS STATUS_ALOKASI
+    FROM `{{table_id}}`
     WHERE UPPER(distributor) = '{distributor_name.upper()}'
       AND buffer_plan_by_lm_qty_adj > 0
-    ORDER BY suggestion_qty DESC
+    ORDER BY SUGGESTION_QTY DESC
     """
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
         st.error(f"Error fetching distributor suggestions: {e}")
         return pd.DataFrame()
-    
+
 @st.cache_data(ttl=21600, show_spinner="Fetching Stock Analysis data from BigQuery...")
 def get_stock_data(distributor_name: str, sku_list: List[str]) -> pd.DataFrame:
     if not sku_list:
@@ -2901,15 +2911,17 @@ with st.container(border=True):
         if _drill_df.empty:
             st.info(f"ℹ️ Tidak ada suggestion SKU untuk **{_drill_dist}**.")
         else:
-            # Aggregate per SKU (sum across regions)
+           
             _drill_agg = (
-                _drill_df.groupby("sku", as_index=False)
+                _drill_df.groupby("SKU", as_index=False)
                 .agg(
-                    suggestion_qty=("suggestion_qty", "sum"),
-                    remaining_allocation=("remaining_allocation_qty_region", "sum"),
-                    woi_eom=("woi_end_of_month_by_lm", "mean"),
+                    SUGGESTION_QTY=("SUGGESTION_QTY", "sum"),
+                    REMAINING_ALLOCATION=("REMAINING_ALLOCATION", "sum"),
+                    CURRENT_WOI=("CURRENT_WOI", "first"),
+                    WOI_AFTER_PO=("WOI_AFTER_PO", "first"),
+                    STATUS_ALOKASI=("STATUS_ALOKASI", "first"),
                 )
-                .sort_values("suggestion_qty", ascending=False)
+                .sort_values("SUGGESTION_QTY", ascending=False)
                 .reset_index(drop=True)
             )
 
@@ -2942,19 +2954,17 @@ with st.container(border=True):
 
             # Header row
             # ── Tabel SKU + Suggestion QTY ──
-            _display_cols = ["sku", "product_name", "suggestion_qty", "woi_eom"]
+            _display_cols = ["SKU", "product_name", "SUGGESTION_QTY", "CURRENT_WOI", "WOI_AFTER_PO", "REMAINING_ALLOCATION", "STATUS_ALOKASI"]
             _display_cols = [c for c in _display_cols if c in _page_df.columns]
             _tbl_df = _page_df[_display_cols].copy()
-            _tbl_df.columns = (
-                ["SKU", "Product Name", "Suggestion QTY", "WOI EOM"][:len(_display_cols)]
-            )
-            if "Suggestion QTY" in _tbl_df.columns:
-                _tbl_df["Suggestion QTY"] = _tbl_df["Suggestion QTY"].apply(
+            _tbl_df = _tbl_df.rename(columns={"product_name": "PRODUCT NAME"})
+            if "SUGGESTION_QTY" in _tbl_df.columns:
+                _tbl_df["SUGGESTION_QTY"] = _tbl_df["SUGGESTION_QTY"].apply(
                     lambda x: int(x) if pd.notna(x) else 0
                 )
-            if "WOI EOM" in _tbl_df.columns:
-                _tbl_df["WOI EOM"] = _tbl_df["WOI EOM"].apply(
-                    lambda x: round(float(x), 2) if pd.notna(x) else 0.0
+            if "REMAINING_ALLOCATION" in _tbl_df.columns:
+                _tbl_df["REMAINING_ALLOCATION"] = _tbl_df["REMAINING_ALLOCATION"].apply(
+                    lambda x: int(x) if pd.notna(x) else 0
                 )
             st.dataframe(_tbl_df, use_container_width=True, hide_index=True)
 
