@@ -251,8 +251,8 @@ def get_distributor_suggestions(distributor_name: str, brand_name: str = "All") 
         ) AS WOI_AFTER_PO,
         remaining_allocation_qty_region AS REMAINING_ALLOCATION,
         CASE 
-            WHEN remaining_allocation_qty_region <= 0 THEN 'Alokasi Habis' 
-            ELSE 'Terdapat Alokasi' 
+            WHEN remaining_allocation_qty_region > THEN 'Terdapat Alokasi' 
+            else 'Alokasi Habis' 
         END AS STATUS_ALOKASI
     FROM `{table_id}`
     WHERE UPPER(distributor) = '{distributor_name.upper()}'
