@@ -2550,7 +2550,6 @@ if st.session_state.get('page') == 'po_changer':
                                 <li>Grand Total PO (sebelum pengurangan): <strong>{_rp(_grand_total_po)}</strong></li>
                                 <li>{_stop_label}: <strong>{_stop_count:,}</strong> SKU dengan value <strong>{_rp(_stop_value)}</strong></li>
                                 <li>{_steve_label}: <strong>{_steve_count:,}</strong> SKU dengan value <strong>{_rp(_steve_value)}</strong></li>
-                                <li>Need Approval (Reject / Reject with Suggestion): <strong>{_approval_count:,}</strong> SKU dengan value <strong>{_rp(_approval_value)}</strong></li>
                                 <li>Total pengurangan: <strong>{_rp(_total_reduction)}</strong></li>
                                 <li>Grand Total setelah pengurangan: <strong>{_rp(_grand_total_after)}</strong></li>
                             </ul>
