@@ -1666,13 +1666,13 @@ with st.sidebar:
     #)
     #if _new_light != _prev_light:
     #    st.rerun()
-
+    st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
     st.markdown(
         "<div style='padding:0 0.4rem 0.3rem;;text-align:center;font-size:1rem;font-weight:700;"
         "letter-spacing:2.5px;color:rgba(255,255,255,0.35);text-transform:uppercase;'>MENU</div>",
         unsafe_allow_html=True
     )
-    st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
+    
 
     #if st.button("Data Extractor", use_container_width=True, key="nav_extractor"):
     #    st.session_state['page'] = 'extractor'
