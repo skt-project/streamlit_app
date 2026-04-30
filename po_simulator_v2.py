@@ -2989,9 +2989,12 @@ with st.container(border=True):
                     return "background-color: #FADBD8; color: #922B21; font-weight: 600;"
                 return ""
 
-            _styled_tbl = _tbl_df.style.applymap(
-                _highlight_alokasi, subset=["STATUS_ALOKASI"]
-            ) if "STATUS_ALOKASI" in _tbl_df.columns else _tbl_df.style
+            if "STATUS_ALOKASI" in _tbl_df.columns:
+                _styled_tbl = _tbl_df.style.map(
+                    _highlight_alokasi, subset=["STATUS_ALOKASI"]
+                )
+            else:
+                _styled_tbl = _tbl_df.style
 
             st.dataframe(_styled_tbl, use_container_width=True, hide_index=True)
 
