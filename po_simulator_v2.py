@@ -1967,9 +1967,10 @@ if st.session_state.get('page') == 'po_changer':
                 if col in combined_df.columns:
                     combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
             st.subheader("📊 Hasil Gabungan")
-            round = combined_df.select_dtypes(include=['float', 'float64', 'float32']).columns
-                    for _nc in round:
-                        combined_df[_nc] = combined_df[_nc].round(2)
+            _round_cols = combined_df.select_dtypes(include=['float', 'float64', 'float32']).columns
+            for _nc in _round_cols:
+                combined_df[_nc] = combined_df[_nc].round(2)
+            
             st.dataframe(combined_df, use_container_width=True, hide_index=True)
             
 
