@@ -1967,7 +1967,11 @@ if st.session_state.get('page') == 'po_changer':
                 if col in combined_df.columns:
                     combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
             st.subheader("📊 Hasil Gabungan")
+            round = combined_df.select_dtypes(include=['float', 'float64', 'float32']).columns
+                    for _nc in round:
+                        combined_df[_nc] = combined_df[_nc].round(2)
             st.dataframe(combined_df, use_container_width=True, hide_index=True)
+            
 
             _ts = datetime.now().strftime('%Y%m%d_%H%M%S')
             _fname_final = f"PO_{_dist_label}_{_ts}.xlsx"
@@ -2381,6 +2385,9 @@ if st.session_state.get('page') == 'po_changer':
                         st.stop()
 
                     _img_df      = _final_disp[PO_COLS_copy].copy()
+                    _num_cols = _img_df.select_dtypes(include=['float', 'float64', 'float32']).columns
+                    for _nc in _num_cols:
+                        _img_df[_nc] = _img_df[_nc].round(2)
                     _remark_col  = "Remark"
                     _stop_keywords = ["STOP PO", "OOS", "DISCONTINUED", "UNAVAILABLE"]
                     _sc_col = next((c for c in _img_df.columns if "supply" in c.lower() and "control" in c.lower()), None)
