@@ -3440,66 +3440,41 @@ with tabs[0]:
 
         # Tulis data + formula TOTAL PRICE = QTY * DPP
         # Tulis data + formula TOTAL PRICE = QTY * DPP (dengan cached value)
+        # Tulis data + formula TOTAL PRICE = QTY * DPP
         for r_offset, (_, row) in enumerate(df_export.iterrows()):
             excel_row = START_ROW + r_offset
-            
-            # Pre-calculate TOTAL PRICE
-            _qty_val = row.get('QTY', 0)
-            _dpp_val = row.get('DPP', 0)
-            try:
-                _qty_num = float(_qty_val) if pd.notna(_qty_val) and str(_qty_val).strip() != '' else 0
-            except (ValueError, TypeError):
-                _qty_num = 0
-            try:
-                _dpp_num = float(_dpp_val) if pd.notna(_dpp_val) and str(_dpp_val).strip() != '' else 0
-            except (ValueError, TypeError):
-                _dpp_num = 0
-            _total_calc = _qty_num * _dpp_num
-            
             for col_name, col_idx in COL_MAP.items():
                 if col_name == 'TOTAL PRICE':
                     _cell = ws.cell(row=excel_row, column=col_idx)
                     _cell.value = f"=D{excel_row}*E{excel_row}"
-                    _cell._value = _total_calc
-                    _cell.data_type = 'f'
                 else:
                     val = row.get(col_name, "")
                     if pd.isna(val) or str(val).strip() in ('', 'nan', 'None'):
                         val = None
                     ws.cell(row=excel_row, column=col_idx, value=val)
 
-        # Tulis summary dengan formula Excel + cached value
+        # Tulis summary dengan formula Excel
         last_data_row = START_ROW + len(df_export) - 1
         summary_start = last_data_row + 2
         sub_row, disc_row, tax_row, grand_row = (
             summary_start, summary_start + 1, summary_start + 2, summary_start + 3
         )
 
-        # Pre-calculate summary values
-        _sub_calc = sum(
-            (float(row.get('QTY', 0) or 0) * float(row.get('DPP', 0) or 0))
-            for _, row in df_export.iterrows()
-        )
-        _disc_calc = 0
-        _tax_calc = _sub_calc * 0.11
-        _grand_calc = _sub_calc - _disc_calc + _tax_calc
-
-        _summary_data = [
-            (sub_row,   "SUB-TOTAL",   f"=SUM(F{START_ROW}:F{last_data_row})", _sub_calc),
-            (disc_row,  "DISCOUNTS",   "=0",                                    _disc_calc),
-            (tax_row,   "Tax (11%)",   f"=F{sub_row}*0.11",                     _tax_calc),
-            (grand_row, "GRAND TOTAL", f"=F{sub_row}-F{disc_row}+F{tax_row}",   _grand_calc),
-        ]
-        for row_idx, label, formula, calc_val in _summary_data:
+        for row_idx, label, formula in [
+            (sub_row,   "SUB-TOTAL",   f"=SUM(F{START_ROW}:F{last_data_row})"),
+            (disc_row,  "DISCOUNTS",   "=0"),
+            (tax_row,   "Tax (11%)",   f"=F{sub_row}*0.11"),
+            (grand_row, "GRAND TOTAL", f"=F{sub_row}-F{disc_row}+F{tax_row}"),
+        ]:
             ws.cell(row=row_idx, column=4, value=label)
-            _cell = ws.cell(row=row_idx, column=6)
-            _cell.value = formula
-            _cell._value = calc_val
-            _cell.data_type = 'f'
-        
-        # Force Excel to recalculate on open
-        wb.calculation.calcMode = 'auto'
-        wb.calculation.fullCalcOnLoad = True
+            ws.cell(row=row_idx, column=6, value=formula)
+
+        # Force Excel to recalculate all formulas on file open
+        try:
+            wb.calculation.fullCalcOnLoad = True
+            wb.calculation.calcMode = 'auto'
+        except Exception:
+            pass
 # ── Tulis sheet ke-2 dari Google Sheet ──
         _other = st.session_state.get('other_sheets', {})
         if _other:
