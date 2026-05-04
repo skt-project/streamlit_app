@@ -1679,7 +1679,7 @@ with st.sidebar:
     if st.button("Request PO (For SPV)", use_container_width = True, key="nav_spv"):
         st.session_state['page'] = 'spv'
         st.rerun()
-    if st.button("PO Changer (For RSA)", use_container_width=True, key="nav_po"):
+    if st.button("PO Simulator (For RSA)", use_container_width=True, key="nav_po"):
         st.session_state['page'] = 'po_changer'
         st.rerun()
     
@@ -1720,7 +1720,7 @@ if st.session_state.get('page') == 'po_changer':
     st.markdown("""
     <div class="hero-wrap">
         <div class="hero-tag">✦ PO Management</div>
-        <div class="hero-title">PO Changer</div>
+        <div class="hero-title">PO Simulator</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2027,7 +2027,15 @@ if st.session_state.get('page') == 'po_changer':
                 for _di, _dist_name in enumerate(_distributors):
                     _prog.progress((_di + 1) / len(_distributors), f"Processing {_dist_name}...")
                     _cur_po   = _sim_df[_sim_df["Distributor"] == _dist_name].copy()
-                    _sku_list = _cur_po["Customer SKU Code"].unique().tolist()
+                    _sku_list = (
+                        _cur_po["Customer SKU Code"]
+                        .dropna()
+                        .astype(str)
+                        .str.strip()
+                        .loc[lambda s: s.ne("") & s.str.lower().ne("nan")]
+                        .unique()
+                        .tolist()
+                    )
 
                     _sku_df   = get_sku_data(tuple(_sku_list))
                     _stock_df = get_stock_data(_dist_name, tuple(_sku_list))
@@ -2053,7 +2061,9 @@ if st.session_state.get('page') == 'po_changer':
                     _skus_in_stock = set(_stock_df["Customer SKU Code"].tolist()) if not _stock_df.empty else set()
                     _skus_not_found = set(_sku_list) - (_skus_in_sku | _skus_in_stock)
                     if _skus_not_found:
-                        st.warning(f"SKU tidak ditemukan ({_dist_name}): {', '.join(sorted(_skus_not_found))}")
+                        _skus_clean = [str(s) for s in _skus_not_found if s is not None and pd.notna(s) and str(s).strip()]
+                        if _skus_clean:
+                            st.warning(f"SKU tidak ditemukan ({_dist_name}): {', '.join(sorted(_skus_clean))}")
 
                     _res_df = pd.merge(_cur_po, _sku_df, on="Customer SKU Code", how="left")
                     _sip_series = _res_df["SIP"] if "SIP" in _res_df.columns else pd.Series([0]*len(_res_df), index=_res_df.index)
