@@ -2907,6 +2907,7 @@ with st.popover("ⓘ Info Tutorial"):
     5. Pilih Distributor (Jika belum ada Distributor dalam spreadsheet) dan Nama RSA yang akan di assign.
     6. Lakukan Preview File terlebih dahulu untuk memastikan ketepatan data.
     7. Export File bisa dalam bentuk PDF atau Excel.
+    8. Setelah Export File, Buka File Excel dan Save hasil export sebelum mengajukan PO.
     
     📌 **Template PO:** [Klik di sini](https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/copy)
     """)
