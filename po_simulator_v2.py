@@ -453,9 +453,17 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
         return pd.DataFrame()
 
 @st.cache_data(ttl=21600, show_spinner="Fetching SKU suggestions from BigQuery...")
-def get_distributor_suggestions(distributor_name: str, brand_name: str = "All") -> pd.DataFrame:
-    if not distributor_name:
+def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> pd.DataFrame:
+    # Handle both string (single) and list (multi)
+    if isinstance(distributor_names, str):
+        distributor_names = [distributor_names]
+    
+    # Filter out invalid entries
+    distributor_names = [d for d in distributor_names if d and d != "(Pilih Distributor)"]
+    
+    if not distributor_names:
         return pd.DataFrame()
+    
     client = get_bq_client()
     table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
 
@@ -463,10 +471,13 @@ def get_distributor_suggestions(distributor_name: str, brand_name: str = "All") 
     if brand_name and brand_name != "All":
         _brand_filter = f"AND UPPER(brand) = UPPER('{brand_name}')"
 
-    # ── BARU: format list SKU jadi string SQL ──
+    # Format list distributor jadi string SQL
+    _dist_str = ", ".join([f"'{d.upper()}'" for d in distributor_names])
+    
+    # Format list SKU Steve
     _MANUAL_REJECT_APPROVAL = ["G2G-252", "G2G-253"]
     _steve_skus_str = ", ".join([f"'{s.upper()}'" for s in _MANUAL_REJECT_APPROVAL])
-    
+
     query = f"""
     SELECT
         UPPER(region) AS REGION,
@@ -483,7 +494,7 @@ def get_distributor_suggestions(distributor_name: str, brand_name: str = "All") 
         remaining_allocation_qty_region AS REMAINING_ALLOCATION,
         CASE 
             WHEN UPPER(sku) IN ({_steve_skus_str}) AND remaining_allocation_qty_region > 0 
-                THEN 'Alokasi : Reject by Steve'
+                THEN 'Reject by Steve'
             WHEN remaining_allocation_qty_region > 0 
                 THEN 'Terdapat Alokasi'
             WHEN remaining_allocation_qty_region <= 0 
@@ -491,10 +502,10 @@ def get_distributor_suggestions(distributor_name: str, brand_name: str = "All") 
             ELSE NULL
         END AS STATUS_ALOKASI
     FROM `{table_id}`
-    WHERE UPPER(distributor) = '{distributor_name.upper()}'
+    WHERE UPPER(distributor) IN ({_dist_str})
     AND buffer_plan_by_lm_qty_adj > 0
     {_brand_filter}
-    ORDER BY SUGGESTION_QTY DESC
+    ORDER BY DISTRIBUTOR, SUGGESTION_QTY DESC
     """
     try:
         return client.query(query).to_dataframe()
@@ -3177,7 +3188,7 @@ with st.container(border=True):
             key="drill_brand",
         )
 
-    if _drill_dist and _drill_dist != "(Pilih Distributor)":
+    if _drill_dist and any(d != "(Pilih Distributor)" for d in _drill_dist):
         _drill_df = get_distributor_suggestions(_drill_dist, _drill_brand)
 
         if _drill_df.empty:
@@ -3212,8 +3223,9 @@ with st.container(border=True):
             else:
                 _drill_agg["PRODUCT_NAME"] = ""
 
+            _dist_label = ", ".join([d for d in _drill_dist if d != "(Pilih Distributor)"])
             st.caption(
-                f"📦 **{_drill_dist}** — {len(_drill_agg):,} SKU dengan suggestion QTY > 0"
+                f"📦 **{_dist_label}** — {len(_drill_agg):,} SKU dengan suggestion QTY > 0"
             )
 
             # Build TEMPLATE PO copy URL
@@ -3308,7 +3320,8 @@ with st.container(border=True):
             st.download_button(
                 label="Export PO Suggestion (.xlsx)",
                 data=_export_buf.getvalue(),
-                file_name=f"PO_Suggestion_{_drill_dist}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                _fname_label = "_".join([d for d in _drill_dist if d != "(Pilih Distributor)"])[:50]  # limit panjang
+                file_name=f"PO_Suggestion_{_fname_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="dl_po_suggestion",
@@ -6659,17 +6672,17 @@ with st.container(border=True):
         else:
         
             _drill_agg = (
-                _drill_df.groupby("SKU", as_index=False)
-                .agg(
-                    SUGGESTION_QTY=("SUGGESTION_QTY", "sum"),
-                    REMAINING_ALLOCATION=("REMAINING_ALLOCATION", "sum"),
-                    CURRENT_WOI=("CURRENT_WOI", "first"),
-                    WOI_AFTER_PO=("WOI_AFTER_PO", "first"),
-                    STATUS_ALOKASI=("STATUS_ALOKASI", "first"),
-                )
-                .sort_values("SUGGESTION_QTY", ascending=False)
-                .reset_index(drop=True)
-            )
+    _drill_df.groupby(["DISTRIBUTOR", "SKU"], as_index=False)  # ← tambah DISTRIBUTOR
+    .agg(
+        SUGGESTION_QTY=("SUGGESTION_QTY", "sum"),
+        REMAINING_ALLOCATION=("REMAINING_ALLOCATION", "sum"),
+        CURRENT_WOI=("CURRENT_WOI", "first"),
+        WOI_AFTER_PO=("WOI_AFTER_PO", "first"),
+        STATUS_ALOKASI=("STATUS_ALOKASI", "first"),
+    )
+    .sort_values(["DISTRIBUTOR", "SUGGESTION_QTY"], ascending=[True, False])  # ← sort by dist juga
+    .reset_index(drop=True)
+)
 
             # Lookup product names
             # Lookup product names
@@ -6701,7 +6714,7 @@ with st.container(border=True):
             _page_df = _drill_agg.reset_index(drop=True)
 
             # Header row
-            _display_cols = ["SKU", "PRODUCT_NAME", "SUGGESTION_QTY", "CURRENT_WOI", "WOI_AFTER_PO", "REMAINING_ALLOCATION", "STATUS_ALOKASI"]
+            _display_cols = ["DISTRIBUTOR", "SKU", "PRODUCT_NAME", "SUGGESTION_QTY", "CURRENT_WOI", "WOI_AFTER_PO", "REMAINING_ALLOCATION", "STATUS_ALOKASI"]
             _display_cols = [c for c in _display_cols if c in _page_df.columns]
             _tbl_df = _page_df[_display_cols].copy()
             if "SUGGESTION_QTY" in _tbl_df.columns:
