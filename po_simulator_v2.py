@@ -3196,7 +3196,7 @@ with st.container(border=True):
         else:
         
             _drill_agg = (
-                _drill_df.groupby("SKU", as_index=False)
+                _drill_df.groupby(["DISTRIBUTOR", "SKU"], as_index=False)  # ← tambah DISTRIBUTOR
                 .agg(
                     SUGGESTION_QTY=("SUGGESTION_QTY", "sum"),
                     REMAINING_ALLOCATION=("REMAINING_ALLOCATION", "sum"),
@@ -3204,9 +3204,9 @@ with st.container(border=True):
                     WOI_AFTER_PO=("WOI_AFTER_PO", "first"),
                     STATUS_ALOKASI=("STATUS_ALOKASI", "first"),
                 )
-                .sort_values("SUGGESTION_QTY", ascending=False)
+                .sort_values(["DISTRIBUTOR", "SUGGESTION_QTY"], ascending=[True, False])  # ← sort by dist juga
                 .reset_index(drop=True)
-            )
+                    )
 
             # Lookup product names
             # Lookup product names
@@ -3239,7 +3239,7 @@ with st.container(border=True):
             _page_df = _drill_agg.reset_index(drop=True)
 
             # Header row
-            _display_cols = ["SKU", "PRODUCT_NAME", "SUGGESTION_QTY", "CURRENT_WOI", "WOI_AFTER_PO", "REMAINING_ALLOCATION", "STATUS_ALOKASI"]
+            _display_cols = ["DISTRIBUTOR", "SKU", "PRODUCT_NAME", "SUGGESTION_QTY", "CURRENT_WOI", "WOI_AFTER_PO", "REMAINING_ALLOCATION", "STATUS_ALOKASI"]
             _display_cols = [c for c in _display_cols if c in _page_df.columns]
             _tbl_df = _page_df[_display_cols].copy()
             if "SUGGESTION_QTY" in _tbl_df.columns:
