@@ -5612,11 +5612,35 @@ if st.session_state.get('page') == 'po_changer':
                             _df_preview["DISTRIBUTOR"] = dist_val
                         else:
                             _df_preview.insert(0, "DISTRIBUTOR", dist_val)
-                    with st.expander(f"👁 Lihat isi  ·  header row {hrow}  ·  {len(_df_preview)} baris  ·  {_df_preview.shape[1]} kolom  ·  indeks 0–{_df_preview.shape[1]-1}", expanded=False):
-                        _round_cols = _df_preview.select_dtypes(include=['float', 'float64', 'float32']).columns
+                    with st.expander(
+                    f"👁 Lihat isi  ·  header row {hrow}  ·  {len(_df_preview)} baris  ·  "
+                    f"{_df_preview.shape[1]} kolom  ·  indeks 0–{_df_preview.shape[1]-1}",
+                    expanded=False
+                ):
+                    # Bulatin float untuk display (biar DPP & TOTAL PRICE rapi 2 desimal)
+                        _show_df = _df_preview.iloc[:, :6].reset_index(drop=True).copy()
+                        _round_cols = _show_df.select_dtypes(include=['float', 'float64', 'float32']).columns
                         for _nc in _round_cols:
-                            _df_preview[_nc] = _df_preview[_nc].round(2)
-                        st.dataframe(_df_preview.iloc[:,:6].reset_index(drop=True), use_container_width=True)
+                            _show_df[_nc] = _show_df[_nc].round(2)
+                        
+                        # Convert kolom angka string ke numeric biar bisa di-format
+                        for _col in ['QTY', 'DPP', 'TOTAL PRICE']:
+                            if _col in _show_df.columns:
+                                _show_df[_col] = pd.to_numeric(_show_df[_col], errors='coerce')
+                        
+                        st.dataframe(
+                        _show_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "DISTRIBUTOR": st.column_config.TextColumn("DISTRIBUTOR", width="medium"),
+                            "PRODUCT CODE": st.column_config.TextColumn("PRODUCT CODE", width="small"),
+                            "DESCRIPTION": st.column_config.TextColumn("DESCRIPTION", width="large"),
+                            "QTY": st.column_config.NumberColumn("QTY", width="small", format="%d"),
+                            "DPP": st.column_config.NumberColumn("DPP", width="small", format="Rp %.2f"),
+                            "TOTAL PRICE": st.column_config.NumberColumn("TOTAL PRICE", width="medium", format="Rp %.2f"),
+                        }
+                    )
 
                     rc1, rc2 = st.columns(2)
                     with rc1:
