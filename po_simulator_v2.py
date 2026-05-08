@@ -2135,6 +2135,9 @@ if st.session_state.get('page') == 'po_changer':
                         else:
                             _df_preview.insert(0, "DISTRIBUTOR", dist_val)
                     with st.expander(f"👁 Lihat isi  ·  header row {hrow}  ·  {len(_df_preview)} baris  ·  {_df_preview.shape[1]} kolom  ·  indeks 0–{_df_preview.shape[1]-1}", expanded=False):
+                        _round_cols = _df_preview.select_dtypes(include=['float', 'float64', 'float32']).columns
+                        for _nc in _round_cols:
+                            _df_preview[_nc] = _df_preview[_nc].round(2)
                         st.dataframe(_df_preview.iloc[:,:6].reset_index(drop=True), use_container_width=True)
 
                     rc1, rc2 = st.columns(2)
@@ -5610,6 +5613,9 @@ if st.session_state.get('page') == 'po_changer':
                         else:
                             _df_preview.insert(0, "DISTRIBUTOR", dist_val)
                     with st.expander(f"👁 Lihat isi  ·  header row {hrow}  ·  {len(_df_preview)} baris  ·  {_df_preview.shape[1]} kolom  ·  indeks 0–{_df_preview.shape[1]-1}", expanded=False):
+                        _round_cols = _df_preview.select_dtypes(include=['float', 'float64', 'float32']).columns
+                        for _nc in _round_cols:
+                            _df_preview[_nc] = _df_preview[_nc].round(2)
                         st.dataframe(_df_preview.iloc[:,:6].reset_index(drop=True), use_container_width=True)
 
                     rc1, rc2 = st.columns(2)
@@ -7045,10 +7051,13 @@ with tabs[0]:
 
     df_final = pd.concat([df, summary], ignore_index=True).iloc[:, 0:6]
     with st.expander(
-            f"👁 Lihat isi · {len(df_final)} baris · {df_final.shape[1]} kolom · indeks 0–{df_final.shape[1]-1}",
+        f"👁 Lihat isi · {len(df_final)} baris · {df_final.shape[1]} kolom · indeks 0–{df_final.shape[1]-1}",
             expanded=False):
-            st.dataframe(df_final.iloc[:, :6].reset_index(drop=True), use_container_width=True)
-            st.success(f"GRAND TOTAL: Rp {grand_total:,.0f} | Total SKU: {count_sku}")
+        _round_cols = df_final.select_dtypes(include=['float', 'float64', 'float32']).columns
+        for _nc in _round_cols:
+            df_final[_nc] = df_final[_nc].round(2)
+        st.dataframe(df_final.iloc[:, :6].reset_index(drop=True), use_container_width=True)
+        st.success(f"GRAND TOTAL: Rp {grand_total:,.0f} | Total SKU: {count_sku}")
 
         # ── Lookup LIFECYCLE STATUS dari Product List ──────────────────────────
     PRODUCT_LIST_URL = "https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/export?format=csv&gid=91084545"
