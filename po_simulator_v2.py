@@ -3316,11 +3316,10 @@ with st.container(border=True):
                     _ws_exp.column_dimensions[_col_cells[0].column_letter].width = min(_max_len + 4, 40)
 
                 _ws_exp.freeze_panes = "A2"
-
+            _fname_label = "_".join([d for d in _drill_dist if d != "(Pilih Distributor)"])[:50]
             st.download_button(
                 label="Export PO Suggestion (.xlsx)",
                 data=_export_buf.getvalue(),
-                _fname_label = "_".join([d for d in _drill_dist if d != "(Pilih Distributor)"])[:50] ,
                 file_name=f"PO_Suggestion_{_fname_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
