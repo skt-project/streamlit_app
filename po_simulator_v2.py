@@ -2237,7 +2237,7 @@ if st.session_state.get('page') == 'po_changer':
         "G2G-228", "G2G-74", "G2G-186", "G2G-202", "G2G-840",
         "G2G-844", "G2G-841", "G2G-800", "G2G-213", "G2G-217",
         "G2G-27305", "G2G-30701", "G2G-30702", "G2G-30703", "G2G-30704",
-        "G2G-201", "G2G-31",
+        "G2G-201", "G2G-31", "G2G-2721"
     ]
     _MANUAL_REJECT_ALL   = _MANUAL_REJECT_APPROVAL + _MANUAL_REJECT_NO_TOL
     _LIMITED_SKUS_QTY    = []
