@@ -5453,12 +5453,6 @@ with st.sidebar:
     #if st.button("Data Extractor", use_container_width=True, key="nav_extractor"):
     #    st.session_state['page'] = 'extractor'
     #    st.rerun()
-    if st.button("Request PO (For SPV)", use_container_width = True, key="nav_spv"):
-        st.session_state['page'] = 'spv'
-        st.rerun()
-    if st.button("PO Simulator (For RSA)", use_container_width=True, key="nav_po"):
-        st.session_state['page'] = 'po_changer'
-        st.rerun()
     
 
     #st.divider()
