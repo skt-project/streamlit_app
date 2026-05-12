@@ -399,7 +399,7 @@ PO_TEMPLATE_COLS = [
     'Remaining Allocation (By Region)', 'RSA Notes',
 ]
 
-PO_IMG_COLS = PO_TEMPLATE_COLS[6:13]
+PO_IMG_COLS = PO_TEMPLATE_COLS,iloc[:, [1, 2, *range(6, 14)]]
 PO_COLS_copy = PO_TEMPLATE_COLS[:13]
 
 
@@ -2178,6 +2178,7 @@ if st.session_state.get('page') == 'po_changer':
                         _df["DISTRIBUTOR"] = p["dist_val"]
                     else:
                         _df.insert(0, "DISTRIBUTOR", p["dist_val"])
+                _df["_source_file"] = p["name"]  # ← tambahkan ini
                 _frames.append(_df)
 
             try:
@@ -2759,8 +2760,59 @@ if st.session_state.get('page') == 'po_changer':
                         with _pc1:
                             st.dataframe(pd.DataFrame({"Remark/Supply Control": _remark_all}), use_container_width=True, hide_index=True)
                         with _pc2:
-                            with st.expander("📋 Copy SKU"):
-                                st.code("\n".join(_sku_all.tolist()), language=None)
+                            # Ambil mapping SKU → source file dari combined_raw
+                            _src_col = "_source_file"
+                            _sku_col_raw = "SKU"
+
+                            _stop_skus_raw  = _stop_df["SKU"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).drop_duplicates().tolist() if "SKU" in _stop_df.columns else []
+                            _steve_skus_raw = _steve_df["SKU"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).drop_duplicates().tolist() if "SKU" in _steve_df.columns else []
+                            _all_reject_skus = list(dict.fromkeys(_stop_skus_raw + _steve_skus_raw))
+
+                            # Lookup source file dari _final_disp (yang sudah punya _source_file via merge)
+                            _copy_lines = []
+                            if _src_col in _final_disp.columns:
+                                _sku_src_map = (
+                                    _final_disp[_final_disp["SKU"].isin(_all_reject_skus)]
+                                    [["SKU", _src_col]]
+                                    .dropna(subset=[_src_col])
+                                    .drop_duplicates(subset=["SKU"])
+                                    .set_index("SKU")[_src_col]
+                                    .to_dict()
+                                )
+                                # Group per file
+                                _per_file = {}
+                                for _sku in _all_reject_skus:
+                                    _fname = _sku_src_map.get(_sku, "Unknown File")
+                                    _per_file.setdefault(_fname, {"stop": [], "steve": []})
+                                    if _sku in _stop_skus_raw:
+                                        _per_file[_fname]["stop"].append(_sku)
+                                    if _sku in _steve_skus_raw:
+                                        _per_file[_fname]["steve"].append(_sku)
+
+                                for _fname, _cats in sorted(_per_file.items()):
+                                    _copy_lines.append(f"== {_fname} ==")
+                                    if _cats["stop"]:
+                                        _copy_lines.append("-- Stop PO / Discontinued --")
+                                        _copy_lines.extend(sorted(_cats["stop"]))
+                                    if _cats["steve"]:
+                                        _copy_lines.append("-- Reject by Steve --")
+                                        _copy_lines.extend(sorted(_cats["steve"]))
+                                    _copy_lines.append("")
+                            else:
+                                # Fallback: tanpa grouping file
+                                if _stop_skus_raw:
+                                    _copy_lines.append("== Stop PO / Discontinued ==")
+                                    _copy_lines.extend(sorted(_stop_skus_raw))
+                                if _steve_skus_raw:
+                                    _copy_lines.append("")
+                                    _copy_lines.append("== Reject by Steve ==")
+                                    _copy_lines.extend(sorted(_steve_skus_raw))
+
+                            with st.expander(f"📋 Copy SKU ({len(_all_reject_skus)} SKU)", expanded=False):
+                                if _copy_lines:
+                                    st.code("\n".join(_copy_lines), language=None)
+                                else:
+                                    st.info("Tidak ada SKU untuk di-copy.")
                             # ─────────────────────────────────────────────────────
                             # POINT 7 — Summary PO per Distributor
                             # ─────────────────────────────────────────────────────
@@ -2820,7 +2872,7 @@ if st.session_state.get('page') == 'po_changer':
                         _approval_value = _approval_grp["PO Value"].sum()
                     
                         # Total reduction
-                        _total_reduction = _stop_value + _steve_value + _approval_value
+                        _total_reduction = _stop_value + _steve_value
                         _grand_total_po  = _grp_po["PO Value"].sum()
                         # ── Label dinamis dari kategori yang muncul di data ──
                         _stop_categories = (
@@ -6322,7 +6374,7 @@ if st.session_state.get('page') == 'po_changer':
                         _approval_value = _approval_grp["PO Value"].sum()
                     
                         # Total reduction
-                        _total_reduction = _stop_value + _steve_value + _approval_value
+                        _total_reduction = _stop_value + _steve_value 
                         _grand_total_po  = _grp_po["PO Value"].sum()
                         # ── Label dinamis dari kategori yang muncul di data ──
                         _stop_categories = (
