@@ -380,7 +380,7 @@ def create_salesman_excel(
     col_req   = {c: r for c, r, _ in SALESMAN_COLS}
 
     FIRST_DATA = 4
-    LAST_DATA  = 1003
+    LAST_DATA  = 30003
 
     CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor"}
 
@@ -592,7 +592,7 @@ def create_pjp_excel(
     col_req   = {c: r for c, r, _ in PJP_COLS}
 
     FIRST_DATA = 4
-    LAST_DATA  = 1003
+    LAST_DATA  = 30003
 
     CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor", "Kode Toko", "Nama Toko"}
 
