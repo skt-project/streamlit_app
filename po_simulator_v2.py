@@ -399,7 +399,7 @@ PO_TEMPLATE_COLS = [
     'Remaining Allocation (By Region)', 'RSA Notes',
 ]
 
-PO_IMG_COLS = PO_TEMPLATE_COLS,iloc[:, [1, 2, *range(6, 14)]]
+PO_IMG_COLS = PO_TEMPLATE_COLS.iloc[:, [1, 2, *range(6, 14)]]
 PO_COLS_copy = PO_TEMPLATE_COLS[:13]
 
 
