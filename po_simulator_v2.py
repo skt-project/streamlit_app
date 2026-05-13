@@ -3701,7 +3701,7 @@ with tabs[0]:
         # ── Truncate: max 200 rows × kolom A–H ─────────────────────────────
         ws = wb.active
         MAX_ROW = 200
-        MAX_COL = 8  # A=1, B=2, ..., H=8
+        MAX_COL = 7  # A=1, B=2, ..., H=8
 
         # Hapus baris di atas 200
         if ws.max_row > MAX_ROW:
