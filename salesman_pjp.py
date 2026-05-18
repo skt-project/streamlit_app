@@ -55,7 +55,7 @@ def load_distributor_data() -> pd.DataFrame:
             UPPER(distributor_code) AS distributor_code,
             UPPER(asm_g2g)          AS asm
         FROM `gt_schema.master_distributor`
-        WHERE asm_g2g != '' AND status = 'Active'
+        WHERE region_g2g != '' AND status = 'Active'
     """
     df = client.query(query).to_dataframe()
     df["distributor_code"] = df["distributor_code"].astype(str).str.strip()
