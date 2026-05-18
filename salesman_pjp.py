@@ -210,6 +210,63 @@ def insert_mapping_record(salesman_id: str, distributor_code: str,
         return False, str(e)
 
 
+def update_salesman_record(nama_salesman: str, updated_fields: dict) -> tuple[bool, str]:
+    """
+    Update editable fields in gt_master_salesman for rows matching nama_salesman.
+    Only the fields present in updated_fields are SET; everything else is untouched.
+    """
+    try:
+        credentials, project_id = get_credentials()
+        client = bigquery.Client(credentials=credentials, project=project_id)
+
+        # Build SET clause dynamically from provided fields
+        allowed = {
+            "nama_salesman":    "STRING",
+            "nama_spv_external":"STRING",
+            "nama_spv_internal":"STRING",
+            "status_salesman":  "STRING",
+            "total_outlet_coverage_pjp": "INT64",
+            "gaji_pokok":       "FLOAT64",
+            "tunjangan_dan_insentif": "FLOAT64",
+            "tanggal_lahir":    "STRING",
+            "jenis_kelamin":    "STRING",
+            "pendidikan_terakhir": "STRING",
+            "pengalaman_bulan": "INT64",
+            "principal_lain":   "STRING",
+            "no_hp":            "STRING",
+            "tanggal_join_g2g": "STRING",
+        }
+
+        set_clauses = []
+        params = [bigquery.ScalarQueryParameter("target_nama", "STRING", nama_salesman)]
+
+        for field, value in updated_fields.items():
+            if field not in allowed:
+                continue
+            param_name = f"p_{field}"
+            bq_type = allowed[field]
+            set_clauses.append(f"{field} = @{param_name}")
+            params.append(bigquery.ScalarQueryParameter(param_name, bq_type, value))
+
+        if not set_clauses:
+            return False, "Tidak ada field yang diupdate."
+
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        params.append(bigquery.ScalarQueryParameter("updated_at", "STRING", now))
+
+        query = f"""
+            UPDATE `{SALESMAN_TABLE}`
+            SET {", ".join(set_clauses)},
+                uploaded_at = @updated_at
+            WHERE UPPER(TRIM(nama_salesman)) = UPPER(TRIM(@target_nama))
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        client.query(query, job_config=job_config).result()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 def deactivate_previous_mapping(salesman_id: str) -> tuple[bool, str]:
     try:
         credentials, project_id = get_credentials()
@@ -1280,8 +1337,8 @@ if PAGES[selected_page] == "salesman":
 
         st.caption(f"Menampilkan **{len(display_df)}** salesman.")
 
-        hcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.9, 0.9, 0.9])
-        headers = ["ID Salesman", "Nama", "Tipe", "No. HP", "Region", "ASM", "", "", ""]
+        hcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.8, 0.8, 0.8, 0.8])
+        headers = ["ID Salesman", "Nama", "Tipe", "No. HP", "Region", "ASM", "", "", "", ""]
         for hc, ht in zip(hcols, headers):
             hc.markdown(f"**{ht}**")
         st.divider()
@@ -1290,7 +1347,7 @@ if PAGES[selected_page] == "salesman":
             sal_id    = row["salesman_id"]
             is_active = row.get("is_active", True)
 
-            rcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.9, 0.9, 0.9])
+            rcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.8, 0.8, 0.8, 0.8])
             id_label = f"🟢 {sal_id}" if is_active else f"🔴 {sal_id}"
             rcols[0].markdown(id_label)
             rcols[1].markdown(row.get("nama_salesman", "-"))
@@ -1300,19 +1357,171 @@ if PAGES[selected_page] == "salesman":
             rcols[5].markdown(row.get("asm", "-") or "-")
 
             if is_active:
-                if rcols[6].button("✏️ Ganti", key=f"rep_{sal_id}", use_container_width=True):
+                if rcols[6].button("✏️ Edit", key=f"edit_{sal_id}", use_container_width=True):
+                    st.session_state.action_mode = None if st.session_state.action_mode == ("edit", sal_id) else ("edit", sal_id)
+                    st.rerun()
+                if rcols[7].button("🔄 Ganti", key=f"rep_{sal_id}", use_container_width=True):
                     st.session_state.action_mode = None if st.session_state.action_mode == ("replace", sal_id) else ("replace", sal_id)
                     st.rerun()
-                if rcols[7].button("❌ Nonaktif", key=f"deact_{sal_id}", use_container_width=True):
+                if rcols[8].button("❌ Nonaktif", key=f"deact_{sal_id}", use_container_width=True):
                     st.session_state.action_mode = None if st.session_state.action_mode == ("deactivate", sal_id) else ("deactivate", sal_id)
                     st.rerun()
-                rcols[8].markdown("—")
+                rcols[9].markdown("—")
             else:
                 rcols[6].markdown("—")
                 rcols[7].markdown("—")
-                if rcols[8].button("♻️ Aktifkan", key=f"react_{sal_id}", use_container_width=True):
+                rcols[8].markdown("—")
+                if rcols[9].button("♻️ Aktifkan", key=f"react_{sal_id}", use_container_width=True):
                     st.session_state.action_mode = None if st.session_state.action_mode == ("reactivate", sal_id) else ("reactivate", sal_id)
                     st.rerun()
+
+            # ── Inline Edit Panel ─────────────────────────────────────────────
+            if st.session_state.action_mode == ("edit", sal_id):
+                with st.container(border=True):
+                    st.markdown(f"#### ✏️ Edit Info Salesman — `{sal_id}`")
+                    st.info(
+                        "Edit informasi salesman ini. Hanya field yang diubah yang akan diperbarui di database. "
+                        "Untuk mengganti salesman sepenuhnya, gunakan tombol **🔄 Ganti**."
+                    )
+
+                    cur_nama    = row.get("nama_salesman", "") or ""
+                    cur_hp      = row.get("no_hp", "") or ""
+
+                    # Fetch full salesman detail from BQ for pre-filling
+                    @st.cache_data(show_spinner=False)
+                    def _fetch_salesman_detail(nama: str) -> dict:
+                        try:
+                            creds, proj = get_credentials()
+                            c = bigquery.Client(credentials=creds, project=proj)
+                            q = f"""
+                                SELECT * FROM `{SALESMAN_TABLE}`
+                                WHERE UPPER(TRIM(nama_salesman)) = UPPER(TRIM(@nama))
+                                ORDER BY uploaded_at DESC LIMIT 1
+                            """
+                            jc = bigquery.QueryJobConfig(
+                                query_parameters=[bigquery.ScalarQueryParameter("nama", "STRING", nama)]
+                            )
+                            rows = list(c.query(q, job_config=jc).result())
+                            return dict(rows[0]) if rows else {}
+                        except Exception:
+                            return {}
+
+                    detail = _fetch_salesman_detail(cur_nama)
+
+                    def _s(key, fallback=""):
+                        v = detail.get(key, fallback)
+                        return "" if v is None else str(v)
+
+                    def _d(key):
+                        v = detail.get(key)
+                        if v is None:
+                            return datetime.today().date()
+                        try:
+                            return pd.to_datetime(v).date()
+                        except Exception:
+                            return datetime.today().date()
+
+                    def _n(key, fallback=0):
+                        v = detail.get(key, fallback)
+                        try:
+                            return float(v) if v is not None else fallback
+                        except Exception:
+                            return fallback
+
+                    with st.form(f"form_edit_{sal_id}"):
+                        st.markdown("**Informasi Dasar**")
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            e_nama    = st.text_input("Nama Salesman *",    value=cur_nama,                key=f"e_nama_{sal_id}")
+                            e_spv_ext = st.text_input("Nama SPV External",  value=_s("nama_spv_external"), key=f"e_spvext_{sal_id}")
+                            e_spv_int = st.text_input("Nama SPV Internal *",value=_s("nama_spv_internal"), key=f"e_spvint_{sal_id}")
+                            e_hp      = st.text_input("No. HP *",           value=cur_hp,                  key=f"e_hp_{sal_id}", placeholder="08123456789")
+                            e_status  = st.selectbox(
+                                "Status Salesman *", STATUS_OPTIONS,
+                                index=STATUS_OPTIONS.index(_s("status_salesman")) if _s("status_salesman") in STATUS_OPTIONS else 0,
+                                key=f"e_status_{sal_id}",
+                            )
+                            e_outlet  = st.number_input("Total Outlet Coverage PJP *", min_value=0, step=1,    value=int(_n("total_outlet_coverage_pjp")), key=f"e_outlet_{sal_id}")
+                            e_gaji    = st.number_input("Gaji Pokok (Rp) *",           min_value=0, step=1000, value=int(_n("gaji_pokok")),                 key=f"e_gaji_{sal_id}")
+                            e_tunj    = st.number_input("Tunjangan dan Insentif (Rp) *",min_value=0, step=1000,value=int(_n("tunjangan_dan_insentif")),       key=f"e_tunj_{sal_id}")
+                        with ec2:
+                            e_lahir   = st.date_input("Tanggal Lahir *",        value=_d("tanggal_lahir"),    key=f"e_lahir_{sal_id}")
+                            e_gender  = st.selectbox(
+                                "Jenis Kelamin *", GENDER_OPTIONS,
+                                index=GENDER_OPTIONS.index(_s("jenis_kelamin")) if _s("jenis_kelamin") in GENDER_OPTIONS else 0,
+                                key=f"e_gender_{sal_id}",
+                            )
+                            e_pendidikan = st.selectbox(
+                                "Pendidikan Terakhir *", EDUCATION_OPTIONS,
+                                index=EDUCATION_OPTIONS.index(_s("pendidikan_terakhir")) if _s("pendidikan_terakhir") in EDUCATION_OPTIONS else 0,
+                                key=f"e_pend_{sal_id}",
+                            )
+                            e_exp       = st.number_input("Pengalaman Sebelumnya (bulan) *", min_value=0, step=1, value=int(_n("pengalaman_bulan")), key=f"e_exp_{sal_id}")
+                            e_principal = st.text_input("Principal Lain (opsional)", value=_s("principal_lain"), key=f"e_principal_{sal_id}")
+                            e_join      = st.date_input("Tanggal Join di G2G *", value=_d("tanggal_join_g2g"), key=f"e_join_{sal_id}")
+
+                        submitted_edit = st.form_submit_button("💾 Simpan Perubahan", type="primary")
+
+                    if submitted_edit:
+                        edit_errors = []
+                        if not e_nama.strip():    edit_errors.append("Nama Salesman wajib diisi.")
+                        if not e_spv_int.strip(): edit_errors.append("Nama SPV Internal wajib diisi.")
+                        if not e_hp.strip():      edit_errors.append("No. HP wajib diisi.")
+
+                        if edit_errors:
+                            for err in edit_errors:
+                                st.error(err)
+                        else:
+                            updated = {
+                                "nama_salesman":             sanitize_salesman_name(e_nama),
+                                "nama_spv_external":         e_spv_ext.strip().upper() if e_spv_ext.strip() else None,
+                                "nama_spv_internal":         e_spv_int.strip().upper(),
+                                "no_hp":                     normalize_phone_id(e_hp),
+                                "status_salesman":           e_status,
+                                "total_outlet_coverage_pjp": int(e_outlet),
+                                "gaji_pokok":                float(e_gaji),
+                                "tunjangan_dan_insentif":    float(e_tunj),
+                                "tanggal_lahir":             str(e_lahir),
+                                "jenis_kelamin":             e_gender,
+                                "pendidikan_terakhir":       e_pendidikan,
+                                "pengalaman_bulan":          int(e_exp),
+                                "principal_lain":            e_principal.strip() if e_principal.strip() else None,
+                                "tanggal_join_g2g":          str(e_join),
+                            }
+
+                            with st.spinner("Menyimpan perubahan..."):
+                                ok_e, err_e = update_salesman_record(cur_nama, updated)
+
+                            if not ok_e:
+                                st.error(f"Gagal menyimpan perubahan: {err_e}")
+                            else:
+                                # If nama changed, update the mapping table's salesman column too
+                                new_nama = sanitize_salesman_name(e_nama)
+                                if new_nama != cur_nama:
+                                    try:
+                                        creds2, proj2 = get_credentials()
+                                        c2 = bigquery.Client(credentials=creds2, project=proj2)
+                                        upd_map_q = f"""
+                                            UPDATE `{MAPPING_TABLE}`
+                                            SET salesman   = @new_nama,
+                                                updated_at = @ts
+                                            WHERE salesman_id = @sid
+                                              AND is_active   = TRUE
+                                        """
+                                        jc2 = bigquery.QueryJobConfig(query_parameters=[
+                                            bigquery.ScalarQueryParameter("new_nama", "STRING", new_nama),
+                                            bigquery.ScalarQueryParameter("ts",       "STRING", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+                                            bigquery.ScalarQueryParameter("sid",      "STRING", sal_id),
+                                        ])
+                                        c2.query(upd_map_q, job_config=jc2).result()
+                                    except Exception:
+                                        pass  # non-critical, mapping sync failure is silent
+
+                                st.success(f"✅ Info salesman **{new_nama}** (`{sal_id}`) berhasil diperbarui.")
+                                st.session_state.action_mode = None
+                                _fetch_salesman_detail.clear()
+                                st.cache_data.clear()
+                                st.rerun()
 
             # ── Inline Replace Panel ──────────────────────────────────────────
             if st.session_state.action_mode == ("replace", sal_id):
