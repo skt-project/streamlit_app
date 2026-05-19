@@ -596,7 +596,7 @@ def create_salesman_excel(df, distributor_map, asm_options, region_options, dist
     col_req   = {c: r for c, r, _ in SALESMAN_COLS}
 
     FIRST_DATA = 4
-    LAST_DATA  = 30003
+    LAST_DATA  = 10003
 
     CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor"}
 
