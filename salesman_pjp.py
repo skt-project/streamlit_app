@@ -16,6 +16,76 @@ from openpyxl.workbook.defined_name import DefinedName
 
 st.set_page_config(page_title="Salesman & PJP Template", page_icon="📋", layout="wide")
 
+# ─── Distributor Passwords ────────────────────────────────────────────────────
+# Each distributor_code maps to a unique password.
+# To add/change passwords, edit this dictionary.
+DISTRIBUTOR_PASSWORDS = {
+    # Example entries — replace with real codes and passwords:
+    "D001": "pass-alpha-7X",
+    "D002": "pass-beta-3K",
+    "D003": "pass-gamma-9Q",
+    # ... add all distributor codes here
+}
+
+def _get_password_for_distributor(dist_code: str) -> str | None:
+    """Return the password for a distributor code, or None if not configured."""
+    return DISTRIBUTOR_PASSWORDS.get(str(dist_code).strip().upper())
+
+
+def _check_distributor_auth(dist_code: str) -> bool:
+    """
+    Returns True if the current session is authenticated for this distributor.
+    Uses st.session_state keyed by dist_code so switching distributors
+    requires re-authentication.
+    """
+    key = f"auth_{dist_code}"
+    return st.session_state.get(key, False)
+
+
+def _render_password_gate(dist_code: str, dist_name: str) -> bool:
+    """
+    Renders a password input form. Returns True once the user is authenticated,
+    False otherwise. Authentication persists in session_state.
+    """
+    key = f"auth_{dist_code}"
+    if st.session_state.get(key, False):
+        return True
+
+    expected = _get_password_for_distributor(dist_code)
+
+    st.markdown("---")
+    st.markdown(
+        f"""
+        <div style='text-align:center; padding: 2rem 0 1rem 0;'>
+            <span style='font-size:2.5rem'>🔒</span>
+            <h3 style='margin:0.5rem 0 0.25rem 0;'>Akses Terkunci</h3>
+            <p style='color:#888; margin:0;'>Masukkan password untuk distributor <b>{dist_name}</b></p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        entered = st.text_input(
+            "Password Distributor",
+            type="password",
+            key=f"pw_input_{dist_code}",
+            placeholder="••••••••",
+        )
+        if st.button("🔓 Masuk", key=f"pw_btn_{dist_code}", type="primary", use_container_width=True):
+            if expected is None:
+                # No password configured — deny access and warn admin
+                st.error("Password untuk distributor ini belum dikonfigurasi. Hubungi administrator.")
+            elif entered == expected:
+                st.session_state[key] = True
+                st.rerun()
+            else:
+                st.error("Password salah. Silakan coba lagi.")
+
+    return False
+
+
 # ─── BigQuery credentials ─────────────────────────────────────────────────────
 
 def get_credentials():
@@ -144,6 +214,38 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def get_pjp_list(distributor_code: str = None, salesman_name: str = None) -> pd.DataFrame:
+    """Load PJP data filtered by distributor and/or salesman name."""
+    try:
+        credentials, project_id = get_credentials()
+        client = bigquery.Client(credentials=credentials, project=project_id)
+
+        conditions = []
+        params = []
+
+        if distributor_code:
+            conditions.append("UPPER(kode_distributor) = UPPER(@kode)")
+            params.append(bigquery.ScalarQueryParameter("kode", "STRING", distributor_code))
+        if salesman_name:
+            conditions.append("UPPER(TRIM(nama_salesman)) = UPPER(TRIM(@salesman))")
+            params.append(bigquery.ScalarQueryParameter("salesman", "STRING", salesman_name))
+
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+        query = f"""
+            SELECT *
+            FROM `{PJP_TABLE}`
+            {where_clause}
+            ORDER BY nama_salesman, hari
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        df = client.query(query, job_config=job_config).to_dataframe()
+        return df
+    except Exception as e:
+        st.error(f"Gagal memuat data PJP: {e}")
+        return pd.DataFrame()
+
+
 def get_latest_running_number(distributor_code: str, salesman_type: str) -> int:
     try:
         credentials, project_id = get_credentials()
@@ -211,15 +313,10 @@ def insert_mapping_record(salesman_id: str, distributor_code: str,
 
 
 def update_salesman_record(nama_salesman: str, updated_fields: dict) -> tuple[bool, str]:
-    """
-    Update editable fields in gt_master_salesman for rows matching nama_salesman.
-    Only the fields present in updated_fields are SET; everything else is untouched.
-    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
 
-        # Build SET clause dynamically from provided fields
         allowed = {
             "nama_salesman":    "STRING",
             "nama_spv_external":"STRING",
@@ -293,37 +390,6 @@ def deactivate_previous_mapping(salesman_id: str) -> tuple[bool, str]:
 
 def deactivate_salesman_mapping(salesman_id: str) -> tuple[bool, str]:
     return deactivate_previous_mapping(salesman_id)
-
-
-def reactivate_salesman_mapping(salesman_id: str, distributor_code: str,
-                                salesman_type: str, nama_salesman: str) -> tuple[bool, str]:
-    return insert_mapping_record(salesman_id, distributor_code, salesman_type, nama_salesman)
-
-
-def get_vacant_salesman_ids(distributor_code: str) -> pd.DataFrame:
-    try:
-        credentials, project_id = get_credentials()
-        client = bigquery.Client(credentials=credentials, project=project_id)
-        query = f"""
-            SELECT
-                m.salesman_id,
-                m.salesman_type,
-                MAX(m.updated_at) AS last_updated,
-                MAX(m.salesman)   AS last_salesman
-            FROM `{MAPPING_TABLE}` m
-            WHERE UPPER(m.distributor_code) = UPPER(@kode)
-            GROUP BY m.salesman_id, m.salesman_type
-            HAVING LOGICAL_AND(m.is_active = FALSE)
-            ORDER BY m.salesman_id
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("kode", "STRING", distributor_code)]
-        )
-        df = client.query(query, job_config=job_config).to_dataframe()
-        return df
-    except Exception as e:
-        st.error(f"Gagal memuat daftar ID salesman vakant: {e}")
-        return pd.DataFrame()
 
 
 # ─── Static option lists ──────────────────────────────────────────────────────
@@ -582,196 +648,6 @@ def _attach_cascade_dvs(ws, col_names, first_data, last_data):
         dv_store.sqref = sqref("Kode Toko")
 
 
-# ─── Salesman Excel ───────────────────────────────────────────────────────────
-
-def create_salesman_excel(df, distributor_map, asm_options, region_options, dist_df) -> BytesIO:
-    wb = Workbook()
-    wb.remove(wb.active)
-    _build_lookup_and_named_ranges(wb, dist_df)
-
-    ws = wb.create_sheet("Salesman Template")
-
-    col_names = [c for c, _, _ in SALESMAN_COLS]
-    col_types = {c: t for c, _, t in SALESMAN_COLS}
-    col_req   = {c: r for c, r, _ in SALESMAN_COLS}
-
-    FIRST_DATA = 4
-    LAST_DATA  = 10003
-
-    CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor"}
-
-    notes = {
-        "Nama Salesman":            "Teks bebas",
-        "Nama SPV External":        "Teks bebas (opsional)",
-        "Nama SPV Internal":        "Teks bebas",
-        "ASM":                      "Langkah 1 - Pilih ASM dari dropdown",
-        "Region":                   "Langkah 2 - Pilih Region (mengikuti ASM)",
-        "Nama Distributor":         "Langkah 3 - Pilih Distributor (mengikuti Region)",
-        "Kode Distributor":         "Otomatis terisi dari Nama Distributor",
-        "Status Salesman":          "Pilih: Mix atau Eksklusif",
-        "Total Outlet Coverage PJP":"Angka bulat",
-        "Gaji Pokok":               "Angka (Rupiah)",
-        "Tunjangan dan insentif":   "Angka (Rupiah)",
-        "Tanggal Lahir":            "Isi tanggal dengan format YYYY-MM-DD (contoh: 2001-01-25)",
-        "Jenis Kelamin":            "Pilih: Male atau Female",
-        "Pendidikan Terakhir":      "Pilih dari dropdown",
-        "Pengalaman di Perusahaan Sebelumnya (Dalam Bulan)": "Angka (bulan)",
-        "Principal Lain yang Ditanggungjawabi":
-            "Teks bebas (opsional) — jika lebih dari satu, pisahkan dengan koma. Contoh: Unilever, P&G, Nestle",
-        "No. HP":                   "Angka, tanpa tanda hubung",
-        "Tanggal Join di G2G":      "Isi tanggal dengan format YYYY-MM-DD (contoh: 2026-01-25)",
-    }
-
-    for ci, cn in enumerate(col_names, 1):
-        cell = ws.cell(row=1, column=ci, value=notes.get(cn, ""))
-        cell.font = _note_font()
-        cell.alignment = _vcenter(wrap=True)
-
-    for ci, cn in enumerate(col_names, 1):
-        if col_req[cn]:
-            cell = ws.cell(row=2, column=ci, value="Wajib Diisi")
-            cell.font = _req_font(); cell.alignment = _center()
-
-    for ci, cn in enumerate(col_names, 1):
-        cell = ws.cell(row=3, column=ci, value=cn)
-        cell.font      = _header_font()
-        cell.fill      = _fill("1A7A6E" if cn in CASCADE_COLS else "2E75B6")
-        cell.alignment = _center()
-        cell.border    = _thin_border()
-
-    ws.row_dimensions[1].height = 42
-    ws.row_dimensions[2].height = 16
-    ws.row_dimensions[3].height = 44
-    ws.freeze_panes = "A4"
-
-    widths = [22, 22, 22, 22, 24, 30, 20, 16, 22, 16, 22, 18, 14, 20, 38, 42, 16, 20]
-    for ci, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(ci)].width = w
-
-    def col_letter(name):
-        return get_column_letter(col_names.index(name) + 1)
-
-    def dr(name):
-        return f"{col_letter(name)}{FIRST_DATA}:{col_letter(name)}{LAST_DATA}"
-
-    _attach_cascade_dvs(ws, col_names, FIRST_DATA, LAST_DATA)
-
-    for col_name, opts, title, msg in [
-        ("Status Salesman",    STATUS_OPTIONS,    "Status",        "Mix atau Eksklusif"),
-        ("Jenis Kelamin",      GENDER_OPTIONS,    "Jenis Kelamin", "Male atau Female"),
-        ("Pendidikan Terakhir",EDUCATION_OPTIONS, "Pendidikan",    "Pilih jenjang"),
-    ]:
-        dv = DataValidation(
-            type="list", formula1='"' + ",".join(opts) + '"', allow_blank=True,
-            showInputMessage=True, promptTitle=title, prompt=msg,
-            showErrorMessage=True, errorTitle="Input Tidak Valid",
-            error="Pilih nilai dari daftar dropdown.",
-        )
-        ws.add_data_validation(dv); dv.sqref = dr(col_name)
-
-    for cn in ["Total Outlet Coverage PJP", "Gaji Pokok", "Tunjangan dan insentif",
-               "Pengalaman di Perusahaan Sebelumnya (Dalam Bulan)"]:
-        dv = DataValidation(
-            type="whole", operator="greaterThanOrEqual", formula1="0",
-            allow_blank=True, showErrorMessage=True,
-            errorTitle="Input Tidak Valid", error="Hanya angka >= 0.",
-        )
-        ws.add_data_validation(dv); dv.sqref = dr(cn)
-
-    hp_c = col_letter("No. HP")
-    hp_dv = DataValidation(
-        type="custom",
-        formula1=f'AND(ISNUMBER(VALUE({hp_c}{FIRST_DATA})),LEN(SUBSTITUTE({hp_c}{FIRST_DATA}," ",""))>=8)',
-        allow_blank=True,
-        showInputMessage=True, promptTitle="No. HP",
-        prompt="Masukkan nomor HP (hanya angka, tanpa tanda hubung atau spasi).",
-        showErrorMessage=True, errorTitle="No. HP Tidak Valid",
-        error="Hanya angka yang diperbolehkan. Contoh: 08123456789",
-    )
-    ws.add_data_validation(hp_dv); hp_dv.sqref = dr("No. HP")
-
-    date_dv = DataValidation(
-        type="date", operator="greaterThan", formula1="DATE(1900,1,1)",
-        allow_blank=True,
-        showInputMessage=True, promptTitle="Format Tanggal",
-        prompt="Isi tanggal dengan format YYYY-MM-DD (contoh: 2001-01-25).",
-        showErrorMessage=True, errorTitle="Tanggal Tidak Valid",
-        error="Masukkan tanggal yang valid.",
-    )
-    ws.add_data_validation(date_dv)
-    cl_lahir = col_letter("Tanggal Lahir")
-    cl_join  = col_letter("Tanggal Join di G2G")
-    date_dv.sqref = (
-        f"{cl_lahir}{FIRST_DATA}:{cl_lahir}{LAST_DATA} "
-        f"{cl_join}{FIRST_DATA}:{cl_join}{LAST_DATA}"
-    )
-
-    principal_cl = col_letter("Principal Lain yang Ditanggungjawabi")
-    principal_dv = DataValidation(
-        type="custom", formula1=f'LEN({principal_cl}{FIRST_DATA})>=0',
-        allow_blank=True, showInputMessage=True,
-        promptTitle="Principal Lain (opsional)",
-        prompt="Jika lebih dari satu principal, pisahkan dengan koma.\nContoh: Unilever, P&G, Nestle",
-        showErrorMessage=False,
-    )
-    ws.add_data_validation(principal_dv)
-    principal_dv.sqref = dr("Principal Lain yang Ditanggungjawabi")
-
-    nama_cl = col_letter("Nama Distributor")
-
-    for excel_row in range(FIRST_DATA, LAST_DATA + 1):
-        dfi      = excel_row - FIRST_DATA
-        has_data = dfi < len(df)
-
-        for ci, cn in enumerate(col_names, 1):
-            cell  = ws.cell(row=excel_row, column=ci)
-            ctype = col_types[cn]
-
-            if cn == "Kode Distributor":
-                cell.value = f'=IFERROR(VLOOKUP({nama_cl}{excel_row},NR_DIST_LOOKUP,2,0),"")'
-                cell.fill       = _fill("D6E4F0")
-                cell.font       = Font(italic=True, color="1A7A6E", size=10, name="Calibri")
-                cell.alignment  = _vcenter()
-                cell.border     = _thin_border()
-                cell.number_format = "@"
-                cell.protection = Protection(locked=True)
-                continue
-
-            if ctype == "date":
-                cell.number_format = "YYYY-MM-DD"
-                if has_data:
-                    val = df.iloc[dfi].get(cn, "")
-                    if pd.notna(val) and str(val).strip():
-                        try:    cell.value = pd.to_datetime(val).date()
-                        except: cell.value = str(val)
-            elif ctype == "numeric":
-                cell.number_format = "#,##0"
-                if has_data:
-                    val = df.iloc[dfi].get(cn, "")
-                    if pd.notna(val) and str(val).strip():
-                        try:    cell.value = float(str(val).replace(",", ""))
-                        except: cell.value = str(val)
-            else:
-                cell.number_format = "@"
-                if has_data:
-                    val = df.iloc[dfi].get(cn, "")
-                    cell.value = "" if pd.isna(val) else (str(val) if val != "" else "")
-
-            cell.alignment  = _vcenter()
-            cell.border     = _thin_border()
-            cell.protection = Protection(locked=False)
-
-    ws.protection.sheet               = True
-    ws.protection.password            = "skintific"
-    ws.protection.selectLockedCells   = False
-    ws.protection.selectUnlockedCells = False
-
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output
-
-
 # ─── PJP Excel ────────────────────────────────────────────────────────────────
 
 def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
@@ -974,67 +850,6 @@ def validate_row_completeness(df, required_cols, sheet_label) -> list:
     return errors
 
 
-def validate_salesman_df(df, distributor_map, asm_options, region_options):
-    errors, warnings = [], []
-    missing = [c for c in SALESMAN_REQUIRED if c not in df.columns]
-    if missing:
-        errors.append(f"Kolom wajib tidak ditemukan: {', '.join(missing)}")
-        return errors, warnings
-
-    errors += validate_row_completeness(df, SALESMAN_REQUIRED, "Salesman")
-
-    unique_dist = _get_unique_distributors(df)
-    if len(unique_dist) > 1:
-        errors.append(
-            f"Sheet Salesman Template hanya boleh berisi 1 kode distributor per file. "
-            f"Ditemukan {len(unique_dist)} kode: {', '.join(unique_dist)}"
-        )
-        return errors, warnings
-
-    for i, row in df.iterrows():
-        n = i + 4
-        if pd.notna(row.get("ASM")) and row["ASM"] not in asm_options:
-            warnings.append(f"Baris {n}: ASM '{row['ASM']}' tidak ada di daftar")
-        if pd.notna(row.get("Region")) and row["Region"] not in region_options:
-            warnings.append(f"Baris {n}: Region '{row['Region']}' tidak dikenali")
-
-        kode = str(row.get("Kode Distributor", "")).strip()
-        if kode and kode not in distributor_map:
-            errors.append(f"Baris {n}: Kode Distributor '{kode}' tidak valid")
-
-        for col, opts, label in [
-            ("Status Salesman",    STATUS_OPTIONS,    "Mix/Eksklusif"),
-            ("Jenis Kelamin",      GENDER_OPTIONS,    "Male/Female"),
-            ("Pendidikan Terakhir",EDUCATION_OPTIONS, "/".join(EDUCATION_OPTIONS)),
-        ]:
-            val = row.get(col, "")
-            if pd.notna(val) and str(val).strip() and val not in opts:
-                errors.append(f"Baris {n}: '{col}' tidak valid - harus {label}")
-
-        for nc in ["Total Outlet Coverage PJP", "Gaji Pokok", "Tunjangan dan insentif",
-                   "Pengalaman di Perusahaan Sebelumnya (Dalam Bulan)"]:
-            val = row.get(nc, "")
-            if pd.notna(val) and str(val).strip():
-                try:    float(str(val).replace(",", ""))
-                except: errors.append(f"Baris {n}: '{nc}' harus berupa angka")
-
-        hp = str(row.get("No. HP", "")).strip().rstrip(".0")
-        if hp:
-            hp_clean = hp
-            if hp_clean.startswith("+62"):
-                hp_clean = hp_clean[3:]
-            elif hp_clean.startswith("62"):
-                hp_clean = hp_clean[2:]
-            if not hp_clean.isdigit():
-                warnings.append(f"Baris {n}: No. HP '{hp}' harus hanya berisi angka (8-15 digit)")
-            elif len(hp_clean) < 8 or len(hp_clean) > 13:
-                warnings.append(f"Baris {n}: No. HP '{hp}' tidak valid (8-15 digit) - panjang {len(hp_clean)} digit")
-            elif hp_clean.startswith("0"):
-                warnings.append(f"Baris {n}: No. HP '{hp}' sebaiknya dimulai dengan '08' atau '+62'")
-
-    return errors, warnings
-
-
 def validate_pjp_df(df, distributor_map, store_df=None):
     errors, warnings = [], []
     missing = [c for c in PJP_REQUIRED if c not in df.columns]
@@ -1164,6 +979,34 @@ def push_to_bigquery(df, col_map, table_id) -> tuple[bool, str]:
         return False, f"Gagal menyimpan ke Database: {e}"
 
 
+def delete_pjp_records(distributor_code: str = None, salesman_name: str = None) -> tuple[bool, str]:
+    """Delete PJP records filtered by distributor and/or salesman before re-uploading."""
+    try:
+        credentials, project_id = get_credentials()
+        client = bigquery.Client(credentials=credentials, project=project_id)
+
+        conditions = []
+        params = []
+
+        if distributor_code:
+            conditions.append("UPPER(kode_distributor) = UPPER(@kode)")
+            params.append(bigquery.ScalarQueryParameter("kode", "STRING", distributor_code))
+        if salesman_name:
+            conditions.append("UPPER(TRIM(nama_salesman)) = UPPER(TRIM(@salesman))")
+            params.append(bigquery.ScalarQueryParameter("salesman", "STRING", salesman_name))
+
+        if not conditions:
+            return False, "Tidak ada filter yang ditetapkan — operasi dibatalkan untuk keamanan."
+
+        where_clause = "WHERE " + " AND ".join(conditions)
+        query = f"DELETE FROM `{PJP_TABLE}` {where_clause}"
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        client.query(query, job_config=job_config).result()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 # ─── Shared salesman form fields ──────────────────────────────────────────────
 
 def _render_salesman_form_fields(key_prefix: str):
@@ -1226,13 +1069,12 @@ def _validate_salesman_fields(fields) -> list:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# NAVIGATION
+# NAVIGATION  —  Salesman Template removed; Salesman Manage + PJP only
 # ══════════════════════════════════════════════════════════════════════════════
 
 PAGES = {
-    "👥 Kelola Salesman":    "salesman",
-    "📋 Salesman Template":  "salesman_template",
-    "🗓️ PJP Template":       "pjp_template",
+    "👥 Kelola Salesman": "salesman",
+    "🗓️ PJP Template":    "pjp_template",
 }
 
 # Sidebar navigation
@@ -1257,7 +1099,7 @@ except Exception as e:
     st.error(f"Gagal memuat data dari Database: {e}")
     st.stop()
 
-# ─── Distributor selector (shared across pages, stored in session_state) ──────
+# ─── Distributor selector ────────────────────────────────────────────────────
 
 dist_labels = [
     f"{row['distributor_code']} — {row['distributor_name']}"
@@ -1289,6 +1131,12 @@ selected_dist_name = dist_df.loc[
 
 with st.sidebar:
     st.success(f"**{selected_dist_name}**\n\n`{selected_dist_code}`")
+
+# ─── PASSWORD GATE ────────────────────────────────────────────────────────────
+# Must pass before any page content is shown.
+
+if not _render_password_gate(selected_dist_code, selected_dist_name):
+    st.stop()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1337,8 +1185,9 @@ if PAGES[selected_page] == "salesman":
 
         st.caption(f"Menampilkan **{len(display_df)}** salesman.")
 
-        hcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.8, 0.8, 0.8, 0.8])
-        headers = ["ID Salesman", "Nama", "Tipe", "No. HP", "Region", "ASM", "", "", "", ""]
+        # Columns: no "Aktifkan" slot since reactivate-vacant is removed
+        hcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.8, 0.8, 0.8])
+        headers = ["ID Salesman", "Nama", "Tipe", "No. HP", "Region", "ASM", "", "", ""]
         for hc, ht in zip(hcols, headers):
             hc.markdown(f"**{ht}**")
         st.divider()
@@ -1347,7 +1196,7 @@ if PAGES[selected_page] == "salesman":
             sal_id    = row["salesman_id"]
             is_active = row.get("is_active", True)
 
-            rcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.8, 0.8, 0.8, 0.8])
+            rcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.8, 0.8, 0.8])
             id_label = f"🟢 {sal_id}" if is_active else f"🔴 {sal_id}"
             rcols[0].markdown(id_label)
             rcols[1].markdown(row.get("nama_salesman", "-"))
@@ -1366,14 +1215,10 @@ if PAGES[selected_page] == "salesman":
                 if rcols[8].button("❌ Nonaktif", key=f"deact_{sal_id}", use_container_width=True):
                     st.session_state.action_mode = None if st.session_state.action_mode == ("deactivate", sal_id) else ("deactivate", sal_id)
                     st.rerun()
-                rcols[9].markdown("—")
             else:
                 rcols[6].markdown("—")
                 rcols[7].markdown("—")
                 rcols[8].markdown("—")
-                if rcols[9].button("♻️ Aktifkan", key=f"react_{sal_id}", use_container_width=True):
-                    st.session_state.action_mode = None if st.session_state.action_mode == ("reactivate", sal_id) else ("reactivate", sal_id)
-                    st.rerun()
 
             # ── Inline Edit Panel ─────────────────────────────────────────────
             if st.session_state.action_mode == ("edit", sal_id):
@@ -1384,10 +1229,9 @@ if PAGES[selected_page] == "salesman":
                         "Untuk mengganti salesman sepenuhnya, gunakan tombol **🔄 Ganti**."
                     )
 
-                    cur_nama    = row.get("nama_salesman", "") or ""
-                    cur_hp      = row.get("no_hp", "") or ""
+                    cur_nama = row.get("nama_salesman", "") or ""
+                    cur_hp   = row.get("no_hp", "") or ""
 
-                    # Fetch full salesman detail from BQ for pre-filling
                     @st.cache_data(show_spinner=False)
                     def _fetch_salesman_detail(nama: str) -> dict:
                         try:
@@ -1495,7 +1339,6 @@ if PAGES[selected_page] == "salesman":
                             if not ok_e:
                                 st.error(f"Gagal menyimpan perubahan: {err_e}")
                             else:
-                                # If nama changed, update the mapping table's salesman column too
                                 new_nama = sanitize_salesman_name(e_nama)
                                 if new_nama != cur_nama:
                                     try:
@@ -1515,7 +1358,7 @@ if PAGES[selected_page] == "salesman":
                                         ])
                                         c2.query(upd_map_q, job_config=jc2).result()
                                     except Exception:
-                                        pass  # non-critical, mapping sync failure is silent
+                                        pass
 
                                 st.success(f"✅ Info salesman **{new_nama}** (`{sal_id}`) berhasil diperbarui.")
                                 st.session_state.action_mode = None
@@ -1587,74 +1430,22 @@ if PAGES[selected_page] == "salesman":
                         else:
                             st.error(f"Gagal menonaktifkan salesman: {err_d}")
 
-            # ── Inline Reactivate Panel ───────────────────────────────────────
-            if st.session_state.action_mode == ("reactivate", sal_id):
-                with st.container(border=True):
-                    st.markdown(f"#### ♻️ Aktifkan Kembali — `{sal_id}`")
-                    st.info(
-                        f"Kode **`{sal_id}`** saat ini **tidak aktif** (pemegang sebelumnya: "
-                        f"*{row.get('nama_salesman', '-')}*). "
-                        "Isi data salesman baru yang akan menggunakan kode ini."
-                    )
-                    with st.form(f"form_reactivate_{sal_id}"):
-                        st.markdown("**Data Salesman Baru (menggunakan kode yang sama)**")
-                        fields_ra = _render_salesman_form_fields(f"react_{sal_id}")
-                        submitted_ra = st.form_submit_button("♻️ Aktifkan & Simpan", type="primary")
-
-                    if submitted_ra:
-                        errs = _validate_salesman_fields(fields_ra)
-                        if errs:
-                            for e in errs: st.error(e)
-                        else:
-                            sal_data_ra = _build_salesman_data(fields_ra, dist_df, selected_dist_code, selected_dist_name)
-                            with st.spinner("Menyimpan..."):
-                                ok1, err1 = insert_salesman_record(sal_data_ra)
-                            if not ok1:
-                                st.error(f"Gagal menyimpan data salesman: {err1}")
-                            else:
-                                with st.spinner("Membuat mapping aktif baru..."):
-                                    ok2, err2 = reactivate_salesman_mapping(
-                                        sal_id, selected_dist_code,
-                                        str(row.get("salesman_type", "")),
-                                        nama_salesman=sanitize_salesman_name(fields_ra["nama"]),
-                                    )
-                                if not ok2:
-                                    st.error(f"Data salesman tersimpan, tapi gagal membuat mapping aktif: {err2}")
-                                else:
-                                    st.success(f"✅ Kode `{sal_id}` berhasil diaktifkan kembali dan kini dipegang oleh **{fields_ra['nama'].strip().upper()}**.")
-                                    st.session_state.action_mode = None
-                                    st.cache_data.clear()
-                                    st.rerun()
-
             st.divider()
 
     else:
         st.info("Belum ada data salesman untuk distributor ini.")
 
-    # ── Bottom action buttons ─────────────────────────────────────────────────
+    # ── Add New Salesman (only remaining bottom action) ───────────────────────
     st.markdown("---")
     if "show_add_form" not in st.session_state:
         st.session_state.show_add_form = False
-    if "show_vacant_form" not in st.session_state:
-        st.session_state.show_vacant_form = False
 
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        add_btn_label = "➕ Tambah Salesman Baru" if not st.session_state.show_add_form else "✖ Tutup Form Tambah"
-        if st.button(add_btn_label, type="primary", use_container_width=True):
-            st.session_state.show_add_form = not st.session_state.show_add_form
-            st.session_state.show_vacant_form = False
-            st.session_state.action_mode = None
-            st.rerun()
-    with btn_col2:
-        vacant_btn_label = "♻️ Aktifkan Kode Vakant" if not st.session_state.show_vacant_form else "✖ Tutup Form Aktifkan"
-        if st.button(vacant_btn_label, use_container_width=True):
-            st.session_state.show_vacant_form = not st.session_state.show_vacant_form
-            st.session_state.show_add_form = False
-            st.session_state.action_mode = None
-            st.rerun()
+    add_btn_label = "➕ Tambah Salesman Baru" if not st.session_state.show_add_form else "✖ Tutup Form Tambah"
+    if st.button(add_btn_label, type="primary", use_container_width=True):
+        st.session_state.show_add_form = not st.session_state.show_add_form
+        st.session_state.action_mode = None
+        st.rerun()
 
-    # ── Add New Salesman Form ─────────────────────────────────────────────────
     if st.session_state.show_add_form:
         with st.container(border=True):
             st.subheader("➕ Tambah Salesman Baru")
@@ -1696,189 +1487,6 @@ if PAGES[selected_page] == "salesman":
                             st.cache_data.clear()
                             st.rerun()
 
-    # ── Reactivate Vacant Code Form ───────────────────────────────────────────
-    if st.session_state.show_vacant_form:
-        with st.container(border=True):
-            st.subheader("♻️ Aktifkan Kembali Kode Salesman Vakant")
-            st.info(
-                "Kode **vakant** adalah ID salesman yang pernah digunakan tapi kini tidak aktif. "
-                "Anda dapat menggunakan kembali kode yang sama untuk salesman baru."
-            )
-            with st.spinner("Memuat daftar kode vakant..."):
-                vacant_df = get_vacant_salesman_ids(selected_dist_code)
-
-            if vacant_df.empty:
-                st.success("✅ Tidak ada kode salesman vakant untuk distributor ini.")
-            else:
-                vacant_options = {
-                    f"{r['salesman_id']} [{r['salesman_type']}] — terakhir: {r.get('last_salesman', '-')}": r
-                    for _, r in vacant_df.iterrows()
-                }
-                selected_vacant_label = st.selectbox("Pilih kode vakant:", list(vacant_options.keys()), key="vacant_selector")
-                selected_vacant = vacant_options[selected_vacant_label]
-                vacant_id   = selected_vacant["salesman_id"]
-                vacant_type = selected_vacant["salesman_type"]
-
-                st.markdown(
-                    f"Kode dipilih: **`{vacant_id}`** | Tipe: `{vacant_type}` | "
-                    f"Terakhir dipakai oleh: *{selected_vacant.get('last_salesman', '-')}*"
-                )
-
-                with st.form("form_reactivate_vacant"):
-                    st.markdown("**Data Salesman Baru untuk Kode Ini**")
-                    fields_rv = _render_salesman_form_fields("vacant_react")
-                    submitted_rv = st.form_submit_button("♻️ Aktifkan & Simpan", type="primary")
-
-                if submitted_rv:
-                    errs = _validate_salesman_fields(fields_rv)
-                    if errs:
-                        for e in errs: st.error(e)
-                    else:
-                        sal_data_rv = _build_salesman_data(fields_rv, dist_df, selected_dist_code, selected_dist_name)
-                        with st.spinner("Menyimpan data salesman baru..."):
-                            ok1, err1 = insert_salesman_record(sal_data_rv)
-                        if not ok1:
-                            st.error(f"Gagal menyimpan data salesman: {err1}")
-                        else:
-                            with st.spinner("Membuat mapping aktif baru..."):
-                                ok2, err2 = reactivate_salesman_mapping(
-                                    vacant_id, selected_dist_code, vacant_type,
-                                    nama_salesman=sanitize_salesman_name(fields_rv["nama"]),
-                                )
-                            if not ok2:
-                                st.error(f"Data salesman tersimpan, tapi gagal membuat mapping aktif: {err2}")
-                            else:
-                                st.success(f"✅ Kode **`{vacant_id}`** berhasil diaktifkan kembali dan kini dipegang oleh **{fields_rv['nama'].strip().upper()}**.")
-                                st.session_state.show_vacant_form = False
-                                st.cache_data.clear()
-                                st.rerun()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: SALESMAN TEMPLATE
-# ══════════════════════════════════════════════════════════════════════════════
-
-elif PAGES[selected_page] == "salesman_template":
-    st.title("📋 Salesman Template")
-    st.caption(f"Distributor: **{selected_dist_name}** ({selected_dist_code})")
-
-    tab_download, tab_upload = st.tabs(["📥 Download Template", "📤 Upload & Validasi"])
-
-    with tab_download:
-        st.subheader("📥 Download Salesman Template")
-
-        with st.expander("📖 Panduan Pengisian", expanded=False):
-            st.markdown("""
-            ### ⚡ ATURAN DASAR:
-            - **1 file = 1 distributor** (tidak boleh campur)
-            - **Semua kolom "Wajib Diisi" harus terisi**
-            - **Jangan edit kolom "Kode Distributor"** (otomatis)
-
-            ### 🔄 URUTAN DROPDOWN BERTINGKAT (WAJIB!):
-            1. **ASM** → 2. **Region** → 3. **Nama Distributor**
-
-            ### ✅ FORMAT DATA YANG BENAR:
-            - **Tanggal**: Format YYYY-MM-DD (contoh: 2001-01-25)
-            - **Angka**: Hanya angka (contoh: 5000000)
-            - **No. HP**: 8-13 digit, contoh: `08123456789`
-
-            ### 📞 BUTUH BANTUAN?
-            Hubungi tim support G2G
-            """)
-
-        sal_excel = create_salesman_excel(
-            pd.DataFrame(), distributor_map, asm_options, region_options, dist_df
-        )
-        st.download_button(
-            "⬇️ Download Salesman Template",
-            data=sal_excel.getvalue(),
-            file_name=f"Salesman_Template_{datetime.now().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="primary",
-        )
-
-    with tab_upload:
-        st.subheader("📤 Upload & Validasi Salesman Template")
-        st.warning("""
-        ⚠️ **PERHATIAN:**
-        - 1 file = 1 distributor
-        - **Data TIDAK BISA diupload jika masih ada error ATAU peringatan**
-        - Perbaiki semua masalah di file Excel, lalu upload ulang
-        """)
-
-        uploaded = st.file_uploader("Pilih file Excel (.xlsx)", type=["xlsx"], key="sal_uploader")
-
-        if uploaded:
-            try:
-                xl = pd.ExcelFile(uploaded)
-            except Exception as e:
-                st.error(f"Gagal membaca file: {e}")
-                st.stop()
-
-            if "Salesman Template" not in xl.sheet_names:
-                st.error("Sheet 'Salesman Template' tidak ditemukan. Gunakan template resmi.")
-                st.stop()
-
-            st.success("Sheet `Salesman Template` ditemukan.")
-
-            try:
-                sal_df = read_template_sheet(uploaded, "Salesman Template", 2, distributor_map)
-                sal_df = sal_df[sal_df["Nama Salesman"].notna() & (sal_df["Nama Salesman"] != "")]
-                sal_df = sal_df.reset_index(drop=True)
-            except Exception as e:
-                st.error(f"Gagal membaca sheet: {e}")
-                st.stop()
-
-            if sal_df.empty:
-                st.warning("Tidak ada data di sheet Salesman Template.")
-                st.stop()
-
-            with st.expander("👁️ Preview Data", expanded=True):
-                st.dataframe(sal_df, use_container_width=True, hide_index=True)
-
-            sal_errors, sal_warnings = validate_salesman_df(sal_df, distributor_map, asm_options, region_options)
-
-            if sal_errors or sal_warnings:
-                if sal_errors:
-                    st.error(f"**❌ {len(sal_errors)} ERROR:**")
-                    for e in sal_errors: st.markdown(f"- {e}")
-                if sal_warnings:
-                    st.warning(f"**⚠️ {len(sal_warnings)} PERINGATAN:**")
-                    for w in sal_warnings: st.markdown(f"- {w}")
-            else:
-                st.success("✅ Validasi berhasil! Data siap diupload.")
-
-                st.markdown("---")
-                st.subheader("☁️ Upload ke Database")
-
-                salesman_type_bulk = st.selectbox("Tipe Salesman untuk batch ini *", SALESMAN_TYPES, key="bulk_sal_type")
-                if st.button("☁️ Simpan Salesman ke Database", key="bq_sal", type="primary"):
-                    sal_df_upload = sal_df.copy()
-                    sal_df_upload["Nama Salesman"] = sal_df_upload["Nama Salesman"].apply(
-                        lambda x: sanitize_salesman_name(x) if pd.notna(x) else x
-                    )
-                    with st.spinner("Menyimpan data Salesman ke Database..."):
-                        ok, msg = push_to_bigquery(sal_df_upload, _SAL_COL_MAP, SALESMAN_TABLE)
-                    if ok:
-                        mapping_errors = []
-                        for _, row in sal_df_upload.iterrows():
-                            sal_name = sanitize_salesman_name(row.get("Nama Salesman", ""))
-                            new_id   = generate_salesman_id(selected_dist_code, salesman_type_bulk)
-                            ok_m, err_m = insert_mapping_record(
-                                new_id, selected_dist_code, salesman_type_bulk,
-                                nama_salesman=sal_name,
-                            )
-                            if not ok_m:
-                                mapping_errors.append(f"{sal_name}: {err_m}")
-                        if mapping_errors:
-                            st.warning(f"Data tersimpan tapi ada {len(mapping_errors)} mapping gagal dibuat.")
-                        else:
-                            st.success(f"✅ Berhasil menyimpan {len(sal_df_upload)} salesman + mapping ke Database.")
-                        st.cache_data.clear()
-                    else:
-                        st.error(msg)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: PJP TEMPLATE
@@ -1888,8 +1496,13 @@ elif PAGES[selected_page] == "pjp_template":
     st.title("🗓️ PJP Template")
     st.caption(f"Distributor: **{selected_dist_name}** ({selected_dist_code})")
 
-    tab_download, tab_upload = st.tabs(["📥 Download Template", "📤 Upload & Validasi"])
+    tab_download, tab_upload, tab_update = st.tabs([
+        "📥 Download Template",
+        "📤 Upload & Validasi",
+        "🔄 Update PJP",
+    ])
 
+    # ── Tab 1: Download ───────────────────────────────────────────────────────
     with tab_download:
         st.subheader("📥 Download PJP Template")
 
@@ -1925,6 +1538,7 @@ elif PAGES[selected_page] == "pjp_template":
             type="primary",
         )
 
+    # ── Tab 2: Upload & Validasi ──────────────────────────────────────────────
     with tab_upload:
         st.subheader("📤 Upload & Validasi PJP Template")
         st.warning("""
@@ -1990,3 +1604,168 @@ elif PAGES[selected_page] == "pjp_template":
                         st.success(f"✅ Berhasil menyimpan {len(pjp_df)} baris data PJP ke Database.")
                     else:
                         st.error(msg)
+
+    # ── Tab 3: Update PJP ─────────────────────────────────────────────────────
+    with tab_update:
+        st.subheader("🔄 Update Daftar PJP")
+        st.info(
+            "Fitur ini memungkinkan **RSA** untuk memperbarui data PJP dengan memilih "
+            "berdasarkan **Distributor** atau **Salesman** tertentu. "
+            "Data PJP lama untuk filter yang dipilih akan **dihapus** dan diganti dengan data baru dari file yang diupload."
+        )
+
+        st.markdown("### 1️⃣ Pilih Scope Update")
+        update_scope = st.radio(
+            "Update berdasarkan:",
+            ["Distributor (semua salesman)", "Salesman tertentu"],
+            key="pjp_update_scope",
+            horizontal=True,
+        )
+
+        scope_dist_code   = None
+        scope_salesman    = None
+
+        if update_scope == "Distributor (semua salesman)":
+            st.markdown(
+                f"Scope: semua PJP milik distributor **{selected_dist_name}** (`{selected_dist_code}`) "
+                "akan diganti."
+            )
+            scope_dist_code = selected_dist_code
+
+        else:  # Salesman tertentu
+            st.markdown("Pilih salesman yang PJP-nya ingin diperbarui:")
+            with st.spinner("Memuat daftar salesman..."):
+                sal_list_df = get_salesman_list(selected_dist_code)
+
+            if sal_list_df.empty:
+                st.warning("Tidak ada salesman aktif untuk distributor ini.")
+                st.stop()
+
+            active_sal = sal_list_df[sal_list_df.get("is_active", True) == True]
+            sal_name_options = sorted(
+                active_sal["nama_salesman"].dropna().astype(str).unique().tolist()
+            )
+            if not sal_name_options:
+                st.warning("Tidak ada salesman aktif yang ditemukan.")
+                st.stop()
+
+            chosen_salesman = st.selectbox(
+                "Pilih Salesman:",
+                sal_name_options,
+                key="pjp_update_salesman_select",
+            )
+            scope_salesman  = chosen_salesman
+            scope_dist_code = selected_dist_code  # still filter by dist for safety
+
+            # Show current PJP for chosen salesman
+            with st.expander(f"👁️ PJP Saat Ini untuk {chosen_salesman}", expanded=False):
+                with st.spinner("Memuat PJP saat ini..."):
+                    cur_pjp = get_pjp_list(
+                        distributor_code=selected_dist_code,
+                        salesman_name=chosen_salesman,
+                    )
+                if cur_pjp.empty:
+                    st.info("Belum ada data PJP untuk salesman ini.")
+                else:
+                    st.dataframe(cur_pjp, use_container_width=True, hide_index=True)
+                    st.caption(f"{len(cur_pjp)} baris PJP ditemukan.")
+
+        st.markdown("### 2️⃣ Upload File PJP Baru")
+        st.warning(
+            "File yang diupload **harus menggunakan template resmi**. "
+            "Pastikan kolom Nama Salesman sudah sesuai dengan filter yang dipilih di atas."
+        )
+
+        uploaded_update = st.file_uploader(
+            "Pilih file Excel PJP baru (.xlsx)", type=["xlsx"], key="pjp_update_uploader"
+        )
+
+        if uploaded_update:
+            try:
+                xl_u = pd.ExcelFile(uploaded_update)
+            except Exception as e:
+                st.error(f"Gagal membaca file: {e}")
+                st.stop()
+
+            if "PJP Template" not in xl_u.sheet_names:
+                st.error("Sheet 'PJP Template' tidak ditemukan. Gunakan template resmi.")
+                st.stop()
+
+            try:
+                pjp_new_df = read_template_sheet(uploaded_update, "PJP Template", 2, distributor_map, store_df)
+                pjp_new_df = pjp_new_df[pjp_new_df["Nama Distributor"].notna() & (pjp_new_df["Nama Distributor"] != "")]
+                pjp_new_df = pjp_new_df.reset_index(drop=True)
+            except Exception as e:
+                st.error(f"Gagal membaca sheet: {e}")
+                st.stop()
+
+            if pjp_new_df.empty:
+                st.warning("Tidak ada data di file yang diupload.")
+                st.stop()
+
+            # Validate new data
+            pjp_u_errors, pjp_u_warnings = validate_pjp_df(pjp_new_df, distributor_map, store_df)
+
+            with st.expander("👁️ Preview Data Baru", expanded=True):
+                st.dataframe(pjp_new_df, use_container_width=True, hide_index=True)
+                st.caption(f"{len(pjp_new_df)} baris akan dimasukkan.")
+
+            if pjp_u_errors or pjp_u_warnings:
+                if pjp_u_errors:
+                    st.error(f"**❌ {len(pjp_u_errors)} ERROR:**")
+                    for e in pjp_u_errors: st.markdown(f"- {e}")
+                if pjp_u_warnings:
+                    st.warning(f"**⚠️ {len(pjp_u_warnings)} PERINGATAN:**")
+                    for w in pjp_u_warnings: st.markdown(f"- {w}")
+                st.error("Perbaiki semua masalah di atas sebelum melanjutkan update.")
+            else:
+                st.success("✅ Validasi data baru berhasil!")
+
+                st.markdown("### 3️⃣ Konfirmasi & Eksekusi Update")
+
+                scope_label = (
+                    f"semua PJP distributor **{selected_dist_name}**"
+                    if scope_salesman is None
+                    else f"PJP salesman **{scope_salesman}** di distributor **{selected_dist_name}**"
+                )
+
+                st.warning(
+                    f"⚠️ Proses ini akan **menghapus** {scope_label} dari database, "
+                    f"kemudian memasukkan **{len(pjp_new_df)} baris baru**. "
+                    "Tindakan ini **tidak dapat dibatalkan**."
+                )
+
+                confirm_update = st.checkbox(
+                    "Saya memahami bahwa data PJP lama akan dihapus dan diganti.",
+                    key="confirm_pjp_update",
+                )
+
+                if st.button(
+                    "🔄 Eksekusi Update PJP",
+                    key="exec_pjp_update",
+                    type="primary",
+                    disabled=not confirm_update,
+                ):
+                    with st.spinner("Menghapus data PJP lama..."):
+                        ok_del, err_del = delete_pjp_records(
+                            distributor_code=scope_dist_code,
+                            salesman_name=scope_salesman,
+                        )
+
+                    if not ok_del:
+                        st.error(f"Gagal menghapus data PJP lama: {err_del}")
+                    else:
+                        with st.spinner("Memasukkan data PJP baru..."):
+                            ok_ins, msg_ins = push_to_bigquery(pjp_new_df, _PJP_COL_MAP, PJP_TABLE)
+
+                        if ok_ins:
+                            st.success(
+                                f"✅ Update PJP berhasil! "
+                                f"Data lama dihapus dan **{len(pjp_new_df)} baris baru** berhasil disimpan."
+                            )
+                            st.cache_data.clear()
+                        else:
+                            st.error(
+                                f"Data lama sudah dihapus, tetapi gagal memasukkan data baru: {msg_ins}\n\n"
+                                "Segera hubungi administrator untuk memulihkan data."
+                            )
