@@ -1242,6 +1242,15 @@ selected_dist_name = dist_df.loc[
     dist_df["distributor_code"] == selected_dist_code, "distributor_name"
 ].iloc[0]
 
+# ── NEW: detect distributor switch and reset auth ──────────────────────────
+_prev = st.session_state.get("_prev_dist_code")
+if _prev is not None and _prev != selected_dist_code:
+    # User switched to a different distributor — require fresh password
+    auth_key = f"auth_{selected_dist_code}"
+    st.session_state.pop(auth_key, None)
+st.session_state["_prev_dist_code"] = selected_dist_code
+# ──────────────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.success(f"**{selected_dist_name}**\n\n`{selected_dist_code}`")
 
