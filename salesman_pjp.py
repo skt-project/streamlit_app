@@ -113,7 +113,7 @@ DISTRIBUTOR_PASSWORDS = {
     "DST292": "0d2def3b",
     "DST305": "93443df2",
     "DST307": "b5cf6933",
-    "DST308": "13500000",   # original value was 1.35E+06
+    "DST308": "13500000", 
     "DST310": "3b00aae1",
     "DST311": "a5b689d0",
     "DST312": "d06b143b",
