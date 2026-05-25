@@ -3614,6 +3614,13 @@ with tabs[0]:
 
     # ── Bersihkan & konversi TOTAL PRICE ──────────────────────────────────
     
+    df['QTY'] = pd.to_numeric(df['QTY'], errors='coerce').fillna(0)
+    df['DPP'] = pd.to_numeric(
+    df['DPP'].astype(str)
+    .str.replace(',', '.', regex=False),
+    errors='coerce'
+    ).fillna(0)
+    df['TOTAL PRICE'] = df['QTY'] * df['DPP']
     #df['TOTAL PRICE'] = pd.to_numeric(
     #df['TOTAL PRICE']
     #.astype(str)
