@@ -3743,7 +3743,7 @@ with tabs[0]:
         SUMMARY_LABELS = ['SUB-TOTAL', 'DISCOUNTS', 'Tax (11%)', 'GRAND TOTAL']
 
         df_export = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
-        df_export1 = df_data[df_data['QTY'].notna()].copy()
+        df_export1 = df_data[df_data['PRODUCT CODE'].notna()].copy()
 
         # Tulis data + formula TOTAL PRICE = QTY * DPP
         # Tulis data + formula TOTAL PRICE = QTY * DPP (dengan cached value)
