@@ -3490,8 +3490,6 @@ with tabs[0]:
         st.stop()
 
     df = st.session_state['df'].copy()
-    st.write("Tipe TOTAL PRICE:", df['TOTAL PRICE'].dtype)
-    st.write("Sample raw:", df['TOTAL PRICE'].sum())
     # ── Validasi PRODUCT CODE & QTY ───────────────────────────────────────
     _val_errors = []
 
@@ -3622,6 +3620,7 @@ with tabs[0]:
     tax         = sub_total * 0.11
     grand_total = sub_total - discount + tax
     count_sku   = df['PRODUCT CODE'].notna().sum()
+    st.write("Sub total:", sub_total)
 
     summary = pd.DataFrame([
         {"PRODUCT CODE": "", "DESCRIPTION": "", "QTY": "SUB-TOTAL",  "DPP": "", "TOTAL PRICE": sub_total},
