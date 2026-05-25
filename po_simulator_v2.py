@@ -3507,7 +3507,6 @@ with tabs[0]:
         _df_check = df.copy()
         _df_check['_qty_num'] = pd.to_numeric(
             _df_check['QTY'].astype(str)
-            .str.replace('.', '', regex=False)
             .str.replace(',', '.', regex=False)
             .str.strip(),
             errors='coerce'
