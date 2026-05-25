@@ -3609,16 +3609,11 @@ with tabs[0]:
     df['TOTAL PRICE'] = pd.to_numeric(
     df['TOTAL PRICE']
     .astype(str)
-    .str.replace('.', '', regex=False)
     .str.replace(',', '.', regex=False),
     errors='coerce'
     ).fillna(0)
-    
+
     # DEBUG
-    st.write(df[['PRODUCT CODE', 'QTY', 'DPP', 'TOTAL PRICE']].head(5))
-    st.write("Manual check row 1:", 460 * 61958)
-    st.write("Sub total dari df:", df['TOTAL PRICE'].sum())
-    
 
     discount    = 0
     sub_total   = df['TOTAL PRICE'].sum()
