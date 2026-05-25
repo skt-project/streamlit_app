@@ -483,6 +483,9 @@ def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> p
         "G2G-27305", "G2G-30701", "G2G-30702", "G2G-30703", "G2G-30704",
         "G2G-2721", "G2G-243"]
     _steve_skus_str = ", ".join([f"'{s.upper()}'" for s in _MANUAL_REJECT_APPROVAL])
+    _no_tol_str = ", ".join([f"'{s.upper()}'" for s in _MANUAL_REJECT_NO_TOL])
+
+
 
     query = f"""
     SELECT
@@ -510,7 +513,7 @@ def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> p
     FROM `{table_id}`
     WHERE UPPER(distributor) IN ({_dist_str})
     AND buffer_plan_by_lm_qty_adj > 0
-    {_brand_filter} AND SKU NOT IN ({_MANUAL_REJECT_NO_TOL})
+    {_brand_filter} AND SKU NOT IN ({_no_tol_str})
     ORDER BY DISTRIBUTOR, SUGGESTION_QTY DESC
     """
     try:
