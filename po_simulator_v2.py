@@ -504,7 +504,7 @@ def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> p
     FROM `{table_id}`
     WHERE UPPER(distributor) IN ({_dist_str})
     AND buffer_plan_by_lm_qty_adj > 0
-    {_brand_filter}
+    {_brand_filter} AND SKU NOT IN ({_MANUAL_REJECT_NO_TOL})
     ORDER BY DISTRIBUTOR, SUGGESTION_QTY DESC
     """
     try:
@@ -3743,11 +3743,12 @@ with tabs[0]:
         SUMMARY_LABELS = ['SUB-TOTAL', 'DISCOUNTS', 'Tax (11%)', 'GRAND TOTAL']
 
         df_export = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
+        df_export1 = df_data[df_data['QTY'].notna()].copy()
 
         # Tulis data + formula TOTAL PRICE = QTY * DPP
         # Tulis data + formula TOTAL PRICE = QTY * DPP (dengan cached value)
         # Tulis data + formula TOTAL PRICE = QTY * DPP
-        for r_offset, (_, row) in enumerate(df_export.iterrows()):
+        for r_offset, (_, row) in enumerate(df_export1.iterrows()):
             excel_row = START_ROW + r_offset
             for col_name, col_idx in COL_MAP.items():
                 if col_name == 'TOTAL PRICE':
@@ -3760,7 +3761,7 @@ with tabs[0]:
                     ws.cell(row=excel_row, column=col_idx, value=val)
 
         # Tulis summary dengan formula Excel
-        last_data_row = START_ROW + len(df_export) - 1
+        last_data_row = START_ROW + len(df_export1)
         summary_start = last_data_row + 2
         sub_row, disc_row, tax_row, grand_row = (
             summary_start, summary_start + 1, summary_start + 2, summary_start + 3
@@ -3853,6 +3854,7 @@ with tabs[0]:
         """Generate PDF PO menggunakan reportlab (pure Python)."""
         SUMMARY_LABELS = ['SUB-TOTAL', 'DISCOUNTS', 'Tax (11%)', 'GRAND TOTAL']
         df_clean = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
+        df_clean1 = df_data[df_data['QTY'].notna()].copy()
 
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
