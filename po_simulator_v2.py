@@ -3803,7 +3803,7 @@ with tabs[0]:
         # ── Signature block ──────────────────────────────────────────────
         from openpyxl.styles import Border, Side
         
-        sig_row = grand_row + 4  # 3 baris kosong setelah GRAND TOTAL
+        sig_row = grand_row + 8  # 3 baris kosong setelah GRAND TOTAL
         
         _green_font = Font(bold=True, color="006400", size=10)
         _red_font   = Font(bold=True, color="C00000", size=9)
