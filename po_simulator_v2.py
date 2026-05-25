@@ -3605,13 +3605,15 @@ with tabs[0]:
         df['DISTRIBUTOR'] = df['DISTRIBUTOR'].fillna(pilih)
 
     # ── Bersihkan & konversi TOTAL PRICE ──────────────────────────────────
-    df['TOTAL PRICE'] = (
-        df['TOTAL PRICE']
-        .astype(str)
-        .str.replace('.', '', regex=False)
-        .str.replace(',', '.', regex=False)
-        .astype(float)
-    )
+    
+    df['TOTAL PRICE'] = pd.to_numeric(
+    df['TOTAL PRICE']
+    .astype(str)
+    .str.replace('.', '', regex=False)
+    .str.replace(',', '.', regex=False),
+    errors='coerce'
+    ).fillna(0)
+        
 
     discount    = 0
     sub_total   = df['TOTAL PRICE'].sum()
@@ -3761,7 +3763,7 @@ with tabs[0]:
                     ws.cell(row=excel_row, column=col_idx, value=val)
 
         # Tulis summary dengan formula Excel
-        last_data_row = START_ROW + len(df_export1)
+        last_data_row = START_ROW + len(df_export1)-1
         summary_start = last_data_row + 2
         sub_row, disc_row, tax_row, grand_row = (
             summary_start, summary_start + 1, summary_start + 2, summary_start + 3
