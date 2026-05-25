@@ -190,7 +190,7 @@ def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
         product_name,
         price_for_distri
     FROM `{table_id}`
-    WHERE UPPER(sku) IN ({sku_list_str})
+    WHERE UPPER(sku) IN ({sku_list_str}) and price_for_distri is not null
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
