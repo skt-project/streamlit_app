@@ -4030,7 +4030,7 @@ with tabs[0]:
         with dl_col2:
             try:
                 pdf_bytes = excel_to_pdf(
-                    df_final, pilih, rsa_pilih,
+                    df, pilih, rsa_pilih,
                     sub_total, tax, grand_total, discount,
                 )
                 st.download_button(
