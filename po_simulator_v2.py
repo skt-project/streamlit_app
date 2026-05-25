@@ -3491,7 +3491,7 @@ with tabs[0]:
 
     df = st.session_state['df'].copy()
     st.write("Tipe TOTAL PRICE:", df['TOTAL PRICE'].dtype)
-    st.write("Sample raw:", df['TOTAL PRICE'].sum()
+    st.write("Sample raw:", df['TOTAL PRICE'].sum())
     # ── Validasi PRODUCT CODE & QTY ───────────────────────────────────────
     _val_errors = []
 
