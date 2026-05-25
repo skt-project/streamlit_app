@@ -3614,6 +3614,11 @@ with tabs[0]:
     errors='coerce'
     ).fillna(0)
     
+    # DEBUG
+    st.write(df[['PRODUCT CODE', 'QTY', 'DPP', 'TOTAL PRICE']].head(5))
+    st.write("Manual check row 1:", 460 * 61958)
+    st.write("Sub total dari df:", df['TOTAL PRICE'].sum())
+    
 
     discount    = 0
     sub_total   = df['TOTAL PRICE'].sum()
