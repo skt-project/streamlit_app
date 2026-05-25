@@ -3855,8 +3855,13 @@ with tabs[0]:
     ) -> bytes:
         """Generate PDF PO menggunakan reportlab (pure Python)."""
         SUMMARY_LABELS = ['SUB-TOTAL', 'DISCOUNTS', 'Tax (11%)', 'GRAND TOTAL']
-        df_clean = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
-        df_clean1 = df_data[df_data['QTY'].notna()].copy()
+        df_clean = df[df['PRODUCT CODE'].notna()].copy()
+        df_clean['TOTAL PRICE'] = pd.to_numeric(
+        df_clean['TOTAL PRICE'].astype(str)
+            .str.replace('.', '', regex=False)
+            .str.replace(',', '.', regex=False),
+            errors='coerce'
+            ).fillna(0)
 
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
