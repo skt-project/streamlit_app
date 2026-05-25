@@ -3742,8 +3742,8 @@ with tabs[0]:
         START_ROW      = 10
         SUMMARY_LABELS = ['SUB-TOTAL', 'DISCOUNTS', 'Tax (11%)', 'GRAND TOTAL']
 
-        df_export = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
-        df_export1 = df_data[df_data['PRODUCT CODE'].notna()].copy()
+        #df_export = df_data[~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
+        df_export1 = df_data[df_data['PRODUCT CODE'].notna() &  ~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
 
         # Tulis data + formula TOTAL PRICE = QTY * DPP
         # Tulis data + formula TOTAL PRICE = QTY * DPP (dengan cached value)
@@ -3982,7 +3982,7 @@ with tabs[0]:
         with st.spinner("Prepare file..."):
             try:
                 tpl_bytes    = fetch_template_xlsx(st.session_state['gsheet_url'])
-                export_bytes = export_to_template(df_final, tpl_bytes, pilih, rsa_pilih, discount)
+                export_bytes = export_to_template(df, tpl_bytes, pilih, rsa_pilih, discount)
                 st.session_state['export_bytes'] = export_bytes
             except Exception as e:
             
