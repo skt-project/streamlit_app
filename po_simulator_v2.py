@@ -3606,12 +3606,12 @@ with tabs[0]:
 
     # ── Bersihkan & konversi TOTAL PRICE ──────────────────────────────────
     
-    df['TOTAL PRICE'] = pd.to_numeric(
-    df['TOTAL PRICE']
-    .astype(str)
-    .str.replace(',', '.', regex=False),
-    errors='coerce'
-    ).fillna(0)
+    #df['TOTAL PRICE'] = pd.to_numeric(
+    #df['TOTAL PRICE']
+    #.astype(str)
+    #.str.replace(',', '.', regex=False),
+    #errors='coerce'
+    #).fillna(0)
 
     # DEBUG
 
