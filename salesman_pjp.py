@@ -1182,7 +1182,7 @@ def _validate_salesman_fields(fields) -> list:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# NAVIGATION  —  Salesman Template removed; Salesman Manage + PJP only
+# NAVIGATION
 # ══════════════════════════════════════════════════════════════════════════════
 
 PAGES = {
@@ -1242,10 +1242,9 @@ selected_dist_name = dist_df.loc[
     dist_df["distributor_code"] == selected_dist_code, "distributor_name"
 ].iloc[0]
 
-# ── NEW: detect distributor switch and reset auth ──────────────────────────
+# ── Detect distributor switch and reset auth ───────────────────────────────
 _prev = st.session_state.get("_prev_dist_code")
 if _prev is not None and _prev != selected_dist_code:
-    # User switched to a different distributor — require fresh password
     auth_key = f"auth_{selected_dist_code}"
     st.session_state.pop(auth_key, None)
 st.session_state["_prev_dist_code"] = selected_dist_code
@@ -1255,7 +1254,6 @@ with st.sidebar:
     st.success(f"**{selected_dist_name}**\n\n`{selected_dist_code}`")
 
 # ─── PASSWORD GATE ────────────────────────────────────────────────────────────
-# Must pass before any page content is shown.
 
 if not _render_password_gate(selected_dist_code, selected_dist_name):
     st.stop()
@@ -1307,7 +1305,6 @@ if PAGES[selected_page] == "salesman":
 
         st.caption(f"Menampilkan **{len(display_df)}** salesman.")
 
-        # Columns: no "Aktifkan" slot since reactivate-vacant is removed
         hcols = st.columns([1.2, 2.2, 1.2, 1.4, 1.2, 1.2, 0.8, 0.8, 0.8])
         headers = ["ID Salesman", "Nama", "Tipe", "No. HP", "Region", "ASM", "", "", ""]
         for hc, ht in zip(hcols, headers):
@@ -1557,7 +1554,7 @@ if PAGES[selected_page] == "salesman":
     else:
         st.info("Belum ada data salesman untuk distributor ini.")
 
-    # ── Add New Salesman (only remaining bottom action) ───────────────────────
+    # ── Add New Salesman ───────────────────────────────────────────────────────
     st.markdown("---")
     if "show_add_form" not in st.session_state:
         st.session_state.show_add_form = False
@@ -1618,9 +1615,8 @@ elif PAGES[selected_page] == "pjp_template":
     st.title("🗓️ PJP Template")
     st.caption(f"Distributor: **{selected_dist_name}** ({selected_dist_code})")
 
-    tab_download, tab_upload, tab_update = st.tabs([
+    tab_download, tab_update = st.tabs([
         "📥 Download Template",
-        "📤 Upload & Validasi",
         "🔄 Update PJP",
     ])
 
@@ -1660,74 +1656,7 @@ elif PAGES[selected_page] == "pjp_template":
             type="primary",
         )
 
-    # ── Tab 2: Upload & Validasi ──────────────────────────────────────────────
-    with tab_upload:
-        st.subheader("📤 Upload & Validasi PJP Template")
-        st.warning("""
-        ⚠️ **PERHATIAN:**
-        - 1 file = 1 distributor
-        - **Data TIDAK BISA diupload jika masih ada error ATAU peringatan**
-        - Perbaiki semua masalah di file Excel, lalu upload ulang
-        """)
-
-        uploaded = st.file_uploader("Pilih file Excel (.xlsx)", type=["xlsx"], key="pjp_uploader")
-
-        if uploaded:
-            try:
-                xl = pd.ExcelFile(uploaded)
-            except Exception as e:
-                st.error(f"Gagal membaca file: {e}")
-                st.stop()
-
-            if "PJP Template" not in xl.sheet_names:
-                st.error("Sheet 'PJP Template' tidak ditemukan. Gunakan template resmi.")
-                st.stop()
-
-            st.success("Sheet `PJP Template` ditemukan.")
-
-            try:
-                pjp_df = read_template_sheet(uploaded, "PJP Template", 2, distributor_map, store_df)
-                pjp_df = pjp_df[pjp_df["Nama Distributor"].notna() & (pjp_df["Nama Distributor"] != "")]
-                pjp_df = pjp_df.reset_index(drop=True)
-            except Exception as e:
-                st.error(f"Gagal membaca sheet: {e}")
-                st.stop()
-
-            if pjp_df.empty:
-                st.warning("Tidak ada data di sheet PJP Template.")
-                st.stop()
-
-            c1, c2 = st.columns([3, 1])
-            c1.metric("Total Baris", len(pjp_df))
-            c2.metric("Total Kolom", len(pjp_df.columns))
-
-            with st.expander("👁️ Preview Data", expanded=True):
-                st.dataframe(pjp_df, use_container_width=True, hide_index=True)
-
-            pjp_errors, pjp_warnings = validate_pjp_df(pjp_df, distributor_map, store_df)
-
-            if pjp_errors or pjp_warnings:
-                if pjp_errors:
-                    st.error(f"**❌ {len(pjp_errors)} ERROR:**")
-                    for e in pjp_errors: st.markdown(f"- {e}")
-                if pjp_warnings:
-                    st.warning(f"**⚠️ {len(pjp_warnings)} PERINGATAN:**")
-                    for w in pjp_warnings: st.markdown(f"- {w}")
-            else:
-                st.success("✅ Validasi berhasil! Data siap diupload.")
-
-                st.markdown("---")
-                st.subheader("☁️ Upload ke Database")
-
-                if st.button("☁️ Simpan PJP ke Database", key="bq_pjp", type="primary"):
-                    with st.spinner("Menyimpan data PJP ke Database..."):
-                        ok, msg = push_to_bigquery(pjp_df, _PJP_COL_MAP, PJP_TABLE)
-                    if ok:
-                        st.success(f"✅ Berhasil menyimpan {len(pjp_df)} baris data PJP ke Database.")
-                    else:
-                        st.error(msg)
-
-    # ── Tab 3: Update PJP ─────────────────────────────────────────────────────
+    # ── Tab 2: Update PJP ─────────────────────────────────────────────────────
     with tab_update:
         st.subheader("🔄 Update Daftar PJP")
         st.info(
@@ -1777,9 +1706,8 @@ elif PAGES[selected_page] == "pjp_template":
                 key="pjp_update_salesman_select",
             )
             scope_salesman  = chosen_salesman
-            scope_dist_code = selected_dist_code  # still filter by dist for safety
+            scope_dist_code = selected_dist_code
 
-            # Show current PJP for chosen salesman
             with st.expander(f"👁️ PJP Saat Ini untuk {chosen_salesman}", expanded=False):
                 with st.spinner("Memuat PJP saat ini..."):
                     cur_pjp = get_pjp_list(
@@ -1825,7 +1753,6 @@ elif PAGES[selected_page] == "pjp_template":
                 st.warning("Tidak ada data di file yang diupload.")
                 st.stop()
 
-            # Validate new data
             pjp_u_errors, pjp_u_warnings = validate_pjp_df(pjp_new_df, distributor_map, store_df)
 
             with st.expander("👁️ Preview Data Baru", expanded=True):
