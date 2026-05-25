@@ -481,7 +481,7 @@ def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> p
         "G2G-228", "G2G-74", "G2G-186", "G2G-202", "G2G-840",
         "G2G-844", "G2G-841", "G2G-800", "G2G-213", "G2G-217",
         "G2G-27305", "G2G-30701", "G2G-30702", "G2G-30703", "G2G-30704",
-        "G2G-2721", "G2G-243"
+        "G2G-2721", "G2G-243"]
     _steve_skus_str = ", ".join([f"'{s.upper()}'" for s in _MANUAL_REJECT_APPROVAL])
 
     query = f"""
