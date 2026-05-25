@@ -3613,14 +3613,17 @@ with tabs[0]:
     .str.replace(',', '.', regex=False),
     errors='coerce'
     ).fillna(0)
-        
+    sub_total   = df['TOTAL PRICE'].sum()
+
+# DEBUG — hapus setelah fix
+    st.write("Sample TOTAL PRICE:", df['TOTAL PRICE'].head(5).tolist())   
 
     discount    = 0
     sub_total   = df['TOTAL PRICE'].sum()
     tax         = sub_total * 0.11
     grand_total = sub_total - discount + tax
     count_sku   = df['PRODUCT CODE'].notna().sum()
-    st.write("Sub total:", sub_total)
+    
 
     summary = pd.DataFrame([
         {"PRODUCT CODE": "", "DESCRIPTION": "", "QTY": "SUB-TOTAL",  "DPP": "", "TOTAL PRICE": sub_total},
