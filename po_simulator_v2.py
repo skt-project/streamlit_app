@@ -3490,6 +3490,8 @@ with tabs[0]:
         st.stop()
 
     df = st.session_state['df'].copy()
+    st.write("Tipe TOTAL PRICE:", df['TOTAL PRICE'].dtype)
+    st.write("Sample raw:", df['TOTAL PRICE'].head(5).tolist())
     # ── Validasi PRODUCT CODE & QTY ───────────────────────────────────────
     _val_errors = []
 
