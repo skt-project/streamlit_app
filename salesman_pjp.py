@@ -281,7 +281,6 @@ PJP_TABLE      = "skintific-data-warehouse.gt_schema.gt_master_salesman_pjp"
 SALESMAN_TYPES = ["GTI", "MIX", "MTI"]
 
 
-# FIX 1: Added @st.cache_data decorator to avoid repeated BigQuery calls
 @st.cache_data(show_spinner=False)
 def get_salesman_list(distributor_code: str) -> pd.DataFrame:
     try:
@@ -1229,11 +1228,14 @@ selected_dist_name = dist_df.loc[
     dist_df["distributor_code"] == selected_dist_code, "distributor_name"
 ].iloc[0]
 
-# ── Detect distributor switch and reset auth ───────────────────────────────
+# ── Detect distributor switch and reset auth + salesman cache ──────────────
 _prev = st.session_state.get("_prev_dist_code")
 if _prev is not None and _prev != selected_dist_code:
     auth_key = f"auth_{selected_dist_code}"
     st.session_state.pop(auth_key, None)
+    # Also clear salesman cache when distributor changes
+    st.session_state.pop("salesman_df", None)
+    st.session_state.pop("_cached_dist", None)
 st.session_state["_prev_dist_code"] = selected_dist_code
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -1245,6 +1247,14 @@ with st.sidebar:
 if not _render_password_gate(selected_dist_code, selected_dist_name):
     st.stop()
 
+# ─── Load salesman data globally (shared across ALL pages) ────────────────────
+# FIX: moved here so PJP page always has salesman data without needing to
+#      visit the Kelola Salesman page first.
+
+if "salesman_df" not in st.session_state or st.session_state.get("_cached_dist") != selected_dist_code:
+    with st.spinner("Memuat daftar salesman..."):
+        st.session_state.salesman_df = get_salesman_list(selected_dist_code)
+        st.session_state._cached_dist = selected_dist_code
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: KELOLA SALESMAN
@@ -1257,12 +1267,7 @@ if PAGES[selected_page] == "salesman":
     if "action_mode" not in st.session_state:
         st.session_state.action_mode = None
 
-    # FIX 3A: Load once into session_state, reuse across pages
-    if "salesman_df" not in st.session_state or st.session_state.get("_cached_dist") != selected_dist_code:
-        with st.spinner("Memuat daftar salesman..."):
-            st.session_state.salesman_df = get_salesman_list(selected_dist_code)
-            st.session_state._cached_dist = selected_dist_code
-
+    # Read from session_state (already loaded globally above)
     salesman_df = st.session_state.salesman_df
 
     col_search, col_filter, col_refresh = st.columns([3, 2, 1])
@@ -1653,7 +1658,7 @@ elif PAGES[selected_page] == "pjp_template":
             )
 
         pjp_excel = _cached_pjp_excel(dist_df, store_df, distributor_map)
-        
+
         st.download_button(
             "⬇️ Download PJP Template",
             data=pjp_excel.getvalue(),
@@ -1693,14 +1698,14 @@ elif PAGES[selected_page] == "pjp_template":
         else:  # Salesman tertentu
             st.markdown("Pilih salesman yang PJP-nya ingin diperbarui:")
 
-            # FIX 3B: Reuse session_state instead of calling BigQuery again
+            # FIX: Read from session_state (always loaded globally above — no more empty list)
             sal_list_df = st.session_state.get("salesman_df", pd.DataFrame())
 
             if sal_list_df.empty:
                 st.warning("Tidak ada salesman aktif untuk distributor ini.")
                 st.stop()
 
-            # FIX 2: Correct is_active filter (was broken with .get())
+            # Correct is_active filter
             if "is_active" in sal_list_df.columns:
                 active_sal = sal_list_df[sal_list_df["is_active"] == True]
             else:
