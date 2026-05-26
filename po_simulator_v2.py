@@ -332,11 +332,13 @@ def get_bq_client() -> bigquery.Client:
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_customer_names() -> list:
     """Fetch distributor list from BigQuery master_distributor table."""
+    
     try:
         client = get_bq_client()
-        query = """
-            SELECT distributor
-            FROM `skintific-data-warehouse.gt_schema.master_distributor`
+        table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+        query = f"""
+            SELECT DISTINCT distributor
+            FROM `{table_id}`
             ORDER BY distributor
         """
         rows = client.query(query).result()
@@ -6698,4 +6700,3 @@ if st.session_state.get('page') == 'po_changer':
                 st.info("ℹ️ Kolom SKU / QTY tidak terdeteksi. Periksa header row.")
 
     st.stop()
-
