@@ -1751,10 +1751,6 @@ elif PAGES[selected_page] == "pjp_template":
 
             pjp_u_errors, pjp_u_warnings = validate_pjp_df(pjp_new_df, distributor_map, store_df)
 
-            with st.expander("👁️ Preview Data Baru", expanded=True):
-                st.dataframe(pjp_new_df, use_container_width=True, hide_index=True)
-                st.caption(f"{len(pjp_new_df)} baris akan dimasukkan.")
-
             if pjp_u_errors or pjp_u_warnings:
                 if pjp_u_errors:
                     st.error(f"**❌ {len(pjp_u_errors)} ERROR:**")
