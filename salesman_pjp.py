@@ -1708,18 +1708,6 @@ elif PAGES[selected_page] == "pjp_template":
             scope_salesman  = chosen_salesman
             scope_dist_code = selected_dist_code
 
-            with st.expander(f"👁️ PJP Saat Ini untuk {chosen_salesman}", expanded=False):
-                with st.spinner("Memuat PJP saat ini..."):
-                    cur_pjp = get_pjp_list(
-                        distributor_code=selected_dist_code,
-                        salesman_name=chosen_salesman,
-                    )
-                if cur_pjp.empty:
-                    st.info("Belum ada data PJP untuk salesman ini.")
-                else:
-                    st.dataframe(cur_pjp, use_container_width=True, hide_index=True)
-                    st.caption(f"{len(cur_pjp)} baris PJP ditemukan.")
-
         st.markdown("### 2️⃣ Upload File PJP Baru")
         st.warning(
             "File yang diupload **harus menggunakan template resmi**. "
