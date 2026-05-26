@@ -1645,10 +1645,15 @@ elif PAGES[selected_page] == "pjp_template":
             Hubungi tim support G2G
             """)
 
-        pjp_excel = create_pjp_excel(
-            pd.DataFrame(columns=[c for c, _, _ in PJP_COLS]),
-            distributor_map, dist_df, store_df,
-        )
+        @st.cache_data(show_spinner="Menyiapkan template Excel...")
+        def _cached_pjp_excel(_dist_df, _store_df, _distributor_map):
+            return create_pjp_excel(
+                pd.DataFrame(columns=[c for c, _, _ in PJP_COLS]),
+                _distributor_map, _dist_df, _store_df,
+            )
+
+        pjp_excel = _cached_pjp_excel(dist_df, store_df, distributor_map)
+        
         st.download_button(
             "⬇️ Download PJP Template",
             data=pjp_excel.getvalue(),
