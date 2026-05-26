@@ -1787,7 +1787,7 @@ elif PAGES[selected_page] == "pjp_template":
                 )
 
                 if st.button(
-                    "🔄 Eksekusi Update PJP",
+                    "🔄 Update PJP",
                     key="exec_pjp_update",
                     type="primary",
                     disabled=not confirm_update,
