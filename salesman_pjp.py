@@ -17,8 +17,7 @@ from openpyxl.workbook.defined_name import DefinedName
 st.set_page_config(page_title="Salesman & PJP Template", page_icon="📋", layout="wide")
 
 # ─── Distributor Passwords ────────────────────────────────────────────────────
-# Each distributor_code maps to a unique password.
-# To add/change passwords, edit this dictionary.
+
 DISTRIBUTOR_PASSWORDS = {
     "DST171": "5bcd0fc2",
     "DST157": "35b0e7bc",
@@ -113,7 +112,7 @@ DISTRIBUTOR_PASSWORDS = {
     "DST292": "0d2def3b",
     "DST305": "93443df2",
     "DST307": "b5cf6933",
-    "DST308": "13500000", 
+    "DST308": "13500000",
     "DST310": "3b00aae1",
     "DST311": "a5b689d0",
     "DST312": "d06b143b",
@@ -141,25 +140,15 @@ DISTRIBUTOR_PASSWORDS = {
 }
 
 def _get_password_for_distributor(dist_code: str) -> str | None:
-    """Return the password for a distributor code, or None if not configured."""
     return DISTRIBUTOR_PASSWORDS.get(str(dist_code).strip().upper())
 
 
 def _check_distributor_auth(dist_code: str) -> bool:
-    """
-    Returns True if the current session is authenticated for this distributor.
-    Uses st.session_state keyed by dist_code so switching distributors
-    requires re-authentication.
-    """
     key = f"auth_{dist_code}"
     return st.session_state.get(key, False)
 
 
 def _render_password_gate(dist_code: str, dist_name: str) -> bool:
-    """
-    Renders a password input form. Returns True once the user is authenticated,
-    False otherwise. Authentication persists in session_state.
-    """
     key = f"auth_{dist_code}"
     if st.session_state.get(key, False):
         return True
@@ -188,7 +177,6 @@ def _render_password_gate(dist_code: str, dist_name: str) -> bool:
         )
         if st.button("🔓 Masuk", key=f"pw_btn_{dist_code}", type="primary", use_container_width=True):
             if expected is None:
-                # No password configured — deny access and warn admin
                 st.error("Password untuk distributor ini belum dikonfigurasi. Hubungi administrator.")
             elif entered == expected:
                 st.session_state[key] = True
@@ -293,6 +281,8 @@ PJP_TABLE      = "skintific-data-warehouse.gt_schema.gt_master_salesman_pjp"
 SALESMAN_TYPES = ["GTI", "MIX", "MTI"]
 
 
+# FIX 1: Added @st.cache_data decorator to avoid repeated BigQuery calls
+@st.cache_data(show_spinner=False)
 def get_salesman_list(distributor_code: str) -> pd.DataFrame:
     try:
         credentials, project_id = get_credentials()
@@ -328,7 +318,6 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
 
 
 def get_pjp_list(distributor_code: str = None, salesman_name: str = None) -> pd.DataFrame:
-    """Load PJP data filtered by distributor and/or salesman name."""
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
@@ -1093,7 +1082,6 @@ def push_to_bigquery(df, col_map, table_id) -> tuple[bool, str]:
 
 
 def delete_pjp_records(distributor_code: str = None, salesman_name: str = None) -> tuple[bool, str]:
-    """Delete PJP records filtered by distributor and/or salesman before re-uploading."""
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
@@ -1190,7 +1178,6 @@ PAGES = {
     "🗓️ PJP Template":    "pjp_template",
 }
 
-# Sidebar navigation
 with st.sidebar:
     st.title("📋 G2G Template Manager")
     st.markdown("---")
@@ -1270,8 +1257,13 @@ if PAGES[selected_page] == "salesman":
     if "action_mode" not in st.session_state:
         st.session_state.action_mode = None
 
-    with st.spinner("Memuat daftar salesman..."):
-        salesman_df = get_salesman_list(selected_dist_code)
+    # FIX 3A: Load once into session_state, reuse across pages
+    if "salesman_df" not in st.session_state or st.session_state.get("_cached_dist") != selected_dist_code:
+        with st.spinner("Memuat daftar salesman..."):
+            st.session_state.salesman_df = get_salesman_list(selected_dist_code)
+            st.session_state._cached_dist = selected_dist_code
+
+    salesman_df = st.session_state.salesman_df
 
     col_search, col_filter, col_refresh = st.columns([3, 2, 1])
     with col_search:
@@ -1284,6 +1276,8 @@ if PAGES[selected_page] == "salesman":
         st.write("")
         if st.button("🔄 Refresh", use_container_width=True):
             st.cache_data.clear()
+            st.session_state.pop("salesman_df", None)
+            st.session_state.pop("_cached_dist", None)
             st.session_state.action_mode = None
             st.rerun()
 
@@ -1483,6 +1477,8 @@ if PAGES[selected_page] == "salesman":
                                 st.session_state.action_mode = None
                                 _fetch_salesman_detail.clear()
                                 st.cache_data.clear()
+                                st.session_state.pop("salesman_df", None)
+                                st.session_state.pop("_cached_dist", None)
                                 st.rerun()
 
             # ── Inline Replace Panel ──────────────────────────────────────────
@@ -1526,6 +1522,8 @@ if PAGES[selected_page] == "salesman":
                                         st.success(f"✅ Salesman berhasil diganti! Kode `{sal_id}` kini dipegang oleh **{fields_r['nama'].strip().upper()}**.")
                                         st.session_state.action_mode = None
                                         st.cache_data.clear()
+                                        st.session_state.pop("salesman_df", None)
+                                        st.session_state.pop("_cached_dist", None)
                                         st.rerun()
 
             # ── Inline Deactivate Panel ───────────────────────────────────────
@@ -1545,6 +1543,8 @@ if PAGES[selected_page] == "salesman":
                             st.success(f"✅ Salesman **{row.get('nama_salesman', sal_id)}** (`{sal_id}`) berhasil dinonaktifkan.")
                             st.session_state.action_mode = None
                             st.cache_data.clear()
+                            st.session_state.pop("salesman_df", None)
+                            st.session_state.pop("_cached_dist", None)
                             st.rerun()
                         else:
                             st.error(f"Gagal menonaktifkan salesman: {err_d}")
@@ -1604,6 +1604,8 @@ if PAGES[selected_page] == "salesman":
                             st.success(f"✅ Salesman baru berhasil ditambahkan!\n\n**ID Salesman: `{salesman_id_new}`**")
                             st.session_state.show_add_form = False
                             st.cache_data.clear()
+                            st.session_state.pop("salesman_df", None)
+                            st.session_state.pop("_cached_dist", None)
                             st.rerun()
 
 
@@ -1673,8 +1675,8 @@ elif PAGES[selected_page] == "pjp_template":
             horizontal=True,
         )
 
-        scope_dist_code   = None
-        scope_salesman    = None
+        scope_dist_code = None
+        scope_salesman  = None
 
         if update_scope == "Distributor (semua salesman)":
             st.markdown(
@@ -1685,14 +1687,20 @@ elif PAGES[selected_page] == "pjp_template":
 
         else:  # Salesman tertentu
             st.markdown("Pilih salesman yang PJP-nya ingin diperbarui:")
-            with st.spinner("Memuat daftar salesman..."):
-                sal_list_df = get_salesman_list(selected_dist_code)
+
+            # FIX 3B: Reuse session_state instead of calling BigQuery again
+            sal_list_df = st.session_state.get("salesman_df", pd.DataFrame())
 
             if sal_list_df.empty:
                 st.warning("Tidak ada salesman aktif untuk distributor ini.")
                 st.stop()
 
-            active_sal = sal_list_df[sal_list_df.get("is_active", True) == True]
+            # FIX 2: Correct is_active filter (was broken with .get())
+            if "is_active" in sal_list_df.columns:
+                active_sal = sal_list_df[sal_list_df["is_active"] == True]
+            else:
+                active_sal = sal_list_df
+
             sal_name_options = sorted(
                 active_sal["nama_salesman"].dropna().astype(str).unique().tolist()
             )
