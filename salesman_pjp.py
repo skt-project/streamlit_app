@@ -1660,7 +1660,7 @@ elif PAGES[selected_page] == "pjp_template":
     with tab_update:
         st.subheader("🔄 Update Daftar PJP")
         st.info(
-            "Fitur ini memungkinkan **RSA** untuk memperbarui data PJP dengan memilih "
+            "Fitur ini memungkinkan **User** untuk memperbarui data PJP dengan memilih "
             "berdasarkan **Distributor** atau **Salesman** tertentu. "
             "Data PJP lama untuk filter yang dipilih akan **dihapus** dan diganti dengan data baru dari file yang diupload."
         )
