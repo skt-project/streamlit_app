@@ -101,7 +101,21 @@ def get_bq_client() -> bigquery.Client:
     """Initializes and returns a BigQuery client."""
     return bigquery.Client(credentials=_bq_credentials, project=GCP_PROJECT_ID)
 
-
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_zero_price_skus() -> set:
+    """Fetch SKUs with price_for_distri = 0 from BigQuery."""
+    try:
+        client = get_bq_client()
+        query = """
+        SELECT UPPER(sku) as sku
+        FROM `skintific-data-warehouse.gt_schema.master_product`
+        WHERE price_for_distri = 0 AND brand = 'G2G'
+        """
+        rows = client.query(query).result()
+        return {r.sku for r in rows if r.sku}
+    except Exception as e:
+        return set()
+    
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_customer_names() -> list:
     """Fetch distributor list from BigQuery master_distributor table."""
@@ -190,7 +204,7 @@ def get_sku_data(sku_list: List[str]) -> pd.DataFrame:
         product_name,
         price_for_distri
     FROM `{table_id}`
-    WHERE UPPER(sku) IN ({sku_list_str}) and price_for_distri is not null
+    WHERE UPPER(sku) IN ({sku_list_str})
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
@@ -482,8 +496,8 @@ def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> p
         "G2G-29705", "G2G-224", "G2G-247", "G2G-225", "G2G-226",
         "G2G-228", "G2G-74", "G2G-186", "G2G-202", "G2G-840",
         "G2G-844", "G2G-841", "G2G-800", "G2G-213", "G2G-217",
-        "G2G-27305", "G2G-30701", "G2G-30702", "G2G-30703", "G2G-30704",
-        "G2G-2721", "G2G-243"]
+        "G2G-27305", "G2G-30701", "G2G-30702", "G2G-30703", "G2G-30704"
+        , "G2G-243"]
     _steve_skus_str = ", ".join([f"'{s.upper()}'" for s in _MANUAL_REJECT_APPROVAL])
     _no_tol_str = ", ".join([f"'{s.upper()}'" for s in _MANUAL_REJECT_NO_TOL])
 
@@ -2290,6 +2304,7 @@ if st.session_state.get('page') == 'po_changer':
                 _excel_dfs   = {}
                 _prog        = st.progress(0)
                 _distributors = _sim_df["Distributor"].unique().tolist()
+                _zero_price_skus = get_zero_price_skus() 
 
                 for _di, _dist_name in enumerate(_distributors):
                     _prog.progress((_di + 1) / len(_distributors), f"Processing {_dist_name}...")
@@ -2421,6 +2436,7 @@ if st.session_state.get('page') == 'po_changer':
                     _cur_woi = _res_df["Current WOI"]
 
                     _conds = [
+                        _res_df["Customer SKU Code"].isin(_zero_price_skus),
                         _res_df["Customer SKU Code"].isin(_skus_not_found),
                         _res_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY) & (_res_df["PO Qty"] > _MAX_QTY_LIMIT),
                         _ra2 < 0,
@@ -2440,6 +2456,7 @@ if st.session_state.get('page') == 'po_changer':
                         _res_df["PO Qty"] == _bp3,
                     ]
                     _choices = [
+                        "Price not available yet"
                         "Reject (SKU Not Found in System)",
                         f"Reject (Exceeds Qty Limit of {_MAX_QTY_LIMIT})",
                         "Reject (Negative Allocation)",
