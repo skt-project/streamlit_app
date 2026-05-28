@@ -2983,6 +2983,7 @@ if st.session_state.get('page') == 'po_changer':
         st.stop()
 
     st.markdown("""
+    </div>
     <div class="pipeline-step active">
         <span class="step-number">1</span>
         <strong>Pilih File untuk Modifikasi</strong>
@@ -3099,16 +3100,16 @@ if st.session_state.get('page') == 'po_changer':
 
                     _btn_col1, _btn_col2 = st.columns(2)
                     with _btn_col1:
-                        if st.button("✏️ Modifikasi QTY", use_container_width=True, key=f"btn_mode_qty_{_fi}"):
+                        if st.button("Modifikasi QTY", use_container_width=True, key=f"btn_mode_qty_{_fi}"):
                             st.session_state[_mode_key] = "qty"
                             _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
                             st.session_state[f"reduce_skus_{_fi}"] = _parsed if _parsed else []
                             if not _parsed:
                                 st.warning("⚠️ Tidak ada SKU yang valid")
                     with _btn_col2:
-                        if st.button("🗑️ Auto Hapus SKU", use_container_width=True, key=f"btn_mode_del_{_fi}"):
+                        if st.button("Auto Hapus SKU", use_container_width=True, key=f"btn_mode_del_{_fi}"):
                             st.session_state[_mode_key] = "delete"
-                            st.session_state.pop(f"reduce_skus_{_fi}", None)  # ← tambah ini
+                            st.session_state.pop(f"reduce_skus_{_fi}", None) 
                             _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
                             if not _parsed:
                                 st.warning("⚠️ Tidak ada SKU yang valid")
