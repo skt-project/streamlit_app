@@ -3092,16 +3092,61 @@ if st.session_state.get('page') == 'po_changer':
                         placeholder="SKU001\nSKU-ABC\nPROD123",
                         height=150, key=f"tpl_reduce_codes_{_fi}",
                     )
-                    load_skus_btn = st.button(
-                        "📋 Tampilkan SKU",
-                        use_container_width=True, key=f"tpl_load_skus_{_fi}"
-                    )
 
-                    if load_skus_btn and reduce_codes.strip():
-                        _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
-                        st.session_state[f"reduce_skus_{_fi}"] = _parsed
-                    elif load_skus_btn:
-                        st.warning("⚠️ Tidak ada SKU yang valid")
+                    _mode_key = f"mod_mode_{_fi}"
+                    if _mode_key not in st.session_state:
+                        st.session_state[_mode_key] = "qty"
+
+                    _btn_col1, _btn_col2 = st.columns(2)
+                    with _btn_col1:
+                        if st.button("✏️ Modifikasi QTY", use_container_width=True, key=f"btn_mode_qty_{_fi}"):
+                            st.session_state[_mode_key] = "qty"
+                            _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
+                            st.session_state[f"reduce_skus_{_fi}"] = _parsed if _parsed else []
+                            if not _parsed:
+                                st.warning("⚠️ Tidak ada SKU yang valid")
+                    with _btn_col2:
+                        if st.button("🗑️ Auto Hapus SKU", use_container_width=True, key=f"btn_mode_del_{_fi}"):
+                            st.session_state[_mode_key] = "delete"
+                            _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
+                            if not _parsed:
+                                st.warning("⚠️ Tidak ada SKU yang valid")
+                            else:
+                                # ── Delete rows matching SKU list via openpyxl ──
+                                _del_set = set(_parsed)
+                                _wb_del = openpyxl.load_workbook(io.BytesIO(tpl_bytes), data_only=False)
+                                _ws_del = next(
+                                    (s for s in _wb_del.worksheets if s.title == tpl_selected_sheet),
+                                    _wb_del.active,
+                                )
+                                _hdr_row_del = _tpl_hrow + 1
+                                _hdrs_del = {
+                                    _ws_del.cell(row=_hdr_row_del, column=c).value: c
+                                    for c in range(1, _ws_del.max_column + 1)
+                                }
+                                _sku_ci_del = _hdrs_del.get(sku_col_t)
+                                _deleted = 0
+                                if _sku_ci_del:
+                                    _rows_to_del = []
+                                    for _r in range(_hdr_row_del + 1, _ws_del.max_row + 1):
+                                        _sv = str(_ws_del.cell(row=_r, column=_sku_ci_del).value or "").strip()
+                                        if _sv in _del_set:
+                                            _rows_to_del.append(_r)
+                                    # Delete bottom-up so row indices stay valid
+                                    for _r in reversed(_rows_to_del):
+                                        _ws_del.delete_rows(_r)
+                                        _deleted += 1
+                                _buf_del = io.BytesIO()
+                                _wb_del.save(_buf_del)
+                                st.session_state[f"tpl_out_{_fi}"] = {
+                                    "buf": _sanitize_xlsx_bytes(_buf_del.getvalue()),
+                                    "cleared": _deleted,
+                                    "sku": sku_col_t, "qty": qty_col_t,
+                                    "ext": "xlsx",
+                                    "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    "mode": "delete",
+                                }
+                                st.success(f"✅ {_deleted} baris dihapus.")
 
                 _skus_r = st.session_state.get(f"reduce_skus_{_fi}", [])
                 if _skus_r:
@@ -3166,7 +3211,8 @@ if st.session_state.get('page') == 'po_changer':
 
                 _res_t = st.session_state.get(f"tpl_out_{_fi}")
                 if _res_t:
-                    st.success(f"✅ Quantity diubah untuk **{_res_t['cleared']}** baris.")
+                    _mode_label = "baris dihapus" if _res_t.get("mode") == "delete" else "baris diubah QTY-nya"
+                    st.success(f"✅ **{_res_t['cleared']}** {_mode_label}.")
                     customer_name = st.selectbox(
                         "Distributor",
                         options=["(Pilih)"] + CUSTOMER_NAMES,
