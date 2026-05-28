@@ -6662,7 +6662,7 @@ if st.session_state.get('page') == 'po_changer':
                         st.warning("⚠️ Tidak ada SKU yang valid")
 
                 _skus_r = st.session_state.get(f"reduce_skus_{_fi}", [])
-                if _skus_r:
+                if _skus_r and st.session_state.get(_mode_key) == "qty":
                     st.markdown("**Atur quantity baru per Product Code:**")
                     _sku_qty_map = (
                         tpl_df[[sku_col_t, qty_col_t]]
