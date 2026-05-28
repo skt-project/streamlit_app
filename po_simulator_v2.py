@@ -2456,7 +2456,7 @@ if st.session_state.get('page') == 'po_changer':
                         _res_df["PO Qty"] == _bp3,
                     ]
                     _choices = [
-                        "Price not available yet"
+                        "Price Not Available Yet",
                         "Reject (SKU Not Found in System)",
                         f"Reject (Exceeds Qty Limit of {_MAX_QTY_LIMIT})",
                         "Reject (Negative Allocation)",
