@@ -2793,8 +2793,12 @@ if st.session_state.get('page') == 'po_changer':
                             _sku_col_raw = "SKU"
 
                             _stop_skus_raw  = _stop_df["SKU"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).drop_duplicates().tolist() if "SKU" in _stop_df.columns else []
-                            _steve_skus_raw = _steve_df["SKU"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).drop_duplicates().tolist() if "SKU" in _steve_df.columns else []
-                            _all_reject_skus = list(dict.fromkeys(_stop_skus_raw + _steve_skus_raw))
+                           #neg allocation
+                            _steve_skus_raw = _steve_df[_steve_df["Remark"].str.lower().str.contains("stop by steve", na=False)]["SKU"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).drop_duplicates().tolist() if "SKU" in _steve_df.columns else []
+                            _neg_alloc_skus_raw = _steve_df[_steve_df["Remark"].str.lower().str.contains("negative allocation", na=False)]["SKU"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).drop_duplicates().tolist() if "SKU" in _steve_df.columns else []
+                            # Price not available
+                            _price_na_skus_raw = _final_disp[_final_disp["Remark"].str.lower().str.contains("price not available", na=False)]["SKU"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).drop_duplicates().tolist() if "Remark" in _final_disp.columns else []
+                            _all_reject_skus = list(dict.fromkeys(_stop_skus_raw + _steve_skus_raw + _neg_alloc_skus_raw + _price_na_skus_raw))
 
                             # Lookup source file dari _final_disp (yang sudah punya _source_file via merge)
                             _copy_lines = []
@@ -2811,11 +2815,15 @@ if st.session_state.get('page') == 'po_changer':
                                 _per_file = {}
                                 for _sku in _all_reject_skus:
                                     _fname = _sku_src_map.get(_sku, "Unknown File")
-                                    _per_file.setdefault(_fname, {"stop": [], "steve": []})
+                                    _per_file.setdefault(_fname, {"stop": [], "steve": [], "neg_alloc": [], "price_na": []})
                                     if _sku in _stop_skus_raw:
                                         _per_file[_fname]["stop"].append(_sku)
                                     if _sku in _steve_skus_raw:
                                         _per_file[_fname]["steve"].append(_sku)
+                                    if _sku in _neg_alloc_skus_raw:
+                                        _per_file[_fname]["neg_alloc"].append(_sku)
+                                    if _sku in _price_na_skus_raw:
+                                        _per_file[_fname]["price_na"].append(_sku)
 
                                 for _fname, _cats in sorted(_per_file.items()):
                                     _copy_lines.append(f"== {_fname} ==")
@@ -2825,6 +2833,12 @@ if st.session_state.get('page') == 'po_changer':
                                     if _cats["steve"]:
                                         _copy_lines.append("-- Reject by Steve --")
                                         _copy_lines.extend(sorted(_cats["steve"]))
+                                    if _cats["neg_alloc"]:
+                                        _copy_lines.append("-- Reject (Negative Allocation) --")
+                                        _copy_lines.extend(sorted(_cats["neg_alloc"]))
+                                    if _cats["price_na"]:
+                                        _copy_lines.append("-- Price Not Available Yet --")
+                                        _copy_lines.extend(sorted(_cats["price_na"]))
                                     _copy_lines.append("")
                             else:
                                 # Fallback: tanpa grouping file
@@ -2835,6 +2849,14 @@ if st.session_state.get('page') == 'po_changer':
                                     _copy_lines.append("")
                                     _copy_lines.append("== Reject by Steve ==")
                                     _copy_lines.extend(sorted(_steve_skus_raw))
+                                if _neg_alloc_skus_raw:
+                                    _copy_lines.append("")
+                                    _copy_lines.append("== Reject (Negative Allocation) ==")
+                                    _copy_lines.extend(sorted(_neg_alloc_skus_raw))
+                                if _price_na_skus_raw:
+                                    _copy_lines.append("")
+                                    _copy_lines.append("== Price Not Available Yet ==")
+                                    _copy_lines.extend(sorted(_price_na_skus_raw))
 
                             with st.expander(f"📋 Copy SKU ({len(_all_reject_skus)} SKU)", expanded=False):
                                 if _copy_lines:
