@@ -3108,6 +3108,7 @@ if st.session_state.get('page') == 'po_changer':
                     with _btn_col2:
                         if st.button("🗑️ Auto Hapus SKU", use_container_width=True, key=f"btn_mode_del_{_fi}"):
                             st.session_state[_mode_key] = "delete"
+                            st.session_state.pop(f"reduce_skus_{_fi}", None)  # ← tambah ini
                             _parsed = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
                             if not _parsed:
                                 st.warning("⚠️ Tidak ada SKU yang valid")
