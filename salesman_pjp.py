@@ -379,16 +379,29 @@ def generate_salesman_id(distributor_code: str, salesman_type: str) -> str:
     return f"{salesman_type}{distributor_code}{str(next_num).zfill(3)}"
 
 
+# ─── FIX: insert_salesman_record — convert date strings to UTC timestamp ──────
+
 def insert_salesman_record(salesman_data: dict) -> tuple[bool, str]:
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
+
         row = {**salesman_data, "uploaded_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}
+        bq_df = pd.DataFrame([row])
+
+        # Convert date string columns to proper UTC-aware timestamps so BigQuery
+        # doesn't reject them when the existing column type is TIMESTAMP.
+        for col in ["tanggal_lahir", "tanggal_join_g2g"]:
+            if col in bq_df.columns:
+                bq_df[col] = pd.to_datetime(bq_df[col], errors="coerce").dt.tz_localize("UTC")
+
         job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND", autodetect=True)
-        client.load_table_from_dataframe(pd.DataFrame([row]), SALESMAN_TABLE, job_config=job_config).result()
+        client.load_table_from_dataframe(bq_df, SALESMAN_TABLE, job_config=job_config).result()
         return True, ""
     except Exception as e:
         return False, str(e)
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def insert_mapping_record(salesman_id: str, distributor_code: str,
@@ -419,23 +432,21 @@ def update_salesman_record(nama_salesman: str, updated_fields: dict) -> tuple[bo
         client = bigquery.Client(credentials=credentials, project=project_id)
 
         allowed = {
-            "nama_salesman":         "STRING",
-            "nama_spv_external":     "STRING",
-            "nama_spv_internal":     "STRING",
-            # ── CHANGE 1: new field added to allowed update map ──────────────
-            "nama_spv_internal_2":   "STRING",
-            # ─────────────────────────────────────────────────────────────────
-            "status_salesman":       "STRING",
+            "nama_salesman":             "STRING",
+            "nama_spv_external":         "STRING",
+            "nama_spv_internal":         "STRING",
+            "nama_spv_internal_2":       "STRING",
+            "status_salesman":           "STRING",
             "total_outlet_coverage_pjp": "INT64",
-            "gaji_pokok":            "INT64",
-            "tunjangan_dan_insentif":"INT64",
-            "tanggal_lahir":         "STRING",
-            "jenis_kelamin":         "STRING",
-            "pendidikan_terakhir":   "STRING",
-            "pengalaman_bulan":      "INT64",
-            "principal_lain":        "STRING",
-            "no_hp":                 "STRING",
-            "tanggal_join_g2g":      "STRING",
+            "gaji_pokok":                "INT64",
+            "tunjangan_dan_insentif":    "INT64",
+            "tanggal_lahir":             "DATE",    # FIX: was "STRING"
+            "jenis_kelamin":             "STRING",
+            "pendidikan_terakhir":       "STRING",
+            "pengalaman_bulan":          "INT64",
+            "principal_lain":            "STRING",
+            "no_hp":                     "STRING",
+            "tanggal_join_g2g":          "DATE",    # FIX: was "STRING"
         }
 
         set_clauses = []
@@ -505,12 +516,11 @@ DAY_OPTIONS       = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
 WEEK_OPTIONS      = ["Minggu Ganjil", "Minggu Genap", "Minggu Ganjil + Genap"]
 FREQUENCY_OPTIONS = ["F4+", "F4", "F2", "F1"]
 
-# ── CHANGE 2: "Nama SPV Internal 2" inserted after "Nama SPV Internal" ───────
 SALESMAN_COLS = [
     ("Nama Salesman",                                       True,  "text"),
     ("Nama SPV External",                                   False, "text"),
     ("Nama SPV Internal",                                   True,  "text"),
-    ("Nama SPV Internal 2",                                 False, "text"),   # NEW
+    ("Nama SPV Internal 2",                                 False, "text"),
     ("ASM",                                                 True,  "cascade"),
     ("Region",                                              True,  "cascade"),
     ("Nama Distributor",                                    True,  "cascade"),
@@ -527,7 +537,6 @@ SALESMAN_COLS = [
     ("No. HP",                                              True,  "text"),
     ("Tanggal Join di G2G",                                 True,  "date"),
 ]
-# ─────────────────────────────────────────────────────────────────────────────
 
 PJP_COLS = [
     ("ASM",                                                 True,  "cascade"),
@@ -1036,12 +1045,11 @@ def read_template_sheet(uploaded_file, sheet_name, header_row, distributor_map, 
 
 # ─── BigQuery writer ──────────────────────────────────────────────────────────
 
-# ── CHANGE 3: "Nama SPV Internal 2" added to salesman column map ─────────────
 _SAL_COL_MAP = {
     "Nama Salesman":                                         "nama_salesman",
     "Nama SPV External":                                     "nama_spv_external",
     "Nama SPV Internal":                                     "nama_spv_internal",
-    "Nama SPV Internal 2":                                   "nama_spv_internal_2",   # NEW
+    "Nama SPV Internal 2":                                   "nama_spv_internal_2",
     "ASM":                                                   "asm",
     "Region":                                                "region",
     "Nama Distributor":                                      "nama_distributor",
@@ -1058,7 +1066,6 @@ _SAL_COL_MAP = {
     "No. HP":                                                "no_hp",
     "Tanggal Join di G2G":                                   "tanggal_join_g2g",
 }
-# ─────────────────────────────────────────────────────────────────────────────
 
 _PJP_COL_MAP = {
     "ASM":                                               "asm",
@@ -1118,14 +1125,13 @@ def delete_pjp_records(distributor_code: str = None, salesman_name: str = None) 
 
 # ─── Shared salesman form fields ──────────────────────────────────────────────
 
-# ── CHANGE 4: spv_int2 input added; returned in dict ─────────────────────────
 def _render_salesman_form_fields(key_prefix: str):
     c1, c2 = st.columns(2)
     with c1:
         nama       = st.text_input("Nama Salesman *", key=f"{key_prefix}_nama")
         spv_ext    = st.text_input("Nama SPV External", key=f"{key_prefix}_spv_ext")
         spv_int    = st.text_input("Nama SPV Internal *", key=f"{key_prefix}_spv_int")
-        spv_int2   = st.text_input("Nama SPV Internal 2", key=f"{key_prefix}_spv_int2")   # NEW
+        spv_int2   = st.text_input("Nama SPV Internal 2", key=f"{key_prefix}_spv_int2")
         status_sal = st.selectbox("Status Salesman *", STATUS_OPTIONS, key=f"{key_prefix}_status")
         outlet_cov = st.number_input("Total Outlet Coverage PJP *", min_value=0, step=1, key=f"{key_prefix}_outlet")
         gaji       = st.number_input("Gaji Pokok (Rp) *", min_value=0, step=1000, key=f"{key_prefix}_gaji")
@@ -1144,24 +1150,22 @@ def _render_salesman_form_fields(key_prefix: str):
         tgl_join   = st.date_input("Tanggal Join di G2G *", key=f"{key_prefix}_join")
     return {
         "nama": nama, "spv_ext": spv_ext, "spv_int": spv_int,
-        "spv_int2": spv_int2,                                                           # NEW
+        "spv_int2": spv_int2,
         "status_sal": status_sal, "outlet_cov": outlet_cov, "gaji": gaji,
         "tunjangan": tunjangan, "tgl_lahir": tgl_lahir, "gender": gender,
         "pendidikan": pendidikan, "pengalaman": pengalaman, "principal": principal,
         "no_hp": no_hp, "tgl_join": tgl_join,
     }
-# ─────────────────────────────────────────────────────────────────────────────
 
 
-# ── CHANGE 5: _build_salesman_data includes nama_spv_internal_2 ──────────────
 def _build_salesman_data(fields, dist_df, selected_dist_code, selected_dist_name) -> dict:
-    hp_norm = normalize_phone_id(fields["no_hp"])
+    hp_norm      = normalize_phone_id(fields["no_hp"])
     spv_int2_val = fields.get("spv_int2", "")
     return {
         "nama_salesman":             sanitize_salesman_name(fields["nama"]),
         "nama_spv_external":         fields["spv_ext"].strip().upper() if fields["spv_ext"].strip() else None,
         "nama_spv_internal":         fields["spv_int"].strip().upper(),
-        "nama_spv_internal_2":       spv_int2_val.strip().upper() if spv_int2_val.strip() else None,  # NEW
+        "nama_spv_internal_2":       spv_int2_val.strip().upper() if spv_int2_val.strip() else None,
         "asm":                       dist_df.loc[dist_df["distributor_code"] == selected_dist_code, "asm"].iloc[0],
         "region":                    dist_df.loc[dist_df["distributor_code"] == selected_dist_code, "region"].iloc[0],
         "nama_distributor":          selected_dist_name,
@@ -1170,15 +1174,15 @@ def _build_salesman_data(fields, dist_df, selected_dist_code, selected_dist_name
         "total_outlet_coverage_pjp": int(fields["outlet_cov"]),
         "gaji_pokok":                float(fields["gaji"]),
         "tunjangan_dan_insentif":    float(fields["tunjangan"]),
-        "tanggal_lahir":             str(fields["tgl_lahir"]),
+        # FIX: pass date objects directly; insert_salesman_record handles UTC conversion
+        "tanggal_lahir":             fields["tgl_lahir"],
         "jenis_kelamin":             fields["gender"],
         "pendidikan_terakhir":       fields["pendidikan"],
         "pengalaman_bulan":          int(fields["pengalaman"]),
         "principal_lain":            fields["principal"].strip() if fields["principal"].strip() else None,
         "no_hp":                     hp_norm,
-        "tanggal_join_g2g":          str(fields["tgl_join"]),
+        "tanggal_join_g2g":          fields["tgl_join"],
     }
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _validate_salesman_fields(fields) -> list:
@@ -1411,17 +1415,15 @@ if PAGES[selected_page] == "salesman":
                         st.markdown("**Informasi Dasar**")
                         ec1, ec2 = st.columns(2)
                         with ec1:
-                            e_nama    = st.text_input("Nama Salesman *",    value=cur_nama,                key=f"e_nama_{sal_id}")
-                            e_spv_ext = st.text_input("Nama SPV External",  value=_s("nama_spv_external"), key=f"e_spvext_{sal_id}")
-                            e_spv_int = st.text_input("Nama SPV Internal *",value=_s("nama_spv_internal"), key=f"e_spvint_{sal_id}")
-                            # ── CHANGE 6: SPV Internal 2 in the edit form ────
+                            e_nama     = st.text_input("Nama Salesman *",     value=cur_nama,                key=f"e_nama_{sal_id}")
+                            e_spv_ext  = st.text_input("Nama SPV External",   value=_s("nama_spv_external"), key=f"e_spvext_{sal_id}")
+                            e_spv_int  = st.text_input("Nama SPV Internal *", value=_s("nama_spv_internal"), key=f"e_spvint_{sal_id}")
                             e_spv_int2 = st.text_input(
                                 "Nama SPV Internal 2",
                                 value=_s("nama_spv_internal_2"),
                                 key=f"e_spvint2_{sal_id}",
                             )
-                            # ─────────────────────────────────────────────────
-                            e_hp      = st.text_input("No. HP *",           value=cur_hp,                  key=f"e_hp_{sal_id}", placeholder="08123456789")
+                            e_hp      = st.text_input("No. HP *",             value=cur_hp,                  key=f"e_hp_{sal_id}", placeholder="08123456789")
                             e_status  = st.selectbox(
                                 "Status Salesman *", STATUS_OPTIONS,
                                 index=STATUS_OPTIONS.index(_s("status_salesman")) if _s("status_salesman") in STATUS_OPTIONS else 0,
@@ -1463,17 +1465,17 @@ if PAGES[selected_page] == "salesman":
                             for err in edit_errors:
                                 st.error(err)
                         else:
-                            # ── CHANGE 7: include nama_spv_internal_2 in updated dict ──
                             updated = {
                                 "nama_salesman":             sanitize_salesman_name(e_nama),
                                 "nama_spv_external":         e_spv_ext.strip().upper() if e_spv_ext.strip() else None,
                                 "nama_spv_internal":         e_spv_int.strip().upper(),
-                                "nama_spv_internal_2":       e_spv_int2.strip().upper() if e_spv_int2.strip() else None,  # NEW
+                                "nama_spv_internal_2":       e_spv_int2.strip().upper() if e_spv_int2.strip() else None,
                                 "no_hp":                     normalize_phone_id(e_hp),
                                 "status_salesman":           e_status,
                                 "total_outlet_coverage_pjp": int(e_outlet),
                                 "gaji_pokok":                float(e_gaji),
                                 "tunjangan_dan_insentif":    float(e_tunj),
+                                # FIX: pass date objects as strings in YYYY-MM-DD for DATE type params
                                 "tanggal_lahir":             str(e_lahir),
                                 "jenis_kelamin":             e_gender,
                                 "pendidikan_terakhir":       e_pendidikan,
@@ -1481,7 +1483,6 @@ if PAGES[selected_page] == "salesman":
                                 "principal_lain":            e_principal.strip() if e_principal.strip() else None,
                                 "tanggal_join_g2g":          str(e_join),
                             }
-                            # ────────────────────────────────────────────────────
 
                             with st.spinner("Menyimpan perubahan..."):
                                 ok_e, err_e = update_salesman_record(cur_nama, updated)
@@ -1623,7 +1624,7 @@ if PAGES[selected_page] == "salesman":
                 if errs:
                     for e in errs: st.error(e)
                 else:
-                    sal_data_add = _build_salesman_data(fields_add, dist_df, selected_dist_code, selected_dist_name)
+                    sal_data_add    = _build_salesman_data(fields_add, dist_df, selected_dist_code, selected_dist_name)
                     salesman_id_new = generate_salesman_id(selected_dist_code, salesman_type_add)
                     with st.spinner("Menyimpan data salesman..."):
                         ok1, err1 = insert_salesman_record(sal_data_add)
@@ -1641,7 +1642,7 @@ if PAGES[selected_page] == "salesman":
                             st.success(f"✅ Salesman baru berhasil ditambahkan!\n\n**ID Salesman: `{salesman_id_new}`**")
                             st.session_state.show_add_form = False
                             for key in ["add_bottom_status", "add_bottom_nama", "add_bottom_hp"]:
-                                st.session_state.pop(key, None)   
+                                st.session_state.pop(key, None)
                             st.cache_data.clear()
                             st.session_state.pop("salesman_df", None)
                             st.session_state.pop("_cached_dist", None)
