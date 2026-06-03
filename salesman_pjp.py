@@ -379,8 +379,6 @@ def generate_salesman_id(distributor_code: str, salesman_type: str) -> str:
     return f"{salesman_type}{distributor_code}{str(next_num).zfill(3)}"
 
 
-# ─── FIX: insert_salesman_record — convert date strings to UTC timestamp ──────
-
 def insert_salesman_record(salesman_data: dict) -> tuple[bool, str]:
     try:
         credentials, project_id = get_credentials()
@@ -389,8 +387,6 @@ def insert_salesman_record(salesman_data: dict) -> tuple[bool, str]:
         row = {**salesman_data, "uploaded_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}
         bq_df = pd.DataFrame([row])
 
-        # Convert date string columns to proper UTC-aware timestamps so BigQuery
-        # doesn't reject them when the existing column type is TIMESTAMP.
         for col in ["tanggal_lahir", "tanggal_join_g2g"]:
             if col in bq_df.columns:
                 bq_df[col] = pd.to_datetime(bq_df[col], errors="coerce").dt.tz_localize("UTC")
@@ -400,8 +396,6 @@ def insert_salesman_record(salesman_data: dict) -> tuple[bool, str]:
         return True, ""
     except Exception as e:
         return False, str(e)
-
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def insert_mapping_record(salesman_id: str, distributor_code: str,
@@ -440,13 +434,13 @@ def update_salesman_record(nama_salesman: str, updated_fields: dict) -> tuple[bo
             "total_outlet_coverage_pjp": "INT64",
             "gaji_pokok":                "INT64",
             "tunjangan_dan_insentif":    "INT64",
-            "tanggal_lahir":             "DATE",    # FIX: was "STRING"
+            "tanggal_lahir":             "DATE",
             "jenis_kelamin":             "STRING",
             "pendidikan_terakhir":       "STRING",
             "pengalaman_bulan":          "INT64",
             "principal_lain":            "STRING",
             "no_hp":                     "STRING",
-            "tanggal_join_g2g":          "DATE",    # FIX: was "STRING"
+            "tanggal_join_g2g":          "DATE",
         }
 
         set_clauses = []
@@ -456,7 +450,19 @@ def update_salesman_record(nama_salesman: str, updated_fields: dict) -> tuple[bo
             if field not in allowed:
                 continue
             param_name = f"p_{field}"
-            bq_type = allowed[field]
+            bq_type    = allowed[field]
+
+            # ── Normalise DATE values to plain "YYYY-MM-DD" strings ──────────
+            # Regardless of whether the caller passes a date object, datetime,
+            # timezone-aware datetime, or an already-formatted string, we
+            # always reduce it to the 10-character form BigQuery DATE expects.
+            if bq_type == "DATE" and value is not None:
+                try:
+                    value = pd.to_datetime(value).strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            # ─────────────────────────────────────────────────────────────────
+
             set_clauses.append(f"{field} = @{param_name}")
             params.append(bigquery.ScalarQueryParameter(param_name, bq_type, value))
 
@@ -1174,7 +1180,6 @@ def _build_salesman_data(fields, dist_df, selected_dist_code, selected_dist_name
         "total_outlet_coverage_pjp": int(fields["outlet_cov"]),
         "gaji_pokok":                float(fields["gaji"]),
         "tunjangan_dan_insentif":    float(fields["tunjangan"]),
-        # FIX: pass date objects directly; insert_salesman_record handles UTC conversion
         "tanggal_lahir":             fields["tgl_lahir"],
         "jenis_kelamin":             fields["gender"],
         "pendidikan_terakhir":       fields["pendidikan"],
@@ -1261,7 +1266,6 @@ if _prev is not None and _prev != selected_dist_code:
     st.session_state.pop("salesman_df", None)
     st.session_state.pop("_cached_dist", None)
 st.session_state["_prev_dist_code"] = selected_dist_code
-# ──────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.success(f"**{selected_dist_name}**\n\n`{selected_dist_code}`")
@@ -1475,13 +1479,14 @@ if PAGES[selected_page] == "salesman":
                                 "total_outlet_coverage_pjp": int(e_outlet),
                                 "gaji_pokok":                float(e_gaji),
                                 "tunjangan_dan_insentif":    float(e_tunj),
-                                # FIX: pass date objects as strings in YYYY-MM-DD for DATE type params
-                                "tanggal_lahir":             str(e_lahir),
+                                # Pass plain date objects — update_salesman_record
+                                # normalises them to "YYYY-MM-DD" strings internally.
+                                "tanggal_lahir":             e_lahir,
                                 "jenis_kelamin":             e_gender,
                                 "pendidikan_terakhir":       e_pendidikan,
                                 "pengalaman_bulan":          int(e_exp),
                                 "principal_lain":            e_principal.strip() if e_principal.strip() else None,
-                                "tanggal_join_g2g":          str(e_join),
+                                "tanggal_join_g2g":          e_join,
                             }
 
                             with st.spinner("Menyimpan perubahan..."):
@@ -1730,7 +1735,7 @@ elif PAGES[selected_page] == "pjp_template":
             )
             scope_dist_code = selected_dist_code
 
-        else:  # Salesman tertentu
+        else:
             st.markdown("Pilih salesman yang PJP-nya ingin diperbarui:")
 
             sal_list_df = st.session_state.get("salesman_df", pd.DataFrame())
