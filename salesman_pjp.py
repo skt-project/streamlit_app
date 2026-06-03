@@ -1640,8 +1640,8 @@ if PAGES[selected_page] == "salesman":
                         else:
                             st.success(f"✅ Salesman baru berhasil ditambahkan!\n\n**ID Salesman: `{salesman_id_new}`**")
                             st.session_state.show_add_form = False
-                                for key in ["add_bottom_status", "add_bottom_nama", "add_bottom_hp"]:
-                                    st.session_state.pop(key, None)   
+                            for key in ["add_bottom_status", "add_bottom_nama", "add_bottom_hp"]:
+                                st.session_state.pop(key, None)   
                             st.cache_data.clear()
                             st.session_state.pop("salesman_df", None)
                             st.session_state.pop("_cached_dist", None)
