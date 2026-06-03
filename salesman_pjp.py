@@ -1131,7 +1131,11 @@ def _render_salesman_form_fields(key_prefix: str):
         gaji       = st.number_input("Gaji Pokok (Rp) *", min_value=0, step=1000, key=f"{key_prefix}_gaji")
         tunjangan  = st.number_input("Tunjangan dan Insentif (Rp) *", min_value=0, step=1000, key=f"{key_prefix}_tunj")
     with c2:
-        tgl_lahir  = st.date_input("Tanggal Lahir *", key=f"{key_prefix}_lahir")
+        tgl_lahir = st.date_input(
+            "Tanggal Lahir *",
+            min_value=datetime(1945, 1, 1).date(),
+            key=f"{key_prefix}_lahir"
+        )
         gender     = st.selectbox("Jenis Kelamin *", GENDER_OPTIONS, key=f"{key_prefix}_gender")
         pendidikan = st.selectbox("Pendidikan Terakhir *", EDUCATION_OPTIONS, key=f"{key_prefix}_pendidikan")
         pengalaman = st.number_input("Pengalaman Sebelumnya (bulan) *", min_value=0, step=1, key=f"{key_prefix}_exp")
@@ -1427,7 +1431,12 @@ if PAGES[selected_page] == "salesman":
                             e_gaji    = st.number_input("Gaji Pokok (Rp) *",           min_value=0, step=1000, value=int(_n("gaji_pokok")),                 key=f"e_gaji_{sal_id}")
                             e_tunj    = st.number_input("Tunjangan dan Insentif (Rp) *",min_value=0, step=1000,value=int(_n("tunjangan_dan_insentif")),       key=f"e_tunj_{sal_id}")
                         with ec2:
-                            e_lahir   = st.date_input("Tanggal Lahir *",        value=_d("tanggal_lahir"),    key=f"e_lahir_{sal_id}")
+                            e_lahir = st.date_input(
+                                "Tanggal Lahir *",
+                                value=_d("tanggal_lahir"),
+                                min_value=datetime(1950, 1, 1).date(),
+                                key=f"e_lahir_{sal_id}"
+                            )
                             e_gender  = st.selectbox(
                                 "Jenis Kelamin *", GENDER_OPTIONS,
                                 index=GENDER_OPTIONS.index(_s("jenis_kelamin")) if _s("jenis_kelamin") in GENDER_OPTIONS else 0,
