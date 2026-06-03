@@ -434,13 +434,13 @@ def update_salesman_record(nama_salesman: str, updated_fields: dict) -> tuple[bo
             "total_outlet_coverage_pjp": "INT64",
             "gaji_pokok":                "INT64",
             "tunjangan_dan_insentif":    "INT64",
-            "tanggal_lahir":             "DATE",
+            "tanggal_lahir":             "TIMESTAMP",
             "jenis_kelamin":             "STRING",
             "pendidikan_terakhir":       "STRING",
             "pengalaman_bulan":          "INT64",
             "principal_lain":            "STRING",
             "no_hp":                     "STRING",
-            "tanggal_join_g2g":          "DATE",
+            "tanggal_join_g2g":          "TIMESTAMP",
         }
 
         set_clauses = []
@@ -452,16 +452,12 @@ def update_salesman_record(nama_salesman: str, updated_fields: dict) -> tuple[bo
             param_name = f"p_{field}"
             bq_type    = allowed[field]
 
-            # ── Normalise DATE values to plain "YYYY-MM-DD" strings ──────────
-            # Regardless of whether the caller passes a date object, datetime,
-            # timezone-aware datetime, or an already-formatted string, we
-            # always reduce it to the 10-character form BigQuery DATE expects.
-            if bq_type == "DATE" and value is not None:
+            # Normalise TIMESTAMP values to "YYYY-MM-DDTHH:MM:SS" (no tz suffix)
+            if bq_type == "TIMESTAMP" and value is not None:
                 try:
-                    value = pd.to_datetime(value).strftime("%Y-%m-%d")
+                    value = pd.to_datetime(value).strftime("%Y-%m-%dT00:00:00")
                 except Exception:
                     pass
-            # ─────────────────────────────────────────────────────────────────
 
             set_clauses.append(f"{field} = @{param_name}")
             params.append(bigquery.ScalarQueryParameter(param_name, bq_type, value))
