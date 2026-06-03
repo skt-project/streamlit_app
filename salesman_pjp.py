@@ -1476,12 +1476,12 @@ if PAGES[selected_page] == "salesman":
                                 "gaji_pokok":                float(e_gaji),
                                 "tunjangan_dan_insentif":    float(e_tunj),
                                 # FIX: pass date objects as strings in YYYY-MM-DD for DATE type params
-                                "tanggal_lahir":             str(e_lahir),
+                                "tanggal_lahir":               pd.Timestamp(str(e_lahir)).tz_localize("UTC").strftime("%Y-%m-%d %H:%M:%S%z"),
                                 "jenis_kelamin":             e_gender,
                                 "pendidikan_terakhir":       e_pendidikan,
                                 "pengalaman_bulan":          int(e_exp),
                                 "principal_lain":            e_principal.strip() if e_principal.strip() else None,
-                                "tanggal_join_g2g":          str(e_join),
+                                "tanggal_join_g2g":          pd.Timestamp(str(e_join)).tz_localize("UTC").strftime("%Y-%m-%d %H:%M:%S%z"),
                             }
 
                             with st.spinner("Menyimpan perubahan..."):
