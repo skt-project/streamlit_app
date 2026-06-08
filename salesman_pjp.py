@@ -127,16 +127,16 @@ DISTRIBUTOR_PASSWORDS = {
     "DST330": "c66e5dda",
     "DST331": "2e1a0b81",
     "DST336": "b74ce041",
-    "DST205": "c937e2c7",
-    "DST206": "9eab97d2",
-    "DST207": "1426bbbd",
-    "DST208": "2094cfe8",
-    "DST209": "62a19cf1",
-    "DST210": "75b49aa5",
-    "DST211": "2eb7f316",
-    "DST212": "7303ada8",
-    "DST213": "f3e22d41",
-    "DST214": "0d2d6510"
+    "DST337": "c937e2c7",
+    "DST338": "9eab97d2",
+    "DST339": "1426bbbd",
+    "DST340": "2094cfe8",
+    "DST341": "62a19cf1",
+    "DST342": "75b49aa5",
+    "DST343": "2eb7f316",
+    "DST344": "7303ada8",
+    "DST345": "f3e22d41",
+    "DST346": "0d2d6510"
 }
 
 def _get_password_for_distributor(dist_code: str) -> str | None:
