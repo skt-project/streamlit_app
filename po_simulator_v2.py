@@ -230,9 +230,8 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
     FROM `{table_id}`
 
     WHERE 
-    sku = 'G2G-344'
     --sku IN ({sku_list_str})
-    AND calendar_date = '2026-06-01' 
+    calendar_date = '2026-06-01' 
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
@@ -460,8 +459,9 @@ def get_npd_data(sku_list: List[str]) -> pd.DataFrame:
         sku
     FROM `{table_id}`
 
-    WHERE sku IN ({sku_list_str})
-    AND calendar_date = '2026-04-01'
+    WHERE 
+    --sku IN ({sku_list_str})AND 
+    calendar_date = '2026-06-01'
     """
     try:
         df_sku_data = client.query(query).to_dataframe()
