@@ -287,6 +287,15 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
         query = f"""
+            WITH ranked_salesman AS (
+                SELECT
+                    *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY UPPER(TRIM(nama_salesman))
+                        ORDER BY uploaded_at DESC
+                    ) AS rn
+                FROM `{SALESMAN_TABLE}`
+            )
             SELECT
                 m.salesman_id,
                 m.salesman_type,
@@ -301,8 +310,9 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
                 s.region,
                 s.asm
             FROM `{MAPPING_TABLE}` m
-            LEFT JOIN `{SALESMAN_TABLE}` s
+            LEFT JOIN ranked_salesman s
                 ON UPPER(TRIM(m.salesman)) = UPPER(TRIM(s.nama_salesman))
+                AND s.rn = 1
             WHERE UPPER(m.distributor_code) = UPPER(@kode)
             ORDER BY m.salesman_id, m.created_at DESC
         """
