@@ -1602,7 +1602,7 @@ if st.session_state.get('page') == 'po_spv':
                         st.warning(
                             "Could not find stock and sales data for the uploaded Distributor/SKUs in BigQuery. Please check the Distributor Name or SKU codes."
                         )
-                        return
+                        st.stop()
 
                     # Rename stock data columns
                     if "sku" in sku_data_df.columns:
