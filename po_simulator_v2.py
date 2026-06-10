@@ -1765,7 +1765,7 @@ if st.session_state.get('page') == 'po_spv':
 
                     choices = [
                         "Reject (SKU Not Found in System)",
-                        f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",
+                        f"Reject (Exceeds Qty Limit of {___MAX_QTY_LIMIT})",
                         "Reject (Negative Allocation)",
                         "Additional Suggestion",
                         "Reject (Stop by Steve - Need approval email)",
