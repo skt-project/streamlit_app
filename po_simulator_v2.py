@@ -823,7 +823,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                 (res_df["Customer SKU Code"].isin(limited_skus_qty) & (bp_s > __MAX_QTY_LIMIT)) |
                 (bp_s == 0))
         if rejected_skus_1:
-            reg_up = [r.upper() for r in _REGION_LIST_1]
+            reg_up = [r.upper() for r in __REGION_LIST_1]
             reg_s = res_df.get("region", pd.Series([""]*len(res_df), index=res_df.index))
             excl = excl | (res_df["Customer SKU Code"].isin(rejected_skus_1) & ~reg_s.str.upper().isin(reg_up))
         res_df = res_df[~(sugg_mask & excl)].copy()
@@ -880,9 +880,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             "remaining_allocation_qty_region":"Remaining Allocation (By Region)",
         })
         if rejected_skus_1:
-            res_df = apply_sku_rejection_rules(rejected_skus_1, res_df, _REGION_LIST_1, is_in=False)
-        if _REJECTED_SKUS_2:
-            res_df = apply_sku_rejection_rules(_REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
+            res_df = apply_sku_rejection_rules(rejected_skus_1, res_df, __REGION_LIST_1, is_in=False)
+        if __REJECTED_SKUS_2:
+            res_df = apply_sku_rejection_rules(__REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
 
         res_df["RSA Notes"] = ""
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
@@ -1802,17 +1802,17 @@ if st.session_state.get('page') == 'po_spv':
 
                     if _REJECTED_SKUS_1:
                         result_df = apply_sku_rejection_rules(
-                            _REJECTED_SKUS_1,
+                            __REJECTED_SKUS_1,
                             result_df,
-                            _REGION_LIST_1,
+                            __REGION_LIST_1,
                             is_in=False
                         )
 
-                    if _REJECTED_SKUS_2:
+                    if __REJECTED_SKUS_2:
                         result_df = apply_sku_rejection_rules(
-                            _REJECTED_SKUS_2,
+                            __REJECTED_SKUS_2,
                             result_df,
-                            REGION_LIST_2,
+                            _REGION_LIST_2,
                             is_in=False
                         )
 
