@@ -1532,7 +1532,7 @@ if st.session_state.get('page') == 'po_spv':
                 if not all(col in po_df.columns for col in required_cols):
                     st.error("The uploaded file is missing one or more required columns.")
                     st.write("Please check for these columns:", required_cols)
-                    return
+                    st.stop()
 
                 po_df["QTY"] = pd.to_numeric(po_df["QTY"], errors="coerce")
                 po_df.dropna(subset=["QTY"], inplace=True)
