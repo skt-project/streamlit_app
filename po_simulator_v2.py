@@ -695,11 +695,14 @@ with st.sidebar:
 
     st.markdown("<div style='padding:0 .4rem .3rem;text-align:center;font-size:1rem;font-weight:700;letter-spacing:2.5px;color:rgba(255,255,255,.35);text-transform:uppercase;'>MENU</div>", unsafe_allow_html=True)
 
-    if st.button("Request PO (For SPV)", use_container_width=True, key="nav_spv"):
+    if st.button("▶ Request PO - SPV", use_container_width=True, key="nav_spv"):
         st.session_state['page'] = 'spv'; st.rerun()
-    if st.button("PO Simulator (For SPV)", use_container_width=True, key="nav_po_spv"):
+    if st.button("▶ PO Simulator - SPV", use_container_width=True, key="nav_po_spv"):
         st.session_state['page'] = 'po_spv'; st.rerun()
-    if st.button("PO Simulator (For RSA)", use_container_width=True, key="nav_po"):
+
+    st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
+    st.divider()
+    if st.button("🌐 PO Simulator - RSA", use_container_width=True, key="nav_po"):
         st.session_state['page'] = 'po_changer'; st.rerun()
 
     # Shared constants used in PO simulation pages
@@ -713,7 +716,7 @@ with st.sidebar:
     __REJECTED_SKUS_2 = []
     _REGION_LIST_2 = []
 
-    st.markdown("<div style='height:200px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
     st.divider()
 
     if st.button("Logout", key="logout_btn", use_container_width=True):
