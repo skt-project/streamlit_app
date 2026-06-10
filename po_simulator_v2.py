@@ -1802,7 +1802,7 @@ if st.session_state.get('page') == 'po_spv':
 
                     if _REJECTED_SKUS_1:
                         result_df = apply_sku_rejection_rules(
-                            __REJECTED_SKUS_1,
+                            _REJECTED_SKUS_1,
                             result_df,
                             __REGION_LIST_1,
                             is_in=False
