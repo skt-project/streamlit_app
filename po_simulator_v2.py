@@ -707,10 +707,10 @@ with st.sidebar:
     _MANUAL_REJECT_NO_TOL = ["G2G-2721","G2G-224","G2G-226","G2G-228","G2G-74"]
     _MANUAL_REJECT_ALL = _MANUAL_REJECT_APPROVAL + _MANUAL_REJECT_NO_TOL
     _LIMITED_SKUS_QTY = []
-    _MAX_QTY_LIMIT = 500
+    ___MAX_QTY_LIMIT = 500
     _REJECTED_SKUS_1 = ["G2G-29700","G2G-27300"]
-    _REGION_LIST_1 = ["Central Sumatera","Northern Sumatera","Jakarta (Csa)","West Kalimantan","South Kalimantan","East Kalimantan"]
-    _REJECTED_SKUS_2 = []
+    __REGION_LIST_1 = ["Central Sumatera","Northern Sumatera","Jakarta (Csa)","West Kalimantan","South Kalimantan","East Kalimantan"]
+    __REJECTED_SKUS_2 = []
     _REGION_LIST_2 = []
 
     st.markdown("<div style='height:200px;'></div>", unsafe_allow_html=True)
@@ -728,9 +728,9 @@ with st.sidebar:
 
 def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                        manual_reject_approval, manual_reject_no_tol,
-                       rejected_skus_1, region_list_1,
-                       rejected_skus_2, region_list_2,
-                       limited_skus_qty, max_qty_limit):
+                       rejected_skus_1, _region_list_1,
+                       _rejected_skus_2, region_list_2,
+                       limited_skus_qty, __MAX_QTY_LIMIT):
     manual_reject_all = manual_reject_approval + manual_reject_no_tol
     sim_df[qty_col] = pd.to_numeric(sim_df[qty_col], errors="coerce")
     sim_df = sim_df.dropna(subset=[qty_col])
@@ -820,10 +820,10 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                 res_df["Customer SKU Code"].isin(manual_reject_all) |
                 (ra_s < 0) |
                 sc_s.str.upper().isin(["STOP PO","DISCONTINUEDD","OOS","UNAVAILABLE"]) |
-                (res_df["Customer SKU Code"].isin(limited_skus_qty) & (bp_s > max_qty_limit)) |
+                (res_df["Customer SKU Code"].isin(limited_skus_qty) & (bp_s > __MAX_QTY_LIMIT)) |
                 (bp_s == 0))
         if rejected_skus_1:
-            reg_up = [r.upper() for r in region_list_1]
+            reg_up = [r.upper() for r in _REGION_LIST_1]
             reg_s = res_df.get("region", pd.Series([""]*len(res_df), index=res_df.index))
             excl = excl | (res_df["Customer SKU Code"].isin(rejected_skus_1) & ~reg_s.str.upper().isin(reg_up))
         res_df = res_df[~(sugg_mask & excl)].copy()
@@ -843,7 +843,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         conds = [
             res_df["Customer SKU Code"].isin(zero_price_skus),
             res_df["Customer SKU Code"].isin(skus_not_found),
-            res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > max_qty_limit),
+            res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT),
             ra2 < 0,
             res_df["is_po_sku"] == False,
             res_df["Customer SKU Code"].isin(manual_reject_approval),
@@ -858,7 +858,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         choices = [
             "Price Not Available Yet",
             "Reject (SKU Not Found in System)",
-            f"Reject (Exceeds Qty Limit of {max_qty_limit})",
+            f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",
             "Reject (Negative Allocation)",
             "Additional Suggestion",
             "Reject (Stop by Steve - Need approval email)",
@@ -880,9 +880,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             "remaining_allocation_qty_region":"Remaining Allocation (By Region)",
         })
         if rejected_skus_1:
-            res_df = apply_sku_rejection_rules(rejected_skus_1, res_df, region_list_1, is_in=False)
-        if rejected_skus_2:
-            res_df = apply_sku_rejection_rules(rejected_skus_2, res_df, region_list_2, is_in=False)
+            res_df = apply_sku_rejection_rules(rejected_skus_1, res_df, _REGION_LIST_1, is_in=False)
+        if _REJECTED_SKUS_2:
+            res_df = apply_sku_rejection_rules(_REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
 
         res_df["RSA Notes"] = ""
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
@@ -1422,9 +1422,9 @@ if st.session_state.get('page') == 'po_changer':
                 excel_dfs, all_npd = _run_po_simulation(
                     sim_df.copy(), sku_col_sim, qty_col_sim, dist_col_sim,
                     _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
-                    _REJECTED_SKUS_1, _REGION_LIST_1,
-                    _REJECTED_SKUS_2, _REGION_LIST_2,
-                    _LIMITED_SKUS_QTY, _MAX_QTY_LIMIT,
+                    _REJECTED_SKUS_1, __REGION_LIST_1,
+                    __REJECTED_SKUS_2, _REGION_LIST_2,
+                    _LIMITED_SKUS_QTY, ___MAX_QTY_LIMIT,
                 )
                 st.session_state["sim_result_rsa"] = {"dfs": excel_dfs, "npd": all_npd}
                 st.rerun()
@@ -1496,7 +1496,7 @@ if st.session_state.get('page') == 'po_spv':
             st.header("Regional Rejection Rules")
             with st.expander("🌍 SKU dengan Pembatasan Regional"):
                 st.markdown(f"**SKU: {', '.join(_REJECTED_SKUS_1)}**\n\nHanya diizinkan di region berikut:")
-                for r in _REGION_LIST_1:
+                for r in __REGION_LIST_1:
                     st.markdown(f"- {r}")
                 st.markdown("**Region lain akan otomatis di-reject.**")
 
@@ -1701,21 +1701,21 @@ if st.session_state.get('page') == 'po_spv':
 
                     exclude_suggested = (
                         (result_df["Customer SKU Code"].isin(skus_not_in_bq)) |
-                        (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_APPROVAL)) |
-                        (result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_NO_TOLERANCE)) |
+                        (result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL)) |
+                        (result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) |
                         (result_df["remaining_allocation_qty_region"] < 0) |
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) |
                         (
-                            (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) &
-                            (result_df["buffer_plan_by_lm_qty_adj"] > MAX_QTY_LIMIT)
+                            (result_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY)) &
+                            (result_df["buffer_plan_by_lm_qty_adj"] > ___MAX_QTY_LIMIT)
                         ) |
                         (result_df["buffer_plan_by_lm_qty_adj"] == 0)
                     )
 
-                    if REJECTED_SKUS_1:
-                        regions_upper_1 = [r.upper() for r in REGION_LIST_1]
+                    if _REJECTED_SKUS_1:
+                        regions_upper_1 = [r.upper() for r in _REJECTED_SKUS_1]
                         regional_reject_1 = (
-                            (result_df["Customer SKU Code"].isin(REJECTED_SKUS_1)) &
+                            (result_df["Customer SKU Code"].isin(_REJECTED_SKUS_1)) &
                             (~result_df["region"].str.upper().isin(regions_upper_1))
                         )
                         exclude_suggested = exclude_suggested | regional_reject_1
@@ -1745,11 +1745,11 @@ if st.session_state.get('page') == 'po_spv':
 
                     conditions = [
                         result_df["Customer SKU Code"].isin(skus_not_in_bq),
-                        (result_df["Customer SKU Code"].isin(LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > MAX_QTY_LIMIT),
+                        (result_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > ___MAX_QTY_LIMIT),
                         (result_df["remaining_allocation_qty_region"] < 0),
                         (result_df["is_po_sku"] == False),
-                        result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_APPROVAL),
-                        result_df["Customer SKU Code"].isin(MANUAL_REJECT_SKUS_NO_TOLERANCE),
+                        result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
+                        result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
@@ -1765,7 +1765,7 @@ if st.session_state.get('page') == 'po_spv':
 
                     choices = [
                         "Reject (SKU Not Found in System)",
-                        f"Reject (Exceeds Qty Limit of {MAX_QTY_LIMIT})",
+                        f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",
                         "Reject (Negative Allocation)",
                         "Additional Suggestion",
                         "Reject (Stop by Steve - Need approval email)",
@@ -1800,17 +1800,17 @@ if st.session_state.get('page') == 'po_spv':
 
                     result_df.rename(columns=new_column_names, inplace=True)
 
-                    if REJECTED_SKUS_1:
+                    if _REJECTED_SKUS_1:
                         result_df = apply_sku_rejection_rules(
-                            REJECTED_SKUS_1,
+                            _REJECTED_SKUS_1,
                             result_df,
-                            REGION_LIST_1,
+                            _REGION_LIST_1,
                             is_in=False
                         )
 
-                    if REJECTED_SKUS_2:
+                    if _REJECTED_SKUS_2:
                         result_df = apply_sku_rejection_rules(
-                            REJECTED_SKUS_2,
+                            _REJECTED_SKUS_2,
                             result_df,
                             REGION_LIST_2,
                             is_in=False
