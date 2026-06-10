@@ -636,8 +636,8 @@ def check_password():
     return False
 
 
-if not check_password():
-    st.stop()
+#if not check_password():
+#    st.stop()
 
 
 # ─── CSS ──────────────────────────────────────────────────────────────────────
@@ -653,6 +653,8 @@ h1,h2,h3,h4,h5,h6{color:#FFFFFF!important;}
 [data-testid="stSidebar"] [data-baseweb="select"]>div{background:rgba(255,255,255,.1)!important;border:1px solid rgba(255,255,255,.2)!important;color:#FFFFFF!important;}
 [data-testid="stMain"] input,[data-testid="stMain"] textarea{color:#FFFFFF!important;background:rgba(255,255,255,.15)!important;border:1.5px solid rgba(255,255,255,.35)!important;border-radius:10px!important;}
 [data-testid="stMain"] .stSelectbox>div>div{color:#FFFFFF!important;background:rgba(255,255,255,.15)!important;border:1.5px solid rgba(255,255,255,.35)!important;border-radius:10px!important;}
+[data-testid="stSidebar"] [data-testid="stButton-nav_po"] button {background: #FF89AA !important;  /* PO Simulator - RSA */
+}
 [data-testid="stMain"] [data-baseweb="select"] span,[data-testid="stMain"] [data-baseweb="select"] div{color:#FFFFFF!important;}
 .hero-wrap{padding:.5rem 0 1.5rem;} .hero-tag{display:inline-block;background:rgba(168,77,106,.6);color:#FFFFFF!important;font-size:.72rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:.25rem .8rem;border-radius:20px;border:1px solid rgba(255,255,255,.25);margin-bottom:.75rem;}
 .hero-title{font-size:2rem;font-weight:700;color:#FFFFFF!important;margin-bottom:.5rem;}
@@ -703,7 +705,9 @@ with st.sidebar:
     st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
     st.divider()
     if st.button("🌐 PO Simulator - RSA", use_container_width=True, key="nav_po"):
-        st.session_state['page'] = 'po_changer'; st.rerun()
+        st.session_state['page'] = 'po_changer_login'
+        st.session_state.pop('rsa_authenticated', None)
+        st.rerun()
 
     # Shared constants used in PO simulation pages
     _MANUAL_REJECT_APPROVAL = ["G2G-840","G2G-844","G2G-841","G2G-800","G2G-213","G2G-217","G2G-30701","G2G-30702","G2G-30703","G2G-30704","G2G-243"]
@@ -721,6 +725,7 @@ with st.sidebar:
 
     if st.button("Logout", key="logout_btn", use_container_width=True):
         st.session_state["authenticated"] = False
+        st.session_state.pop('rsa_authenticated', None)
         for k in ("raw_df","data_source","source_type"):
             st.session_state.pop(k, None)
         st.rerun()
@@ -1402,7 +1407,42 @@ def _modify_qty_section(raw_entries, page_key: str):
                     use_container_width=True, key=f"tpl_dl_{page_key}_{fi}",
                 )
 
+# === HALAMAN BARU: Login RSA ===
+if st.session_state.get('page') == 'po_changer_login':
+    st.markdown("""<div class="hero-wrap">
+        <div class="hero-tag">✦ PO Management</div>
+        <div class="hero-title">PO Simulator - RSA</div></div>""", unsafe_allow_html=True)
+    st.divider()
 
+    _, col, _ = st.columns([1, 1.5, 1])
+    with col:
+        st.markdown("""<div style="text-align:center;margin:1rem 0 1.5rem;">
+            <div style="font-size:1.2rem;font-weight:700;color:#6E253A;">🔒 Masukkan Password RSA</div>
+            <div style="color:#555;font-size:.85rem;margin-top:.3rem;">Fitur ini hanya untuk RSA</div>
+        </div>""", unsafe_allow_html=True)
+        with st.form("rsa_login_form"):
+            rsa_password = st.text_input("Password", type="password", placeholder="Masukkan password RSA...")
+            submitted = st.form_submit_button("Masuk", use_container_width=True)
+            if submitted:
+                if rsa_password == st.secrets["glowithyou"]:
+                    st.session_state['rsa_authenticated'] = True
+                    st.session_state['page'] = 'po_changer'
+                    st.rerun()
+                else:
+                    st.error("❌ Password salah.")
+    st.stop()
+
+# === HALAMAN po_changer: tambah guard di baris pertama ===
+if st.session_state.get('page') == 'po_changer':
+    if not st.session_state.get('rsa_authenticated'):  # <-- TAMBAHAN INI SAJA
+        st.session_state['page'] = 'po_changer_login'
+        st.rerun()
+
+    st.markdown("""<div class="hero-wrap">
+        <div class="hero-tag">✦ PO Management</div>
+        <div class="hero-title">PO Simulator</div></div>""", unsafe_allow_html=True)
+    st.divider()
+    # ... sisa kode tidak berubah ...
 # ─── Page: PO Simulator (For RSA) ────────────────────────────────────────────
 
 if st.session_state.get('page') == 'po_changer':
