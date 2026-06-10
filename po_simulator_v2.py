@@ -704,6 +704,12 @@ with st.sidebar:
 
     st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
     st.divider()
+    st.markdown("""<style>
+[data-testid="stSidebar"] [data-testid="stButton-nav_po"] button {
+    background: #6E6E6E !important;
+    border: 1px solid rgba(255,255,255,.2) !important;
+}
+</style>""", unsafe_allow_html=True)
     if st.button("🌐 PO Simulator - RSA", use_container_width=True, key="nav_po"):
         st.session_state['page'] = 'po_changer_login'
         st.session_state.pop('rsa_authenticated', None)
@@ -1409,11 +1415,6 @@ def _modify_qty_section(raw_entries, page_key: str):
 
 # === HALAMAN BARU: Login RSA ===
 if st.session_state.get('page') == 'po_changer_login':
-    st.markdown("""<div class="hero-wrap">
-        <div class="hero-tag">✦ PO Management</div>
-        <div class="hero-title">PO Simulator - RSA</div></div>""", unsafe_allow_html=True)
-    st.divider()
-
     _, col, _ = st.columns([1, 1.5, 1])
     with col:
         st.markdown("""<div style="text-align:center;margin:1rem 0 1.5rem;">
