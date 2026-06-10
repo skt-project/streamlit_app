@@ -471,10 +471,6 @@ def insert_mapping_record(
 def update_salesman_record(
     nama_salesman: str, distributor_code: str, updated_fields: dict
 ) -> tuple[bool, str]:
-    """
-    Update a salesman record identified by the composite key
-    (nama_salesman, kode_distributor) — prevents cross-distributor collisions.
-    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
@@ -509,12 +505,36 @@ def update_salesman_record(
             param_name = f"p_{field}"
             bq_type = allowed[field]
 
-            # Normalise TIMESTAMP values to "YYYY-MM-DDTHH:MM:SS" (no tz suffix)
-            if bq_type == "TIMESTAMP" and value is not None:
+            # ── Sanitize NaN / inf for numeric fields ──────────────────────
+            if bq_type == "INT64":
+                try:
+                    value = int(value) if value is not None and not (isinstance(value, float) and (pd.isna(value) or value != value)) else 0
+                except (TypeError, ValueError):
+                    value = 0
+
+            elif bq_type == "FLOAT64":
+                try:
+                    value = float(value) if value is not None and not (isinstance(value, float) and (pd.isna(value) or value != value)) else 0.0
+                except (TypeError, ValueError):
+                    value = 0.0
+
+            # ── Normalise TIMESTAMP values to "YYYY-MM-DDTHH:MM:SS" ────────
+            elif bq_type == "TIMESTAMP" and value is not None:
                 try:
                     value = pd.to_datetime(value).strftime("%Y-%m-%dT00:00:00")
                 except Exception:
                     pass
+
+            # ── Sanitize STRING NaN ────────────────────────────────────────
+            elif bq_type == "STRING":
+                if value is None:
+                    pass  # keep None → NULL in BQ
+                else:
+                    try:
+                        if pd.isna(value):
+                            value = None
+                    except (TypeError, ValueError):
+                        pass
 
             set_clauses.append(f"{field} = @{param_name}")
             params.append(bigquery.ScalarQueryParameter(param_name, bq_type, value))
