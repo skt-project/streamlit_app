@@ -1427,31 +1427,112 @@ if st.session_state.get('page') == 'po_spv':
         <div class="hero-title">PO Simulator (SPV)</div></div>""", unsafe_allow_html=True)
     st.divider()
 
-    raw_entries, folder_res = _file_upload_section("spv_sim")
+    tab1, tab2 = st.tabs(["📖 How to Use", "📂 Upload & Simulate"])
 
-    if folder_res is not None:
-        sim_df = folder_res["df"].copy()
-        sku_col_sim = next((c for c in sim_df.columns if c.upper() in ("SKU","PRODUCT CODE")), None)
-        qty_col_sim = next((c for c in sim_df.columns if c.upper() in ("QTY","QUANTITY")), None)
-        dist_col_sim = next((c for c in sim_df.columns if "DISTRIBUTOR" in c.upper()), None)
+    with tab1:
+        st.header("How to Use the PO Simulator")
+        with st.expander("📋 Step-by-Step Guide"):
+            st.markdown("""
+1. **Upload PO Data**: Upload file Excel atau CSV dengan kolom: `DISTRIBUTOR`, `PRODUCT CODE`, `DESCRIPTION`, `QTY`.
+2. **Review Rejection Lists**: Cek manual rejection SKUs dan regional rejection jika ada.
+3. **Simulate**: App akan fetch data stock & sales dari BigQuery, hitung WOI, dan apply approval/rejection rules.
+4. **View Results**: Review simulated data termasuk Remark (Proceed / Reject / Suggest).
+5. **Download Excel**: Pilih format output — Separate Sheets (per distributor) atau Single Sheet.
+""")
 
-        if sku_col_sim and qty_col_sim and dist_col_sim:
-            st.divider()
-            if st.session_state.get("sim_result_spv") is None:
-                excel_dfs, all_npd = _run_po_simulation(
-                    sim_df.copy(), sku_col_sim, qty_col_sim, dist_col_sim,
-                    _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
-                    _REJECTED_SKUS_1, _REGION_LIST_1,
-                    _REJECTED_SKUS_2, _REGION_LIST_2,
-                    _LIMITED_SKUS_QTY, _MAX_QTY_LIMIT,
+        st.header("Rules & Calculations Logic")
+        with st.expander("⚖️ Rules & Calculations Logic"):
+            st.markdown("""
+**Remark ditentukan berurutan:**
+
+1. **Reject** jika:
+   - SKU **tidak ditemukan** di sistem (BigQuery)
+   - Ada di **regional rejection list** (Stop by Steve), kecuali region diizinkan
+   - Ada di **manual rejection list**:
+     - *Need approval email*: G2G-840, G2G-844, G2G-841, G2G-800, dll
+     - *No tolerance to open*: G2G-2721, G2G-224, dll
+   - **Remaining Allocation < 0** (Negative Allocation)
+   - Supply Control = STOP PO / DISCONTINUED / OOS
+   - PO Qty **>** Suggested Qty → **Reject with Suggestion**
+
+2. **Proceed** jika:
+   - PO Qty **<** Suggested Qty → **Proceed with Suggestion**
+   - PO Qty **=** Suggested Qty → **Proceed**
+   - NPD dengan allocation > 0 dan PO Qty ≤ remaining allocation
+   - Tidak ada historical data, supply control bukan STOP/DISCONTINUED/OOS
+
+3. **Additional Suggestion**: SKU tidak ada di PO tapi disarankan sistem (auto-filtered jika akan di-reject)
+
+**WOI** = (Total Stock + PO/Suggested Qty) / Avg Weekly Sales LM
+""")
+
+        st.header("Manual Rejection SKUs")
+        with st.expander("🚫 SKU yang di-reject manual (Steve)"):
+            reject_data = [{"SKU": s, "Remark": "Need approval email"} for s in _MANUAL_REJECT_APPROVAL]
+            reject_data += [{"SKU": s, "Remark": "No tolerance to open"} for s in _MANUAL_REJECT_NO_TOL]
+            st.dataframe(pd.DataFrame(reject_data).sort_values("SKU").reset_index(drop=True),
+                         use_container_width=True, hide_index=True)
+
+        if _REJECTED_SKUS_1:
+            st.header("Regional Rejection Rules")
+            with st.expander("🌍 SKU dengan Pembatasan Regional"):
+                st.markdown(f"**SKU: {', '.join(_REJECTED_SKUS_1)}**\n\nHanya diizinkan di region berikut:")
+                for r in _REGION_LIST_1:
+                    st.markdown(f"- {r}")
+                st.markdown("**Region lain akan otomatis di-reject.**")
+
+    with tab2:
+        raw_entries, folder_res = _file_upload_section("spv_sim")
+
+        if folder_res is not None:
+            sim_df = folder_res["df"].copy()
+            sku_col_sim = next((c for c in sim_df.columns if c.upper() in ("SKU","PRODUCT CODE")), None)
+            qty_col_sim = next((c for c in sim_df.columns if c.upper() in ("QTY","QUANTITY")), None)
+            dist_col_sim = next((c for c in sim_df.columns if "DISTRIBUTOR" in c.upper()), None)
+
+            if sku_col_sim and qty_col_sim and dist_col_sim:
+                output_format = st.radio(
+                    "Format Output Excel:",
+                    ["Separate Sheets (per Distributor)", "Single Sheet (All Distributors)"],
+                    index=0, horizontal=True, key="spv_output_fmt",
                 )
-                st.session_state["sim_result_spv"] = {"dfs": excel_dfs, "npd": all_npd}
-                st.rerun()
+                st.divider()
 
-            sim_out = st.session_state.get("sim_result_spv")
-            if sim_out and sim_out["dfs"]:
-                st.success(f"Simulasi selesai — {len(sim_out['dfs'])} distributor")
-                _render_sim_results(sim_out["dfs"], sim_out["npd"], folder_res, sku_col_sim, qty_col_sim, dist_col_sim)
+                if st.session_state.get("sim_result_spv") is None:
+                    excel_dfs, all_npd = _run_po_simulation(
+                        sim_df.copy(), sku_col_sim, qty_col_sim, dist_col_sim,
+                        _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
+                        _REJECTED_SKUS_1, _REGION_LIST_1,
+                        _REJECTED_SKUS_2, _REGION_LIST_2,
+                        _LIMITED_SKUS_QTY, _MAX_QTY_LIMIT,
+                    )
+                    st.session_state["sim_result_spv"] = {"dfs": excel_dfs, "npd": all_npd}
+                    st.rerun()
+
+                sim_out = st.session_state.get("sim_result_spv")
+                if sim_out and sim_out["dfs"]:
+                    st.success(f"Simulasi selesai — {len(sim_out['dfs'])} distributor")
+
+                    # Output format: override download button in render
+                    e_dfs = sim_out["dfs"]; e_npd = sim_out["npd"]
+                    if output_format.startswith("Separate"):
+                        dl_data = to_excel_with_styling(e_dfs, e_npd)
+                        dl_fname = f"PO_Result_SeparateSheets_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                    else:
+                        final_all = pd.concat(e_dfs.values(), ignore_index=True)
+                        dl_data = to_excel_single_sheet(final_all, e_npd)
+                        dl_fname = f"PO_Result_SingleSheet_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+                    st.download_button(
+                        label=f"📥 Download PO Result ({output_format.split('(')[0].strip()}).xlsx",
+                        data=dl_data, file_name=dl_fname,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True, key="spv_dl_top",
+                    )
+
+                    _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim)
+            else:
+                st.warning("⚠️ Kolom SKU / QTY / DISTRIBUTOR tidak terdeteksi di file yang diupload.")
 
     st.stop()
 
