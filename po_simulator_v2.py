@@ -494,7 +494,7 @@ def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> p
     
     # Format list SKU Steve
     _MANUAL_REJECT_APPROVAL = [ "G2G-840", "G2G-844", "G2G-841", "G2G-800", "G2G-213", "G2G-217", "G2G-30701","G2G-30702", "G2G-30703", "G2G-30704", "G2G-243"]
-    _MANUAL_REJECT_NO_TOL = [
+    _MANUAL_REJECT_NO_TOL = [ "G2G-2721",
          "G2G-224",  "G2G-226",
         "G2G-228", "G2G-74"
         ]
@@ -2257,14 +2257,13 @@ if st.session_state.get('page') == 'po_changer':
     # PO SIMULATOR — BigQuery integration
     # ─────────────────────────────────────────────────────────────────────────
 
-    _MANUAL_REJECT_APPROVAL = ["G2G-252", "G2G-253"]
-    _MANUAL_REJECT_NO_TOL = [
-        "G2G-29705", "G2G-224", "G2G-247", "G2G-225", "G2G-226",
-        "G2G-228", "G2G-74", "G2G-186", "G2G-202", "G2G-840",
-        "G2G-844", "G2G-841", "G2G-800", "G2G-213", "G2G-217",
-        "G2G-27305", "G2G-30701", "G2G-30702", "G2G-30703", "G2G-30704",
-        "G2G-2721", "G2G-243"
-    ]
+    #_MANUAL_REJECT_APPROVAL = ["G2G-252", "G2G-253"]
+    #_MANUAL_REJECT_NO_TOL = ["G2G-29705", "G2G-224", "G2G-247", "G2G-225", "G2G-226","G2G-228", "G2G-74", "G2G-186", "G2G-202", "G2G-840", "G2G-844", "G2G-841", "G2G-800", "G2G-213", "G2G-217", "G2G-27305", "G2G-30701", "G2G-30702", "G2G-30703", "G2G-30704", "G2G-2721", "G2G-243"]
+    _MANUAL_REJECT_APPROVAL = [ "G2G-840", "G2G-844", "G2G-841", "G2G-800", "G2G-213", "G2G-217", "G2G-30701","G2G-30702", "G2G-30703", "G2G-30704", "G2G-243"]
+    _MANUAL_REJECT_NO_TOL = [ "G2G-2721",
+         "G2G-224",  "G2G-226",
+        "G2G-228", "G2G-74"
+        ]
     _MANUAL_REJECT_ALL   = _MANUAL_REJECT_APPROVAL + _MANUAL_REJECT_NO_TOL
     _LIMITED_SKUS_QTY    = []
     _MAX_QTY_LIMIT       = 500
