@@ -141,7 +141,7 @@ DISTRIBUTOR_PASSWORDS = {
 
 # ─── Input Period Deadline ─────────────────────────────────────────────────────
 # Ubah tanggal ini setiap bulan sesuai jadwal. Format: datetime(YYYY, MM, DD)
-INPUT_DEADLINE = datetime(2025, 06, 11).date()
+INPUT_DEADLINE = datetime(2025, 6, 11).date()
 
 
 def _get_password_for_distributor(dist_code: str) -> str | None:
