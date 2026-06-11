@@ -139,6 +139,10 @@ DISTRIBUTOR_PASSWORDS = {
     "DST346": "0d2d6510",
 }
 
+# ─── Input Period Deadline ─────────────────────────────────────────────────────
+# Ubah tanggal ini setiap bulan sesuai jadwal. Format: datetime(YYYY, MM, DD)
+INPUT_DEADLINE = datetime(2025, 6, 15).date()
+
 
 def _get_password_for_distributor(dist_code: str) -> str | None:
     return DISTRIBUTOR_PASSWORDS.get(str(dist_code).strip().upper())
@@ -299,11 +303,6 @@ SALESMAN_TYPES = ["GTI", "MIX", "MTI"]
 
 @st.cache_data(show_spinner=False)
 def get_salesman_list(distributor_code: str) -> pd.DataFrame:
-    """
-    Load salesman mapping joined to master salesman.
-    JOIN uses composite key: (nama_salesman, kode_distributor) to avoid
-    cross-distributor name collisions.
-    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
@@ -505,7 +504,6 @@ def update_salesman_record(
             param_name = f"p_{field}"
             bq_type = allowed[field]
 
-            # ── Sanitize NaN / inf for numeric fields ──────────────────────
             if bq_type == "INT64":
                 try:
                     value = int(value) if value is not None and not (isinstance(value, float) and (pd.isna(value) or value != value)) else 0
@@ -518,17 +516,15 @@ def update_salesman_record(
                 except (TypeError, ValueError):
                     value = 0.0
 
-            # ── Normalise TIMESTAMP values to "YYYY-MM-DDTHH:MM:SS" ────────
             elif bq_type == "TIMESTAMP" and value is not None:
                 try:
                     value = pd.to_datetime(value).strftime("%Y-%m-%dT00:00:00")
                 except Exception:
                     pass
 
-            # ── Sanitize STRING NaN ────────────────────────────────────────
             elif bq_type == "STRING":
                 if value is None:
-                    pass  # keep None → NULL in BQ
+                    pass
                 else:
                     try:
                         if pd.isna(value):
@@ -1451,6 +1447,36 @@ with st.sidebar:
 if not _render_password_gate(selected_dist_code, selected_dist_name):
     st.stop()
 
+# ─── PERIOD LOCK GATE ─────────────────────────────────────────────────────────
+
+_today = datetime.now().date()
+if _today > INPUT_DEADLINE:
+    st.markdown(
+        """
+        <div style='
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 5rem 2rem;
+            text-align: center;
+        '>
+            <div style='font-size: 4rem; line-height: 1; margin-bottom: 1.5rem;'>🔒</div>
+            <h2 style='margin: 0 0 0.75rem 0; font-size: 1.75rem; font-weight: 600;'>
+                Periode Input Sudah Ditutup
+            </h2>
+            <p style='color: #888; margin: 0 0 0.5rem 0; font-size: 1rem; max-width: 420px;'>
+                Batas akhir pengisian adalah <b>{deadline}</b>.
+            </p>
+            <p style='color: #aaa; margin: 0; font-size: 0.9rem;'>
+                Hubungi tim G2G jika ada pertanyaan.
+            </p>
+        </div>
+        """.format(deadline=INPUT_DEADLINE.strftime("%d %B %Y")),
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
 # ─── Load salesman data globally (shared across ALL pages) ────────────────────
 
 if (
@@ -1573,16 +1599,10 @@ if PAGES[selected_page] == "salesman":
 
                     cur_nama = row.get("nama_salesman", "") or ""
                     cur_hp = row.get("no_hp", "") or ""
-                    # distributor_code is available from the mapping row directly
                     cur_dist_code = row.get("distributor_code", selected_dist_code) or selected_dist_code
 
                     @st.cache_data(show_spinner=False)
                     def _fetch_salesman_detail(nama: str, dist_code: str) -> dict:
-                        """
-                        Fetch the latest salesman record by composite key
-                        (nama_salesman, kode_distributor) to avoid pulling
-                        records from a different distributor with the same name.
-                        """
                         try:
                             creds, proj = get_credentials()
                             c = bigquery.Client(credentials=creds, project=proj)
@@ -1603,7 +1623,6 @@ if PAGES[selected_page] == "salesman":
                         except Exception:
                             return {}
 
-                    # Pass both name AND distributor code for the composite lookup
                     detail = _fetch_salesman_detail(cur_nama, cur_dist_code)
 
                     def _s(key, fallback=""):
@@ -1757,8 +1776,6 @@ if PAGES[selected_page] == "salesman":
                                 "total_outlet_coverage_pjp": int(e_outlet),
                                 "gaji_pokok": float(e_gaji),
                                 "tunjangan_dan_insentif": float(e_tunj),
-                                # Pass plain date objects — update_salesman_record
-                                # normalises them to "YYYY-MM-DD" strings internally.
                                 "tanggal_lahir": e_lahir,
                                 "jenis_kelamin": e_gender,
                                 "pendidikan_terakhir": e_pendidikan,
@@ -1768,7 +1785,6 @@ if PAGES[selected_page] == "salesman":
                             }
 
                             with st.spinner("Menyimpan perubahan..."):
-                                # Pass distributor code as the second key
                                 ok_e, err_e = update_salesman_record(
                                     cur_nama, cur_dist_code, updated
                                 )
