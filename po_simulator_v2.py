@@ -715,7 +715,7 @@ with st.sidebar:
     _MANUAL_REJECT_ALL = _MANUAL_REJECT_APPROVAL + _MANUAL_REJECT_NO_TOL
     _LIMITED_SKUS_QTY = []
     ___MAX_QTY_LIMIT = 500
-    _REJECTED_SKUS_1 = ["G2G-29700","G2G-27300"]
+    _REJECTED_SKUS_1 = []
     __REGION_LIST_1 = ["Central Sumatera","Northern Sumatera","Jakarta (Csa)","West Kalimantan","South Kalimantan","East Kalimantan"]
     __REJECTED_SKUS_2 = []
     _REGION_LIST_2 = []
