@@ -913,6 +913,17 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
     prog.progress(1.0, "Selesai")
     return excel_dfs, all_npd
 
+PO_TEMPLATE_COLS = [
+    'Distributor','SKU','Product Name','Assortment','Supply Control',
+    'Avg Weekly Sales LM (Qty)','Total Stock (Qty)','Current WOI',
+    'PO Qty','PO Value','WOI (Stock + PO Ori)','Remark',
+    'Suggested PO Qty','Suggested PO Value',
+    'WOI After Buffer (Stock + Suggested Qty)',
+    'Stock + Suggested Qty WOI (Projection at EOM)',
+    'Remaining Allocation (By Region)','RSA Notes',
+]
+PO_IMG_COLS = [PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:14]
+PO_COLS_copy = PO_TEMPLATE_COLS[:13]
 
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim):
     final_disp = pd.concat(e_dfs.values(), ignore_index=True)
