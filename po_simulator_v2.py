@@ -259,34 +259,35 @@ LOGO_URL = _logo_src()
 
 @st.cache_data(show_spinner=False)
 def create_po_template_excel() -> bytes:
-    try:
-        return _fetch_template_bytes(TEMPLATE_PO_URL)
-    except Exception:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "PO Template"
-        hdr_fill = PatternFill(start_color="BF3979", end_color="BF3979", fill_type="solid")
-        hdr_font = Font(bold=True, color="FFFFFF")
-        for col_idx, col_name in enumerate(["DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY", "DPP"], 1):
-            cell = ws.cell(row=8, column=col_idx, value=col_name)
-            cell.fill = hdr_fill
-            cell.font = hdr_font
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
+    """
+    Creates a blank Excel template file with the required headers.
+    """
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PO Template"
 
-PO_TEMPLATE_COLS = [
-    'Distributor','SKU','Product Name','Assortment','Supply Control',
-    'Avg Weekly Sales LM (Qty)','Total Stock (Qty)','Current WOI',
-    'PO Qty','PO Value','WOI (Stock + PO Ori)','Remark',
-    'Suggested PO Qty','Suggested PO Value',
-    'WOI After Buffer (Stock + Suggested Qty)',
-    'Stock + Suggested Qty WOI (Projection at EOM)',
-    'Remaining Allocation (By Region)','RSA Notes',
-]
-PO_IMG_COLS = [PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:14]
-PO_COLS_copy = PO_TEMPLATE_COLS[:13]
+    ws["A2"] = "PUCHASE ORDER FORM"
+    ws["A3"] = "CUSTOMER NAME :"
+    ws["A4"] = "NPWP / ID CARD :"
+    ws["A5"] = "ADDRESS :"
+    ws["D3"] = "DATE :"
+    ws["D4"] = "Berlaku Sampai"
+    ws["D5"] = "Issued by"
 
+    ws["A2"].font = Font(bold=True, size=16)
+
+    headers = ["DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY", "DPP", "TOTAL PRICE"]
+
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=8, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+
+    ws.freeze_panes = "A9"
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
 
 def _sanitize_xlsx_bytes(xlsx_bytes: bytes) -> bytes:
     _src = io.BytesIO(xlsx_bytes)
