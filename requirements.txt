@@ -21,6 +21,4 @@ pytz
 matplotlib
 xutils
 Pillow
-xlwt
-reportlab
 pyarrow
