@@ -2,17 +2,34 @@ import streamlit as st
 import pandas as pd
 import uuid
 import io
+import base64
+from pathlib import Path
 from datetime import datetime
 from pendulum import now as pendulum_now
 from google.oauth2 import service_account
 from google.cloud import bigquery
 from openpyxl.worksheet.datavalidation import DataValidation
+from assessment_logic import (
+    VALUE_THRESHOLDS, normalize_username, value_to_grade, get_sla_grade,
+    bad_stock_grade_for_ytd, validate_allocation_row,
+)
 
 st.set_page_config(
     page_title="Distributor Operational Assessment",
     layout="wide",
     page_icon="📋"
 )
+
+def _load_logo_base64():
+    """Transparent-background SKINTIFIC wordmark, used on the login screen
+    instead of a lock emoji. Falls back to None (caller shows nothing) if the
+    asset is missing rather than crashing the page."""
+    logo_path = Path(__file__).parent / "assets" / "skintific_logo.png"
+    if not logo_path.exists():
+        return None
+    return base64.b64encode(logo_path.read_bytes()).decode()
+
+LOGO_B64 = _load_logo_base64()
 
 # =====================================================
 # SKINTIFIC BRAND CSS (BLUE) — unchanged from the verified mock
@@ -199,9 +216,8 @@ label[data-baseweb="radio"] > div:has(~ input:checked) {
     padding: 40px 44px;
     box-shadow: 0 4px 24px rgba(30, 107, 138, 0.12);
 }
-.login-logo  { text-align: center; font-size: 2.4rem; margin-bottom: 8px; }
-.login-title { text-align: center; font-size: 1.3rem; font-weight: 700; color: #14506A; margin-bottom: 4px; }
-.login-sub   { text-align: center; color: #6B7280; font-size: 0.85rem; margin-bottom: 28px; }
+.login-logo  { text-align: center; margin-bottom: 20px; }
+.login-logo img { max-width: 240px; width: 100%; height: auto; }
 .role-pill {
     display: inline-block;
     background: #EAF6FB;
@@ -249,12 +265,44 @@ def load_master_distributor():
     return df
 
 @st.cache_data(ttl=600)
+def get_distributors_for_supervisor(full_name, region):
+    """Distributors owned by this Area Sales Supervisor specifically — matched
+    on master_distributor.spv_skt / spv_tph against the logged-in user's
+    full_name, not just region. SELECT DISTINCT means a distributor where both
+    spv_skt and spv_tph equal this user still returns exactly one row (avoids
+    the duplicate-mapping case). Case-insensitive on full_name since it's a
+    free-typed display name that may not match spv_skt/spv_tph casing exactly.
+    NOTE: spv_skt/spv_tph column names are user-provided and not independently
+    verified against the live schema — confirm a real account resolves to the
+    expected distributor list after deploy."""
+    query = f"""
+        SELECT DISTINCT region, distributor, distributor_code
+        FROM `{PROJECT_ID}.{DATASET}.master_distributor`
+        WHERE status = 'Active'
+          AND region = @region
+          AND (UPPER(spv_skt) = UPPER(@full_name) OR UPPER(spv_tph) = UPPER(@full_name))
+        ORDER BY distributor
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("region", "STRING", region),
+        bigquery.ScalarQueryParameter("full_name", "STRING", full_name),
+    ])
+    df = bq_client.query(query, job_config=job_config).to_dataframe()
+    for col in ["region", "distributor", "distributor_code"]:
+        df[col] = df[col].astype(str).str.strip()
+    return df
+
+@st.cache_data(ttl=600)
 def get_ytd_sell_through(distributor_name, year):
+    # Brand filter restricts Bad Stock allowance to Skintific + Timephoria only.
+    # Column/value names are user-provided, not independently verified against
+    # live fact_sell_through_all rows — sanity-check after deploy.
     query = """
         SELECT SUM(value) AS ytd_value
         FROM `pbi_gt_dataset.fact_sell_through_all`
         WHERE distributor_name = @distributor_name
         AND EXTRACT(YEAR FROM calendar_date) = @selected_year
+        AND brand IN ('SKINTIFIC', 'TIMEPHORIA')
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("distributor_name", "STRING", distributor_name),
@@ -265,31 +313,16 @@ def get_ytd_sell_through(distributor_name, year):
         return 0
     return df["ytd_value"].iloc[0]
 
-def get_sla_grade(inner, outer):
-    if inner == "<80%" or outer == "<80%":      return "C", 0
-    elif inner == "99%-80%" or outer == "99%-80%": return "B", 4
-    else:                                          return "A", 8
-
 BAD_STOCK_Q = "BAD STOCK HANDLING PERFORMANCE"
 
 def compute_bad_stock_score(distributor_name, year):
-    """Compliance % = (Utilization / Allowance) * 100."""
-    ytd_val  = get_ytd_sell_through(distributor_name, year)
-    bs_allow = ytd_val * 0.005
+    """Fetches YTD sell-through (the only part that needs BigQuery), then
+    delegates the pure compliance-% -> grade math to bad_stock_grade_for_ytd
+    (assessment_logic.py) so that rule is unit-testable without a BQ connection."""
+    ytd_val = get_ytd_sell_through(distributor_name, year)
     utilization = st.session_state.get(f"util_{BAD_STOCK_Q}", 0)
-
-    if bs_allow > 0:
-        compliance_pct = min(100.0, (utilization / bs_allow) * 100)
-    else:
-        compliance_pct = 0.0
-
-    if compliance_pct >= 100:
-        grade = "A"
-    elif compliance_pct >= 80:
-        grade = "B"
-    else:
-        grade = "C"
-    return grade, ytd_val, bs_allow, utilization, compliance_pct
+    grade, bs_allow, utilization_out, compliance_pct = bad_stock_grade_for_ytd(ytd_val, utilization)
+    return grade, ytd_val, bs_allow, utilization_out, compliance_pct
 
 # =====================================================
 # QUESTIONS CONFIG — all 10 metrics, owned across 4 roles
@@ -412,34 +445,21 @@ ROLE_MAX = {role: sum(max(v[1] for v in questions[q].values()) for q in cfg["que
             for role, cfg in ROLES.items()}
 TOTAL_MAX_SCORE = sum(max(v[1] for v in g.values()) for g in questions.values())
 
-VALUE_THRESHOLDS = {
-    "ACCOUNT RECEIVABLE (AR) PERFORMANCE": 2,
-    "DATA REPORTING COMPLIANCE": 1,
-}
-
-def value_to_grade(metric_name, value):
-    """Banded rule: <=0 -> A (negative values clamped to the 0 rule), 1..threshold -> B, >threshold -> C."""
-    threshold = VALUE_THRESHOLDS[metric_name]
-    if value <= 0:
-        return "A"
-    elif value <= threshold:
-        return "B"
-    else:
-        return "C"
-
 # =====================================================
 # LOGIN — BigQuery-backed (skintific-data-warehouse.gt_schema.assessment_users)
 # =====================================================
 def check_login(username, password):
-    """Returns the user dict {username, full_name, role, region} if valid, else None."""
+    """Returns the user dict {username, full_name, role, region} if valid, else None.
+    Username comparison is case-insensitive on both sides (LOWER() on the stored
+    column too) so a legacy/mixed-case row still matches a lowercase login attempt."""
     query = f"""
         SELECT username, password, full_name, role, region
         FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
-        WHERE username = @username AND is_active = TRUE
+        WHERE LOWER(username) = @username AND is_active = TRUE
         LIMIT 1
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("username", "STRING", username.strip().lower()),
+        bigquery.ScalarQueryParameter("username", "STRING", normalize_username(username)),
     ])
     df = bq_client.query(query, job_config=job_config).to_dataframe()
     if df.empty:
@@ -453,6 +473,36 @@ def check_login(username, password):
         "role": str(row["role"]),
         "region": None if pd.isna(row["region"]) else str(row["region"]),
     }
+
+def verify_and_change_password(username, old_password, new_password):
+    """Available to every role. Verifies old_password against the stored value,
+    then updates it. Returns (True, None) on success or (False, error_message).
+    No audit-log hook here — this app has no audit logging system to feed."""
+    query = f"""
+        SELECT password FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        WHERE LOWER(username) = @username AND is_active = TRUE
+        LIMIT 1
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("username", "STRING", normalize_username(username)),
+    ])
+    df = bq_client.query(query, job_config=job_config).to_dataframe()
+    if df.empty:
+        return False, "User not found."
+    if old_password != str(df.iloc[0]["password"]):
+        return False, "Old password is incorrect."
+
+    update_query = f"""
+        UPDATE `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        SET password = @new_password
+        WHERE LOWER(username) = @username
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("new_password", "STRING", new_password),
+        bigquery.ScalarQueryParameter("username", "STRING", normalize_username(username)),
+    ])
+    bq_client.query(update_query, job_config=job_config).result()
+    return True, None
 
 def short_name(q_name):
     return (q_name
@@ -606,9 +656,10 @@ def generate_allocation_template(program_type, effective_date, end_date):
     ]]
 
     notes_df = pd.DataFrame([
-        {"field": "brand", "example": "SKINTIFIC"},
-        {"field": "sku_code", "example": "SKINTIFIC-4331"},
-        {"field": "allocation_target", "example": "Whole number, e.g. 500"},
+        {"field": "distributor_code", "example": "Optional - leave blank if not tied to a specific distributor"},
+        {"field": "brand", "example": "SKINTIFIC (required)"},
+        {"field": "sku_code", "example": "SKINTIFIC-4331 (required)"},
+        {"field": "allocation_target", "example": "Optional - whole number, e.g. 500. Leave blank if not yet known"},
         {"field": "effective_date / end_date", "example": "Locked to the dates chosen on the page - edits here are ignored on upload"},
     ])
 
@@ -620,39 +671,64 @@ def generate_allocation_template(program_type, effective_date, end_date):
     return buffer
 
 def parse_allocation_upload(df_upload, master_df):
-    """Returns (preview_rows, row_errors). Validates distributor_code, brand,
-    sku_code, allocation_target. Effective/End Date are deliberately ignored
-    here — the caller re-stamps them from the live page filter."""
+    """Returns (preview_rows, row_errors). brand/sku_code are required to
+    consider a row "filled in". distributor_code and allocation_target are
+    optional (nullable in distributor_sku_allocation) — left blank, they're
+    stored as NULL rather than rejecting the row. An explicitly-typed but
+    unrecognized distributor_code is still flagged as an error (likely a
+    typo), since blank is the only accepted way to skip it. Effective/End
+    Date are deliberately ignored here — the caller re-stamps them from the
+    live page filter."""
     code_to_name = dict(zip(master_df["distributor_code"], master_df["distributor"]))
     code_to_region = dict(zip(master_df["distributor_code"], master_df["region"]))
 
     preview_rows, row_errors = [], []
     for i, r in df_upload.iterrows():
-        code = str(r.get("distributor_code", "")).strip()
-        if code not in code_to_name:
+        raw_code = str(r.get("distributor_code", "")).strip()
+        code = "" if raw_code.lower() in ("", "nan") else raw_code
+        if code and code not in code_to_name:
             row_errors.append(f"Row {i + 2}: unknown distributor_code '{code}' — skipped.")
             continue
 
-        brand = str(r.get("brand", "")).strip()
-        sku_code = str(r.get("sku_code", "")).strip()
+        raw_brand = r.get("brand", "")
+        raw_sku = r.get("sku_code", "")
+        brand = "" if pd.isna(raw_brand) else str(raw_brand).strip()
+        sku_code = "" if pd.isna(raw_sku) else str(raw_sku).strip()
+
+        if brand == "" and sku_code == "":
+            continue  # entirely blank row, not yet filled in — silently skip
+        if brand == "" or sku_code == "":
+            row_errors.append(f"Row {i + 2}: both brand and sku_code are required — skipped.")
+            continue
+
         raw_target = r.get("allocation_target", "")
+        if pd.isna(raw_target) or str(raw_target).strip() == "":
+            allocation_target = None
+        else:
+            try:
+                allocation_target = int(float(raw_target))
+            except (TypeError, ValueError):
+                row_errors.append(f"Row {i + 2}: invalid allocation_target '{raw_target}' for {brand}/{sku_code} — skipped.")
+                continue
+            if allocation_target < 0:
+                row_errors.append(f"Row {i + 2}: allocation_target for {brand}/{sku_code} cannot be negative — skipped.")
+                continue
 
-        if brand == "" or sku_code == "" or pd.isna(raw_target) or str(raw_target).strip() == "":
-            continue  # blank row, not yet filled in — silently skip
-
-        try:
-            allocation_target = int(float(raw_target))
-        except (TypeError, ValueError):
-            row_errors.append(f"Row {i + 2}: invalid allocation_target '{raw_target}' for {code} — skipped.")
-            continue
-        if allocation_target < 0:
-            row_errors.append(f"Row {i + 2}: allocation_target for {code} cannot be negative — skipped.")
-            continue
+        if code:
+            dist_name = code_to_name[code]
+            region_val = code_to_region[code]
+        else:
+            # No code given — fall back to whatever was typed in the
+            # distributor_name / region columns instead of forcing NULL.
+            raw_name = str(r.get("distributor_name", "")).strip()
+            raw_region = str(r.get("region", "")).strip()
+            dist_name = raw_name if raw_name and raw_name.lower() != "nan" else None
+            region_val = raw_region if raw_region and raw_region.lower() != "nan" else None
 
         preview_rows.append({
-            "distributor_code": code,
-            "distributor_name": code_to_name[code],
-            "region": code_to_region[code],
+            "distributor_code": code or None,
+            "distributor_name": dist_name,
+            "region": region_val,
             "brand": brand,
             "sku_code": sku_code,
             "allocation_target": allocation_target,
@@ -670,13 +746,15 @@ def insert_allocation_rows(rows_to_insert):
 # uniqueness constraint, so username_exists() is checked explicitly here.
 # =====================================================
 def username_exists(username):
+    """Case-insensitive existence check — LOWER() on the stored column so a
+    legacy/mixed-case row still collides with a new lowercase username."""
     query = f"""
         SELECT 1 FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
-        WHERE username = @username
+        WHERE LOWER(username) = @username
         LIMIT 1
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("username", "STRING", username.strip().lower()),
+        bigquery.ScalarQueryParameter("username", "STRING", normalize_username(username)),
     ])
     df = bq_client.query(query, job_config=job_config).to_dataframe()
     return not df.empty
@@ -684,7 +762,7 @@ def username_exists(username):
 def create_user(username, password, full_name, new_role, region, email):
     table_id = f"{PROJECT_ID}.{DATASET}.{USERS_TABLE}"
     row = {
-        "username": username.strip().lower(),
+        "username": normalize_username(username),
         "password": password,
         "full_name": full_name.strip(),
         "role": new_role,
@@ -770,11 +848,13 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 if st.session_state.user is None:
-    st.markdown("""
+    logo_html = (
+        f'<img src="data:image/png;base64,{LOGO_B64}" alt="SKINTIFIC" />'
+        if LOGO_B64 else "🔐"
+    )
+    st.markdown(f"""
     <div class="login-card">
-        <div class="login-logo">🔐</div>
-        <div class="login-title">Sign in to continue</div>
-        <div class="login-sub">Your account determines which role's form you see</div>
+        <div class="login-logo">{logo_html}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -807,6 +887,24 @@ with st.sidebar:
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.user = None
         st.rerun()
+
+    with st.expander("🔑 Change Password"):
+        old_pw = st.text_input("Old Password", type="password", key="cp_old")
+        new_pw = st.text_input("New Password", type="password", key="cp_new")
+        confirm_pw = st.text_input("Confirm New Password", type="password", key="cp_confirm")
+        if st.button("Update Password", use_container_width=True, key="cp_submit"):
+            if not old_pw or not new_pw or not confirm_pw:
+                st.error("All fields are required.")
+            elif new_pw != confirm_pw:
+                st.error("New Password and Confirm New Password don't match.")
+            else:
+                ok, err = verify_and_change_password(st.session_state.user["username"], old_pw, new_pw)
+                if ok:
+                    st.success("✅ Password changed. Please log in again.")
+                    st.session_state.user = None
+                    st.rerun()
+                else:
+                    st.error(err)
 
 with st.container(border=True):
     st.markdown('<div class="sec-label">👤 Logged In As</div>', unsafe_allow_html=True)
@@ -862,12 +960,13 @@ is_bulk_role = ROLES[role]["bulk"]
 # =====================================================================================
 if not is_bulk_role:
 
-    master_df   = load_master_distributor()
     user_region = st.session_state.user.get("region")
 
     if not user_region:
         st.error("⚠️ Your account has no region assigned. Contact an admin to fix your user record.")
         st.stop()
+
+    supervisor_df = get_distributors_for_supervisor(representative_name, user_region)
 
     with st.container(border=True):
         st.markdown('<div class="sec-label">📍 Location</div>', unsafe_allow_html=True)
@@ -877,8 +976,10 @@ if not is_bulk_role:
                          help="Your account is scoped to this region only.")
             region = user_region
         with c5:
-            dist_opts = sorted(master_df[master_df["region"] == region]["distributor"].dropna().unique())
+            dist_opts = sorted(supervisor_df["distributor"].dropna().unique())
             distributor = st.selectbox("Distributor", ["— Select Distributor —"] + dist_opts)
+            if not dist_opts:
+                st.caption("⚠️ No distributors are mapped to you (spv_skt/spv_tph) in this region yet. Contact an admin if this looks wrong.")
 
     metadata_ok = distributor != "— Select Distributor —"
     if not metadata_ok:
@@ -969,6 +1070,18 @@ if not is_bulk_role:
             grades  = questions[q_name]
             q_num   = Q_NUMBER[q_name]
             max_pts = max(v[1] for v in grades.values())
+
+            if q_name == BAD_STOCK_Q:
+                ytd_check = get_ytd_sell_through(distributor, selected_year)
+                if not ytd_check:
+                    # No sell-through data to assess against — hide this
+                    # metric's card entirely and auto-award max score, no
+                    # error/warning shown (per spec).
+                    answers[q_name] = {
+                        "grade": "A", "ytd_value": ytd_check, "bs_allowance": 0,
+                        "bs_utilization": 0, "compliance_pct": 100.0,
+                    }
+                    continue
 
             with st.container(border=True):
                 st.markdown(f"""
@@ -1353,7 +1466,7 @@ else:
                 if new_user_role == "Area Sales Supervisor" and not new_region:
                     errors.append("Region is required for Area Sales Supervisor.")
                 if not errors and username_exists(new_username):
-                    errors.append(f"Username '{new_username.strip().lower()}' already exists.")
+                    errors.append(f"Username '{normalize_username(new_username)}' already exists.")
 
                 if errors:
                     for e in errors:
@@ -1364,7 +1477,7 @@ else:
                         st.error("❌ Failed to create user")
                         st.json(insert_errors)
                     else:
-                        st.success(f"✅ User '{new_username.strip().lower()}' created with role **{new_user_role}**.")
+                        st.success(f"✅ User '{normalize_username(new_username)}' created with role **{new_user_role}**.")
 
     # ── ADMIN: NPD & SKU Focus allocation uploads (Distributor Manager only) ──
     @st.dialog("📝 Confirm Allocation Submission", width="large")

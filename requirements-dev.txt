@@ -1,0 +1,4 @@
+# Test-only dependencies — NOT installed on Streamlit Community Cloud.
+# Install locally with: pip install -r requirements-dev.txt
+pytest>=8.0
+pytest-cov>=5.0
