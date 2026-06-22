@@ -934,14 +934,20 @@ with st.sidebar:
                     st.error(err)
 
     with st.expander("📖 User Guide"):
-        guide_lang = st.radio(
-            "Language", ["English", "Bahasa Indonesia"],
-            horizontal=True, key="guide_lang", label_visibility="collapsed",
-        )
-        guide_html = GUIDE_HTML.get(guide_lang)
-        if guide_html:
-            st.components.v1.html(guide_html, height=600, scrolling=True)
-        else:
+        st.caption("Download the user guide (opens in your browser):")
+        if GUIDE_HTML.get("English"):
+            st.download_button(
+                "⬇️ English", data=GUIDE_HTML["English"],
+                file_name="User_Guide.html", mime="text/html",
+                use_container_width=True, key="dl_guide_en",
+            )
+        if GUIDE_HTML.get("Bahasa Indonesia"):
+            st.download_button(
+                "⬇️ Bahasa Indonesia", data=GUIDE_HTML["Bahasa Indonesia"],
+                file_name="User_Guide_ID.html", mime="text/html",
+                use_container_width=True, key="dl_guide_id",
+            )
+        if not GUIDE_HTML.get("English") and not GUIDE_HTML.get("Bahasa Indonesia"):
             st.caption("Guide not available in this deployment.")
 
 with st.container(border=True):
