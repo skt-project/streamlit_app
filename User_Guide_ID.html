@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Distributor Operational Assessment — Panduan Pengguna</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Inter, Arial, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 24px; color: #1C1C1C; line-height: 1.6; }
+  h1 { color: #14506A; border-bottom: 3px solid #1E6B8A; padding-bottom: 10px; }
+  h2 { color: #1E6B8A; margin-top: 48px; border-bottom: 1px solid #BEE3EE; padding-bottom: 6px; }
+  h3 { color: #14506A; }
+  img { max-width: 100%; border: 1px solid #BEE3EE; border-radius: 8px; margin: 12px 0; box-shadow: 0 2px 8px rgba(30,107,138,0.10); }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #D0D8E4; padding: 8px 12px; text-align: left; }
+  th { background: #EAF6FB; color: #14506A; }
+  code { background: #F4FAFC; padding: 2px 6px; border-radius: 4px; }
+  hr { border: none; border-top: 1px solid #BEE3EE; margin: 32px 0; }
+  a { color: #1E6B8A; }
+  ol li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<h1 id="distributor-operational-assessment-panduan-pengguna">Distributor Operational Assessment — Panduan Pengguna</h1>
+<p><strong>Peran yang dibahas dalam panduan ini: Area Sales Supervisor</strong>
+(Peran lain — Distributor Manager, Admin RSA, Account Receivable — memiliki
+antarmuka berbasis upload-massal yang berbeda dan didokumentasikan secara
+terpisah.)</p>
+<p>Dibuat secara otomatis dari penjelajahan screenshot aplikasi
+(<code>docs_crawler.py</code>, Playwright) dengan login menggunakan akun <code>budi</code> /
+Area Sales Supervisor. Screenshot tersimpan di folder <code>/screenshots</code>.</p>
+<p>🇬🇧 <em>English version: <a href="User_Guide.html">User_Guide.html</a> /
+<a href="User_Guide.md">User_Guide.md</a></em></p>
+<hr />
+<h2 id="daftar-isi">Daftar Isi</h2>
+<ol>
+<li><a href="#1-login">Login</a></li>
+<li><a href="#2-dashboard-setelah-login-form-terkunci">Dashboard Setelah Login (Form Terkunci)</a></li>
+<li><a href="#3-filter-periode-assessment">Filter Periode Assessment</a></li>
+<li><a href="#4-filter-distributor">Filter Distributor</a></li>
+<li><a href="#5-form-assessment--people--roles">Form Assessment — People &amp; Roles</a></li>
+<li><a href="#6-form-assessment--infrastructure--delivery--operations--compliance">Form Assessment — Infrastructure &amp; Delivery / Operations &amp; Compliance</a></li>
+<li><a href="#7-live-score-tracker-sidebar">Live Score Tracker (Sidebar)</a></li>
+<li><a href="#8-review--submit">Review &amp; Submit</a></li>
+<li><a href="#9-hasil-submission--notifikasi-submission-ganda">Hasil Submission / Notifikasi Submission Ganda</a></li>
+<li><a href="#10-ganti-password-change-password">Ganti Password (Change Password)</a></li>
+<li><a href="#faq">FAQ</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ol>
+<hr />
+<h2 id="1-login">1. Login</h2>
+<p><img alt="Tampilan login" src="screenshots/01_login_screen.png" />
+<img alt="Login terisi" src="screenshots/02_login_filled.png" /></p>
+<p><strong>Tujuan:</strong> Melakukan autentikasi dan otomatis mengarahkan pengguna ke
+antarmuka sesuai perannya — tidak ada pemilihan peran secara manual; akun
+Anda yang menentukan tampilan yang akan muncul.</p>
+<p><strong>Kolom isian:</strong>
+- <strong>Username</strong> — nama login yang sudah didaftarkan (tidak case-sensitive,
+  huruf besar/kecil tidak masalah)
+- <strong>Password</strong> — password akun Anda</p>
+<p><strong>Tombol:</strong>
+- <strong>🔑 Log In</strong> — mengirimkan kredensial. Jika berhasil, halaman akan
+  reload menuju dashboard sesuai peran Anda. Jika gagal, akan muncul
+  pesan "❌ Invalid username or password." di bawah form tanpa
+  menyebutkan kolom mana yang salah.</p>
+<p><strong>Aturan validasi:</strong>
+- Perbandingan username tidak case-sensitive (<code>Budi</code>, <code>budi</code>, <code>BUDI</code>
+  semuanya akan cocok ke akun yang sama).
+- Tidak ada batasan lockout/percobaan ulang — tidak ada rate limiting
+  untuk percobaan login.</p>
+<p><strong>Aksi umum pengguna:</strong> Ketik username dan password, klik Log In. Jika
+lupa password, lihat <a href="#10-ganti-password-change-password">Bagian 10 — Ganti Password</a>
+(memerlukan password lama Anda) atau hubungi Admin untuk reset password
+melalui panel Create User milik Distributor Manager.</p>
+<hr />
+<h2 id="2-dashboard-setelah-login-form-terkunci">2. Dashboard Setelah Login (Form Terkunci)</h2>
+<p><img alt="Setelah login, form terkunci" src="screenshots/03_post_login_locked.png" /></p>
+<p><strong>Tujuan:</strong> Mengonfirmasi identitas dan ruang lingkup peran/region Anda,
+sebelum form assessment dibuka.</p>
+<p><strong>Yang ditampilkan:</strong>
+- <strong>Sidebar</strong>: nama Anda, label peran, label region, tombol Logout,
+  panel Change Password
+- <strong>Kartu "Logged In As"</strong>: nama, deskripsi peran, dan ruang lingkup region
+- <strong>Kartu "Assessment Period"</strong>: pemilih bulan/tahun
+- <strong>Kartu "Location"</strong>: Region (terkunci sesuai region yang ditugaskan ke
+  Anda) + Distributor (wajib dipilih)</p>
+<p><strong>Aturan validasi:</strong>
+- Form assessment di bawah tetap tersembunyi sampai sebuah Distributor
+  dipilih. Region tidak dapat diubah — akun Area Sales Supervisor hanya
+  ditugaskan untuk satu region tertentu.</p>
+<p><strong>Aksi umum pengguna:</strong> Pilih Assessment Period, lalu pilih Distributor
+untuk membuka form.</p>
+<hr />
+<h2 id="3-filter-periode-assessment">3. Filter Periode Assessment</h2>
+<p><img alt="Dropdown periode assessment" src="screenshots/04_assessment_period_dropdown.png" /></p>
+<p><strong>Tujuan:</strong> Memilih bulan yang menjadi acuan assessment.</p>
+<p><strong>Perilaku filter:</strong>
+- Area Sales Supervisor hanya bisa melihat <strong>3 bulan</strong>: bulan ini dan 2
+  bulan sebelumnya. (Peran lain — peran bulk/admin — melihat jendela
+  yang lebih luas, 13 bulan: 6 bulan ke belakang sampai 6 bulan ke
+  depan.) Ini disengaja: assessment lapangan diharapkan diisi tepat
+  waktu, bukan jauh-jauh hari sebelumnya atau lama setelah kejadian.
+- Default-nya adalah bulan berjalan saat halaman dibuka.</p>
+<p><strong>Aksi umum pengguna:</strong> Buka dropdown, pilih bulan. Mengubah periode
+setelah Anda mulai mengisi form tidak akan menghapus jawaban yang sudah
+diisi, tapi mengubah periode setelah submission untuk satu periode akan
+memungkinkan Anda memulai submission baru untuk periode lain (hanya satu
+submission diperbolehkan per peran+distributor+periode — lihat Bagian 8).</p>
+<hr />
+<h2 id="4-filter-distributor">4. Filter Distributor</h2>
+<p><img alt="Dropdown distributor" src="screenshots/05_distributor_dropdown.png" /></p>
+<p><strong>Tujuan:</strong> Memilih distributor yang akan diases.</p>
+<p><strong>Perilaku filter:</strong>
+- Daftar hanya menampilkan distributor yang ditugaskan <strong>khusus untuk
+  Anda</strong> (dicocokkan pada master distributor berdasarkan region dan nama
+  Anda sebagai supervisor yang bertanggung jawab) — bukan semua
+  distributor di region Anda.
+- Jika daftar kosong, berarti belum ada distributor yang ditugaskan ke
+  Anda; hubungi Admin.</p>
+<p><strong>Aturan validasi:</strong> Assessment Period dan Distributor harus diisi
+sebelum form di bawah muncul — akan tampil banner "✏️ Select a
+distributor above to unlock the assessment form" sampai keduanya diisi.</p>
+<hr />
+<h2 id="5-form-assessment-people-roles">5. Form Assessment — People &amp; Roles</h2>
+<p><img alt="Form terbuka — People &amp; Roles" src="screenshots/06_form_unlocked_people_roles.png" />
+<img alt="People &amp; Roles terisi" src="screenshots/07_people_roles_filled.png" /></p>
+<p><strong>Tujuan:</strong> Kategori metrik pertama dari 3 kategori. Menilai apakah
+distributor memiliki staf khusus (exclusive untuk SKINTIFIC) di 3 peran
+berikut.</p>
+<p><strong>Kartu pada kategori ini:</strong>
+| # | Metrik | Poin Maksimal | Grade |
+|---|---|---|---|
+| 1 | Operational Leader (SPV/Operational Manager) | 5 | A=Exclusive(5), B=Mixed(3), C=Tidak ada(0) |
+| 2 | Salesman | 7 | A=Exclusive(7), B=Mixed(5), C=Di bawah kuota(3), D=Tidak ada(0) |
+| 3 | Administrative &amp; AR Support | 3 | A=Exclusive(3), B=Mixed(1), C=Tidak ada(0) |</p>
+<p><strong>Tombol/input:</strong>
+- Radio button (A/B/C/D) untuk memilih grade setiap metrik
+- Kolom nama — wajib diisi jika grade yang dipilih menunjukkan peran
+  tersebut ada; Salesman wajib diisi <strong>tepat 5 nama</strong> (gunakan <code>-</code> untuk
+  slot yang tidak terisi jika kurang dari 5 salesman)</p>
+<p><strong>Aturan validasi:</strong>
+- Jika grade = "Do not exist" (tidak ada), nama yang sudah diisi akan
+  ditolak ("selected 'Do not exist' but a name was entered")
+- Jika grade ≠ "Do not exist", nama wajib diisi
+- Salesman secara khusus wajib memiliki tepat 5 entri nama (nama asli
+  atau placeholder <code>-</code>), tidak boleh lebih atau kurang</p>
+<p><strong>Kalkulasi yang ditampilkan:</strong> Belum ada di tahap ini — poin dihitung
+secara live di sidebar (lihat Bagian 7).</p>
+<hr />
+<h2 id="6-form-assessment-infrastructure-delivery-operations-compliance">6. Form Assessment — Infrastructure &amp; Delivery / Operations &amp; Compliance</h2>
+<p><img alt="Infrastructure &amp; Delivery" src="screenshots/08_infrastructure_delivery.png" />
+<img alt="Operations &amp; Compliance" src="screenshots/09_operations_compliance.png" />
+<img alt="Detail Bad Stock" src="screenshots/10_bad_stock_detail.png" /></p>
+<p><strong>Tujuan:</strong> 4 metrik tersisa yang menjadi tanggung jawab Area Sales
+Supervisor.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Metrik</th>
+<th>Poin Maksimal</th>
+<th>Catatan</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4</td>
+<td>Warehouse Facility Standard</td>
+<td>3</td>
+<td>Pilih grade langsung</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Delivery SLA Compliance</td>
+<td>8</td>
+<td><strong>Dihitung otomatis</strong>, lihat di bawah</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Inventory Control &amp; Stock Opname</td>
+<td>6</td>
+<td>Pilih grade langsung</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Bad Stock Handling Performance</td>
+<td>2</td>
+<td><strong>Dihitung otomatis</strong>, lihat di bawah</td>
+</tr>
+</tbody>
+</table>
+<h3 id="delivery-sla-compliance-cara-perhitungan">Delivery SLA Compliance — cara perhitungan</h3>
+<p>Dua input radio terpisah (Inner City 2×24 jam, Outer City 3×24 jam),
+masing-masing 100% / 99%-80% / &lt;80%. Grade <strong>dihitung otomatis</strong>, bukan
+dipilih langsung:
+- Inner ATAU Outer di bawah 80% → <strong>0 pts</strong>
+- Salah satu di 99%-80% (tidak ada yang di bawah 80%) → <strong>4 pts</strong>
+- Inner DAN Outer di 100% → <strong>8 pts</strong></p>
+<h3 id="bad-stock-handling-performance-cara-perhitungan">Bad Stock Handling Performance — cara perhitungan</h3>
+<ol>
+<li><strong>YTD Sell Through</strong> dicari otomatis untuk distributor dan tahun yang
+   dipilih (hanya brand Skintific + Timephoria).</li>
+<li><strong>Bad Stock Allowance</strong> = 0.5% dari YTD Sell Through.</li>
+<li>Anda mengisi <strong>Bad Stock Utilization (Rp)</strong> — nilai Rupiah aktual bad
+   stock yang diklaim pada periode ini.</li>
+<li><strong>Compliance % = Utilization ÷ Allowance × 100</strong>, dibatasi maksimal
+   100%.</li>
+<li>Grade: ≥100% → A (2 pts), ≥80% → B (1 pt), &lt;80% → C (0 pts).</li>
+</ol>
+<p><strong>Aturan validasi (penting):</strong> Jika distributor memiliki <strong>YTD sell
+through nol atau tidak ada datanya</strong>, seluruh kartu ini akan
+<strong>disembunyikan</strong> dan metrik ini otomatis mendapat skor maksimal (2 pts)
+— karena tidak ada data untuk dibandingkan, jadi tidak ada input yang
+ditampilkan dan tidak ada error yang muncul.</p>
+<p><strong>Aksi umum pengguna:</strong> Pilih grade langsung untuk Warehouse dan
+Inventory; untuk Delivery SLA, pilih band inner/outer; untuk Bad Stock,
+isi nominal Rupiah utilization dan lihat compliance % serta grade
+ter-update secara live.</p>
+<hr />
+<h2 id="7-live-score-tracker-sidebar">7. Live Score Tracker (Sidebar)</h2>
+<p><img alt="Live score tracker di sidebar" src="screenshots/11_sidebar_score_tracker.png" /></p>
+<p><strong>Tujuan:</strong> Memberikan feedback skor secara real-time saat Anda mengisi
+form, sekaligus visibilitas progress 3 peran lain untuk
+distributor+periode yang sama.</p>
+<p><strong>Yang ditampilkan:</strong>
+- <strong>"Your Live Score"</strong> — total berjalan dari maksimal 34 (maksimal
+  7 metrik milik Area Sales Supervisor), ter-update setiap ada perubahan
+  jawaban, dilengkapi progress bar
+- Rincian per metrik dengan titik warna: 🟢 nilai penuh, 🟡 sebagian,
+  🔴 nol
+- <strong>"Assessment Progress"</strong> — semua 10 metrik dari 4 peran untuk
+  distributor+periode ini: ✅ selesai (dengan poin + peran mana yang
+  submit) atau ⏳ belum (dengan peran mana yang bertanggung jawab)
+- <strong>"Combined Score So Far"</strong> — dari maksimal 50, gabungan dari peran
+  yang sudah submit</p>
+<p><strong>Kalkulasi yang ditampilkan:</strong> Ini hanya cermin live dari aturan
+scoring yang sama seperti dijelaskan di Bagian 5–6 — tidak ada
+kalkulasi baru di sini, hanya total berjalan dari jawaban di atas.</p>
+<hr />
+<h2 id="8-review-submit">8. Review &amp; Submit</h2>
+<p><img alt="Popup konfirmasi Review &amp; Submit" src="screenshots/12_review_submit_popup.png" /></p>
+<p><strong>Tujuan:</strong> Langkah pengecekan ulang wajib sebelum data tersimpan.</p>
+<p><strong>Tombol:</strong>
+- <strong>🔍 Review &amp; Submit (Area Sales Supervisor)</strong> — memvalidasi form
+  (lihat aturan validasi di Bagian 5) dan, jika valid, membuka popup
+  konfirmasi seperti gambar di atas. Tombol ini nonaktif jika Anda
+  sudah pernah submit untuk distributor+periode ini.
+- Di dalam popup: <strong>✏️ Back to Edit</strong> (menutup popup, tidak ada
+  perubahan tersimpan) atau <strong>✅ Confirm &amp; Submit</strong> (menyimpan
+  submission)</p>
+<p><strong>Yang ditampilkan di popup:</strong> Setiap metrik, grade-nya, nilai poin,
+dan nama orang (jika ada), beserta subtotal Anda dari maksimal 34.</p>
+<p><strong>Aturan validasi:</strong>
+- Semua aturan validasi level-field di Bagian 5 dicek terlebih dahulu;
+  error akan ditampilkan dan popup tidak akan terbuka sampai semua
+  diperbaiki.
+- <strong>Satu submission per peran, per distributor, per periode
+  assessment</strong> — setelah dikonfirmasi, Anda tidak bisa submit ulang
+  untuk kombinasi yang sama persis. Jika mencoba mengakses kembali,
+  akan muncul banner peringatan dan tombol Review &amp; Submit akan
+  nonaktif.</p>
+<hr />
+<h2 id="9-hasil-submission-notifikasi-submission-ganda">9. Hasil Submission / Notifikasi Submission Ganda</h2>
+<p><img alt="Hasil submission / peringatan sudah submit" src="screenshots/13_submission_result.png" /></p>
+<p><strong>Tujuan:</strong> Mengonfirmasi bahwa submission berhasil disimpan, dan — jika
+keempat peran sudah submit bagian masing-masing — menampilkan skor
+gabungan akhir dan rating (Excellent/Good/Fair/Needs Improvement) untuk
+distributor+periode tersebut.</p>
+<p><strong>Jika Anda kembali ke distributor+periode yang sudah pernah disubmit:</strong>
+banner kuning akan muncul bertuliskan <em>"[Role] has already submitted
+for [Distributor] in [Period]. Only one submission is allowed per role,
+per distributor, per assessment period."</em> — ini adalah aturan satu
+submission yang sama dari Bagian 8, ditampilkan kembali saat Anda
+mengunjungi ulang.</p>
+<hr />
+<h2 id="10-ganti-password-change-password">10. Ganti Password (Change Password)</h2>
+<p><img alt="Panel Change Password" src="screenshots/14_change_password.png" /></p>
+<p><strong>Tujuan:</strong> Penggantian password secara mandiri (self-service), tersedia
+untuk semua peran (bukan hanya Area Sales Supervisor).</p>
+<p><strong>Kolom isian:</strong> Old Password, New Password, Confirm New Password
+(semuanya tersembunyi/masked, dengan ikon mata untuk
+menampilkan/menyembunyikan).</p>
+<p><strong>Tombol:</strong> <strong>Update Password</strong> — memvalidasi dan menerapkan perubahan.</p>
+<p><strong>Aturan validasi:</strong>
+- Ketiga kolom wajib diisi.
+- Old Password harus cocok persis dengan password Anda saat ini.
+- New Password dan Confirm New Password harus sama.
+- Tidak ada aturan kompleksitas password (panjang minimal, karakter
+  khusus, dll) yang diterapkan.
+- Jika berhasil, Anda akan <strong>langsung logout</strong> dan harus login kembali
+  dengan password baru — ini disengaja, bukan bug.</p>
+<hr />
+<h2 id="faq">FAQ</h2>
+<p><strong>T: Saya tidak menemukan distributor yang seharusnya saya lihat.</strong>
+J: Daftar distributor Anda difilter hanya menampilkan distributor yang
+ditugaskan ke Anda. Jika ada yang hilang, hubungi Admin untuk mengecek
+mapping-nya.</p>
+<p><strong>T: Kartu Bad Stock tiba-tiba hilang — apakah ini bug?</strong>
+J: Tidak. Kartu ini hanya hilang ketika distributor memiliki YTD sell
+through nol (Skintific + Timephoria) untuk tahun yang dipilih — tidak
+ada data untuk menghitung compliance, sehingga metrik ini otomatis
+diberi nilai penuh dan input-nya disembunyikan.</p>
+<p><strong>T: Saya salah input setelah konfirmasi — bisa diperbaiki?</strong>
+J: Tidak. Submission bersifat final per peran/distributor/periode.
+Hubungi Admin jika memang perlu koreksi.</p>
+<p><strong>T: Mengapa sidebar menampilkan progress peran lain?</strong>
+J: Keempat peran digabung menjadi satu assessment per
+distributor+periode — sidebar memungkinkan Anda melihat keseluruhan
+gambaran, bukan hanya bagian Anda sendiri.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Gejala</th>
+<th>Kemungkinan Sebab</th>
+<th>Solusi</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Invalid username or password"</td>
+<td>Salah ketik, atau akun salah</td>
+<td>Cek kembali kredensial; username tidak case-sensitive tapi password case-sensitive</td>
+</tr>
+<tr>
+<td>Dropdown distributor kosong</td>
+<td>Tidak ada distributor yang ditugaskan ke akun Anda</td>
+<td>Hubungi Admin</td>
+</tr>
+<tr>
+<td>Tombol Review &amp; Submit nonaktif/abu-abu</td>
+<td>Sudah pernah submit untuk distributor+periode ini</td>
+<td>Pilih distributor atau periode lain, atau hubungi Admin untuk koreksi</td>
+</tr>
+<tr>
+<td>Kartu Bad Stock hilang</td>
+<td>YTD sell through nol untuk distributor/tahun tersebut</td>
+<td>Perilaku normal, bukan error — lihat FAQ</td>
+</tr>
+<tr>
+<td>Logout tiba-tiba</td>
+<td>Anda baru saja mengganti password</td>
+<td>Login kembali dengan password baru</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

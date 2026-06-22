@@ -3,6 +3,7 @@ import pandas as pd
 import uuid
 import io
 import base64
+import re
 from pathlib import Path
 from datetime import datetime
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -27,6 +28,32 @@ def _load_logo_base64():
     return base64.b64encode(logo_path.read_bytes()).decode()
 
 LOGO_B64 = _load_logo_base64()
+
+@st.cache_data
+def _load_guide_html(filename):
+    """Reads a generated User_Guide HTML file and inlines its screenshots/*.png
+    references as base64 data URIs, so the whole guide is self-contained and can
+    be rendered inside an iframe via st.components.v1.html() without needing the
+    screenshots folder served separately. Returns None if the file is missing."""
+    guide_path = Path(__file__).parent / filename
+    if not guide_path.exists():
+        return None
+    html = guide_path.read_text(encoding="utf-8")
+    screenshots_dir = Path(__file__).parent / "screenshots"
+
+    def _embed(match):
+        img_path = screenshots_dir / match.group(1)
+        if img_path.exists():
+            b64 = base64.b64encode(img_path.read_bytes()).decode()
+            return f'src="data:image/png;base64,{b64}"'
+        return match.group(0)
+
+    return re.sub(r'src="screenshots/([^"]+)"', _embed, html)
+
+GUIDE_HTML = {
+    "English": _load_guide_html("User_Guide.html"),
+    "Bahasa Indonesia": _load_guide_html("User_Guide_ID.html"),
+}
 
 # =====================================================
 # SKINTIFIC BRAND CSS (BLUE)
@@ -781,6 +808,17 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.error(err)
+
+    with st.expander("📖 User Guide"):
+        guide_lang = st.radio(
+            "Language", ["English", "Bahasa Indonesia"],
+            horizontal=True, key="guide_lang", label_visibility="collapsed",
+        )
+        guide_html = GUIDE_HTML.get(guide_lang)
+        if guide_html:
+            st.components.v1.html(guide_html, height=600, scrolling=True)
+        else:
+            st.caption("Guide not available in this deployment.")
 
 with st.container(border=True):
     st.markdown('<div class="sec-label">👤 Logged In As</div>', unsafe_allow_html=True)

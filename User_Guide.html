@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Distributor Operational Assessment — User Guide</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Inter, Arial, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 24px; color: #1C1C1C; line-height: 1.6; }
+  h1 { color: #14506A; border-bottom: 3px solid #1E6B8A; padding-bottom: 10px; }
+  h2 { color: #1E6B8A; margin-top: 48px; border-bottom: 1px solid #BEE3EE; padding-bottom: 6px; }
+  h3 { color: #14506A; }
+  img { max-width: 100%; border: 1px solid #BEE3EE; border-radius: 8px; margin: 12px 0; box-shadow: 0 2px 8px rgba(30,107,138,0.10); }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #D0D8E4; padding: 8px 12px; text-align: left; }
+  th { background: #EAF6FB; color: #14506A; }
+  code { background: #F4FAFC; padding: 2px 6px; border-radius: 4px; }
+  hr { border: none; border-top: 1px solid #BEE3EE; margin: 32px 0; }
+  a { color: #1E6B8A; }
+  ol li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<h1 id="distributor-operational-assessment-user-guide">Distributor Operational Assessment — User Guide</h1>
+<p><strong>Role covered in this guide: Area Sales Supervisor</strong>
+(Other roles — Distributor Manager, Admin RSA, Account Receivable — have a
+different bulk-upload-based interface and are documented separately.)</p>
+<p>Generated from an automated screenshot walkthrough of the application
+(<code>docs_crawler.py</code>, Playwright) logged in as the <code>budi</code> / Area Sales Supervisor
+account. Screenshots are stored in <code>/screenshots</code>.</p>
+<p>🇮🇩 <em>Bahasa Indonesia version: <a href="User_Guide_ID.html">User_Guide_ID.html</a> /
+<a href="User_Guide_ID.md">User_Guide_ID.md</a></em></p>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-login">Login</a></li>
+<li><a href="#2-post-login-dashboard-form-locked">Post-Login Dashboard (Form Locked)</a></li>
+<li><a href="#3-assessment-period-filter">Assessment Period Filter</a></li>
+<li><a href="#4-distributor-filter">Distributor Filter</a></li>
+<li><a href="#5-assessment-form--people--roles">Assessment Form — People &amp; Roles</a></li>
+<li><a href="#6-assessment-form--infrastructure--delivery--operations--compliance">Assessment Form — Infrastructure &amp; Delivery / Operations &amp; Compliance</a></li>
+<li><a href="#7-live-score-tracker-sidebar">Live Score Tracker (Sidebar)</a></li>
+<li><a href="#8-review--submit">Review &amp; Submit</a></li>
+<li><a href="#9-submission-result--duplicate-submission-notice">Submission Result / Duplicate-Submission Notice</a></li>
+<li><a href="#10-change-password">Change Password</a></li>
+<li><a href="#faq">FAQ</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ol>
+<hr />
+<h2 id="1-login">1. Login</h2>
+<p><img alt="Login screen" src="screenshots/01_login_screen.png" />
+<img alt="Login filled in" src="screenshots/02_login_filled.png" /></p>
+<p><strong>Purpose:</strong> Authenticate and automatically route the user to the correct
+role's interface — there is no manual role picker; your account determines
+what you see.</p>
+<p><strong>Fields:</strong>
+- <strong>Username</strong> — your assigned login name (not case-sensitive)
+- <strong>Password</strong> — your account password</p>
+<p><strong>Buttons:</strong>
+- <strong>🔑 Log In</strong> — submits the credentials. On success, the page reloads into
+  your role's dashboard. On failure, shows "❌ Invalid username or password."
+  below the form without revealing which field was wrong.</p>
+<p><strong>Validation rules:</strong>
+- Username comparison is case-insensitive (<code>Budi</code>, <code>budi</code>, <code>BUDI</code> all match
+  the same account).
+- No lockout/retry-limit is enforced — there is no rate limiting on login
+  attempts.</p>
+<p><strong>Common user actions:</strong> Type username and password, click Log In. If you
+forget your password, see <a href="#10-change-password">Section 10 — Change Password</a>
+(requires knowing your current password) or contact an Admin to have it reset
+via the Distributor Manager's Create User panel.</p>
+<hr />
+<h2 id="2-post-login-dashboard-form-locked">2. Post-Login Dashboard (Form Locked)</h2>
+<p><img alt="Post-login, locked" src="screenshots/03_post_login_locked.png" /></p>
+<p><strong>Purpose:</strong> Confirms who you're logged in as and what role/region you're
+scoped to, before unlocking the assessment form.</p>
+<p><strong>What's shown:</strong>
+- <strong>Sidebar</strong>: your name, role pill, region pill, Logout button, Change
+  Password panel
+- <strong>"Logged In As" card</strong>: your name, role description, and region scope
+- <strong>"Assessment Period" card</strong>: month/year selector
+- <strong>"Location" card</strong>: Region (locked to your assigned region) + Distributor
+  (must be selected)</p>
+<p><strong>Validation rules:</strong>
+- The assessment form below stays hidden until a Distributor is selected.
+  Region cannot be changed — Area Sales Supervisor accounts are scoped to
+  exactly one region.</p>
+<p><strong>Common user actions:</strong> Select the Assessment Period, then select a
+Distributor to unlock the form.</p>
+<hr />
+<h2 id="3-assessment-period-filter">3. Assessment Period Filter</h2>
+<p><img alt="Assessment period dropdown" src="screenshots/04_assessment_period_dropdown.png" /></p>
+<p><strong>Purpose:</strong> Choose which month the assessment applies to.</p>
+<p><strong>Filter behavior:</strong>
+- Area Sales Supervisor sees only <strong>3 months</strong>: the current month and the 2
+  previous months. (Other roles — the bulk/admin roles — see a wider
+  13-month window: 6 months back to 6 months forward.) This is intentional:
+  field assessments are expected to be entered promptly, not months in
+  advance or long after the fact.
+- Defaults to the current month on load.</p>
+<p><strong>Common user actions:</strong> Open the dropdown, pick a month. Changing this after
+you've already started filling in the form does not clear your answers, but
+changing it after a submission for one period will let you start a new
+submission for a different period (one submission is allowed per
+role+distributor+period — see Section 8).</p>
+<hr />
+<h2 id="4-distributor-filter">4. Distributor Filter</h2>
+<p><img alt="Distributor dropdown" src="screenshots/05_distributor_dropdown.png" /></p>
+<p><strong>Purpose:</strong> Select which distributor you're assessing.</p>
+<p><strong>Filter behavior:</strong>
+- The list only shows distributors assigned to <strong>you specifically</strong> (matched
+  on the master distributor list by region and your name as the responsible
+  supervisor) — not every distributor in your region.
+- If the list is empty, no distributors are currently mapped to you; contact
+  an Admin.</p>
+<p><strong>Validation rules:</strong> Both Assessment Period and Distributor must be set
+before the form below appears — a banner shows "✏️ Select a distributor above
+to unlock the assessment form" until then.</p>
+<hr />
+<h2 id="5-assessment-form-people-roles">5. Assessment Form — People &amp; Roles</h2>
+<p><img alt="Form unlocked — People &amp; Roles" src="screenshots/06_form_unlocked_people_roles.png" />
+<img alt="People &amp; Roles filled in" src="screenshots/07_people_roles_filled.png" /></p>
+<p><strong>Purpose:</strong> The first of 3 metric categories. Captures whether the
+distributor has dedicated, exclusive-to-SKINTIFIC staff in 3 roles.</p>
+<p><strong>Cards in this category:</strong>
+| # | Metric | Max Points | Grades |
+|---|---|---|---|
+| 1 | Operational Leader (SPV/Operational Manager) | 5 | A=Exclusive(5), B=Mixed(3), C=Don't exist(0) |
+| 2 | Salesman | 7 | A=Exclusive(7), B=Mixed(5), C=Under quota(3), D=Don't exist(0) |
+| 3 | Administrative &amp; AR Support | 3 | A=Exclusive(3), B=Mixed(1), C=Don't exist(0) |</p>
+<p><strong>Buttons/inputs:</strong>
+- Radio buttons (A/B/C/D) select the grade for each metric
+- Name field(s) — required when the selected grade implies the role exists;
+  Salesman requires <strong>exactly 5 names</strong> (use <code>-</code> for unfilled slots if fewer
+  than 5 salesmen)</p>
+<p><strong>Validation rules:</strong>
+- If grade = "Do not exist", any entered name is rejected ("selected 'Do not
+  exist' but a name was entered")
+- If grade ≠ "Do not exist", a name is required
+- Salesman specifically requires exactly 5 name entries (real names or <code>-</code>
+  placeholders), never more or fewer</p>
+<p><strong>Calculations shown:</strong> None at this stage — points are tallied live in the
+sidebar (see Section 7).</p>
+<hr />
+<h2 id="6-assessment-form-infrastructure-delivery-operations-compliance">6. Assessment Form — Infrastructure &amp; Delivery / Operations &amp; Compliance</h2>
+<p><img alt="Infrastructure &amp; Delivery" src="screenshots/08_infrastructure_delivery.png" />
+<img alt="Operations &amp; Compliance" src="screenshots/09_operations_compliance.png" />
+<img alt="Bad Stock detail" src="screenshots/10_bad_stock_detail.png" /></p>
+<p><strong>Purpose:</strong> The remaining 4 metrics owned by Area Sales Supervisor.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Metric</th>
+<th>Max Points</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4</td>
+<td>Warehouse Facility Standard</td>
+<td>3</td>
+<td>Simple grade selection</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Delivery SLA Compliance</td>
+<td>8</td>
+<td><strong>Calculated</strong>, see below</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Inventory Control &amp; Stock Opname</td>
+<td>6</td>
+<td>Simple grade selection</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Bad Stock Handling Performance</td>
+<td>2</td>
+<td><strong>Calculated</strong>, see below</td>
+</tr>
+</tbody>
+</table>
+<h3 id="delivery-sla-compliance-calculation">Delivery SLA Compliance — calculation</h3>
+<p>Two separate radio inputs (Inner City 2×24h, Outer City 3×24h), each
+100% / 99%-80% / &lt;80%. The grade is <strong>derived automatically</strong>, not chosen
+directly:
+- Either Inner or Outer below 80% → <strong>0 pts</strong>
+- Either at 99%-80% (none below 80%) → <strong>4 pts</strong>
+- Both at 100% → <strong>8 pts</strong></p>
+<h3 id="bad-stock-handling-performance-calculation">Bad Stock Handling Performance — calculation</h3>
+<ol>
+<li><strong>YTD Sell Through</strong> is looked up automatically for the selected
+   distributor and year (Skintific + Timephoria brands only).</li>
+<li><strong>Bad Stock Allowance</strong> = 0.5% of YTD Sell Through.</li>
+<li>You enter <strong>Bad Stock Utilization (Rp)</strong> — the actual Rupiah value of bad
+   stock claimed this period.</li>
+<li><strong>Compliance % = Utilization ÷ Allowance × 100</strong>, capped at 100%.</li>
+<li>Grade: ≥100% → A (2 pts), ≥80% → B (1 pt), &lt;80% → C (0 pts).</li>
+</ol>
+<p><strong>Validation rule (important):</strong> If the distributor has <strong>zero or no YTD
+sell-through data</strong>, this entire card is <strong>hidden</strong> and the metric
+auto-scores the maximum (2 pts) — there's nothing to assess compliance
+against, so no input is shown and no error appears.</p>
+<p><strong>Common user actions:</strong> Select grades for Warehouse and Inventory directly;
+for Delivery SLA, pick the inner/outer band; for Bad Stock, type the Rupiah
+utilization amount and watch the compliance % and grade update live.</p>
+<hr />
+<h2 id="7-live-score-tracker-sidebar">7. Live Score Tracker (Sidebar)</h2>
+<p><img alt="Sidebar score tracker" src="screenshots/11_sidebar_score_tracker.png" /></p>
+<p><strong>Purpose:</strong> Real-time feedback on your score as you fill in the form, plus
+visibility into the other 3 roles' progress on the same distributor+period.</p>
+<p><strong>What's shown:</strong>
+- <strong>"Your Live Score"</strong> — running total out of 34 (the Area Sales
+  Supervisor's 7-metric maximum), updates on every answer change, with a
+  progress bar
+- Per-metric breakdown with a colored dot: 🟢 full marks, 🟡 partial, 🔴 zero
+- <strong>"Assessment Progress"</strong> — all 10 metrics across all 4 roles for this
+  distributor+period: ✅ done (with points + which role submitted) or ⏳
+  pending (with which role owns it)
+- <strong>"Combined Score So Far"</strong> — out of 50, across whichever roles have
+  already submitted</p>
+<p><strong>Calculations shown:</strong> This is a live mirror of the same scoring rules
+described in Sections 5–6 — nothing new is calculated here, it's a running
+total of the answers above.</p>
+<hr />
+<h2 id="8-review-submit">8. Review &amp; Submit</h2>
+<p><img alt="Review &amp; Submit confirmation popup" src="screenshots/12_review_submit_popup.png" /></p>
+<p><strong>Purpose:</strong> A mandatory double-check step before anything is saved.</p>
+<p><strong>Buttons:</strong>
+- <strong>🔍 Review &amp; Submit (Area Sales Supervisor)</strong> — validates the form (see
+  Section 5's validation rules) and, if valid, opens the confirmation popup
+  shown above. Disabled if you've already submitted for this
+  distributor+period.
+- Inside the popup: <strong>✏️ Back to Edit</strong> (closes the popup, no changes saved)
+  or <strong>✅ Confirm &amp; Submit</strong> (writes the submission)</p>
+<p><strong>What the popup shows:</strong> Every metric, its grade, point value, and any
+person name, plus your subtotal out of 34.</p>
+<p><strong>Validation rules:</strong>
+- All Section 5 field-level rules are checked first; errors are listed and
+  the popup does not open until they're fixed.
+- <strong>One submission per role, per distributor, per assessment period</strong> — once
+  confirmed, you cannot submit again for this exact combination. Attempting
+  to revisit shows a warning banner and disables the Review &amp; Submit button.</p>
+<hr />
+<h2 id="9-submission-result-duplicate-submission-notice">9. Submission Result / Duplicate-Submission Notice</h2>
+<p><img alt="Submission result / already-submitted warning" src="screenshots/13_submission_result.png" /></p>
+<p><strong>Purpose:</strong> Confirms the submission was saved, and — if all 4 roles have
+since submitted their part — shows the final combined score and rating
+(Excellent/Good/Fair/Needs Improvement) for the distributor+period.</p>
+<p><strong>If you return to an already-submitted distributor+period:</strong> a yellow
+warning banner reads <em>"[Role] has already submitted for [Distributor] in
+[Period]. Only one submission is allowed per role, per distributor, per
+assessment period."</em> — this is the same one-submission rule from Section 8,
+shown again on revisit.</p>
+<hr />
+<h2 id="10-change-password">10. Change Password</h2>
+<p><img alt="Change Password panel" src="screenshots/14_change_password.png" /></p>
+<p><strong>Purpose:</strong> Self-service password change, available to every role (not just
+Area Sales Supervisor).</p>
+<p><strong>Fields:</strong> Old Password, New Password, Confirm New Password (all masked,
+with a show/hide eye icon).</p>
+<p><strong>Buttons:</strong> <strong>Update Password</strong> — validates and applies the change.</p>
+<p><strong>Validation rules:</strong>
+- All 3 fields are required.
+- Old Password must match your current password exactly.
+- New Password and Confirm New Password must match each other.
+- No complexity requirements (length, special characters, etc.) are
+  enforced.
+- On success, you are <strong>immediately logged out</strong> and must log back in with
+  the new password — this is intentional, not a bug.</p>
+<hr />
+<h2 id="faq">FAQ</h2>
+<p><strong>Q: I can't find a distributor I expect to see.</strong>
+A: Your distributor list is filtered to only the distributors assigned to
+you. If one is missing, contact an Admin to check the mapping.</p>
+<p><strong>Q: The Bad Stock card disappeared — is that a bug?</strong>
+A: No. It only disappears when the distributor has zero recorded YTD
+sell-through (Skintific + Timephoria) for the selected year — there's
+nothing to calculate compliance against, so the metric auto-awards full
+marks and hides the input.</p>
+<p><strong>Q: I made a mistake after confirming — can I fix it?</strong>
+A: No. Submissions are final per role/distributor/period. Contact an Admin
+if a correction is genuinely needed.</p>
+<p><strong>Q: Why does the sidebar show other roles' progress?</strong>
+A: All 4 roles' submissions roll up into one combined assessment per
+distributor+period — the sidebar lets you see the whole picture, not just
+your own part.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Invalid username or password"</td>
+<td>Typo, or wrong account</td>
+<td>Re-check credentials; case doesn't matter for username but does for password</td>
+</tr>
+<tr>
+<td>Distributor dropdown is empty</td>
+<td>No distributors mapped to your account</td>
+<td>Contact an Admin</td>
+</tr>
+<tr>
+<td>Review &amp; Submit button is disabled/greyed out</td>
+<td>Already submitted for this distributor+period</td>
+<td>Pick a different distributor or period, or contact an Admin for a correction</td>
+</tr>
+<tr>
+<td>Bad Stock card missing</td>
+<td>Zero YTD sell-through for that distributor/year</td>
+<td>Expected behavior, not an error — see FAQ</td>
+</tr>
+<tr>
+<td>Logged out unexpectedly</td>
+<td>You just changed your password</td>
+<td>Log back in with the new password</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>
