@@ -622,6 +622,52 @@ def check_role_already_submitted(role, distributor_name, period):
     df = bq_client.query(query, job_config=job_config).to_dataframe()
     return not df.empty
 
+@st.cache_data(ttl=300)
+def get_ass_missing_distributors(period):
+    """Active distributors with no Area Sales Supervisor submission for this
+    period. ASS submits all 7 of its metrics in one atomic batch, so checking
+    for any row with this role+distributor+period is enough — no metric filter
+    needed (unlike get_role_bulk_progress, which checks one bulk role's single
+    metric)."""
+    master_df = load_master_distributor()
+    all_distributors = master_df[["region", "distributor"]].drop_duplicates()
+
+    query = f"""
+        SELECT DISTINCT distributor
+        FROM `{PROJECT_ID}.{DATASET}.{TABLE}`
+        WHERE submitted_role = 'Area Sales Supervisor' AND assessment_period = @period
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("period", "STRING", period),
+    ])
+    df = bq_client.query(query, job_config=job_config).to_dataframe()
+    done_set = set(df["distributor"]) if not df.empty else set()
+
+    missing = all_distributors[~all_distributors["distributor"].isin(done_set)]
+    return missing.sort_values(["region", "distributor"]).reset_index(drop=True)
+
+@st.cache_data(ttl=300)
+def get_ass_users_not_submitted(period):
+    """Active Area Sales Supervisor accounts with zero submissions for this
+    period — matched on full_name since that's what's stored in
+    representative_name, case-insensitively since it's free-typed at login time."""
+    query = f"""
+        SELECT u.username, u.full_name, u.region
+        FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}` u
+        WHERE u.role = 'Area Sales Supervisor' AND u.is_active = TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM `{PROJECT_ID}.{DATASET}.{TABLE}` da
+            WHERE da.submitted_role = 'Area Sales Supervisor'
+              AND da.assessment_period = @period
+              AND UPPER(da.representative_name) = UPPER(u.full_name)
+          )
+        ORDER BY u.region, u.full_name
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("period", "STRING", period),
+    ])
+    return bq_client.query(query, job_config=job_config).to_dataframe()
+
 def check_bulk_already_submitted(role, distributor_names, period, metric):
     """Live (uncached) batch check — one query covers the whole upload batch."""
     if not distributor_names:
@@ -1522,6 +1568,30 @@ else:
                         st.json(insert_errors)
                     else:
                         st.success(f"✅ User '{normalize_username(new_username)}' created with role **{new_user_role}**.")
+
+        with st.expander("📊  Reporting — Pending ASS Assessments", expanded=False):
+            report_period = st.selectbox("Period", period_labels, index=default_index, key="report_period")
+
+            missing_df = get_ass_missing_distributors(report_period)
+            not_submitted_df = get_ass_users_not_submitted(report_period)
+
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                st.metric("Distributors missing an ASS assessment", len(missing_df))
+            with rc2:
+                st.metric("ASS users with zero submissions", len(not_submitted_df))
+
+            st.markdown(f"**Distributors without an ASS assessment — {report_period}**")
+            if missing_df.empty:
+                st.success("All distributors have an ASS assessment for this period.")
+            else:
+                st.dataframe(missing_df, use_container_width=True, hide_index=True)
+
+            st.markdown(f"**ASS users who haven't submitted yet — {report_period}**")
+            if not_submitted_df.empty:
+                st.success("All ASS users have submitted for this period.")
+            else:
+                st.dataframe(not_submitted_df, use_container_width=True, hide_index=True)
 
     # ── ADMIN: NPD & SKU Focus allocation uploads (Distributor Manager only) ──
     @st.dialog("📝 Confirm Allocation Submission", width="large")

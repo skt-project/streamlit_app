@@ -616,6 +616,39 @@ def get_role_bulk_progress(role, period):
             pending.append(r["distributor"])
     return done, pending
 
+def get_ass_missing_distributors(period):
+    """Active distributors with no Area Sales Supervisor submission for this
+    period (MOCK — checks role_submitted_keys directly, same set used by the
+    ASS one-submission-per-period guard elsewhere in this file)."""
+    master_df = load_master_distributor()
+    all_distributors = master_df[["region", "distributor"]].drop_duplicates()
+    done_set = {d for (r, d, p) in st.session_state.role_submitted_keys
+                if r == "Area Sales Supervisor" and p == period}
+    missing = all_distributors[~all_distributors["distributor"].isin(done_set)]
+    return missing.sort_values(["region", "distributor"]).reset_index(drop=True)
+
+def get_ass_users_not_submitted(period):
+    """Area Sales Supervisor accounts with no submission for this period.
+    MOCK APPROXIMATION: role_submitted_keys only records (role, distributor,
+    period), not who submitted it — unlike production, which has a real
+    representative_name on every row. As a stand-in, this checks whether ANY
+    distributor in the user's own region has been submitted for the period."""
+    master_df = load_master_distributor()
+    all_users = {**MOCK_USERS, **st.session_state.get("extra_users", {})}
+    ass_users = [
+        {"username": uname, "full_name": u["full_name"], "region": u.get("region")}
+        for uname, u in all_users.items() if u["role"] == "Area Sales Supervisor"
+    ]
+    done_distributors = {d for (r, d, p) in st.session_state.role_submitted_keys
+                          if r == "Area Sales Supervisor" and p == period}
+
+    not_submitted = []
+    for u in ass_users:
+        region_dists = set(master_df[master_df["region"] == u["region"]]["distributor"])
+        if not (region_dists & done_distributors):
+            not_submitted.append(u)
+    return pd.DataFrame(not_submitted, columns=["username", "full_name", "region"])
+
 # =====================================================
 # NPD / SKU FOCUS ALLOCATION UPLOADS (Distributor Manager only)
 # Separate from the 10-metric scoring system — these set per-SKU allocation
@@ -1417,6 +1450,30 @@ else:
                 else:
                     mock_create_user(new_username, new_password, new_full_name, new_user_role, new_region)
                     st.success(f"✅ User '{normalize_username(new_username)}' created with role **{new_user_role}**. (MOCK — log out and try logging in with it!)")
+
+        with st.expander("📊  Reporting — Pending ASS Assessments", expanded=False):
+            report_period = st.selectbox("Period", period_labels, index=default_index, key="report_period")
+
+            missing_df = get_ass_missing_distributors(report_period)
+            not_submitted_df = get_ass_users_not_submitted(report_period)
+
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                st.metric("Distributors missing an ASS assessment", len(missing_df))
+            with rc2:
+                st.metric("ASS users with zero submissions", len(not_submitted_df))
+
+            st.markdown(f"**Distributors without an ASS assessment — {report_period}**")
+            if missing_df.empty:
+                st.success("All distributors have an ASS assessment for this period.")
+            else:
+                st.dataframe(missing_df, use_container_width=True, hide_index=True)
+
+            st.markdown(f"**ASS users who haven't submitted yet — {report_period}**")
+            if not_submitted_df.empty:
+                st.success("All ASS users have submitted for this period.")
+            else:
+                st.dataframe(not_submitted_df, use_container_width=True, hide_index=True)
 
     # ── ADMIN: NPD & SKU Focus allocation uploads (Distributor Manager only) ──
     @st.dialog("📝 Confirm Allocation Submission", width="large")
