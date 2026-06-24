@@ -668,6 +668,18 @@ def get_ass_users_not_submitted(period):
     ])
     return bq_client.query(query, job_config=job_config).to_dataframe()
 
+@st.cache_data(ttl=300)
+def get_total_ass_users():
+    """Count of active Area Sales Supervisor accounts, for the X/Y submitted
+    ratio in the Reporting panel."""
+    query = f"""
+        SELECT COUNT(*) AS total
+        FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        WHERE role = 'Area Sales Supervisor' AND is_active = TRUE
+    """
+    df = bq_client.query(query).to_dataframe()
+    return int(df["total"].iloc[0]) if not df.empty else 0
+
 def check_bulk_already_submitted(role, distributor_names, period, metric):
     """Live (uncached) batch check — one query covers the whole upload batch."""
     if not distributor_names:
@@ -1574,12 +1586,16 @@ else:
 
             missing_df = get_ass_missing_distributors(report_period)
             not_submitted_df = get_ass_users_not_submitted(report_period)
+            total_distributors = load_master_distributor()["distributor"].nunique()
+            total_ass_users = get_total_ass_users()
+            submitted_distributors = total_distributors - len(missing_df)
+            submitted_ass_users = total_ass_users - len(not_submitted_df)
 
             rc1, rc2 = st.columns(2)
             with rc1:
-                st.metric("Distributors missing an ASS assessment", len(missing_df))
+                st.metric("Distributors Submitted (ASS)", f"{submitted_distributors}/{total_distributors}")
             with rc2:
-                st.metric("ASS users with zero submissions", len(not_submitted_df))
+                st.metric("ASS Users Submitted", f"{submitted_ass_users}/{total_ass_users}")
 
             st.markdown(f"**Distributors without an ASS assessment — {report_period}**")
             if missing_df.empty:

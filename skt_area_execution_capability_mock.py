@@ -649,6 +649,12 @@ def get_ass_users_not_submitted(period):
             not_submitted.append(u)
     return pd.DataFrame(not_submitted, columns=["username", "full_name", "region"])
 
+def get_total_ass_users():
+    """Count of active Area Sales Supervisor accounts (MOCK), for the X/Y
+    submitted ratio in the Reporting panel."""
+    all_users = {**MOCK_USERS, **st.session_state.get("extra_users", {})}
+    return sum(1 for u in all_users.values() if u["role"] == "Area Sales Supervisor")
+
 # =====================================================
 # NPD / SKU FOCUS ALLOCATION UPLOADS (Distributor Manager only)
 # Separate from the 10-metric scoring system — these set per-SKU allocation
@@ -1456,12 +1462,16 @@ else:
 
             missing_df = get_ass_missing_distributors(report_period)
             not_submitted_df = get_ass_users_not_submitted(report_period)
+            total_distributors = load_master_distributor()["distributor"].nunique()
+            total_ass_users = get_total_ass_users()
+            submitted_distributors = total_distributors - len(missing_df)
+            submitted_ass_users = total_ass_users - len(not_submitted_df)
 
             rc1, rc2 = st.columns(2)
             with rc1:
-                st.metric("Distributors missing an ASS assessment", len(missing_df))
+                st.metric("Distributors Submitted (ASS)", f"{submitted_distributors}/{total_distributors}")
             with rc2:
-                st.metric("ASS users with zero submissions", len(not_submitted_df))
+                st.metric("ASS Users Submitted", f"{submitted_ass_users}/{total_ass_users}")
 
             st.markdown(f"**Distributors without an ASS assessment — {report_period}**")
             if missing_df.empty:
