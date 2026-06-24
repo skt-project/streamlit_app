@@ -14,6 +14,7 @@ from assessment_logic import (
     VALUE_THRESHOLDS, normalize_username, value_to_grade, get_sla_grade,
     bad_stock_grade_for_ytd, validate_allocation_row,
 )
+from assessment_email import send_email, build_ass_reminder_email
 
 st.set_page_config(
     page_title="Distributor Operational Assessment",
@@ -652,7 +653,7 @@ def get_ass_users_not_submitted(period):
     period — matched on full_name since that's what's stored in
     representative_name, case-insensitively since it's free-typed at login time."""
     query = f"""
-        SELECT u.username, u.full_name, u.region
+        SELECT u.username, u.full_name, u.region, u.email
         FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}` u
         WHERE u.role = 'Area Sales Supervisor' AND u.is_active = TRUE
           AND NOT EXISTS (
@@ -1015,7 +1016,9 @@ with st.container(border=True):
 
 # =====================================================
 # METADATA — PERIOD
-# Area Sales Supervisor: current month + 2 previous (3 total).
+# Area Sales Supervisor: 2 previous months + current month, but the current
+# month only becomes selectable from its 4th week onward (day >= 22) — there
+# isn't enough of the month's data to assess fairly before then.
 # Other roles: 6 months before + current + 6 months after (13 total).
 # =====================================================
 months = ["January","February","March","April","May","June",
@@ -1032,10 +1035,16 @@ def build_period_options(months_before, months_after):
         opts.append((months[month_num - 1], year))
     return opts
 
-period_options = build_period_options(2, 0) if role == "Area Sales Supervisor" else build_period_options(6, 6)
-period_labels  = [f"{m} {y}" for m, y in period_options]
-default_index  = next(i for i, (m, y) in enumerate(period_options)
-                       if m == months[datetime.now().month - 1] and y == datetime.now().year)
+if role == "Area Sales Supervisor":
+    current_month_open = datetime.now().day >= 22
+    period_options = build_period_options(2, 0 if current_month_open else -1)
+    default_index  = len(period_options) - 1  # most recent selectable period
+else:
+    period_options = build_period_options(6, 6)
+    default_index  = next(i for i, (m, y) in enumerate(period_options)
+                           if m == months[datetime.now().month - 1] and y == datetime.now().year)
+
+period_labels = [f"{m} {y}" for m, y in period_options]
 
 with st.container(border=True):
     st.markdown('<div class="sec-label">📅 Assessment Period</div>', unsafe_allow_html=True)
@@ -1608,6 +1617,30 @@ else:
                 st.success("All ASS users have submitted for this period.")
             else:
                 st.dataframe(not_submitted_df, use_container_width=True, hide_index=True)
+
+                emailable = not_submitted_df[not_submitted_df["email"].notna() & (not_submitted_df["email"].str.strip() != "")]
+                no_email_count = len(not_submitted_df) - len(emailable)
+
+                send_clicked = st.button(
+                    f"📧  Send Reminder Email ({len(emailable)} recipient{'s' if len(emailable) != 1 else ''})",
+                    type="primary", use_container_width=True,
+                    disabled=emailable.empty, key="send_ass_reminder",
+                )
+                if no_email_count:
+                    st.caption(f"⚠️ {no_email_count} user(s) have no email on file and will be skipped.")
+
+                if send_clicked:
+                    sent, failed = [], []
+                    for _, u in emailable.iterrows():
+                        subject, html = build_ass_reminder_email(u["full_name"], report_period)
+                        if send_email([u["email"]], subject, html):
+                            sent.append(u["full_name"])
+                        else:
+                            failed.append(u["full_name"])
+                    if sent:
+                        st.success(f"✅ Reminder sent to {len(sent)}: {', '.join(sent)}")
+                    if failed:
+                        st.error(f"❌ Failed to send to {len(failed)}: {', '.join(failed)}")
 
     # ── ADMIN: NPD & SKU Focus allocation uploads (Distributor Manager only) ──
     @st.dialog("📝 Confirm Allocation Submission", width="large")
