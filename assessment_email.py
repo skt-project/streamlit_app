@@ -28,21 +28,26 @@ def get_app_url() -> str:
         return "https://your-app.streamlit.app"
 
 
-def send_email(to_list, subject, html_body) -> bool:
-    """Send one HTML email to one or more recipients. Returns True on success."""
+def send_email(to_list, subject, html_body, cc_list=None) -> bool:
+    """Send one HTML email to one or more recipients, optionally CC'ing
+    others (e.g. other roles kept in the loop on ASS reminders without
+    needing their own completion tracking). Returns True on success."""
     if not to_list:
         return False
+    cc_list = cc_list or []
     cfg = _smtp_cfg()
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = cfg["user"]
     msg["To"] = ", ".join(to_list)
+    if cc_list:
+        msg["Cc"] = ", ".join(cc_list)
     msg.attach(MIMEText(html_body, "html"))
     try:
         with smtplib.SMTP(cfg["host"], cfg["port"]) as srv:
             srv.starttls()
             srv.login(cfg["user"], cfg["pass"])
-            srv.sendmail(cfg["user"], to_list, msg.as_string())
+            srv.sendmail(cfg["user"], to_list + cc_list, msg.as_string())
         return True
     except Exception as e:
         st.warning(f"⚠️ Email failed to send: {e}")

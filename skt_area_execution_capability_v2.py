@@ -649,19 +649,26 @@ def get_ass_missing_distributors(period):
 
 @st.cache_data(ttl=300)
 def get_ass_users_not_submitted(period):
-    """Active Area Sales Supervisor accounts with zero submissions for this
-    period — matched on full_name since that's what's stored in
-    representative_name, case-insensitively since it's free-typed at login time."""
+    """Active Area Sales Supervisor accounts with at least one assigned
+    distributor still missing a submission for this period — NOT just users
+    with zero submissions. An ASS responsible for 3 distributors who only
+    submitted 1 still belongs on this list; checking "any submission exists"
+    alone would incorrectly mark them as done."""
     query = f"""
         SELECT u.username, u.full_name, u.region, u.email
         FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}` u
+        JOIN `{PROJECT_ID}.{DATASET}.master_distributor` m
+          ON m.status = 'Active'
+          AND m.region = u.region
+          AND (UPPER(m.spv_skt) = UPPER(u.full_name) OR UPPER(m.spv_tph) = UPPER(u.full_name))
         WHERE u.role = 'Area Sales Supervisor' AND u.is_active = TRUE
           AND NOT EXISTS (
             SELECT 1 FROM `{PROJECT_ID}.{DATASET}.{TABLE}` da
             WHERE da.submitted_role = 'Area Sales Supervisor'
               AND da.assessment_period = @period
-              AND UPPER(da.representative_name) = UPPER(u.full_name)
+              AND da.distributor = m.distributor
           )
+        GROUP BY u.username, u.full_name, u.region, u.email
         ORDER BY u.region, u.full_name
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
@@ -680,6 +687,22 @@ def get_total_ass_users():
     """
     df = bq_client.query(query).to_dataframe()
     return int(df["total"].iloc[0]) if not df.empty else 0
+
+@st.cache_data(ttl=300)
+def get_other_stakeholder_cc_emails():
+    """Active Distributor Manager / Admin RSA / Account Receivable emails to
+    CC on ASS reminders — keeps the other 3 roles in the loop on who's
+    lagging without building separate completion tracking for their own
+    submissions."""
+    query = f"""
+        SELECT DISTINCT email
+        FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        WHERE role IN ('Distributor Manager', 'Admin RSA', 'Account Receivable')
+          AND is_active = TRUE
+          AND email IS NOT NULL AND TRIM(email) != ''
+    """
+    df = bq_client.query(query).to_dataframe()
+    return df["email"].tolist() if not df.empty else []
 
 def check_bulk_already_submitted(role, distributor_names, period, metric):
     """Live (uncached) batch check — one query covers the whole upload batch."""
@@ -1621,6 +1644,7 @@ else:
                 emailable = not_submitted_df[not_submitted_df["email"].notna() & (not_submitted_df["email"].str.strip() != "")]
                 no_email_count = len(not_submitted_df) - len(emailable)
 
+                cc_emails = get_other_stakeholder_cc_emails()
                 send_clicked = st.button(
                     f"📧  Send Reminder Email ({len(emailable)} recipient{'s' if len(emailable) != 1 else ''})",
                     type="primary", use_container_width=True,
@@ -1628,12 +1652,14 @@ else:
                 )
                 if no_email_count:
                     st.caption(f"⚠️ {no_email_count} user(s) have no email on file and will be skipped.")
+                if cc_emails:
+                    st.caption(f"📋 CC'd on every reminder: {', '.join(cc_emails)}")
 
                 if send_clicked:
                     sent, failed = [], []
                     for _, u in emailable.iterrows():
                         subject, html = build_ass_reminder_email(u["full_name"], report_period)
-                        if send_email([u["email"]], subject, html):
+                        if send_email([u["email"]], subject, html, cc_list=cc_emails):
                             sent.append(u["full_name"])
                         else:
                             failed.append(u["full_name"])

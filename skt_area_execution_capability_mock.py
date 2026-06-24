@@ -13,13 +13,13 @@ from assessment_logic import (
 )
 from assessment_email import build_ass_reminder_email
 
-def mock_send_email(to_list, subject, html_body):
+def mock_send_email(to_list, subject, html_body, cc_list=None):
     """MOCK ONLY — no real SMTP available here. Records the send to session
     state (visible via the 'Sent Reminders (MOCK)' log) instead of actually
     emailing, and always reports success."""
     if "mock_sent_emails" not in st.session_state:
         st.session_state.mock_sent_emails = []
-    st.session_state.mock_sent_emails.append({"to": to_list, "subject": subject})
+    st.session_state.mock_sent_emails.append({"to": to_list, "cc": cc_list or [], "subject": subject})
     return True
 
 st.set_page_config(
@@ -467,9 +467,9 @@ MOCK_USERS = {
     "budi":  {"password": "sales123", "full_name": "Budi Santoso", "role": "Area Sales Supervisor", "region": "Jakarta", "email": "budi@skintific.com"},
     "wati":  {"password": "sales456", "full_name": "Wati Suryani", "role": "Area Sales Supervisor", "region": "East Java", "email": "wati@skintific.com"},
     # Distributor Manager / Admin RSA / Account Receivable work across all regions (bulk mode).
-    "citra": {"password": "dist123",  "full_name": "Citra Dewi",   "role": "Distributor Manager", "email": "citra@skintific.com"},
-    "dedi":  {"password": "rsa123",   "full_name": "Dedi Admin",   "role": "Admin RSA", "email": "dedi@skintific.com"},
-    "eka":   {"password": "ar123",    "full_name": "Eka Finance",  "role": "Account Receivable", "email": "eka@skintific.com"},
+    "citra": {"password": "dist123",  "full_name": "Citra Dewi",   "role": "Distributor Manager"},
+    "dedi":  {"password": "rsa123",   "full_name": "Dedi Admin",   "role": "Admin RSA"},
+    "eka":   {"password": "ar123",    "full_name": "Eka Finance",  "role": "Account Receivable"},
 }
 
 def check_login(username, password):
@@ -638,11 +638,13 @@ def get_ass_missing_distributors(period):
     return missing.sort_values(["region", "distributor"]).reset_index(drop=True)
 
 def get_ass_users_not_submitted(period):
-    """Area Sales Supervisor accounts with no submission for this period.
-    MOCK APPROXIMATION: role_submitted_keys only records (role, distributor,
-    period), not who submitted it — unlike production, which has a real
-    representative_name on every row. As a stand-in, this checks whether ANY
-    distributor in the user's own region has been submitted for the period."""
+    """Area Sales Supervisor accounts with at least one distributor in their
+    region still missing a submission for this period — NOT just users with
+    zero submissions. An ASS responsible for 3 distributors who only
+    submitted 1 still belongs on this list.
+    MOCK APPROXIMATION: the mock has no spv_skt/spv_tph mapping, so "assigned
+    distributors" here means "every distributor in the user's region" —
+    production checks the user's actual mapped distributors instead."""
     master_df = load_master_distributor()
     all_users = {**MOCK_USERS, **st.session_state.get("extra_users", {})}
     ass_users = [
@@ -655,7 +657,7 @@ def get_ass_users_not_submitted(period):
     not_submitted = []
     for u in ass_users:
         region_dists = set(master_df[master_df["region"] == u["region"]]["distributor"])
-        if not (region_dists & done_distributors):
+        if region_dists - done_distributors:
             not_submitted.append(u)
     return pd.DataFrame(not_submitted, columns=["username", "full_name", "region", "email"])
 
@@ -664,6 +666,15 @@ def get_total_ass_users():
     submitted ratio in the Reporting panel."""
     all_users = {**MOCK_USERS, **st.session_state.get("extra_users", {})}
     return sum(1 for u in all_users.values() if u["role"] == "Area Sales Supervisor")
+
+def get_other_stakeholder_cc_emails():
+    """Distributor Manager / Admin RSA / Account Receivable emails to CC on
+    ASS reminders (MOCK) — keeps the other 3 roles in the loop without
+    building separate completion tracking for their own submissions."""
+    all_users = {**MOCK_USERS, **st.session_state.get("extra_users", {})}
+    other_roles = {"Distributor Manager", "Admin RSA", "Account Receivable"}
+    emails = {u.get("email") for u in all_users.values() if u["role"] in other_roles and u.get("email")}
+    return sorted(emails)
 
 # =====================================================
 # NPD / SKU FOCUS ALLOCATION UPLOADS (Distributor Manager only)
@@ -1506,6 +1517,7 @@ else:
                 emailable = not_submitted_df[not_submitted_df["email"].notna() & (not_submitted_df["email"].str.strip() != "")]
                 no_email_count = len(not_submitted_df) - len(emailable)
 
+                cc_emails = get_other_stakeholder_cc_emails()
                 send_clicked = st.button(
                     f"📧  Send Reminder Email ({len(emailable)} recipient{'s' if len(emailable) != 1 else ''})",
                     type="primary", use_container_width=True,
@@ -1513,12 +1525,14 @@ else:
                 )
                 if no_email_count:
                     st.caption(f"⚠️ {no_email_count} user(s) have no email on file and will be skipped.")
+                if cc_emails:
+                    st.caption(f"📋 CC'd on every reminder: {', '.join(cc_emails)}")
 
                 if send_clicked:
                     sent = []
                     for _, u in emailable.iterrows():
                         subject, html = build_ass_reminder_email(u["full_name"], report_period)
-                        if mock_send_email([u["email"]], subject, html):
+                        if mock_send_email([u["email"]], subject, html, cc_list=cc_emails):
                             sent.append(u["full_name"])
                     if sent:
                         st.success(f"✅ (MOCK) Reminder sent to {len(sent)}: {', '.join(sent)}")
@@ -1526,7 +1540,8 @@ else:
                 if st.session_state.get("mock_sent_emails"):
                     with st.expander(f"📜 Sent Reminders Log (MOCK) — {len(st.session_state.mock_sent_emails)}"):
                         for e in st.session_state.mock_sent_emails:
-                            st.caption(f"→ {', '.join(e['to'])} — {e['subject']}")
+                            cc_suffix = f"  (cc: {', '.join(e['cc'])})" if e.get("cc") else ""
+                            st.caption(f"→ {', '.join(e['to'])}{cc_suffix} — {e['subject']}")
 
     # ── ADMIN: NPD & SKU Focus allocation uploads (Distributor Manager only) ──
     @st.dialog("📝 Confirm Allocation Submission", width="large")
