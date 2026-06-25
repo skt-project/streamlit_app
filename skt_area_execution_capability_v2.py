@@ -12,7 +12,7 @@ from google.cloud import bigquery
 from openpyxl.worksheet.datavalidation import DataValidation
 from assessment_logic import (
     VALUE_THRESHOLDS, normalize_username, value_to_grade, get_sla_grade,
-    bad_stock_grade_for_ytd, validate_allocation_row,
+    bad_stock_grade_for_ytd, validate_allocation_row, is_new_distributor_exempt,
 )
 from assessment_email import send_email, build_ass_reminder_email
 
@@ -321,13 +321,13 @@ def get_distributors_for_supervisor(full_name, region):
     return df
 
 @st.cache_data(ttl=600)
-def get_ytd_sell_through(distributor_name, year):
+def get_sell_in_ytd(distributor_name, year):
     # Brand filter restricts Bad Stock allowance to Skintific + Timephoria only.
-    # Column/value names are user-provided, not independently verified against
-    # live fact_sell_through_all rows — sanity-check after deploy.
+    # Table/column names confirmed: pbi_gt_dataset.fact_sell_in_all, same
+    # structure as fact_sell_through_all.
     query = """
         SELECT SUM(value) AS ytd_value
-        FROM `pbi_gt_dataset.fact_sell_through_all`
+        FROM `pbi_gt_dataset.fact_sell_in_all`
         WHERE distributor_name = @distributor_name
         AND EXTRACT(YEAR FROM calendar_date) = @selected_year
         AND brand IN ('SKINTIFIC', 'TIMEPHORIA')
@@ -337,20 +337,42 @@ def get_ytd_sell_through(distributor_name, year):
         bigquery.ScalarQueryParameter("selected_year", "INT64", year),
     ])
     df = bq_client.query(query, job_config=job_config).to_dataframe()
-    if df.empty or df["ytd_value"].iloc[0] is None:
+    # BigQuery NULL (no matching rows) becomes pandas NaN here, not Python
+    # None — "is None" alone doesn't catch it. This was the root cause of a
+    # real "cannot convert float NaN to integer" crash downstream.
+    if df.empty or pd.isna(df["ytd_value"].iloc[0]):
         return 0
     return df["ytd_value"].iloc[0]
 
+@st.cache_data(ttl=600)
+def get_distributor_join_date(distributor_name):
+    query = f"""
+        SELECT join_date
+        FROM `{PROJECT_ID}.{DATASET}.master_distributor`
+        WHERE distributor = @distributor_name
+        LIMIT 1
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("distributor_name", "STRING", distributor_name),
+    ])
+    df = bq_client.query(query, job_config=job_config).to_dataframe()
+    if df.empty or pd.isna(df["join_date"].iloc[0]):
+        return None
+    return df["join_date"].iloc[0]
+
 BAD_STOCK_Q = "BAD STOCK HANDLING PERFORMANCE"
 
-def compute_bad_stock_score(distributor_name, year):
-    """Fetches YTD sell-through (the only part that needs BigQuery), then
-    delegates the pure compliance-% -> grade math to bad_stock_grade_for_ytd
-    (assessment_logic.py) so that rule is unit-testable without a BQ connection."""
-    ytd_val = get_ytd_sell_through(distributor_name, year)
+def compute_bad_stock_score(distributor_name, year, month_num):
+    """Fetches Sell In YTD + join date (the only parts that need BigQuery),
+    then delegates the pure compliance-% -> grade math to
+    bad_stock_grade_for_ytd (assessment_logic.py) so that rule is
+    unit-testable without a BQ connection."""
+    ytd_val = get_sell_in_ytd(distributor_name, year)
+    join_date = get_distributor_join_date(distributor_name)
+    is_exempt = is_new_distributor_exempt(ytd_val, join_date, year, month_num)
     utilization = st.session_state.get(f"util_{BAD_STOCK_Q}", 0)
-    grade, bs_allow, utilization_out, compliance_pct = bad_stock_grade_for_ytd(ytd_val, utilization)
-    return grade, ytd_val, bs_allow, utilization_out, compliance_pct
+    grade, bs_allow, utilization_out, compliance_pct = bad_stock_grade_for_ytd(ytd_val, utilization, is_exempt)
+    return grade, ytd_val, bs_allow, utilization_out, compliance_pct, is_exempt
 
 # =====================================================
 # QUESTIONS CONFIG — all 10 metrics, owned across 4 roles
@@ -1075,6 +1097,7 @@ with st.container(border=True):
 
 selected_month, _sep_year = assessment_period.rsplit(" ", 1)
 selected_year = int(_sep_year)
+selected_month_num = months.index(selected_month) + 1
 
 # =====================================================
 # SESSION STATE INIT (UI-flow only — submission truth lives in BigQuery)
@@ -1152,7 +1175,7 @@ if not is_bulk_role:
                 outer = st.session_state.get("outer_city_sla", "100%")
                 _, pts = get_sla_grade(inner, outer)
             elif q_name == BAD_STOCK_Q:
-                g, *_ = compute_bad_stock_score(distributor, selected_year)
+                g, *_ = compute_bad_stock_score(distributor, selected_year, selected_month_num)
                 pts = grades[g][1]
             else:
                 g = st.session_state.get(f"grade_{q_name}", list(grades.keys())[0])
@@ -1171,7 +1194,7 @@ if not is_bulk_role:
                 outer = st.session_state.get("outer_city_sla", "100%")
                 _, pts = get_sla_grade(inner, outer)
             elif q_name == BAD_STOCK_Q:
-                g, *_ = compute_bad_stock_score(distributor, selected_year)
+                g, *_ = compute_bad_stock_score(distributor, selected_year, selected_month_num)
                 pts = grades[g][1]
             else:
                 g = st.session_state.get(f"grade_{q_name}", list(grades.keys())[0])
@@ -1206,11 +1229,17 @@ if not is_bulk_role:
             max_pts = max(v[1] for v in grades.values())
 
             if q_name == BAD_STOCK_Q:
-                ytd_check = get_ytd_sell_through(distributor, selected_year)
-                if not ytd_check:
-                    # No sell-through data to assess against — hide this
+                ytd_check = get_sell_in_ytd(distributor, selected_year)
+                join_date_check = get_distributor_join_date(distributor)
+                exempt_check = is_new_distributor_exempt(ytd_check, join_date_check, selected_year, selected_month_num)
+                if exempt_check:
+                    # New distributor (joined within 3 months of this
+                    # assessment period) with zero Sell In YTD — hide this
                     # metric's card entirely and auto-award max score, no
-                    # error/warning shown (per spec).
+                    # error/warning shown (per spec). An established
+                    # distributor with zero Sell In does NOT get this
+                    # exemption — falls through to the normal card below,
+                    # where bad_stock_grade_for_ytd assigns the lowest grade.
                     answers[q_name] = {
                         "grade": "A", "ytd_value": ytd_check, "bs_allowance": 0,
                         "bs_utilization": 0, "compliance_pct": 100.0,
@@ -1254,14 +1283,14 @@ if not is_bulk_role:
                     continue
 
                 if q_name == BAD_STOCK_Q:
-                    ytd_val_preview = get_ytd_sell_through(distributor, selected_year)
+                    ytd_val_preview = get_sell_in_ytd(distributor, selected_year)
                     bs_allow_preview = ytd_val_preview * 0.005
 
                     c_ytd, c_allow = st.columns(2)
                     with c_ytd:
                         st.markdown(f"""
                         <div class="ytd-box">
-                            <div class="ytd-box-label">📈 YTD Sell Through</div>
+                            <div class="ytd-box-label">📈 YTD Sell In</div>
                             <div class="ytd-box-value">Rp {ytd_val_preview:,.0f}</div>
                         </div>""", unsafe_allow_html=True)
                     with c_allow:
@@ -1283,15 +1312,19 @@ if not is_bulk_role:
                     </div>
                     """, unsafe_allow_html=True)
 
+                    # NaN-safe: a blank/NULL Sell In sum becomes pandas NaN
+                    # upstream in rare cases — int(nan) raises ValueError, so
+                    # never trust ytd_val_preview's truthiness alone here.
+                    safe_max = int(ytd_val_preview) if ytd_val_preview and not pd.isna(ytd_val_preview) else 0
                     st.number_input(
                         "Bad Stock Utilization (Rp)",
-                        min_value=0, max_value=int(ytd_val_preview) if ytd_val_preview else 0,
+                        min_value=0, max_value=safe_max,
                         value=0, step=10_000,
                         key=f"util_{BAD_STOCK_Q}", format="%d",
                         help="Actual Rupiah value of bad stock claimed/utilized by the distributor this period.",
                     )
 
-                    grade_opt, ytd_val, bs_allow, utilization, compliance_pct = compute_bad_stock_score(distributor, selected_year)
+                    grade_opt, ytd_val, bs_allow, utilization, compliance_pct, _ = compute_bad_stock_score(distributor, selected_year, selected_month_num)
                     badge_color = "#059669" if grade_opt == "A" else ("#D97706" if grade_opt == "B" else "#DC2626")
                     st.markdown(
                         f"<div style='margin-top:0.6rem; font-weight:700; color:{badge_color}; font-size:1rem;'>"

@@ -45,13 +45,26 @@ def get_sla_grade(inner, outer):
         return "A", 8
 
 
-def bad_stock_grade_for_ytd(ytd_val, utilization):
-    """Pure compliance-% -> grade math for Bad Stock Handling Performance.
-    No YTD sell-through data (0 or None) auto-awards max score — there's
-    nothing to be out-of-compliance against. Returns
-    (grade, bs_allowance, utilization, compliance_pct)."""
-    if not ytd_val:
+def bad_stock_grade_for_ytd(ytd_val, utilization, is_exempt=False):
+    """Pure compliance-% -> grade math for Bad Stock Handling Performance,
+    driven by Sell In YTD (not Sell Through). Returns
+    (grade, bs_allowance, utilization, compliance_pct).
+
+    is_exempt=True: a new distributor with zero Sell In YTD (joined within
+    the last 3 months of the assessment period) — Bad Stock is hidden
+    entirely and auto-scored at the max grade; see
+    is_new_distributor_exempt() for the condition. Not penalized for having
+    no Sell In activity yet.
+
+    ytd_val blank/zero but NOT exempt: an established distributor with
+    genuinely zero Sell In has no meaningful allowance to compare
+    utilization against — automatically the lowest grade, not a division
+    by zero."""
+    if is_exempt:
         return "A", 0, 0, 100.0
+
+    if _is_blank(ytd_val) or not ytd_val:
+        return "C", 0, utilization, 0.0
 
     bs_allow = ytd_val * 0.005
     compliance_pct = min(100.0, (utilization / bs_allow) * 100)
@@ -63,6 +76,22 @@ def bad_stock_grade_for_ytd(ytd_val, utilization):
     else:
         grade = "C"
     return grade, bs_allow, utilization, compliance_pct
+
+
+def is_new_distributor_exempt(sell_in_ytd, join_date, assessment_year, assessment_month):
+    """True when Bad Stock should be hidden and auto-scored at the max grade:
+    zero/blank Sell In YTD AND the distributor joined within the last 3
+    calendar months of the assessment period (inclusive). join_date must be
+    a date/datetime (or None, which always returns False — no join date on
+    file means we can't establish "new", so the normal rules apply)."""
+    is_zero_sell_in = _is_blank(sell_in_ytd) or sell_in_ytd == 0
+    if not is_zero_sell_in or join_date is None:
+        return False
+    months_since_join = (
+        (assessment_year * 12 + (assessment_month - 1))
+        - (join_date.year * 12 + (join_date.month - 1))
+    )
+    return 0 <= months_since_join <= 3
 
 
 def _is_blank(value):

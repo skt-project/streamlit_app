@@ -14,12 +14,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import date
+
 from assessment_logic import (
     VALUE_THRESHOLDS,
     normalize_username,
     value_to_grade,
     get_sla_grade,
     bad_stock_grade_for_ytd,
+    is_new_distributor_exempt,
     validate_allocation_row,
     dedupe_metric_points,
 )
@@ -113,19 +116,43 @@ class TestGetSlaGrade:
 # =====================================================================
 class TestBadStockGradeForYtd:
     @pytest.mark.sanity
-    def test_zero_ytd_auto_max_score(self):
-        """Regression: this is the exact bug that crashed the app in
-        production — 0 YTD must auto-award max score, not error or score 0."""
-        grade, bs_allow, utilization, compliance_pct = bad_stock_grade_for_ytd(0, 0)
+    def test_exempt_new_distributor_auto_max_score(self):
+        """New-distributor exemption (is_exempt=True): always Grade A / 100%
+        compliance, regardless of the actual ytd_val/utilization values."""
+        grade, bs_allow, utilization, compliance_pct = bad_stock_grade_for_ytd(0, 0, is_exempt=True)
         assert grade == "A"
         assert compliance_pct == 100.0
         assert bs_allow == 0
         assert utilization == 0
 
-    def test_none_ytd_auto_max_score(self):
-        grade, bs_allow, utilization, compliance_pct = bad_stock_grade_for_ytd(None, 500)
+    def test_none_ytd_exempt_auto_max_score(self):
+        grade, bs_allow, utilization, compliance_pct = bad_stock_grade_for_ytd(None, 500, is_exempt=True)
         assert grade == "A"
         assert compliance_pct == 100.0
+
+    @pytest.mark.sanity
+    def test_zero_ytd_not_exempt_is_lowest_grade(self):
+        """Regression: an established distributor with genuinely zero Sell In
+        (NOT exempt) must get the lowest grade, not a ZeroDivisionError and
+        not the new-distributor auto-max score — see Distributor B in the
+        Bad Stock Sell In requirements."""
+        grade, bs_allow, utilization, compliance_pct = bad_stock_grade_for_ytd(0, 0, is_exempt=False)
+        assert grade == "C"
+        assert compliance_pct == 0.0
+        assert bs_allow == 0
+
+    def test_none_ytd_not_exempt_is_lowest_grade(self):
+        grade, bs_allow, utilization, compliance_pct = bad_stock_grade_for_ytd(None, 0, is_exempt=False)
+        assert grade == "C"
+        assert compliance_pct == 0.0
+
+    def test_nan_ytd_does_not_crash(self):
+        """Regression: the exact 'cannot convert float NaN to integer' crash
+        — a NaN ytd_val (e.g. from a BigQuery NULL that became pandas NaN)
+        must be treated like zero/blank, not blow up in the % math."""
+        grade, bs_allow, utilization, compliance_pct = bad_stock_grade_for_ytd(float("nan"), 5000, is_exempt=False)
+        assert grade == "C"
+        assert compliance_pct == 0.0
 
     def test_full_utilization_is_grade_a(self):
         # allowance = 1_000_000_000 * 0.005 = 5_000_000
@@ -149,6 +176,46 @@ class TestBadStockGradeForYtd:
         grade, _, _, compliance_pct = bad_stock_grade_for_ytd(1_000_000_000, 50_000_000)
         assert grade == "A"
         assert compliance_pct == 100.0
+
+
+class TestIsNewDistributorExempt:
+    @pytest.mark.sanity
+    def test_distributor_a_example_join_one_month_before_period(self):
+        """Distributor A from the requirements: joined May 2026, zero Sell
+        In YTD, assessed for June 2026 -> exempt (1 month since join)."""
+        assert is_new_distributor_exempt(0, date(2026, 5, 1), 2026, 6) is True
+
+    @pytest.mark.sanity
+    def test_distributor_b_example_join_five_months_before_period(self):
+        """Distributor B from the requirements: joined January 2026, zero
+        Sell In YTD, assessed for June 2026 -> NOT exempt (5 months since
+        join, beyond the 3-month window)."""
+        assert is_new_distributor_exempt(0, date(2026, 1, 1), 2026, 6) is False
+
+    def test_exactly_three_months_is_exempt_inclusive(self):
+        assert is_new_distributor_exempt(0, date(2026, 3, 1), 2026, 6) is True
+
+    def test_four_months_is_not_exempt(self):
+        assert is_new_distributor_exempt(0, date(2026, 2, 1), 2026, 6) is False
+
+    def test_nonzero_sell_in_never_exempt_regardless_of_join_date(self):
+        """Even a brand-new distributor isn't exempt once they have any
+        Sell In activity — the exemption is specifically for "no activity
+        yet", not "new distributor" alone."""
+        assert is_new_distributor_exempt(1, date(2026, 6, 1), 2026, 6) is False
+
+    def test_no_join_date_on_file_is_not_exempt(self):
+        """Can't establish 'new' without a join date — normal rules apply."""
+        assert is_new_distributor_exempt(0, None, 2026, 6) is False
+
+    def test_join_date_in_future_relative_to_period_is_not_exempt(self):
+        """Defensive: a join date after the assessment period shouldn't
+        happen in real data, but must not be misread as 'exempt' via a
+        negative months-since-join slipping past the bounds check."""
+        assert is_new_distributor_exempt(0, date(2026, 9, 1), 2026, 6) is False
+
+    def test_nan_sell_in_treated_as_zero(self):
+        assert is_new_distributor_exempt(float("nan"), date(2026, 5, 1), 2026, 6) is True
 
 
 # =====================================================================

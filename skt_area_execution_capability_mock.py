@@ -5,11 +5,11 @@ import io
 import base64
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from openpyxl.worksheet.datavalidation import DataValidation
 from assessment_logic import (
     VALUE_THRESHOLDS, normalize_username, value_to_grade, get_sla_grade,
-    bad_stock_grade_for_ytd, validate_allocation_row,
+    bad_stock_grade_for_ytd, validate_allocation_row, is_new_distributor_exempt,
 )
 from assessment_email import build_ass_reminder_email
 
@@ -308,10 +308,12 @@ def load_master_distributor():
         ]
     })
 
-MOCK_YTD = {
+MOCK_SELL_IN = {
     "CV Maju Bersama - Jakarta Pusat":    4_250_000_000,
-    "PT Sinar Jaya - Jakarta Utara":      3_870_000_000,
-    "PT Sinar Jaya - Jakarta Selatan":    5_100_000_000,
+    # Zero Sell In, joined recently -> new-distributor exemption (hidden, Grade A).
+    "PT Sinar Jaya - Jakarta Utara":      0,
+    # Zero Sell In, joined years ago -> NOT exempt, lowest grade (no card hide).
+    "PT Sinar Jaya - Jakarta Selatan":    0,
     "CV Mitra Makmur - Bandung":          2_950_000_000,
     "CV Mitra Makmur - Bekasi":           3_200_000_000,
     "PT Cahaya Timur - Surabaya":         6_500_000_000,
@@ -321,18 +323,28 @@ MOCK_YTD = {
     "PT Surya Selatan - Palembang":       1_500_000_000,
 }
 
-def get_ytd_sell_through(distributor_name, year):
-    return MOCK_YTD.get(distributor_name, 2_000_000_000)
+MOCK_JOIN_DATE = {
+    "PT Sinar Jaya - Jakarta Utara":   date.today() - timedelta(days=45),
+    "PT Sinar Jaya - Jakarta Selatan": date(2020, 1, 1),
+}
+
+def get_sell_in_ytd(distributor_name, year):
+    return MOCK_SELL_IN.get(distributor_name, 2_000_000_000)
+
+def get_distributor_join_date(distributor_name):
+    return MOCK_JOIN_DATE.get(distributor_name)
 
 BAD_STOCK_Q = "BAD STOCK HANDLING PERFORMANCE"
 
-def compute_bad_stock_score(distributor_name, year):
-    """Fetches mock YTD sell-through, delegates the pure compliance-% -> grade
-    math to bad_stock_grade_for_ytd (assessment_logic.py)."""
-    ytd_val = get_ytd_sell_through(distributor_name, year)
+def compute_bad_stock_score(distributor_name, year, month_num):
+    """Fetches mock Sell In YTD + join date, delegates the pure compliance-%
+    -> grade math to bad_stock_grade_for_ytd (assessment_logic.py)."""
+    ytd_val = get_sell_in_ytd(distributor_name, year)
+    join_date = get_distributor_join_date(distributor_name)
+    is_exempt = is_new_distributor_exempt(ytd_val, join_date, year, month_num)
     utilization = st.session_state.get(f"util_{BAD_STOCK_Q}", 0)
-    grade, bs_allow, utilization_out, compliance_pct = bad_stock_grade_for_ytd(ytd_val, utilization)
-    return grade, ytd_val, bs_allow, utilization_out, compliance_pct
+    grade, bs_allow, utilization_out, compliance_pct = bad_stock_grade_for_ytd(ytd_val, utilization, is_exempt)
+    return grade, ytd_val, bs_allow, utilization_out, compliance_pct, is_exempt
 
 # =====================================================
 # QUESTIONS CONFIG — all 10 metrics, owned across 4 roles
@@ -929,6 +941,7 @@ with st.container(border=True):
 
 selected_month, _sep_year = assessment_period.rsplit(" ", 1)
 selected_year = int(_sep_year)
+selected_month_num = months.index(selected_month) + 1
 
 # =====================================================
 # SESSION STATE INIT
@@ -1033,7 +1046,7 @@ if not is_bulk_role:
                 outer = st.session_state.get("outer_city_sla", "100%")
                 _, pts = get_sla_grade(inner, outer)
             elif q_name == BAD_STOCK_Q:
-                g, *_ = compute_bad_stock_score(distributor, selected_year)
+                g, *_ = compute_bad_stock_score(distributor, selected_year, selected_month_num)
                 pts = grades[g][1]
             else:
                 g = st.session_state.get(f"grade_{q_name}", list(grades.keys())[0])
@@ -1052,7 +1065,7 @@ if not is_bulk_role:
                 outer = st.session_state.get("outer_city_sla", "100%")
                 _, pts = get_sla_grade(inner, outer)
             elif q_name == BAD_STOCK_Q:
-                g, *_ = compute_bad_stock_score(distributor, selected_year)
+                g, *_ = compute_bad_stock_score(distributor, selected_year, selected_month_num)
                 pts = grades[g][1]
             else:
                 g = st.session_state.get(f"grade_{q_name}", list(grades.keys())[0])
@@ -1087,8 +1100,14 @@ if not is_bulk_role:
             max_pts = max(v[1] for v in grades.values())
 
             if q_name == BAD_STOCK_Q:
-                ytd_check = get_ytd_sell_through(distributor, selected_year)
-                if not ytd_check:
+                ytd_check = get_sell_in_ytd(distributor, selected_year)
+                join_date_check = get_distributor_join_date(distributor)
+                exempt_check = is_new_distributor_exempt(ytd_check, join_date_check, selected_year, selected_month_num)
+                if exempt_check:
+                    # New distributor (joined within 3 months of this period)
+                    # with zero Sell In — hide the card, auto-max score. An
+                    # established distributor with zero Sell In does NOT get
+                    # this exemption; falls through to the normal card below.
                     answers[q_name] = {
                         "grade": "A", "ytd_value": ytd_check, "bs_allowance": 0,
                         "bs_utilization": 0, "compliance_pct": 100.0,
@@ -1134,14 +1153,14 @@ if not is_bulk_role:
 
                 # ── BAD STOCK (auto-scored from Rupiah utilization input) ──
                 if q_name == BAD_STOCK_Q:
-                    ytd_val_preview = get_ytd_sell_through(distributor, selected_year)
+                    ytd_val_preview = get_sell_in_ytd(distributor, selected_year)
                     bs_allow_preview = ytd_val_preview * 0.005
 
                     c_ytd, c_allow = st.columns(2)
                     with c_ytd:
                         st.markdown(f"""
                         <div class="ytd-box">
-                            <div class="ytd-box-label">📈 YTD Sell Through</div>
+                            <div class="ytd-box-label">📈 YTD Sell In</div>
                             <div class="ytd-box-value">Rp {ytd_val_preview:,.0f}</div>
                         </div>""", unsafe_allow_html=True)
                     with c_allow:
@@ -1163,15 +1182,19 @@ if not is_bulk_role:
                     </div>
                     """, unsafe_allow_html=True)
 
+                    # NaN-safe: never trust ytd_val_preview's truthiness alone
+                    # (a blank/NULL Sell In sum becomes pandas NaN upstream in
+                    # production — int(nan) raises ValueError).
+                    safe_max = int(ytd_val_preview) if ytd_val_preview and not pd.isna(ytd_val_preview) else 0
                     st.number_input(
                         "Bad Stock Utilization (Rp)",
-                        min_value=0, max_value=int(ytd_val_preview),
+                        min_value=0, max_value=safe_max,
                         value=0, step=10_000,
                         key=f"util_{BAD_STOCK_Q}", format="%d",
                         help="Actual Rupiah value of bad stock claimed/utilized by the distributor this period.",
                     )
 
-                    grade_opt, ytd_val, bs_allow, utilization, compliance_pct = compute_bad_stock_score(distributor, selected_year)
+                    grade_opt, ytd_val, bs_allow, utilization, compliance_pct, _ = compute_bad_stock_score(distributor, selected_year, selected_month_num)
                     badge_color = "#059669" if grade_opt == "A" else ("#D97706" if grade_opt == "B" else "#DC2626")
                     st.markdown(
                         f"<div style='margin-top:0.6rem; font-weight:700; color:{badge_color}; font-size:1rem;'>"
