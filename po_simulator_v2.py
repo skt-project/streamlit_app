@@ -946,7 +946,25 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         woi_col = next((c for c in final_disp.columns if "woi" in c.lower()), "Current WOI")
 
     st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span><strong>Preview Data — Top 10 WOI</strong></div>""", unsafe_allow_html=True)
-    prev_df = final_disp[final_disp["Remark"].str.contains("Reject", na=False)].copy()
+    prev_df = final_disp[
+    ~final_disp["Supply Control"].str.contains(
+        "Stop PO|Discontinued",
+        case=False,
+        na=False
+    )
+    &
+    ~final_disp["Remark"].str.contains(
+        "Steve",
+        case=False,
+        na=False
+    )
+    &
+    final_disp["Remark"].str.contains(
+        "Reject",
+        case=False,
+        na=False
+    )
+].copy()
     prev_df[woi_col] = pd.to_numeric(prev_df[woi_col], errors="coerce")
     top10 = prev_df.nlargest(10, woi_col)[PO_IMG_COLS].reset_index(drop=True)
     st.dataframe(top10.style.set_properties(**{"background-color":"#D6EAF8","color":"#1a1a2e","border":"1px solid #AED6F1"}).format(na_rep="-"), use_container_width=True, hide_index=True)
