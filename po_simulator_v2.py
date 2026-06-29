@@ -945,7 +945,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     if woi_col is None:
         woi_col = next((c for c in final_disp.columns if "woi" in c.lower()), "Current WOI")
 
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span><strong>Preview Data — Top 10 WOI</strong></div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span><strong>Preview Data — Top 10 WOI (Exclude : STOP PO/DISCONTINUED and Reject by Steve)</strong></div>""", unsafe_allow_html=True)
     prev_df = final_disp[
     ~final_disp["Supply Control"].str.contains(
         "Stop PO|Discontinued",
