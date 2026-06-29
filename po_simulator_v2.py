@@ -1031,7 +1031,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     st.error(f"Gagal generate gambar: {e}")
 
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+2}</span><strong>Product Code yang Harus Dihapus</strong></div>""", unsafe_allow_html=True)
-####################TRY CODE YAAA~~~
+####################TRY CODE YAAA~~~ KHUSUS SULAWESI 1
     pairs = []
     if "SKU" in stop_df.columns and "Supply Control" in stop_df.columns:
         pairs.append(
@@ -1127,7 +1127,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
             <ul style="margin:0;padding-left:1.2rem;color:#1F1F1F;font-size:.88rem;line-height:1.7;">
                 <li>Total SKU: <strong>{grp_po["SKU"].nunique():,}</strong></li>
                 <li>Grand Total PO (sebelum pengurangan): <strong>{_rp(grand_total_po)}</strong></li>
-                <li>Sulawesi 1 Only: <strong>{sul1_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(sul1_grp["PO Value"].sum())}</strong></li>
+                <li>Sulawesi 1 - VITA C Series: <strong>{sul1_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(sul1_grp["PO Value"].sum())}</strong></li>
                 <li>{stop_label}: <strong>{stop_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(stop_grp["PO Value"].sum())}</strong></li>
                 <li>{steve_label}: <strong>{steve_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(steve_grp["PO Value"].sum())}</strong></li>
                 <li>Total pengurangan: <strong>{_rp(total_reduction)}</strong></li>
