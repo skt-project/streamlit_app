@@ -856,6 +856,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["is_po_sku"] == False,
             res_df["Customer SKU Code"].isin(manual_reject_approval),
             res_df["Customer SKU Code"].isin(manual_reject_no_tol),
+            res_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False),
             sc2.str.upper().isin(["STOP PO","DISCONTINUEDD","OOS","UNAVAILABLE"]),
             ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUEDD","OOS"])),
             bp3 == 0,
@@ -871,6 +872,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             "Additional Suggestion",
             "Reject (Stop by Steve - Need approval email)",
             "Reject (Stop by Steve - No tolerance to open)",
+            "Reject (Sulawesi 1 Only)",
             "Reject",
             "Proceed",
             "Reject",
@@ -985,7 +987,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     steve_mask = (non_stop_df["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) |
                   non_stop_df["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False))
     steve_df = non_stop_df[steve_mask].reset_index(drop=True)
-    approval_mask = (non_stop_df["Remark"].str.strip().str.lower().isin(["reject","reject with suggestion"]) & ~steve_mask)
+    sul1_mask = non_stop_df["Remark"].str.strip().str.lower() == "reject (sulawesi 1 only)"
+    sul1_df = non_stop_df[sul1_mask].reset_index(drop=True)
+    approval_mask = (non_stop_df["Remark"].str.strip().str.lower().isin(["reject","reject with suggestion"]) & ~steve_mask & ~sul1_mask)
     approval_df = non_stop_df[approval_mask].reset_index(drop=True)
 
     cat1, cat2, cat3 = st.columns(3)
@@ -1009,22 +1013,55 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     st.error(f"Gagal generate gambar: {e}")
 
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+2}</span><strong>Product Code yang Harus Dihapus</strong></div>""", unsafe_allow_html=True)
-    sku_series = [d["SKU"].dropna().astype(str).str.strip() for d in (stop_df, steve_df) if "SKU" in d.columns]
-    sku_all = (pd.concat(sku_series).pipe(lambda s: s[s != ""]).drop_duplicates().sort_values().reset_index(drop=True) if sku_series else pd.Series(dtype=str))
-    remark_series = []
-    if "Supply Control" in stop_df.columns: remark_series.append(stop_df["Supply Control"].dropna().astype(str).str.strip())
-    if "Remark" in steve_df.columns: remark_series.append(steve_df["Remark"].dropna().astype(str).str.strip())
-    remark_all = (pd.concat(remark_series, ignore_index=True).astype(str).str.strip().loc[lambda s: s.ne("")].drop_duplicates().sort_values().reset_index(drop=True) if remark_series else pd.Series(dtype="string"))
+####################TRY CODE YAAA~~~
+    pairs = []
+    if "SKU" in stop_df.columns and "Supply Control" in stop_df.columns:
+        pairs.append(
+            stop_df[["SKU", "Supply Control"]]
+            .rename(columns={"Supply Control": "Remark"})
+        )
+    if "SKU" in steve_df.columns and "Remark" in steve_df.columns:
+        pairs.append(steve_df[["SKU", "Remark"]])
 
-    if sku_all.empty:
+    if "SKU" in sul1_df.columns and "Remark" in sul1_df.columns:
+        pairs.append(sul1_df[["SKU", "Remark"]])
+
+    if not pairs:
         st.info("Tidak ada product code yang perlu dihapus.")
     else:
-        pc1, pc2 = st.columns(2)
-        with pc1:
-            st.dataframe(pd.DataFrame({"Remark/Supply Control": remark_all}), use_container_width=True, hide_index=True)
-        with pc2:
-            with st.expander(f"📋 Copy SKU ({len(sku_all)} SKU)", expanded=False):
-                st.code("\n".join(sku_all.tolist()), language=None)
+        combined = pd.concat(pairs, ignore_index=True)
+        combined["SKU"] = combined["SKU"].astype(str).str.strip()
+        combined["Remark"] = combined["Remark"].astype(str).str.strip()
+        combined = combined[
+            combined["SKU"].ne("") & combined["Remark"].ne("")
+        ].drop_duplicates()
+
+        if combined.empty:
+            st.info("Tidak ada product code yang perlu dihapus.")
+        else:
+            grouped = (
+                combined.groupby("Remark")["SKU"]
+                .apply(lambda s: sorted(set(s)))
+                .reset_index()
+            )
+            grouped["Jumlah SKU"] = grouped["SKU"].apply(len)
+
+            pc1, pc2 = st.columns(2)
+            with pc1:
+                st.dataframe(
+                    grouped[["Remark", "Jumlah SKU"]]
+                    .rename(columns={"Remark": "Remark/Supply Control"}),
+                    use_container_width=True, hide_index=True
+                )
+            with pc2:
+                total_sku = grouped["Jumlah SKU"].sum()
+                with st.expander(f"📋 Copy SKU per Remark ({total_sku} SKU total)", expanded=False):
+                    all_lines = []
+                    for _, row in grouped.iterrows():
+                        all_lines.append(f"-- {row['Remark']}")
+                        all_lines.extend(row["SKU"])
+                        all_lines.append("") 
+                    st.code("\n".join(all_lines), language=None)
 
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+3}</span><strong>Summary PO</strong></div>""", unsafe_allow_html=True)
     summary_df = final_disp.copy()
@@ -1046,6 +1083,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         steve_mask_s = (grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) |
                         grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False))
         steve_grp = grp_po[steve_mask_s]
+        sul1_mask_s = grp_po["Remark"].str.strip().str.lower() == "reject (sulawesi 1 only)"
+        sul1_grp = grp_po[sul1_mask_s]
+        total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum() + sul1_grp["PO Value"].sum()
         total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum()
         grand_total_po = grp_po["PO Value"].sum()
         grand_total_after = grand_total_po - total_reduction
@@ -1069,6 +1109,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
             <ul style="margin:0;padding-left:1.2rem;color:#1F1F1F;font-size:.88rem;line-height:1.7;">
                 <li>Total SKU: <strong>{grp_po["SKU"].nunique():,}</strong></li>
                 <li>Grand Total PO (sebelum pengurangan): <strong>{_rp(grand_total_po)}</strong></li>
+                <li>Sulawesi 1 Only: <strong>{sul1_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(sul1_grp["PO Value"].sum())}</strong></li>
                 <li>{stop_label}: <strong>{stop_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(stop_grp["PO Value"].sum())}</strong></li>
                 <li>{steve_label}: <strong>{steve_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(steve_grp["PO Value"].sum())}</strong></li>
                 <li>Total pengurangan: <strong>{_rp(total_reduction)}</strong></li>
@@ -1816,6 +1857,7 @@ if st.session_state.get('page') == 'po_spv':
                         "Additional Suggestion",
                         "Reject (Stop by Steve - Need approval email)",
                         "Reject (Stop by Steve - No tolerance to open)",
+                        "Reject (Sulawesi 1 Only)",
                         "Reject",
                         "Proceed",
                         "Reject",
@@ -1825,8 +1867,6 @@ if st.session_state.get('page') == 'po_spv':
                     ]
 
                     result_df["Remark"] = np.select(conditions, choices, default="N/A (Missing Data)")
-
-                    # Rename columns — note: product_name already renamed to "Product Name" via sku_df merge
                     new_column_names = {
                         "distributor_name": "Distributor",
                         "Customer SKU Code": "SKU",
