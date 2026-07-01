@@ -281,7 +281,8 @@ def load_store_master() -> pd.DataFrame:
     df = df.dropna(subset=["store_code", "store_name", "distributor_code"])
     for c in ["store_code", "store_name", "distributor_name", "distributor_code", "region", "asm"]:
         df[c] = df[c].astype(str).str.strip()
-    df["store_label"] = df["store_code"] + " - " + df["store_name"]
+    # Dropdown now shows the bare store code only (no "Kode - Nama" combo).
+    df["store_label"] = df["store_code"]
     df = df.drop_duplicates(subset=["store_code"]).reset_index(drop=True)
     return df
 
@@ -323,7 +324,8 @@ def load_salesman_mapping(distributor_code: str) -> pd.DataFrame:
     df = client.query(query, job_config=job_config).to_dataframe()
     df["salesman_id"] = df["salesman_id"].astype(str).str.strip()
     df["salesman"] = df["salesman"].astype(str).str.strip()
-    df["salesman_label"] = df["salesman_id"] + " - " + df["salesman"]
+    # Dropdown now shows the bare Salesman ID only (no "ID - Nama" combo).
+    df["salesman_label"] = df["salesman_id"]
     df = df.drop_duplicates(subset=["salesman_id"]).reset_index(drop=True)
     return df
 
@@ -683,18 +685,21 @@ SALESMAN_COLS = [
 ]
 
 # ─── PJP columns: Salesman-ID-first flow ──────────────────────────────────────
+# ASM / Region / Nama Distributor / Kode Distributor are constant for the
+# whole file (1 file = 1 distributor, enforced by scoping the Salesman ID /
+# Kode Toko dropdowns to `selected_dist_code`), so they're pre-filled
+# directly from the selected distributor rather than looked up per row.
 # Step 1: user picks Salesman ID -> Step 2: Nama Salesman auto-fills (read-only)
-# Step 3: user picks Kode Toko   -> Step 4: Nama Toko/Region/ASM/Nama
-#         Distributor/Kode Distributor all auto-fill (read-only)
+# Step 3: user picks Kode Toko   -> Step 4: Nama Toko auto-fills (read-only)
 PJP_COLS = [
+    ("ASM", False, "auto"),
+    ("Region", False, "auto"),
+    ("Nama Distributor", False, "auto"),
+    ("Kode Distributor", False, "auto"),
     ("Salesman ID", True, "salesman_dropdown"),
     ("Nama Salesman", False, "auto"),
     ("Kode Toko", True, "store_dropdown"),
     ("Nama Toko", False, "auto"),
-    ("Region", False, "auto"),
-    ("ASM", False, "auto"),
-    ("Nama Distributor", False, "auto"),
-    ("Kode Distributor", False, "auto"),
     ("Hari", True, "dropdown"),
     ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap", True, "dropdown"),
     ("Frekuensi", True, "dropdown"),
@@ -758,20 +763,21 @@ def _vcenter(wrap=False):
 
 # ─── Build Lookup sheet + named ranges (PJP: Salesman ID + Kode Toko driven) ──
 
-# Combo strings use " - " as the visual separator between the stored key
-# (salesman_id / cust_id) and its human-readable label. Formulas split on
-# this separator to recover the real key for VLOOKUP purposes.
+# Legacy separator kept only so _extract_combo_key() can still gracefully
+# parse older uploaded files that used the "KEY - Label" combo format. New
+# templates write the bare key (Salesman ID / Kode Toko) directly, with no
+# separator, so this is a fallback path only.
 _COMBO_SEP = " - "
 
 
 def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
     """
     Builds a hidden 'Lookup' sheet containing:
-      - NR_SALESMAN_COMBO : list of "salesman_id - salesman" strings for the
+      - NR_SALESMAN_COMBO : list of bare salesman_id values for the
                              Salesman ID dropdown (scoped to the distributor
                              this template was generated for).
       - NR_SALESMAN_LOOKUP: 2-col table (salesman_id, salesman) for VLOOKUP.
-      - NR_STORE_COMBO     : list of "cust_id - store_name" strings for the
+      - NR_STORE_COMBO     : list of bare cust_id (store code) values for the
                               Kode Toko dropdown (scoped to the same
                               distributor, which is what enforces "store
                               must belong to selected distributor" at
@@ -858,7 +864,7 @@ def _attach_pjp_dvs(ws, col_names, first_data, last_data):
         allow_blank=True,
         showInputMessage=True,
         promptTitle="Langkah 1 - Salesman ID",
-        prompt="Pilih Salesman ID. Format: ID - Nama Salesman. Nama Salesman akan terisi otomatis.",
+        prompt="Pilih Salesman ID dari daftar. Nama Salesman akan terisi otomatis.",
         showErrorMessage=True,
         errorTitle="Input Tidak Valid",
         error="Pilih Salesman ID dari daftar (hanya salesman aktif pada distributor ini yang muncul).",
@@ -872,7 +878,7 @@ def _attach_pjp_dvs(ws, col_names, first_data, last_data):
         allow_blank=True,
         showInputMessage=True,
         promptTitle="Langkah 2 - Kode Toko",
-        prompt="Pilih Kode Toko. Format: Kode - Nama Toko. Nama Toko, Region, ASM, dan Distributor akan terisi otomatis.",
+        prompt="Pilih Kode Toko dari daftar. Nama Toko, Region, ASM, dan Distributor akan terisi otomatis.",
         showErrorMessage=True,
         errorTitle="Input Tidak Valid",
         error="Pilih Kode Toko dari daftar (hanya toko milik distributor ini yang muncul).",
@@ -890,38 +896,53 @@ _AUTO_FROM_SALESMAN = {
     "Nama Salesman": 2,  # NR_SALESMAN_LOOKUP col 2 = salesman name
 }
 _AUTO_FROM_STORE = {
-    "Nama Toko": 2,          # NR_STORE_LOOKUP col 2 = store_name
-    "Region": 3,             # col 3 = region
-    "ASM": 4,                # col 4 = asm
-    "Nama Distributor": 5,   # col 5 = nama_distributor
-    "Kode Distributor": 6,   # col 6 = kode_distributor
+    "Nama Toko": 2,  # NR_STORE_LOOKUP col 2 = store_name
 }
+# ASM / Region / Nama Distributor / Kode Distributor are constant for the
+# whole file (1 file = 1 distributor), so they're written once as static
+# values from the selected distributor rather than looked up per row.
+_DIST_CONST_COLS = ["ASM", "Region", "Nama Distributor", "Kode Distributor"]
 
 
 def _extract_key_formula(cell_ref: str) -> str:
     """
-    Given a cell holding a combo string like "GTIDST171001 - BUDI SETIAWAN",
-    returns an Excel formula fragment that extracts the key portion before
-    the first " - " (robust to an empty cell, via the &" - " trick).
+    The Salesman ID / Kode Toko cell now holds the bare key value directly
+    (e.g. "GTIDST171001" or "ST00123") — no "KEY - Label" combo string — so
+    the VLOOKUP key is just the trimmed cell value itself.
     """
-    return f'TRIM(LEFT({cell_ref},FIND(" - ",{cell_ref}&" - ")-1))'
+    return f"TRIM({cell_ref})"
 
 
-def create_pjp_excel(df, salesman_df, store_df, selected_dist_code, selected_dist_name) -> BytesIO:
+def create_pjp_excel(
+    df,
+    salesman_df,
+    store_df,
+    selected_dist_code,
+    selected_dist_name,
+    selected_dist_asm,
+    selected_dist_region,
+) -> BytesIO:
     """
     Builds the PJP Template workbook.
 
+    Column order: ASM, Region, Nama Distributor, Kode Distributor,
+    Salesman ID, Nama Salesman, Kode Toko, Nama Toko, Hari, Minggu,
+    Frekuensi.
+
     Flow implemented in the sheet:
-      Step 1 — user picks "Salesman ID" from a dropdown showing
-               "salesman_id - nama_salesman" (sourced from gt_salesman_mapping,
-               filtered to ACTIVE salesman of `selected_dist_code`).
+      Step 0 — "ASM", "Region", "Nama Distributor", "Kode Distributor" are
+               written as static, read-only values for the whole file, since
+               1 file = 1 distributor (`selected_dist_code`/`selected_dist_name`/
+               `selected_dist_asm`/`selected_dist_region`).
+      Step 1 — user picks "Salesman ID" from a dropdown of bare salesman_id
+               values (sourced from gt_salesman_mapping, filtered to ACTIVE
+               salesman of `selected_dist_code`).
       Step 2 — "Nama Salesman" auto-fills (read-only) via VLOOKUP.
-      Step 3 — user picks "Kode Toko" from a dropdown showing
-               "cust_id - store_name" (sourced from master_store_database_basis,
+      Step 3 — user picks "Kode Toko" from a dropdown of bare cust_id
+               (store code) values (sourced from master_store_database_basis,
                filtered to stores of `selected_dist_code` — this is what
                guarantees a selected store always belongs to the distributor).
-      Step 4 — "Nama Toko", "Region", "ASM", "Nama Distributor", and
-               "Kode Distributor" all auto-fill (read-only) via VLOOKUP.
+      Step 4 — "Nama Toko" auto-fills (read-only) via VLOOKUP.
 
     salesman_df / store_df are expected to already be scoped to
     `selected_dist_code` (1 file = 1 distributor, same rule as before).
@@ -936,18 +957,18 @@ def create_pjp_excel(df, salesman_df, store_df, selected_dist_code, selected_dis
     FIRST_DATA = 4
     LAST_DATA = 30003
 
-    AUTO_COLS = set(_AUTO_FROM_SALESMAN) | set(_AUTO_FROM_STORE)
+    AUTO_COLS = set(_AUTO_FROM_SALESMAN) | set(_AUTO_FROM_STORE) | set(_DIST_CONST_COLS)
     DROPDOWN_COLS = {"Salesman ID", "Kode Toko"}
 
     notes_pjp = {
-        "Salesman ID": "Langkah 1 - Pilih Salesman ID (format: ID - Nama). Hanya salesman aktif pada distributor ini.",
+        "ASM": "Otomatis terisi sesuai distributor terpilih",
+        "Region": "Otomatis terisi sesuai distributor terpilih",
+        "Nama Distributor": "Otomatis terisi sesuai distributor terpilih",
+        "Kode Distributor": "Otomatis terisi sesuai distributor terpilih",
+        "Salesman ID": "Langkah 1 - Pilih Salesman ID. Hanya salesman aktif pada distributor ini.",
         "Nama Salesman": "Otomatis terisi dari Salesman ID",
-        "Kode Toko": "Langkah 2 - Pilih Kode Toko (format: Kode - Nama Toko). Hanya toko milik distributor ini.",
+        "Kode Toko": "Langkah 2 - Pilih Kode Toko. Hanya toko milik distributor ini.",
         "Nama Toko": "Otomatis terisi dari Kode Toko",
-        "Region": "Otomatis terisi dari Kode Toko",
-        "ASM": "Otomatis terisi dari Kode Toko",
-        "Nama Distributor": "Otomatis terisi dari Kode Toko",
-        "Kode Distributor": "Otomatis terisi dari Kode Toko",
         "Hari": "Drop down dengan opsi hari",
         "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap": "Drop down: ganjil / genap / ganjil+genap",
         "Frekuensi": "F4+ = >1x seminggu  |  F4 = 1 minggu sekali  |  F2 = 2 minggu sekali  |  F1 = 1 bulan sekali",
@@ -1227,9 +1248,10 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
 
 
 def _extract_combo_key(val) -> str:
-    """Extracts the stored key (e.g. salesman_id / cust_id) from a
-    'KEY - Label' combo string chosen via the Excel dropdown. Falls back to
-    the raw trimmed value if no separator is present (e.g. manual entry)."""
+    """Returns the trimmed key value chosen via the Excel dropdown
+    (Salesman ID / Kode Toko). Templates now write the bare key directly,
+    so this is normally just a trim; the old 'KEY - Label' combo format is
+    still handled as a fallback for backward-compat with older uploads."""
     if pd.isna(val):
         return ""
     s = str(val).strip()
@@ -2188,8 +2210,8 @@ elif PAGES[selected_page] == "pjp_template":
             - **Jangan edit kolom hasil auto-fill** (Nama Salesman, Nama Toko, Region, ASM, Nama Distributor, Kode Distributor)
 
             ### 🔄 URUTAN PENGISIAN (WAJIB!):
-            1. **Salesman ID** → Nama Salesman otomatis terisi
-            2. **Kode Toko** → Nama Toko, Region, ASM, Nama Distributor, Kode Distributor otomatis terisi
+            1. **Salesman ID** (pilih dari dropdown) → Nama Salesman otomatis terisi
+            2. **Kode Toko** (pilih dari dropdown) → Nama Toko, Region, ASM, Nama Distributor, Kode Distributor otomatis terisi
 
             ### ✅ FORMAT DATA YANG BENAR:
             - **Frekuensi PJP**: F4+ / F4 / F2 / F1
