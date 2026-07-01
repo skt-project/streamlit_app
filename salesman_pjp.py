@@ -243,7 +243,7 @@ def load_distributor_data() -> pd.DataFrame:
         SELECT
             UPPER(distributor)      AS distributor_name,
             UPPER(region_g2g)       AS region,
-            UPPER(distributor_g2g) AS distributor_g2g,
+            UPPER(distributor_code) AS distributor_code,
             UPPER(asm_g2g)          AS asm
         FROM `gt_schema.master_distributor`
         WHERE region_g2g != '' AND status = 'Active'
