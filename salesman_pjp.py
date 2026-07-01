@@ -1586,6 +1586,12 @@ selected_dist_code = dist_code_from_label[selected_label]
 selected_dist_name = dist_df.loc[
     dist_df["distributor_code"] == selected_dist_code, "distributor_name"
 ].iloc[0]
+selected_dist_asm = dist_df.loc[
+    dist_df["distributor_code"] == selected_dist_code, "asm"
+].iloc[0]
+selected_dist_region = dist_df.loc[
+    dist_df["distributor_code"] == selected_dist_code, "region"
+].iloc[0]
 
 # ── Detect distributor switch and reset auth + salesman cache ──────────────
 _prev = st.session_state.get("_prev_dist_code")
@@ -2251,17 +2257,26 @@ elif PAGES[selected_page] == "pjp_template":
             )
 
         @st.cache_data(show_spinner="Menyiapkan template Excel...")
-        def _cached_pjp_excel(_salesman_df, _store_df, _dist_code, _dist_name):
+        def _cached_pjp_excel(
+            _salesman_df, _store_df, _dist_code, _dist_name, _dist_asm, _dist_region
+        ):
             return create_pjp_excel(
                 pd.DataFrame(columns=[c for c, _, _ in PJP_COLS]),
                 _salesman_df,
                 _store_df,
                 _dist_code,
                 _dist_name,
+                _dist_asm,
+                _dist_region,
             )
 
         pjp_excel = _cached_pjp_excel(
-            pjp_salesman_df, pjp_store_df, selected_dist_code, selected_dist_name
+            pjp_salesman_df,
+            pjp_store_df,
+            selected_dist_code,
+            selected_dist_name,
+            selected_dist_asm,
+            selected_dist_region,
         )
 
         st.download_button(
