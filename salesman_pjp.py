@@ -925,9 +925,18 @@ def create_pjp_excel(
     """
     Builds the PJP Template workbook.
 
-    Column order: ASM, Region, Nama Distributor, Kode Distributor,
-    Salesman ID, Nama Salesman, Kode Toko, Nama Toko, Hari, Minggu,
-    Frekuensi.
+    Column order:
+    ASM
+    Region
+    Nama Distributor
+    Kode Distributor
+    Salesman ID
+    Nama Salesman
+    Kode Toko
+    Nama Toko
+    Hari
+    Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap
+    Frekuensi
 
     Flow implemented in the sheet:
       Step 0 — "ASM", "Region", "Nama Distributor", "Kode Distributor" are
@@ -999,7 +1008,7 @@ def create_pjp_excel(
     ws.row_dimensions[3].height = 44
     ws.freeze_panes = "A4"
 
-    widths = [24, 26, 22, 30, 18, 18, 30, 16, 12, 40, 14]
+    widths = [18, 18, 28, 18, 20, 30, 18, 30, 14, 42, 14]
     for ci, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
