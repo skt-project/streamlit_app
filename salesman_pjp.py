@@ -897,11 +897,16 @@ _AUTO_FROM_SALESMAN = {
 }
 _AUTO_FROM_STORE = {
     "Nama Toko": 2,  # NR_STORE_LOOKUP col 2 = store_name
+    "Region": 3,  # NR_STORE_LOOKUP col 3 = region
+    "ASM": 4,  # NR_STORE_LOOKUP col 4 = asm
+    "Nama Distributor": 5,  # NR_STORE_LOOKUP col 5 = distributor_name
+    "Kode Distributor": 6,  # NR_STORE_LOOKUP col 6 = distributor_code
 }
-# ASM / Region / Nama Distributor / Kode Distributor are constant for the
-# whole file (1 file = 1 distributor), so they're written once as static
-# values from the selected distributor rather than looked up per row.
-_DIST_CONST_COLS = ["ASM", "Region", "Nama Distributor", "Kode Distributor"]
+# Kept for backwards-compat readability in a couple of comments/docstrings
+# below; ASM / Region / Nama Distributor / Kode Distributor are now looked
+# up per-row via VLOOKUP off Kode Toko (see _AUTO_FROM_STORE above) instead
+# of being written once as static values.
+_DIST_CONST_COLS = []
 
 
 def _extract_key_formula(cell_ref: str) -> str:
@@ -970,10 +975,10 @@ def create_pjp_excel(
     DROPDOWN_COLS = {"Salesman ID", "Kode Toko"}
 
     notes_pjp = {
-        "ASM": "Otomatis terisi sesuai distributor terpilih",
-        "Region": "Otomatis terisi sesuai distributor terpilih",
-        "Nama Distributor": "Otomatis terisi sesuai distributor terpilih",
-        "Kode Distributor": "Otomatis terisi sesuai distributor terpilih",
+        "ASM": "Otomatis terisi dari Kode Toko",
+        "Region": "Otomatis terisi dari Kode Toko",
+        "Nama Distributor": "Otomatis terisi dari Kode Toko",
+        "Kode Distributor": "Otomatis terisi dari Kode Toko",
         "Salesman ID": "Langkah 1 - Pilih Salesman ID. Hanya salesman aktif pada distributor ini.",
         "Nama Salesman": "Otomatis terisi dari Salesman ID",
         "Kode Toko": "Langkah 2 - Pilih Kode Toko. Hanya toko milik distributor ini.",
