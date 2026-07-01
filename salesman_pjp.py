@@ -1357,10 +1357,12 @@ _SAL_COL_MAP = {
     "Tanggal Join di G2G": "tanggal_join_g2g",
 }
 
-# NOTE: "salesman_id" is a derived lowercase helper column added by
-# read_template_sheet() (not a literal Excel header), included here so the
-# new Salesman-ID link is persisted going forward. Requires the BigQuery
-# migration: ALTER TABLE gt_master_salesman_pjp ADD COLUMN salesman_id STRING.
+# NOTE: "salesman_id" and "snapshot_month" are derived lowercase helper
+# columns added by read_template_sheet() / the upload flow (not literal
+# Excel headers), included here so they get persisted going forward.
+# Requires the BigQuery migrations:
+#   ALTER TABLE gt_master_salesman_pjp ADD COLUMN salesman_id STRING;
+#   ALTER TABLE gt_master_salesman_pjp ADD COLUMN snapshot_month STRING;
 _PJP_COL_MAP = {
     "salesman_id": "salesman_id",
     "ASM": "asm",
@@ -1373,6 +1375,7 @@ _PJP_COL_MAP = {
     "Hari": "hari",
     "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap": "minggu",
     "Frekuensi": "frekuensi",
+    "snapshot_month": "snapshot_month",
 }
 
 
@@ -1394,12 +1397,26 @@ def push_to_bigquery(df, col_map, table_id) -> tuple[bool, str]:
 def delete_pjp_records(
     distributor_code: str = None, salesman_name: str = None
 ) -> tuple[bool, str]:
+    """
+    Deletes PJP records for the given scope (distributor and/or salesman),
+    but ONLY within the CURRENT snapshot_month (based on system date at
+    call time). Historical months (previous snapshot_month values) are
+    never touched here — this is what lets an upload replace this month's
+    data while automatically preserving prior months, with no manual
+    month/year selection required from the user.
+    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
 
-        conditions = []
-        params = []
+        current_snapshot_month = datetime.now().strftime("%Y-%m")
+
+        conditions = ["snapshot_month = @snapshot_month"]
+        params = [
+            bigquery.ScalarQueryParameter(
+                "snapshot_month", "STRING", current_snapshot_month
+            )
+        ]
 
         if distributor_code:
             conditions.append("UPPER(kode_distributor) = UPPER(@kode)")
@@ -1412,7 +1429,7 @@ def delete_pjp_records(
                 bigquery.ScalarQueryParameter("salesman", "STRING", salesman_name)
             )
 
-        if not conditions:
+        if not distributor_code and not salesman_name:
             return False, "Tidak ada filter yang ditetapkan — operasi dibatalkan untuk keamanan."
 
         where_clause = "WHERE " + " AND ".join(conditions)
@@ -2299,7 +2316,10 @@ elif PAGES[selected_page] == "pjp_template":
         st.info(
             "Fitur ini memungkinkan **User** untuk memperbarui data PJP dengan memilih "
             "berdasarkan **Distributor** atau **Salesman** tertentu. "
-            "Data PJP lama untuk filter yang dipilih akan **dihapus** dan diganti dengan data baru dari file yang diupload."
+            "Data PJP **bulan berjalan** (ditentukan otomatis dari tanggal sistem) untuk filter yang "
+            "dipilih akan **dihapus** dan diganti dengan data baru dari file yang diupload. "
+            "**Data PJP bulan-bulan sebelumnya tidak pernah dihapus** dan tetap tersimpan sebagai riwayat — "
+            "tidak perlu memilih bulan/tahun secara manual."
         )
 
         st.markdown("### 1️⃣ Pilih Scope Update")
@@ -2390,6 +2410,11 @@ elif PAGES[selected_page] == "pjp_template":
                     & (pjp_new_df["Nama Distributor"] != "")
                 ]
                 pjp_new_df = pjp_new_df.reset_index(drop=True)
+                # Tag every uploaded row with the CURRENT snapshot month
+                # (YYYY-MM, from system date at upload time) — this is what
+                # drives the automatic replace-current/preserve-history
+                # logic below. No manual month/year selection needed.
+                pjp_new_df["snapshot_month"] = datetime.now().strftime("%Y-%m")
             except Exception as e:
                 st.error(f"Gagal membaca sheet: {e}")
                 st.stop()
@@ -2421,20 +2446,28 @@ elif PAGES[selected_page] == "pjp_template":
 
                 st.markdown("### 3️⃣ Konfirmasi & Eksekusi Update")
 
+                _current_snapshot_month = datetime.now().strftime("%Y-%m")
                 scope_label = (
                     f"semua PJP distributor **{selected_dist_name}**"
                     if scope_salesman is None
                     else f"PJP salesman **{scope_salesman}** di distributor **{selected_dist_name}**"
                 )
 
+                st.info(
+                    f"📅 Snapshot bulan berjalan: **{_current_snapshot_month}** "
+                    "(ditentukan otomatis dari tanggal sistem, tidak perlu dipilih manual)."
+                )
                 st.warning(
-                    f"⚠️ Proses ini akan **menghapus** {scope_label} dari database, "
-                    f"kemudian memasukkan **{len(pjp_new_df)} baris baru**. "
+                    f"⚠️ Proses ini akan **menghapus data PJP bulan {_current_snapshot_month}** "
+                    f"untuk {scope_label}, kemudian memasukkan **{len(pjp_new_df)} baris baru** "
+                    f"sebagai snapshot bulan {_current_snapshot_month}. "
+                    "**Data PJP bulan-bulan sebelumnya tetap aman dan tidak akan terhapus.** "
                     "Tindakan ini **tidak dapat dibatalkan**."
                 )
 
                 confirm_update = st.checkbox(
-                    "Saya memahami bahwa data PJP lama akan dihapus dan diganti.",
+                    "Saya memahami bahwa data PJP bulan berjalan akan dihapus dan diganti "
+                    "(data bulan sebelumnya tetap tersimpan).",
                     key="confirm_pjp_update",
                 )
 
@@ -2444,14 +2477,14 @@ elif PAGES[selected_page] == "pjp_template":
                     type="primary",
                     disabled=not confirm_update,
                 ):
-                    with st.spinner("Menghapus data PJP lama..."):
+                    with st.spinner(f"Menghapus data PJP bulan {_current_snapshot_month}..."):
                         ok_del, err_del = delete_pjp_records(
                             distributor_code=scope_dist_code,
                             salesman_name=scope_salesman,
                         )
 
                     if not ok_del:
-                        st.error(f"Gagal menghapus data PJP lama: {err_del}")
+                        st.error(f"Gagal menghapus data PJP bulan berjalan: {err_del}")
                     else:
                         with st.spinner("Memasukkan data PJP baru..."):
                             ok_ins, msg_ins = push_to_bigquery(
@@ -2460,12 +2493,14 @@ elif PAGES[selected_page] == "pjp_template":
 
                         if ok_ins:
                             st.success(
-                                f"✅ Update PJP berhasil! "
-                                f"Data lama dihapus dan **{len(pjp_new_df)} baris baru** berhasil disimpan."
+                                f"✅ Update PJP berhasil! Snapshot bulan **{_current_snapshot_month}** "
+                                f"diganti dengan **{len(pjp_new_df)} baris baru**. "
+                                "Data bulan-bulan sebelumnya tetap tersimpan."
                             )
                             st.cache_data.clear()
                         else:
                             st.error(
-                                f"Data lama sudah dihapus, tetapi gagal memasukkan data baru: {msg_ins}\n\n"
+                                f"Data bulan {_current_snapshot_month} sudah dihapus, tetapi gagal "
+                                f"memasukkan data baru: {msg_ins}\n\n"
                                 "Segera hubungi administrator untuk memulihkan data."
                             )
