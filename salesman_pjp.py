@@ -243,7 +243,7 @@ def load_distributor_data() -> pd.DataFrame:
         SELECT
             UPPER(distributor)      AS distributor_name,
             UPPER(region_g2g)       AS region,
-            UPPER(distributor_code) AS distributor_code,
+            UPPER(distributor_g2g) AS distributor_g2g,
             UPPER(asm_g2g)          AS asm
         FROM `gt_schema.master_distributor`
         WHERE region_g2g != '' AND status = 'Active'
@@ -271,7 +271,7 @@ def load_store_master() -> pd.DataFrame:
             UPPER(cust_id)           AS store_code,
             UPPER(store_name)        AS store_name,
             UPPER(distributor_g2g)   AS distributor_name,
-            UPPER(distributor_code)  AS distributor_code,
+            UPPER(dst_id_g2g)  AS distributor_code,
             UPPER(region_g2g)        AS region,
             UPPER(asm_g2g)           AS asm
         FROM `gt_schema.master_store_database_basis`
