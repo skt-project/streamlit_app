@@ -255,34 +255,102 @@ def load_distributor_data() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Memuat data toko dari Database...")
-def load_store_data() -> pd.DataFrame:
+def load_store_master() -> pd.DataFrame:
+    """
+    Loads store master data directly from master_store_database_basis,
+    sourcing distributor_code / region / asm straight off the store row
+    (per the PJP redesign mapping table) instead of joining by distributor
+    name. This is the single source of truth used to auto-populate
+    Nama Toko / Region / ASM / Nama Distributor / Kode Distributor once a
+    Kode Toko is chosen in the PJP flow.
+    """
     credentials, project_id = get_credentials()
     client = bigquery.Client(credentials=credentials, project=project_id)
     query = """
-        WITH RAW AS (
-            SELECT
-                UPPER(distributor)      AS distributor_name,
-                UPPER(region_g2g)       AS region,
-                UPPER(distributor_code) AS distributor_code,
-                UPPER(asm_g2g)          AS asm
-            FROM `gt_schema.master_distributor`
-            WHERE asm_g2g != '' AND status = 'Active'
-        )
         SELECT
-            UPPER(a.cust_id)           AS store_code,
-            UPPER(a.store_name)        AS store_name,
-            UPPER(a.distributor_g2g)   AS distributor_name
-        FROM `gt_schema.master_store_database_basis` a
-        LEFT JOIN RAW b ON UPPER(a.distributor_g2g) = UPPER(b.distributor_name)
+            UPPER(cust_id)           AS store_code,
+            UPPER(store_name)        AS store_name,
+            UPPER(distributor_g2g)   AS distributor_name,
+            UPPER(distributor_code)  AS distributor_code,
+            UPPER(region_g2g)        AS region,
+            UPPER(asm_g2g)           AS asm
+        FROM `gt_schema.master_store_database_basis`
+        WHERE cust_id IS NOT NULL AND cust_id != ''
     """
     df = client.query(query).to_dataframe()
-    df = df.dropna(subset=["store_code", "store_name", "distributor_name"])
-    df["store_code"] = df["store_code"].astype(str).str.strip()
-    df["store_name"] = df["store_name"].astype(str).str.strip()
-    df["distributor_name"] = df["distributor_name"].astype(str).str.strip()
+    df = df.dropna(subset=["store_code", "store_name", "distributor_code"])
+    for c in ["store_code", "store_name", "distributor_name", "distributor_code", "region", "asm"]:
+        df[c] = df[c].astype(str).str.strip()
     df["store_label"] = df["store_code"] + " - " + df["store_name"]
     df = df.drop_duplicates(subset=["store_code"]).reset_index(drop=True)
     return df
+
+
+# Backwards-compatible alias — older code referenced load_store_data().
+load_store_data = load_store_master
+
+
+@st.cache_data(show_spinner="Memuat daftar salesman aktif...")
+def load_salesman_mapping(distributor_code: str) -> pd.DataFrame:
+    """
+    Loads the ACTIVE salesman roster for a given distributor straight from
+    gt_salesman_mapping — the source of truth for salesman identity. Used
+    to populate the Salesman ID dropdown in the PJP template (Step 1) and
+    to validate uploaded PJP files.
+    """
+    credentials, project_id = get_credentials()
+    client = bigquery.Client(credentials=credentials, project=project_id)
+    query = f"""
+        SELECT
+            salesman_id,
+            salesman_type,
+            UPPER(TRIM(distributor_code)) AS distributor_code,
+            UPPER(TRIM(salesman))         AS salesman,
+            is_active
+        FROM `{MAPPING_TABLE}`
+        WHERE UPPER(TRIM(distributor_code)) = UPPER(@kode)
+          AND is_active = TRUE
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY salesman_id ORDER BY updated_at DESC
+        ) = 1
+        ORDER BY salesman
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("kode", "STRING", distributor_code)
+        ]
+    )
+    df = client.query(query, job_config=job_config).to_dataframe()
+    df["salesman_id"] = df["salesman_id"].astype(str).str.strip()
+    df["salesman"] = df["salesman"].astype(str).str.strip()
+    df["salesman_label"] = df["salesman_id"] + " - " + df["salesman"]
+    df = df.drop_duplicates(subset=["salesman_id"]).reset_index(drop=True)
+    return df
+
+
+def build_salesman_lookup(mapping_df: pd.DataFrame) -> dict:
+    """{salesman_id: salesman_name}"""
+    if mapping_df is None or mapping_df.empty:
+        return {}
+    return dict(zip(mapping_df["salesman_id"], mapping_df["salesman"]))
+
+
+def build_store_lookup(store_df: pd.DataFrame) -> dict:
+    """
+    {store_code: {"store_name", "region", "asm", "nama_distributor", "kode_distributor"}}
+    """
+    if store_df is None or store_df.empty:
+        return {}
+    lookup = {}
+    for _, r in store_df.iterrows():
+        lookup[r["store_code"]] = {
+            "store_name": r["store_name"],
+            "region": r["region"],
+            "asm": r["asm"],
+            "nama_distributor": r["distributor_name"],
+            "kode_distributor": r["distributor_code"],
+        }
+    return lookup
 
 
 def build_lookup_tables(dist_df: pd.DataFrame):
@@ -615,13 +683,14 @@ SALESMAN_COLS = [
 ]
 
 PJP_COLS = [
-    ("ASM", True, "cascade"),
-    ("Region", True, "cascade"),
-    ("Nama Distributor", True, "cascade"),
-    ("Kode Distributor", True, "auto"),
-    ("Nama Salesman", True, "text"),
-    ("Kode Toko", True, "store_cascade"),
+    ("Salesman ID", True, "salesman_dropdown"),
+    ("Nama Salesman", False, "auto"),
+    ("Kode Toko", True, "store_dropdown"),
     ("Nama Toko", False, "auto"),
+    ("Region", False, "auto"),
+    ("ASM", False, "auto"),
+    ("Nama Distributor", False, "auto"),
+    ("Kode Distributor", False, "auto"),
     ("Hari", True, "dropdown"),
     ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap", True, "dropdown"),
     ("Frekuensi", True, "dropdown"),
@@ -683,123 +752,95 @@ def _vcenter(wrap=False):
     return Alignment(vertical="center", wrap_text=wrap)
 
 
-# ─── Build Lookup sheet + named ranges ───────────────────────────────────────
+# ─── Build Lookup sheet + named ranges (PJP: Salesman ID + Kode Toko driven) ──
+
+# Combo strings use " - " as the visual separator between the stored key
+# (salesman_id / cust_id) and its human-readable label. Formulas split on
+# this separator to recover the real key for VLOOKUP purposes.
+_COMBO_SEP = " - "
 
 
-def _build_lookup_and_named_ranges(wb, dist_df, store_df=None):
+def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
+    """
+    Builds a hidden 'Lookup' sheet containing:
+      - NR_SALESMAN_COMBO : list of "salesman_id - salesman" strings for the
+                             Salesman ID dropdown (scoped to the distributor
+                             this template was generated for).
+      - NR_SALESMAN_LOOKUP: 2-col table (salesman_id, salesman) for VLOOKUP.
+      - NR_STORE_COMBO     : list of "cust_id - store_name" strings for the
+                              Kode Toko dropdown (scoped to the same
+                              distributor, which is what enforces "store
+                              must belong to selected distributor" at
+                              selection time).
+      - NR_STORE_LOOKUP    : 6-col table (cust_id, store_name, region, asm,
+                              nama_distributor, kode_distributor) for VLOOKUP.
+    """
     LK = "Lookup"
     lk = wb.create_sheet(LK)
     lk.sheet_state = "hidden"
 
-    asm_list = sorted(dist_df["asm"].dropna().unique().tolist())
-    cur_col = 1
+    # ── Salesman combo list ────────────────────────────────────────────────
+    sal_df = salesman_df.sort_values("salesman") if salesman_df is not None and not salesman_df.empty else pd.DataFrame(columns=["salesman_id", "salesman", "salesman_label"])
 
-    lk.cell(row=1, column=cur_col, value="__ALL_ASM__")
-    for i, asm in enumerate(asm_list, start=2):
-        lk.cell(row=i, column=cur_col, value=asm)
-    c = get_column_letter(cur_col)
-    nm = _safe_name("ALL_ASM")
-    wb.defined_names[nm] = DefinedName(
-        nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(asm_list)}"
+    combo_col = 1
+    lk.cell(row=1, column=combo_col, value="__SALESMAN_COMBO__")
+    for i, label in enumerate(sal_df["salesman_label"].tolist(), start=2):
+        lk.cell(row=i, column=combo_col, value=label)
+    c = get_column_letter(combo_col)
+    last_row = max(2, 1 + len(sal_df))
+    wb.defined_names["NR_SALESMAN_COMBO"] = DefinedName(
+        "NR_SALESMAN_COMBO", attr_text=f"'{LK}'!${c}$2:${c}${last_row}"
     )
-    cur_col += 1
 
-    for asm in asm_list:
-        regions = sorted(dist_df.loc[dist_df["asm"] == asm, "region"].unique().tolist())
-        lk.cell(row=1, column=cur_col, value=f"__ASM_{asm}__")
-        for i, reg in enumerate(regions, start=2):
-            lk.cell(row=i, column=cur_col, value=reg)
-        c = get_column_letter(cur_col)
-        nm = _safe_name(asm)
-        wb.defined_names[nm] = DefinedName(
-            nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(regions)}"
-        )
-        cur_col += 1
-
-    for asm in asm_list:
-        regions = sorted(dist_df.loc[dist_df["asm"] == asm, "region"].unique().tolist())
-        for region in regions:
-            mask = (dist_df["asm"] == asm) & (dist_df["region"] == region)
-            names = sorted(dist_df.loc[mask, "distributor_name"].unique().tolist())
-            lk.cell(row=1, column=cur_col, value=f"__ASM_{asm}__REG_{region}__")
-            for i, name in enumerate(names, start=2):
-                lk.cell(row=i, column=cur_col, value=name)
-            c = get_column_letter(cur_col)
-            nm = _safe_name(f"{asm}_{region}")
-            wb.defined_names[nm] = DefinedName(
-                nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(names)}"
-            )
-            cur_col += 1
-
-    name_col = cur_col
-    code_col = cur_col + 1
-    lk.cell(row=1, column=name_col, value="__DIST_NAME__")
-    lk.cell(row=1, column=code_col, value="__DIST_CODE__")
-    all_dists = (
-        dist_df[["distributor_name", "distributor_code"]]
-        .drop_duplicates(subset=["distributor_name"])
-        .sort_values("distributor_name")
-        .reset_index(drop=True)
-    )
-    for i, row in all_dists.iterrows():
-        lk.cell(row=i + 2, column=name_col, value=row["distributor_name"])
-        lk.cell(row=i + 2, column=code_col, value=row["distributor_code"])
+    id_col = combo_col + 1
+    name_col = combo_col + 2
+    lk.cell(row=1, column=id_col, value="__SALESMAN_ID__")
+    lk.cell(row=1, column=name_col, value="__SALESMAN_NAME__")
+    for i, r in enumerate(sal_df.itertuples(index=False), start=2):
+        lk.cell(row=i, column=id_col, value=r.salesman_id)
+        lk.cell(row=i, column=name_col, value=r.salesman)
+    ic = get_column_letter(id_col)
     nc = get_column_letter(name_col)
-    kc = get_column_letter(code_col)
-    last_row = 1 + len(all_dists)
-    wb.defined_names["NR_DIST_LOOKUP"] = DefinedName(
-        "NR_DIST_LOOKUP",
-        attr_text=f"'{LK}'!${nc}$2:${kc}${last_row}",
+    last_row = max(2, 1 + len(sal_df))
+    wb.defined_names["NR_SALESMAN_LOOKUP"] = DefinedName(
+        "NR_SALESMAN_LOOKUP", attr_text=f"'{LK}'!${ic}$2:${nc}${last_row}"
     )
-    cur_col += 2
 
-    if store_df is not None and not store_df.empty:
-        dist_names_with_stores = sorted(
-            store_df["distributor_name"].dropna().unique().tolist()
-        )
-        for dist_name in dist_names_with_stores:
-            codes = sorted(
-                store_df.loc[store_df["distributor_name"] == dist_name, "store_code"]
-                .dropna()
-                .unique()
-                .tolist()
-            )
-            lk.cell(row=1, column=cur_col, value=f"__STORE_{dist_name}__")
-            for i, code in enumerate(codes, start=2):
-                lk.cell(row=i, column=cur_col, value=code)
-            c = get_column_letter(cur_col)
-            nm = _safe_name(f"STORE_{dist_name}")
-            wb.defined_names[nm] = DefinedName(
-                nm, attr_text=f"'{LK}'!${c}$2:${c}${1+len(codes)}"
-            )
-            cur_col += 1
+    # ── Store combo list + multi-column lookup table ───────────────────────
+    st_df = store_df.sort_values("store_code") if store_df is not None and not store_df.empty else pd.DataFrame(
+        columns=["store_code", "store_name", "region", "asm", "distributor_name", "distributor_code", "store_label"]
+    )
 
-        sc_col = cur_col
-        sn_col = cur_col + 1
-        lk.cell(row=1, column=sc_col, value="__STORE_CODE__")
-        lk.cell(row=1, column=sn_col, value="__STORE_NAME__")
-        all_stores = (
-            store_df[["store_code", "store_name"]]
-            .drop_duplicates(subset=["store_code"])
-            .sort_values("store_code")
-            .reset_index(drop=True)
-        )
-        for i, row in all_stores.iterrows():
-            lk.cell(row=i + 2, column=sc_col, value=row["store_code"])
-            lk.cell(row=i + 2, column=sn_col, value=row["store_name"])
-        scc = get_column_letter(sc_col)
-        snc = get_column_letter(sn_col)
-        last_row = 1 + len(all_stores)
-        wb.defined_names["NR_STORE_LOOKUP"] = DefinedName(
-            "NR_STORE_LOOKUP",
-            attr_text=f"'{LK}'!${scc}$2:${snc}${last_row}",
-        )
+    store_combo_col = name_col + 1
+    lk.cell(row=1, column=store_combo_col, value="__STORE_COMBO__")
+    for i, label in enumerate(st_df["store_label"].tolist(), start=2):
+        lk.cell(row=i, column=store_combo_col, value=label)
+    sc = get_column_letter(store_combo_col)
+    last_row = max(2, 1 + len(st_df))
+    wb.defined_names["NR_STORE_COMBO"] = DefinedName(
+        "NR_STORE_COMBO", attr_text=f"'{LK}'!${sc}$2:${sc}${last_row}"
+    )
+
+    lut_start = store_combo_col + 1  # cust_id
+    cols_order = ["store_code", "store_name", "region", "asm", "distributor_name", "distributor_code"]
+    headers = ["__STORE_ID__", "__STORE_NAME__", "__STORE_REGION__", "__STORE_ASM__", "__STORE_DIST__", "__STORE_DISTCODE__"]
+    for offset, (col_key, header) in enumerate(zip(cols_order, headers)):
+        col_idx = lut_start + offset
+        lk.cell(row=1, column=col_idx, value=header)
+        for i, val in enumerate(st_df[col_key].tolist(), start=2):
+            lk.cell(row=i, column=col_idx, value=val)
+    lut_first_letter = get_column_letter(lut_start)
+    lut_last_letter = get_column_letter(lut_start + len(cols_order) - 1)
+    last_row = max(2, 1 + len(st_df))
+    wb.defined_names["NR_STORE_LOOKUP"] = DefinedName(
+        "NR_STORE_LOOKUP", attr_text=f"'{LK}'!${lut_first_letter}$2:${lut_last_letter}${last_row}"
+    )
 
 
-# ─── Attach cascading DVs ─────────────────────────────────────────────────────
+# ─── Attach Salesman ID / Kode Toko dropdown DVs ──────────────────────────────
 
 
-def _attach_cascade_dvs(ws, col_names, first_data, last_data):
+def _attach_pjp_dvs(ws, col_names, first_data, last_data):
     def cl(name):
         return get_column_letter(col_names.index(name) + 1)
 
@@ -807,96 +848,102 @@ def _attach_cascade_dvs(ws, col_names, first_data, last_data):
         c = cl(name)
         return f"{c}{first_data}:{c}{last_data}"
 
-    asm_ref = f"{cl('ASM')}{first_data}"
-    reg_ref = f"{cl('Region')}{first_data}"
-
-    dv_asm = DataValidation(
+    dv_sal = DataValidation(
         type="list",
-        formula1=_safe_name("ALL_ASM"),
+        formula1="NR_SALESMAN_COMBO",
         allow_blank=True,
         showInputMessage=True,
-        promptTitle="Langkah 1 - ASM",
-        prompt="Pilih nama ASM. Region dan Distributor akan menyesuaikan.",
+        promptTitle="Langkah 1 - Salesman ID",
+        prompt="Pilih Salesman ID. Format: ID - Nama Salesman. Nama Salesman akan terisi otomatis.",
         showErrorMessage=True,
         errorTitle="Input Tidak Valid",
-        error="Pilih ASM dari daftar.",
+        error="Pilih Salesman ID dari daftar (hanya salesman aktif pada distributor ini yang muncul).",
     )
-    ws.add_data_validation(dv_asm)
-    dv_asm.sqref = sqref("ASM")
+    ws.add_data_validation(dv_sal)
+    dv_sal.sqref = sqref("Salesman ID")
 
-    asm_clean = _indirect_clean(asm_ref)
-    dv_reg = DataValidation(
+    dv_store = DataValidation(
         type="list",
-        formula1=f'INDIRECT("NR_"&{asm_clean})',
+        formula1="NR_STORE_COMBO",
         allow_blank=True,
         showInputMessage=True,
-        promptTitle="Langkah 2 - Region",
-        prompt="Pilih Region. Daftar disesuaikan dengan ASM yang dipilih.",
+        promptTitle="Langkah 2 - Kode Toko",
+        prompt="Pilih Kode Toko. Format: Kode - Nama Toko. Nama Toko, Region, ASM, dan Distributor akan terisi otomatis.",
         showErrorMessage=True,
         errorTitle="Input Tidak Valid",
-        error="Pilih Region dari daftar. Pastikan ASM sudah dipilih.",
+        error="Pilih Kode Toko dari daftar (hanya toko milik distributor ini yang muncul).",
     )
-    ws.add_data_validation(dv_reg)
-    dv_reg.sqref = sqref("Region")
-
-    reg_clean = _indirect_clean(reg_ref)
-    dv_nama = DataValidation(
-        type="list",
-        formula1=f'INDIRECT("NR_"&{asm_clean}&"_"&{reg_clean})',
-        allow_blank=True,
-        showInputMessage=True,
-        promptTitle="Langkah 3 - Nama Distributor",
-        prompt="Pilih Nama Distributor. Daftar disesuaikan dengan ASM dan Region.",
-        showErrorMessage=True,
-        errorTitle="Input Tidak Valid",
-        error="Pilih Distributor dari daftar. Pastikan ASM dan Region sudah dipilih.",
-    )
-    ws.add_data_validation(dv_nama)
-    dv_nama.sqref = sqref("Nama Distributor")
-
-    if "Kode Toko" in col_names:
-        nama_dist_ref = f"{cl('Nama Distributor')}{first_data}"
-        dist_clean = _indirect_clean(nama_dist_ref)
-        dv_store = DataValidation(
-            type="list",
-            formula1=f'INDIRECT("NR_STORE_"&{dist_clean})',
-            allow_blank=True,
-            showInputMessage=True,
-            promptTitle="Langkah 4 - Kode Toko",
-            prompt="Pilih Kode Toko. Daftar disesuaikan dengan Distributor yang dipilih.",
-            showErrorMessage=True,
-            errorTitle="Input Tidak Valid",
-            error="Pilih Kode Toko dari daftar. Pastikan Nama Distributor sudah dipilih.",
-        )
-        ws.add_data_validation(dv_store)
-        dv_store.sqref = sqref("Kode Toko")
+    ws.add_data_validation(dv_store)
+    dv_store.sqref = sqref("Kode Toko")
 
 
 # ─── PJP Excel ────────────────────────────────────────────────────────────────
 
+# Auto (formula-driven, protected, read-only) columns and which NR_..._LOOKUP
+# column index (1-based, within the lookup table) each one pulls from, keyed
+# by which driving/input column it depends on.
+_AUTO_FROM_SALESMAN = {
+    "Nama Salesman": 2,  # NR_SALESMAN_LOOKUP col 2 = salesman name
+}
+_AUTO_FROM_STORE = {
+    "Nama Toko": 2,          # NR_STORE_LOOKUP col 2 = store_name
+    "Region": 3,             # col 3 = region
+    "ASM": 4,                # col 4 = asm
+    "Nama Distributor": 5,   # col 5 = nama_distributor
+    "Kode Distributor": 6,   # col 6 = kode_distributor
+}
 
-def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
+
+def _extract_key_formula(cell_ref: str) -> str:
+    """
+    Given a cell holding a combo string like "GTIDST171001 - BUDI SETIAWAN",
+    returns an Excel formula fragment that extracts the key portion before
+    the first " - " (robust to an empty cell, via the &" - " trick).
+    """
+    return f'TRIM(LEFT({cell_ref},FIND(" - ",{cell_ref}&" - ")-1))'
+
+
+def create_pjp_excel(df, salesman_df, store_df, selected_dist_code, selected_dist_name) -> BytesIO:
+    """
+    Builds the PJP Template workbook.
+
+    Flow implemented in the sheet:
+      Step 1 — user picks "Salesman ID" from a dropdown showing
+               "salesman_id - nama_salesman" (sourced from gt_salesman_mapping,
+               filtered to ACTIVE salesman of `selected_dist_code`).
+      Step 2 — "Nama Salesman" auto-fills (read-only) via VLOOKUP.
+      Step 3 — user picks "Kode Toko" from a dropdown showing
+               "cust_id - store_name" (sourced from master_store_database_basis,
+               filtered to stores of `selected_dist_code` — this is what
+               guarantees a selected store always belongs to the distributor).
+      Step 4 — "Nama Toko", "Region", "ASM", "Nama Distributor", and
+               "Kode Distributor" all auto-fill (read-only) via VLOOKUP.
+
+    salesman_df / store_df are expected to already be scoped to
+    `selected_dist_code` (1 file = 1 distributor, same rule as before).
+    """
     wb = Workbook()
     wb.remove(wb.active)
-    _build_lookup_and_named_ranges(wb, dist_df, store_df)
+    _build_lookup_and_named_ranges(wb, salesman_df, store_df)
 
     col_names = [c for c, _, _ in PJP_COLS]
-    col_types = {c: t for c, _, t in PJP_COLS}
     col_req = {c: r for c, r, _ in PJP_COLS}
 
     FIRST_DATA = 4
     LAST_DATA = 30003
 
-    CASCADE_COLS = {"ASM", "Region", "Nama Distributor", "Kode Distributor", "Kode Toko", "Nama Toko"}
+    AUTO_COLS = set(_AUTO_FROM_SALESMAN) | set(_AUTO_FROM_STORE)
+    DROPDOWN_COLS = {"Salesman ID", "Kode Toko"}
 
     notes_pjp = {
-        "ASM": "Langkah 1 - Pilih ASM dari dropdown",
-        "Region": "Langkah 2 - Pilih Region (mengikuti ASM)",
-        "Nama Distributor": "Langkah 3 - Pilih Distributor (mengikuti Region)",
-        "Kode Distributor": "Otomatis terisi dari Nama Distributor",
-        "Nama Salesman": "Teks bebas",
-        "Kode Toko": "Langkah 4 - Pilih Kode Toko (mengikuti Distributor)",
+        "Salesman ID": "Langkah 1 - Pilih Salesman ID (format: ID - Nama). Hanya salesman aktif pada distributor ini.",
+        "Nama Salesman": "Otomatis terisi dari Salesman ID",
+        "Kode Toko": "Langkah 2 - Pilih Kode Toko (format: Kode - Nama Toko). Hanya toko milik distributor ini.",
         "Nama Toko": "Otomatis terisi dari Kode Toko",
+        "Region": "Otomatis terisi dari Kode Toko",
+        "ASM": "Otomatis terisi dari Kode Toko",
+        "Nama Distributor": "Otomatis terisi dari Kode Toko",
+        "Kode Distributor": "Otomatis terisi dari Kode Toko",
         "Hari": "Drop down dengan opsi hari",
         "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap": "Drop down: ganjil / genap / ganjil+genap",
         "Frekuensi": "F4+ = >1x seminggu  |  F4 = 1 minggu sekali  |  F2 = 2 minggu sekali  |  F1 = 1 bulan sekali",
@@ -918,7 +965,7 @@ def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
     for ci, cn in enumerate(col_names, 1):
         cell = ws.cell(row=3, column=ci, value=cn)
         cell.font = _header_font()
-        cell.fill = _fill("1A7A6E" if cn in CASCADE_COLS else "ED7D31")
+        cell.fill = _fill("1A7A6E" if (cn in DROPDOWN_COLS or cn in AUTO_COLS) else "ED7D31")
         cell.alignment = _center()
         cell.border = _thin_border()
 
@@ -927,7 +974,7 @@ def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
     ws.row_dimensions[3].height = 44
     ws.freeze_panes = "A4"
 
-    widths = [22, 24, 30, 20, 22, 18, 30, 12, 40, 22]
+    widths = [24, 26, 22, 30, 18, 18, 30, 16, 12, 40, 14]
     for ci, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
@@ -937,7 +984,7 @@ def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
     def dr(name):
         return f"{col_letter(name)}{FIRST_DATA}:{col_letter(name)}{LAST_DATA}"
 
-    _attach_cascade_dvs(ws, col_names, FIRST_DATA, LAST_DATA)
+    _attach_pjp_dvs(ws, col_names, FIRST_DATA, LAST_DATA)
 
     for col_name, opts in [
         ("Hari", DAY_OPTIONS),
@@ -977,7 +1024,7 @@ def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
     ws.add_data_validation(frekuensi_dv)
     frekuensi_dv.sqref = dr("Frekuensi")
 
-    nama_cl = col_letter("Nama Distributor")
+    sal_id_cl = col_letter("Salesman ID")
     kode_toko_cl = col_letter("Kode Toko")
     df_reindexed = df.reindex(columns=col_names)
 
@@ -987,10 +1034,11 @@ def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
 
         for ci, cn in enumerate(col_names, 1):
             cell = ws.cell(row=excel_row, column=ci)
-            ctype = col_types.get(cn, "text")
 
-            if cn == "Kode Distributor":
-                cell.value = f'=IFERROR(VLOOKUP({nama_cl}{excel_row},NR_DIST_LOOKUP,2,0),"")'
+            if cn in _AUTO_FROM_SALESMAN:
+                key_formula = _extract_key_formula(f"{sal_id_cl}{excel_row}")
+                lut_col = _AUTO_FROM_SALESMAN[cn]
+                cell.value = f'=IFERROR(VLOOKUP({key_formula},NR_SALESMAN_LOOKUP,{lut_col},0),"")'
                 cell.fill = _fill("D6E4F0")
                 cell.font = Font(italic=True, color="1A7A6E", size=10, name="Calibri")
                 cell.alignment = _vcenter()
@@ -999,8 +1047,10 @@ def create_pjp_excel(df, distributor_map, dist_df, store_df) -> BytesIO:
                 cell.protection = Protection(locked=True)
                 continue
 
-            if cn == "Nama Toko":
-                cell.value = f'=IFERROR(VLOOKUP({kode_toko_cl}{excel_row},NR_STORE_LOOKUP,2,0),"")'
+            if cn in _AUTO_FROM_STORE:
+                key_formula = _extract_key_formula(f"{kode_toko_cl}{excel_row}")
+                lut_col = _AUTO_FROM_STORE[cn]
+                cell.value = f'=IFERROR(VLOOKUP({key_formula},NR_STORE_LOOKUP,{lut_col},0),"")'
                 cell.fill = _fill("D6E4F0")
                 cell.font = Font(italic=True, color="1A7A6E", size=10, name="Calibri")
                 cell.alignment = _vcenter()
@@ -1093,7 +1143,20 @@ def validate_row_completeness(df, required_cols, sheet_label) -> list:
     return errors
 
 
-def validate_pjp_df(df, distributor_map, store_df=None):
+def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, selected_dist_code=None):
+    """
+    Validates an uploaded/parsed PJP dataframe (after read_template_sheet has
+    already extracted 'salesman_id' and 'kode_toko' from the combo strings).
+
+    Rules enforced:
+      - salesman_id must exist in gt_salesman_mapping AND be active
+        (salesman_df is expected to already be the ACTIVE roster).
+      - salesman_id's distributor_code must match selected_dist_code.
+      - kode_toko must exist in master_store_database_basis (store_df).
+      - kode_toko's distributor_code must equal selected_dist_code, otherwise:
+        "Store does not belong to selected distributor."
+      - Hari / Minggu / Frekuensi must be one of the allowed dropdown values.
+    """
     errors, warnings = [], []
     missing = [c for c in PJP_REQUIRED if c not in df.columns]
     if missing:
@@ -1102,7 +1165,7 @@ def validate_pjp_df(df, distributor_map, store_df=None):
 
     errors += validate_row_completeness(df, PJP_REQUIRED, "PJP")
 
-    unique_dist = _get_unique_distributors(df)
+    unique_dist = _get_unique_distributors(df, col="kode_distributor")
     if len(unique_dist) > 1:
         errors.append(
             f"Sheet PJP Template hanya boleh berisi 1 kode distributor per file. "
@@ -1110,21 +1173,38 @@ def validate_pjp_df(df, distributor_map, store_df=None):
         )
         return errors, warnings
 
-    valid_store_codes = set()
-    if store_df is not None and not store_df.empty:
-        valid_store_codes = set(store_df["store_code"].dropna().tolist())
+    valid_salesman_ids = set()
+    if salesman_df is not None and not salesman_df.empty:
+        valid_salesman_ids = set(salesman_df["salesman_id"].dropna().astype(str).str.strip().tolist())
+
+    store_lookup = build_store_lookup(store_df) if store_df is not None else {}
 
     for i, row in df.iterrows():
         n = i + 4
-        kode = str(row.get("Kode Distributor", "")).strip()
-        if kode and kode not in distributor_map:
-            errors.append(f"Baris {n}: Kode Distributor '{kode}' tidak valid")
 
-        kode_toko = str(row.get("Kode Toko", "")).strip()
-        if kode_toko and valid_store_codes and kode_toko not in valid_store_codes:
-            warnings.append(
-                f"Baris {n}: Kode Toko '{kode_toko}' tidak ditemukan di master store"
-            )
+        # ── Salesman ID validation ──────────────────────────────────────────
+        sal_id = str(row.get("salesman_id", "")).strip()
+        if sal_id:
+            if valid_salesman_ids and sal_id not in valid_salesman_ids:
+                errors.append(
+                    f"Baris {n}: Salesman ID '{sal_id}' tidak ditemukan atau tidak aktif "
+                    f"untuk distributor ini."
+                )
+            elif selected_dist_code and salesman_df is not None and not salesman_df.empty:
+                match = salesman_df.loc[salesman_df["salesman_id"] == sal_id]
+                if not match.empty and str(match.iloc[0]["distributor_code"]).strip().upper() != str(selected_dist_code).strip().upper():
+                    errors.append(
+                        f"Baris {n}: Salesman ID '{sal_id}' bukan milik distributor yang dipilih."
+                    )
+
+        # ── Kode Toko validation ────────────────────────────────────────────
+        kode_toko = str(row.get("kode_toko", "")).strip()
+        if kode_toko:
+            store_info = store_lookup.get(kode_toko)
+            if store_info is None:
+                errors.append(f"Baris {n}: Kode Toko '{kode_toko}' tidak ditemukan di master store.")
+            elif selected_dist_code and str(store_info["kode_distributor"]).strip().upper() != str(selected_dist_code).strip().upper():
+                errors.append(f"Baris {n}: Store does not belong to selected distributor.")
 
         for col, opts in [
             ("Hari", DAY_OPTIONS),
@@ -1138,9 +1218,33 @@ def validate_pjp_df(df, distributor_map, store_df=None):
     return errors, warnings
 
 
+def _extract_combo_key(val) -> str:
+    """Extracts the stored key (e.g. salesman_id / cust_id) from a
+    'KEY - Label' combo string chosen via the Excel dropdown. Falls back to
+    the raw trimmed value if no separator is present (e.g. manual entry)."""
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if _COMBO_SEP in s:
+        return s.split(_COMBO_SEP, 1)[0].strip()
+    return s
+
+
 def read_template_sheet(
-    uploaded_file, sheet_name, header_row, distributor_map, store_df=None
+    uploaded_file, sheet_name, header_row, salesman_df=None, store_df=None
 ):
+    """
+    Reads an uploaded PJP Template sheet and re-derives every auto column
+    in Python (rather than trusting Excel's cached formula values, which are
+    not guaranteed to be present since the template is generated by
+    openpyxl, not by Excel itself).
+
+    Adds two extra lowercase helper columns used by validate_pjp_df /
+    push_to_bigquery:
+      - salesman_id   : extracted from the "Salesman ID" combo column
+      - kode_toko     : extracted from the "Kode Toko" combo column
+      - kode_distributor : mirror of "Kode Distributor" for convenience
+    """
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=header_row)
     df = df.dropna(how="all")
 
@@ -1158,17 +1262,21 @@ def read_template_sheet(
     if "Frekuensi" in df.columns:
         df["Frekuensi"] = df["Frekuensi"].astype(str).str.strip().str.upper()
 
-    name_to_code = {v: k for k, v in distributor_map.items()}
-    if "Nama Distributor" in df.columns:
-        df["Kode Distributor"] = df["Nama Distributor"].apply(
-            lambda x: name_to_code.get(str(x).strip(), "") if pd.notna(x) else ""
-        )
+    salesman_lookup = build_salesman_lookup(salesman_df) if salesman_df is not None else {}
+    store_lookup = build_store_lookup(store_df) if store_df is not None else {}
 
-    if store_df is not None and "Kode Toko" in df.columns:
-        code_to_name = dict(zip(store_df["store_code"], store_df["store_name"]))
-        df["Nama Toko"] = df["Kode Toko"].apply(
-            lambda x: code_to_name.get(str(x).strip(), "") if pd.notna(x) else ""
-        )
+    if "Salesman ID" in df.columns:
+        df["salesman_id"] = df["Salesman ID"].apply(_extract_combo_key)
+        df["Nama Salesman"] = df["salesman_id"].apply(lambda k: salesman_lookup.get(k, ""))
+
+    if "Kode Toko" in df.columns:
+        df["kode_toko"] = df["Kode Toko"].apply(_extract_combo_key)
+        df["Nama Toko"] = df["kode_toko"].apply(lambda k: store_lookup.get(k, {}).get("store_name", ""))
+        df["Region"] = df["kode_toko"].apply(lambda k: store_lookup.get(k, {}).get("region", ""))
+        df["ASM"] = df["kode_toko"].apply(lambda k: store_lookup.get(k, {}).get("asm", ""))
+        df["Nama Distributor"] = df["kode_toko"].apply(lambda k: store_lookup.get(k, {}).get("nama_distributor", ""))
+        df["Kode Distributor"] = df["kode_toko"].apply(lambda k: store_lookup.get(k, {}).get("kode_distributor", ""))
+        df["kode_distributor"] = df["Kode Distributor"]
 
     if "No. HP" in df.columns:
         df["No. HP"] = df["No. HP"].apply(normalize_phone_id)
