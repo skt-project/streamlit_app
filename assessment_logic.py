@@ -66,8 +66,8 @@ def bad_stock_grade_for_ytd(ytd_val, utilization, is_exempt=False):
     if _is_blank(ytd_val) or not ytd_val:
         return "C", 0, utilization, 0.0
 
-    bs_allow = ytd_val * 0.005
-    compliance_pct = min(100.0, (utilization / bs_allow) * 100)
+    bs_allow = round(ytd_val * 0.005, 2)
+    compliance_pct = round(min(100.0, (utilization / bs_allow) * 100), 4)
 
     if compliance_pct >= 100:
         grade = "A"
