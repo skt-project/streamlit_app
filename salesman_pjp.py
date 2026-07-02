@@ -1238,24 +1238,30 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
     Validates an uploaded/parsed PJP dataframe (after read_template_sheet has
     already extracted 'salesman_id' and 'kode_toko' from the combo strings).
 
-    Rules enforced (UNCHANGED — still fully distributor-scoped, regardless
-    of the fact that the Excel dropdowns themselves are no longer scoped):
+    Rules enforced:
       - salesman_id must exist in gt_salesman_mapping AND be active
-        (salesman_df is expected to already be the ACTIVE roster, scoped to
-        selected_dist_code — i.e. the output of load_salesman_mapping(),
-        NOT load_all_salesman_mapping()).
-      - salesman_id's distributor_code must match selected_dist_code.
-      - kode_toko must exist in master_store_database_basis (store_df).
-      - kode_toko's distributor_code must equal selected_dist_code, otherwise:
-        "Store does not belong to selected distributor."
+        (checked against the FULL active roster across all distributors —
+        salesman_df should be load_all_salesman_mapping()'s output, NOT the
+        distributor-scoped load_salesman_mapping()).
+      - salesman_id's distributor_code must match selected_dist_code,
+        otherwise: "Salesman ID '<id>' bukan milik distributor yang dipilih."
+      - kode_toko must exist in master_store_database_basis (checked
+        against the FULL store master — store_df should be the full,
+        unscoped dataset, not pre-filtered to one distributor).
+      - kode_toko's distributor_code must equal selected_dist_code,
+        otherwise: "Store does not belong to selected distributor."
       - Hari / Minggu / Frekuensi must be one of the allowed dropdown values.
 
-    IMPORTANT: salesman_df and selected_dist_code must be passed by callers
-    for the salesman-active / distributor-ownership rules to actually be
-    enforced — omitting them silently skips those checks. Callers must pass
-    the DISTRIBUTOR-SCOPED salesman_df/store_df here (not the full,
-    all-distributor datasets used to build the Excel template), since this
-    function is what enforces ownership.
+    IMPORTANT: callers MUST pass the FULL, unscoped salesman_df/store_df
+    here (covering all distributors), NOT a subset pre-filtered to
+    selected_dist_code. Pre-filtering before this function runs would
+    conflate "doesn't exist at all" with "exists, but under a different
+    distributor" — a store/salesman that's real but has any distributor_code
+    formatting mismatch would then wrongly disappear from the pre-filtered
+    subset and get reported as "not found" instead of the more accurate
+    "belongs to a different distributor". Passing the full dataset here and
+    letting this function do the selected_dist_code comparison itself keeps
+    the two failure modes distinguishable.
     """
     errors, warnings = [], []
     missing = [c for c in PJP_REQUIRED if c not in df.columns]
@@ -1287,14 +1293,15 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
         if sal_id:
             if valid_salesman_ids and sal_id not in valid_salesman_ids:
                 errors.append(
-                    f"Baris {n}: Salesman ID '{sal_id}' tidak ditemukan atau tidak aktif "
-                    f"untuk distributor ini."
+                    f"Baris {n}: Salesman ID '{sal_id}' tidak ditemukan atau tidak aktif."
                 )
             elif selected_dist_code and salesman_df is not None and not salesman_df.empty:
                 match = salesman_df.loc[salesman_df["salesman_id"] == sal_id]
                 if not match.empty and str(match.iloc[0]["distributor_code"]).strip().upper() != str(selected_dist_code).strip().upper():
+                    actual_dist = match.iloc[0]["distributor_code"]
                     errors.append(
-                        f"Baris {n}: Salesman ID '{sal_id}' bukan milik distributor yang dipilih."
+                        f"Baris {n}: Salesman ID '{sal_id}' bukan milik distributor yang dipilih "
+                        f"(terdaftar untuk distributor '{actual_dist}', bukan '{selected_dist_code}')."
                     )
 
         # ── Kode Toko validation ────────────────────────────────────────────
@@ -1304,7 +1311,12 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
             if store_info is None:
                 errors.append(f"Baris {n}: Kode Toko '{kode_toko}' tidak ditemukan di master store.")
             elif selected_dist_code and str(store_info["kode_distributor"]).strip().upper() != str(selected_dist_code).strip().upper():
-                errors.append(f"Baris {n}: Store does not belong to selected distributor.")
+                actual_dist = store_info["kode_distributor"]
+                errors.append(
+                    f"Baris {n}: Store does not belong to selected distributor "
+                    f"(Kode Toko '{kode_toko}' terdaftar untuk distributor '{actual_dist}', "
+                    f"bukan '{selected_dist_code}')."
+                )
 
         for col, opts in [
             ("Hari", DAY_OPTIONS),
@@ -2483,20 +2495,26 @@ elif PAGES[selected_page] == "pjp_template":
                 )
                 st.stop()
 
-            # Scope the same active-salesman-roster + distributor-filtered
-            # store list used for ownership enforcement — this is
-            # intentionally DIFFERENT from the full, unscoped datasets used
-            # to populate the Excel dropdown in Tab 1. Validation here still
-            # requires each row's Salesman ID / Kode Toko to belong to
-            # `selected_dist_code`, exactly as before.
-            pjp_salesman_df = st.session_state.pjp_salesman_df
-            pjp_store_df = store_df[
-                store_df["distributor_code"] == selected_dist_code
-            ].reset_index(drop=True)
+            # Use the FULL (unscoped, all-distributor) salesman/store
+            # datasets for the actual existence lookup — NOT a
+            # distributor-pre-filtered subset. Pre-filtering before the
+            # lookup conflates two different checks ("does this
+            # store/salesman exist at all?" vs "does it belong to the
+            # selected distributor?"): if a store's distributor_code field
+            # doesn't line up exactly with selected_dist_code for any
+            # reason, it silently disappears from a pre-filtered subset and
+            # gets wrongly reported as "not found" even though it's a
+            # perfectly real store — just (apparently) under a different
+            # distributor. Looking it up in the full dataset first, and
+            # then checking ownership separately in validate_pjp_df() by
+            # comparing the row's own distributor_code to
+            # selected_dist_code, gives accurate diagnostics either way.
+            pjp_salesman_lookup_df = st.session_state.pjp_salesman_all_df
+            pjp_store_lookup_df = store_df
 
             try:
                 pjp_new_df = read_template_sheet(
-                    uploaded_update, "PJP Template", 2, pjp_salesman_df, pjp_store_df
+                    uploaded_update, "PJP Template", 2, pjp_salesman_lookup_df, pjp_store_lookup_df
                 )
                 # Determine "row has data" from the RAW Kode Toko input,
                 # not from the derived/looked-up "Nama Distributor" column.
@@ -2532,8 +2550,8 @@ elif PAGES[selected_page] == "pjp_template":
             pjp_u_errors, pjp_u_warnings = validate_pjp_df(
                 pjp_new_df,
                 distributor_map,
-                store_df=pjp_store_df,
-                salesman_df=pjp_salesman_df,
+                store_df=pjp_store_lookup_df,
+                salesman_df=pjp_salesman_lookup_df,
                 selected_dist_code=selected_dist_code,
             )
 
