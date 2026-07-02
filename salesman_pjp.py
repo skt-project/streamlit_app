@@ -2498,9 +2498,22 @@ elif PAGES[selected_page] == "pjp_template":
                 pjp_new_df = read_template_sheet(
                     uploaded_update, "PJP Template", 2, pjp_salesman_df, pjp_store_df
                 )
+                # Determine "row has data" from the RAW Kode Toko input,
+                # not from the derived/looked-up "Nama Distributor" column.
+                # Nama Distributor is re-computed via a VLOOKUP-equivalent
+                # against pjp_store_df (scoped to selected_dist_code) — if
+                # that lookup fails to match a row's Kode Toko for any
+                # reason, Nama Distributor silently becomes "", which used
+                # to cause the row (and potentially ALL rows) to be dropped
+                # here with no explanation. Using the raw "kode_toko" column
+                # instead means genuinely filled rows always survive to the
+                # per-row validation below, where a real lookup miss is
+                # reported explicitly (e.g. "Kode Toko 'X' tidak ditemukan
+                # di master store.") instead of vanishing silently.
+                _row_key_col = "kode_toko" if "kode_toko" in pjp_new_df.columns else "Kode Toko"
                 pjp_new_df = pjp_new_df[
-                    pjp_new_df["Nama Distributor"].notna()
-                    & (pjp_new_df["Nama Distributor"] != "")
+                    pjp_new_df[_row_key_col].notna()
+                    & (pjp_new_df[_row_key_col].astype(str).str.strip() != "")
                 ]
                 pjp_new_df = pjp_new_df.reset_index(drop=True)
                 # Tag every uploaded row with the CURRENT snapshot month
