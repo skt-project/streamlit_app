@@ -296,8 +296,10 @@ def load_salesman_mapping(distributor_code: str) -> pd.DataFrame:
     """
     Loads the ACTIVE salesman roster for a given distributor straight from
     gt_salesman_mapping — the source of truth for salesman identity. Used
-    to populate the Salesman ID dropdown in the PJP template (Step 1) and
-    to validate uploaded PJP files.
+    to validate uploaded PJP files (salesman_id must belong to the selected
+    distributor). NOTE: this distributor-scoped roster is no longer used to
+    populate the Excel template's Salesman ID dropdown — see
+    load_all_salesman_mapping() for that.
     """
     credentials, project_id = get_credentials()
     client = bigquery.Client(credentials=credentials, project=project_id)
@@ -322,6 +324,42 @@ def load_salesman_mapping(distributor_code: str) -> pd.DataFrame:
         ]
     )
     df = client.query(query, job_config=job_config).to_dataframe()
+    df["salesman_id"] = df["salesman_id"].astype(str).str.strip()
+    df["salesman"] = df["salesman"].astype(str).str.strip()
+    # Dropdown now shows the bare Salesman ID only (no "ID - Nama" combo).
+    df["salesman_label"] = df["salesman_id"]
+    df = df.drop_duplicates(subset=["salesman_id"]).reset_index(drop=True)
+    return df
+
+
+@st.cache_data(show_spinner="Memuat seluruh Salesman ID aktif (semua distributor)...")
+def load_all_salesman_mapping() -> pd.DataFrame:
+    """
+    Loads the ACTIVE salesman roster across ALL distributors from
+    gt_salesman_mapping (no distributor filter). Used to populate the
+    Salesman ID dropdown in the PJP Excel template so users can search and
+    select any active Salesman ID regardless of which distributor it
+    belongs to. Distributor ownership of the chosen Salesman ID is still
+    enforced separately, at upload time, by validate_pjp_df() (using the
+    distributor-scoped roster from load_salesman_mapping()).
+    """
+    credentials, project_id = get_credentials()
+    client = bigquery.Client(credentials=credentials, project=project_id)
+    query = f"""
+        SELECT
+            salesman_id,
+            salesman_type,
+            UPPER(TRIM(distributor_code)) AS distributor_code,
+            UPPER(TRIM(salesman))         AS salesman,
+            is_active
+        FROM `{MAPPING_TABLE}`
+        WHERE is_active = TRUE
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY salesman_id ORDER BY updated_at DESC
+        ) = 1
+        ORDER BY salesman
+    """
+    df = client.query(query).to_dataframe()
     df["salesman_id"] = df["salesman_id"].astype(str).str.strip()
     df["salesman"] = df["salesman"].astype(str).str.strip()
     # Dropdown now shows the bare Salesman ID only (no "ID - Nama" combo).
@@ -774,16 +812,23 @@ def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
     """
     Builds a hidden 'Lookup' sheet containing:
       - NR_SALESMAN_COMBO : list of bare salesman_id values for the
-                             Salesman ID dropdown (scoped to the distributor
-                             this template was generated for).
+                             Salesman ID dropdown. `salesman_df` is expected
+                             to be the FULL active roster across ALL
+                             distributors (see load_all_salesman_mapping()) —
+                             this is no longer scoped to a single
+                             distributor, so users can search/select any
+                             active Salesman ID from any distributor.
       - NR_SALESMAN_LOOKUP: 2-col table (salesman_id, salesman) for VLOOKUP.
       - NR_STORE_COMBO     : list of bare cust_id (store code) values for the
-                              Kode Toko dropdown (scoped to the same
-                              distributor, which is what enforces "store
-                              must belong to selected distributor" at
-                              selection time).
+                              Kode Toko dropdown. `store_df` is expected to
+                              be the FULL store master across ALL
+                              distributors, likewise unscoped.
       - NR_STORE_LOOKUP    : 6-col table (cust_id, store_name, region, asm,
                               nama_distributor, kode_distributor) for VLOOKUP.
+
+    NOTE: Distributor ownership of whatever Salesman ID / Kode Toko the user
+    ends up choosing is enforced separately at upload time by
+    validate_pjp_df(), not here.
     """
     LK = "Lookup"
     lk = wb.create_sheet(LK)
@@ -864,10 +909,10 @@ def _attach_pjp_dvs(ws, col_names, first_data, last_data):
         allow_blank=True,
         showInputMessage=True,
         promptTitle="Langkah 1 - Salesman ID",
-        prompt="Pilih Salesman ID dari daftar. Nama Salesman akan terisi otomatis.",
+        prompt="Pilih Salesman ID dari daftar (seluruh distributor). Nama Salesman akan terisi otomatis. Kepemilikan distributor akan divalidasi saat upload.",
         showErrorMessage=True,
         errorTitle="Input Tidak Valid",
-        error="Pilih Salesman ID dari daftar (hanya salesman aktif pada distributor ini yang muncul).",
+        error="Pilih Salesman ID dari daftar dropdown.",
     )
     ws.add_data_validation(dv_sal)
     dv_sal.sqref = sqref("Salesman ID")
@@ -878,10 +923,10 @@ def _attach_pjp_dvs(ws, col_names, first_data, last_data):
         allow_blank=True,
         showInputMessage=True,
         promptTitle="Langkah 2 - Kode Toko",
-        prompt="Pilih Kode Toko dari daftar. Nama Toko, Region, ASM, dan Distributor akan terisi otomatis.",
+        prompt="Pilih Kode Toko dari daftar (seluruh distributor). Nama Toko, Region, ASM, dan Distributor akan terisi otomatis. Kepemilikan distributor akan divalidasi saat upload.",
         showErrorMessage=True,
         errorTitle="Input Tidak Valid",
-        error="Pilih Kode Toko dari daftar (hanya toko milik distributor ini yang muncul).",
+        error="Pilih Kode Toko dari daftar dropdown.",
     )
     ws.add_data_validation(dv_store)
     dv_store.sqref = sqref("Kode Toko")
@@ -944,22 +989,28 @@ def create_pjp_excel(
     Frekuensi
 
     Flow implemented in the sheet:
-      Step 0 — "ASM", "Region", "Nama Distributor", "Kode Distributor" are
-               written as static, read-only values for the whole file, since
-               1 file = 1 distributor (`selected_dist_code`/`selected_dist_name`/
-               `selected_dist_asm`/`selected_dist_region`).
       Step 1 — user picks "Salesman ID" from a dropdown of bare salesman_id
-               values (sourced from gt_salesman_mapping, filtered to ACTIVE
-               salesman of `selected_dist_code`).
+               values sourced from the FULL active gt_salesman_mapping
+               roster across ALL distributors (`salesman_df` is expected to
+               be unscoped — see load_all_salesman_mapping()). The chosen
+               Salesman ID is NOT restricted to `selected_dist_code` here;
+               ownership is enforced later at upload-validation time.
       Step 2 — "Nama Salesman" auto-fills (read-only) via VLOOKUP.
       Step 3 — user picks "Kode Toko" from a dropdown of bare cust_id
-               (store code) values (sourced from master_store_database_basis,
-               filtered to stores of `selected_dist_code` — this is what
-               guarantees a selected store always belongs to the distributor).
-      Step 4 — "Nama Toko" auto-fills (read-only) via VLOOKUP.
+               (store code) values sourced from the FULL store master
+               across ALL distributors (`store_df` is expected to be
+               unscoped). Likewise not restricted to `selected_dist_code`
+               here.
+      Step 4 — "Nama Toko" (and Region / ASM / Nama Distributor / Kode
+               Distributor) auto-fill (read-only) via VLOOKUP based on
+               whichever store was picked.
 
-    salesman_df / store_df are expected to already be scoped to
-    `selected_dist_code` (1 file = 1 distributor, same rule as before).
+    `selected_dist_code` / `selected_dist_name` / `selected_dist_asm` /
+    `selected_dist_region` are kept as parameters for context/labeling
+    purposes only — they no longer filter `salesman_df` / `store_df`, which
+    the caller is expected to pass in as the FULL, unfiltered datasets.
+    Distributor ownership of the row's actual Salesman ID / Kode Toko is
+    validated separately at upload time (see validate_pjp_df()).
     """
     wb = Workbook()
     wb.remove(wb.active)
@@ -979,9 +1030,9 @@ def create_pjp_excel(
         "Region": "Otomatis terisi dari Kode Toko",
         "Nama Distributor": "Otomatis terisi dari Kode Toko",
         "Kode Distributor": "Otomatis terisi dari Kode Toko",
-        "Salesman ID": "Langkah 1 - Pilih Salesman ID. Hanya salesman aktif pada distributor ini.",
+        "Salesman ID": "Langkah 1 - Pilih Salesman ID (dari seluruh distributor). Kepemilikan distributor divalidasi saat upload.",
         "Nama Salesman": "Otomatis terisi dari Salesman ID",
-        "Kode Toko": "Langkah 2 - Pilih Kode Toko. Hanya toko milik distributor ini.",
+        "Kode Toko": "Langkah 2 - Pilih Kode Toko (dari seluruh distributor). Kepemilikan distributor divalidasi saat upload.",
         "Nama Toko": "Otomatis terisi dari Kode Toko",
         "Hari": "Drop down dengan opsi hari",
         "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap": "Drop down: ganjil / genap / ganjil+genap",
@@ -1187,9 +1238,12 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
     Validates an uploaded/parsed PJP dataframe (after read_template_sheet has
     already extracted 'salesman_id' and 'kode_toko' from the combo strings).
 
-    Rules enforced:
+    Rules enforced (UNCHANGED — still fully distributor-scoped, regardless
+    of the fact that the Excel dropdowns themselves are no longer scoped):
       - salesman_id must exist in gt_salesman_mapping AND be active
-        (salesman_df is expected to already be the ACTIVE roster).
+        (salesman_df is expected to already be the ACTIVE roster, scoped to
+        selected_dist_code — i.e. the output of load_salesman_mapping(),
+        NOT load_all_salesman_mapping()).
       - salesman_id's distributor_code must match selected_dist_code.
       - kode_toko must exist in master_store_database_basis (store_df).
       - kode_toko's distributor_code must equal selected_dist_code, otherwise:
@@ -1198,7 +1252,10 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
 
     IMPORTANT: salesman_df and selected_dist_code must be passed by callers
     for the salesman-active / distributor-ownership rules to actually be
-    enforced — omitting them silently skips those checks.
+    enforced — omitting them silently skips those checks. Callers must pass
+    the DISTRIBUTOR-SCOPED salesman_df/store_df here (not the full,
+    all-distributor datasets used to build the Excel template), since this
+    function is what enforces ownership.
     """
     errors, warnings = [], []
     missing = [c for c in PJP_REQUIRED if c not in df.columns]
@@ -1679,8 +1736,11 @@ if (
 
 # ─── Load ACTIVE salesman-mapping roster for the new PJP flow ─────────────────
 # This is the source-of-truth roster (gt_salesman_mapping, is_active=TRUE)
-# used to build the Salesman ID dropdown in the Excel template (Step 1) and
-# to validate uploaded PJP files (salesman_id must exist & be active).
+# used to VALIDATE uploaded PJP files (salesman_id must exist & be active &
+# belong to selected_dist_code). It is distributor-scoped on purpose,
+# because it drives ownership enforcement — it is NOT used anymore to build
+# the Excel template's Salesman ID dropdown (that now uses
+# pjp_salesman_all_df, loaded below).
 
 if (
     "pjp_salesman_df" not in st.session_state
@@ -1689,6 +1749,16 @@ if (
     with st.spinner("Memuat daftar Salesman ID aktif..."):
         st.session_state.pjp_salesman_df = load_salesman_mapping(selected_dist_code)
         st.session_state._pjp_cached_dist = selected_dist_code
+
+# ─── Load FULL (all-distributor) active salesman roster for Excel dropdown ────
+# Not distributor-scoped — this is what populates the Salesman ID dropdown
+# in the downloaded Excel template, so users can search/select any active
+# salesman from any distributor. Distributor ownership is still enforced
+# at upload time using pjp_salesman_df (above), not this dataset.
+
+if "pjp_salesman_all_df" not in st.session_state:
+    with st.spinner("Memuat seluruh Salesman ID aktif..."):
+        st.session_state.pjp_salesman_all_df = load_all_salesman_mapping()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1723,6 +1793,7 @@ if PAGES[selected_page] == "salesman":
             st.session_state.pop("_cached_dist", None)
             st.session_state.pop("pjp_salesman_df", None)
             st.session_state.pop("_pjp_cached_dist", None)
+            st.session_state.pop("pjp_salesman_all_df", None)
             st.session_state.action_mode = None
             st.rerun()
 
@@ -2034,6 +2105,7 @@ if PAGES[selected_page] == "salesman":
                                 st.session_state.pop("_cached_dist", None)
                                 st.session_state.pop("pjp_salesman_df", None)
                                 st.session_state.pop("_pjp_cached_dist", None)
+                                st.session_state.pop("pjp_salesman_all_df", None)
                                 st.rerun()
 
             # ── Inline Replace Panel ──────────────────────────────────────────
@@ -2095,6 +2167,7 @@ if PAGES[selected_page] == "salesman":
                                         st.session_state.pop("_cached_dist", None)
                                         st.session_state.pop("pjp_salesman_df", None)
                                         st.session_state.pop("_pjp_cached_dist", None)
+                                        st.session_state.pop("pjp_salesman_all_df", None)
                                         st.rerun()
 
             # ── Inline Deactivate Panel ───────────────────────────────────────
@@ -2129,6 +2202,7 @@ if PAGES[selected_page] == "salesman":
                             st.session_state.pop("_cached_dist", None)
                             st.session_state.pop("pjp_salesman_df", None)
                             st.session_state.pop("_pjp_cached_dist", None)
+                            st.session_state.pop("pjp_salesman_all_df", None)
                             st.rerun()
                         else:
                             st.error(f"Gagal menonaktifkan salesman: {err_d}")
@@ -2217,6 +2291,7 @@ if PAGES[selected_page] == "salesman":
                             st.session_state.pop("_cached_dist", None)
                             st.session_state.pop("pjp_salesman_df", None)
                             st.session_state.pop("_pjp_cached_dist", None)
+                            st.session_state.pop("pjp_salesman_all_df", None)
                             st.rerun()
 
 
@@ -2247,8 +2322,14 @@ elif PAGES[selected_page] == "pjp_template":
             - **Jangan edit kolom hasil auto-fill** (Nama Salesman, Nama Toko, Region, ASM, Nama Distributor, Kode Distributor)
 
             ### 🔄 URUTAN PENGISIAN (WAJIB!):
-            1. **Salesman ID** (pilih dari dropdown) → Nama Salesman otomatis terisi
-            2. **Kode Toko** (pilih dari dropdown) → Nama Toko, Region, ASM, Nama Distributor, Kode Distributor otomatis terisi
+            1. **Salesman ID** (pilih dari dropdown — daftar berisi seluruh salesman aktif dari semua distributor, cari dengan mengetik ID-nya) → Nama Salesman otomatis terisi
+            2. **Kode Toko** (pilih dari dropdown — daftar berisi seluruh toko dari semua distributor, cari dengan mengetik kode tokonya) → Nama Toko, Region, ASM, Nama Distributor, Kode Distributor otomatis terisi
+
+            ### ⚠️ VALIDASI KEPEMILIKAN DISTRIBUTOR:
+            Walaupun dropdown menampilkan seluruh Salesman ID dan Kode Toko dari semua distributor,
+            saat file diupload sistem akan tetap memvalidasi bahwa Salesman ID dan Kode Toko yang
+            dipilih benar-benar **milik distributor `{selected_dist_code}`**. Baris yang tidak sesuai
+            akan ditolak saat upload.
 
             ### ✅ FORMAT DATA YANG BENAR:
             - **Frekuensi PJP**: F4+ / F4 / F2 / F1
@@ -2259,23 +2340,31 @@ elif PAGES[selected_page] == "pjp_template":
             Hubungi tim support G2G
             """)
 
-        # Scope Salesman ID + Kode Toko dropdowns to THIS distributor only —
-        # this is what enforces "salesman/store must belong to selected
-        # distributor" already at selection time in Excel.
-        pjp_salesman_df = st.session_state.pjp_salesman_df
-        pjp_store_df = store_df[
-            store_df["distributor_code"] == selected_dist_code
-        ].reset_index(drop=True)
+        # ── Full (all-distributor) datasets used to populate the Excel
+        # dropdowns — per the new requirement, Salesman ID and Kode Toko
+        # are no longer scoped to `selected_dist_code` here. Distributor
+        # ownership is still enforced separately at upload-validation time
+        # (Tab 2, using the distributor-scoped datasets there).
+        pjp_salesman_df_excel = st.session_state.pjp_salesman_all_df
+        pjp_store_df_excel = store_df
 
-        if pjp_salesman_df.empty:
+        # Distributor-scoped subsets, kept only to warn if THIS distributor
+        # currently has no active salesman / stores of its own — purely
+        # informational, does not affect what appears in the Excel dropdown.
+        _dist_salesman_df = st.session_state.pjp_salesman_df
+        _dist_store_df = store_df[store_df["distributor_code"] == selected_dist_code]
+
+        if _dist_salesman_df.empty:
             st.warning(
-                "⚠️ Tidak ada Salesman ID aktif untuk distributor ini. "
-                "Template tetap bisa diunduh, tapi dropdown Salesman ID akan kosong."
+                "⚠️ Tidak ada Salesman ID aktif yang tercatat untuk distributor ini. "
+                "Dropdown Salesman ID pada template tetap menampilkan seluruh salesman aktif dari semua "
+                "distributor, namun baris dengan Salesman ID yang bukan milik distributor ini akan ditolak saat upload."
             )
-        if pjp_store_df.empty:
+        if _dist_store_df.empty:
             st.warning(
-                "⚠️ Tidak ada data toko untuk distributor ini. "
-                "Dropdown Kode Toko akan kosong."
+                "⚠️ Tidak ada data toko yang tercatat untuk distributor ini. "
+                "Dropdown Kode Toko pada template tetap menampilkan seluruh toko dari semua distributor, "
+                "namun baris dengan Kode Toko yang bukan milik distributor ini akan ditolak saat upload."
             )
 
         @st.cache_data(show_spinner="Menyiapkan template Excel...")
@@ -2293,8 +2382,8 @@ elif PAGES[selected_page] == "pjp_template":
             )
 
         pjp_excel = _cached_pjp_excel(
-            pjp_salesman_df,
-            pjp_store_df,
+            pjp_salesman_df_excel,
+            pjp_store_df_excel,
             selected_dist_code,
             selected_dist_name,
             selected_dist_asm,
@@ -2372,7 +2461,9 @@ elif PAGES[selected_page] == "pjp_template":
         st.markdown("### 2️⃣ Upload File PJP Baru")
         st.warning(
             "File yang diupload **harus menggunakan template resmi**. "
-            "Pastikan Salesman ID dan Kode Toko sudah sesuai dengan filter yang dipilih di atas."
+            "Sistem akan memvalidasi bahwa setiap Salesman ID dan Kode Toko yang dipilih "
+            "benar-benar milik distributor yang dipilih di atas — baris yang bukan milik "
+            "distributor ini akan ditolak."
         )
 
         uploaded_update = st.file_uploader(
@@ -2393,9 +2484,11 @@ elif PAGES[selected_page] == "pjp_template":
                 st.stop()
 
             # Scope the same active-salesman-roster + distributor-filtered
-            # store list used to build the download template, so upload
-            # validation enforces exactly the same "belongs to this
-            # distributor" rules.
+            # store list used for ownership enforcement — this is
+            # intentionally DIFFERENT from the full, unscoped datasets used
+            # to populate the Excel dropdown in Tab 1. Validation here still
+            # requires each row's Salesman ID / Kode Toko to belong to
+            # `selected_dist_code`, exactly as before.
             pjp_salesman_df = st.session_state.pjp_salesman_df
             pjp_store_df = store_df[
                 store_df["distributor_code"] == selected_dist_code
