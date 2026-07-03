@@ -231,11 +231,49 @@ function complianceForDate(sid, dateStr, baseline){
   return Math.max(50, Math.min(100, baseline + jitter));
 }
 
-/* ---- Salesman roster is scoped to the active Brand Group — switching brand context refreshes
-   the whole planner (rail, search, recommendations) since the page is reloaded by setBrandGroup(). ---- */
-const groupSalesmen = STEP.salesmenInCurrentGroup();
+/* ---- Salesman roster ----
+   Mock mode: reads from STEP.DATA (salesmenInCurrentGroup).
+   Production mode (STEP.api.enabled): fetches from /api/v1/route/salesmen and normalizes
+   the API response into the same shape the rest of the page code expects.
+   ---------------------------------------------------------------- */
+let groupSalesmen = STEP.api.enabled ? [] : STEP.salesmenInCurrentGroup();
+
+/* Map API salesman object → shape expected by the existing page render logic */
+function _apiSalesmanToLocal(s){
+  return {
+    id: s.salesman_sk,
+    code: s.source_salesman_code,
+    name: s.salesman_name || s.source_salesman_code,
+    area: s.region || '',
+    distributor: s.distributor_code || '',
+    region: s.region || '',
+    spv: s.spv_name || '',
+    status: s.is_active === false ? 'inactive' : 'active',
+    achievementPct: 0,
+    routeCompliancePct: 0,
+    capacityPerDay: 8,
+    territory: s.region || '',
+  };
+}
+
+/* Map API route plan day entries → shape used by store card render */
+function _apiOutletToStore(o){
+  return {
+    code: o.source_outlet_code,
+    name: o.store_name || o.source_outlet_code,
+    address: o.address || '',
+    tier: o.store_grade || 'C',
+    brand: o.brand || '',
+    sellIn: 0,
+    lastVisit: null,
+    time: '08:00',
+  };
+}
+
 const storedSalesmanId = localStorage.getItem('step_planner_salesman');
-let activeSalesmanId = (storedSalesmanId && groupSalesmen.some(s => s.id === storedSalesmanId)) ? storedSalesmanId : groupSalesmen[0].id;
+let activeSalesmanId = (storedSalesmanId && groupSalesmen.some(s => s.id === storedSalesmanId))
+  ? storedSalesmanId
+  : (groupSalesmen[0]?.id || '');
 let currentWeekOffset = parseInt(localStorage.getItem('step_planner_week_offset') || '0', 10);
 let activeDay = 'mon';
 let salesmanQuery = '';
@@ -264,7 +302,26 @@ function routeStorageKey(sid, offset){ return `step_route_${sid}_w${offset}`; }
 function metaStorageKey(sid, offset){ return `step_route_meta_${sid}_w${offset}`; }
 function emptyRoute(){ const r = Object.fromEntries(DAY_DEFS.map(d=>[d.key,[]])); r.sun = []; return r; }
 
+/* In-memory cache for API route plans. Keys = "salesman_sk:YYYY-Www" */
+const _apiRouteCache = {};
+const _DAY_TO_KEY = { Senin:'mon', Selasa:'tue', Rabu:'wed', Kamis:'thu', Jumat:'fri', Sabtu:'sat', Minggu:'sun' };
+
+function _weekString(offset){
+  const m = weekMonday(offset);
+  const info = STEP.isoWeekInfo(m);
+  return `${info.isoYear}-W${String(info.week).padStart(2,'0')}`;
+}
+
 function getRouteForWeek(sid, offset){
+  /* Production mode: check in-memory API cache first */
+  if (STEP.api.enabled) {
+    const ck = sid + ':' + _weekString(offset);
+    if (_apiRouteCache[ck]) return _apiRouteCache[ck];
+    /* Cache miss: trigger async fetch, return empty while loading */
+    _fetchRouteFromAPI(sid, offset);
+    return { route: emptyRoute(), source: 'loading' };
+  }
+  /* Mock mode: existing localStorage / generated route logic */
   const raw = localStorage.getItem(routeStorageKey(sid, offset));
   if (raw) {
     const meta = JSON.parse(localStorage.getItem(metaStorageKey(sid, offset)) || '{"source":"manual"}');
@@ -280,6 +337,33 @@ function getRouteForWeek(sid, offset){
   saveRoute(sid, offset, copied, 'copied', { silent: true });
   return { route: copied, source: 'copied' };
 }
+
+function _fetchRouteFromAPI(sid, offset){
+  const ck = sid + ':' + _weekString(offset);
+  if (_apiRouteCache[ck + ':fetching']) return;
+  _apiRouteCache[ck + ':fetching'] = true;
+
+  STEP.api.get('/api/v1/route/plan', { salesman_sk: sid, week: _weekString(offset) })
+    .then(plan => {
+      if (!plan) return;
+      const route = emptyRoute();
+      Object.entries(plan.days || {}).forEach(([dayId, outlets]) => {
+        const key = _DAY_TO_KEY[dayId];
+        if (key) route[key] = outlets.map(o => ({
+          code: o.source_outlet_code,
+          name: o.store_name || o.source_outlet_code,
+          address: o.address || '',
+          tier: o.store_grade || 'C',
+          brand: o.brand || '',
+          sellIn: 0, lastVisit: null, time: '08.00',
+        }));
+      });
+      _apiRouteCache[ck] = { route, source: 'pjp' };
+      /* Re-render if this is the currently viewed salesman+week */
+      if (sid === activeSalesmanId && offset === currentWeekOffset) renderAll();
+    })
+    .catch(err => { console.warn('Route plan API error:', err); });
+}
 function saveRoute(sid, offset, route, source, opts){
   opts = opts || {};
   localStorage.setItem(routeStorageKey(sid, offset), JSON.stringify(route));
@@ -287,6 +371,13 @@ function saveRoute(sid, offset, route, source, opts){
   if (!opts.silent) STEP.toast('Route otomatis tersimpan sebagai draft', '💾');
 }
 function storeCountFor(sid){
+  if (STEP.api.enabled) {
+    const ck = sid + ':' + _weekString(0);
+    const cached = _apiRouteCache[ck];
+    if (!cached) return '—';
+    const codes = new Set(DAY_DEFS.flatMap(d => cached.route[d.key].map(o => o.code)));
+    return codes.size;
+  }
   const sm = D.salesmen.find(s=>s.id===sid);
   if (!sm) return 0;
   const baseline = STEP.generateWeeklyRoute(sid, sm.area || sm.territory, 0);
@@ -1011,7 +1102,24 @@ function renderAll(){
   renderReco();
   updateFilterBadge();
 }
-renderAll();
+/* ---- Initial render ----
+   Mock mode: synchronous, data is already in groupSalesmen.
+   Production mode: fetch salesmen from API, normalize, then render. ---- */
+if (STEP.api.enabled) {
+  // Show skeleton while loading
+  document.getElementById('salesmanRail').innerHTML = '<div class="text-sm ink-faint" style="padding:20px 0;">Memuat data salesman...</div>';
+  STEP.api.get('/api/v1/route/salesmen').then(data => {
+    groupSalesmen = (data || []).map(_apiSalesmanToLocal);
+    if (!activeSalesmanId && groupSalesmen.length) activeSalesmanId = groupSalesmen[0].id;
+    renderAll();
+  }).catch(err => {
+    document.getElementById('salesmanRail').innerHTML =
+      `<div class="empty-state"><div class="ic">⚠️</div><p>Gagal memuat data: ${err.message}</p></div>`;
+  });
+} else {
+  renderAll();
+}
+
 }); // end guardPage
 </script>
 </body>

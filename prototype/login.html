@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  body{ display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--soft-white); }
+  .login-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:40px 36px; width:100%; max-width:420px; box-shadow:var(--shadow-md); }
+  .login-logo{ display:flex; align-items:center; gap:10px; margin-bottom:28px; }
+  .login-logo .logo-mark{ font-size:28px; }
+  .login-logo .logo-text{ font-size:22px; font-weight:900; color:var(--navy-900); letter-spacing:-0.5px; }
+  .login-logo .logo-sub{ font-size:11px; color:var(--ink-faint); font-weight:600; letter-spacing:.5px; }
+  .form-group{ display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+  .form-group label{ font-size:13px; font-weight:700; color:var(--ink-soft); }
+  .form-group input{ padding:11px 14px; border:1px solid var(--line); border-radius:var(--radius-md); font-size:14px; background:var(--soft-white); outline:none; }
+  .form-group input:focus{ border-color:var(--primary-500); box-shadow:0 0 0 3px var(--primary-100); }
+  .login-btn{ width:100%; padding:13px; border-radius:var(--radius-md); border:none; background:var(--navy-900); color:#fff; font-weight:800; font-size:15px; cursor:pointer; margin-top:8px; }
+  .login-btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .login-error{ background:var(--danger-bg); color:var(--danger); border-radius:var(--radius-md); padding:10px 14px; font-size:13px; font-weight:600; margin-top:14px; display:none; }
+  .login-footer{ text-align:center; font-size:12px; color:var(--ink-faint); margin-top:28px; }
+  @media (max-width:479px){ .login-card{ padding:28px 20px; margin:16px; } }
+</style>
+</head>
+<body>
+
+<div class="login-card">
+  <div class="login-logo">
+    <div class="logo-mark">🗺️</div>
+    <div>
+      <div class="logo-text">STEP</div>
+      <div class="logo-sub">TERRITORY &amp; EXECUTION PLATFORM</div>
+    </div>
+  </div>
+
+  <form id="loginForm" autocomplete="on">
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" autocomplete="username" placeholder="Masukkan username" required>
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Masukkan password" required>
+    </div>
+    <button type="submit" class="login-btn" id="loginBtn">Masuk</button>
+    <div class="login-error" id="loginError"></div>
+  </form>
+
+  <div class="login-footer">
+    STEP v1.0 · Skintific Territory &amp; Execution Platform<br>
+    Hubungi HO Admin jika akun belum dibuat.
+  </div>
+</div>
+
+<script src="assets/js/step.js"></script>
+<script>
+  /* If not in production mode (STEP.api.enabled = false), redirect to index for mock-mode usage */
+  if (!STEP.api.enabled) {
+    window.location.href = 'index.html';
+  }
+
+  /* If already logged in, redirect to destination or dashboard */
+  if (STEP.api.session.isLoggedIn()) {
+    const params = new URLSearchParams(window.location.search);
+    window.location.href = params.get('from') || 'dashboard.html';
+  }
+
+  const form = document.getElementById('loginForm');
+  const btn  = document.getElementById('loginBtn');
+  const errEl= document.getElementById('loginError');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Memproses...';
+
+    try {
+      const res = await STEP.api.login(
+        document.getElementById('username').value.trim(),
+        document.getElementById('password').value,
+      );
+      if (res) {
+        const params = new URLSearchParams(window.location.search);
+        window.location.href = params.get('from') || 'dashboard.html';
+      }
+    } catch (err) {
+      errEl.textContent = err.message || 'Login gagal. Periksa username dan password Anda.';
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Masuk';
+    }
+  });
+</script>
+</body>
+</html>

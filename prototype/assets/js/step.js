@@ -622,6 +622,26 @@ const STEP = (function () {
          // all page logic here — scope = 'area'|'distributor'|'national'
        }); */
   function guardPage(pageId, fn) {
+    // Production mode: verify JWT session, use real role from token
+    if (api.enabled) {
+      if (!api.session.isLoggedIn()) {
+        window.location.href = 'login.html?from=' + encodeURIComponent(window.location.pathname);
+        return false;
+      }
+      const u = api.session.user;
+      const perm = PERMISSIONS[pageId];
+      const role = u.role;
+      const allowed = !perm || perm.roles.includes(role);
+      if (!allowed) {
+        const content = document.querySelector('.content');
+        if (content) content.innerHTML = _accessDeniedHtml(role, pageId);
+        return false;
+      }
+      const scope = perm ? (perm.scopes[role] || 'national') : 'national';
+      if (typeof fn === 'function') fn(scope);
+      return true;
+    }
+    // Mock mode: existing behavior
     const { allowed, scope, role } = checkPageAccess(pageId);
     if (!allowed) {
       const content = document.querySelector('.content');
@@ -782,6 +802,71 @@ const STEP = (function () {
     document.addEventListener('click', (e) => { if (!menu.contains(e.target) && e.target !== btn) menu.classList.remove('open'); });
   }
 
+  /* =========================================================
+     PRODUCTION API CLIENT
+     Set window.STEP_API_BASE = 'https://your-cloud-run-url' before loading step.js
+     to switch from mock data to the real FastAPI backend.
+     In mock mode (default, STEP_API_BASE not set): api.enabled = false and all
+     api.get/post calls return null — pages fall back to STEP.DATA.
+     ========================================================= */
+  const API_BASE = (window.STEP_API_BASE || localStorage.getItem('step_api_base') || '').replace(/\/$/, '');
+
+  const _session = {
+    _key: 'step_jwt_session',
+    _stored() { try { return JSON.parse(localStorage.getItem(this._key)); } catch { return null; } },
+    get token() { return this._stored()?.token || null; },
+    get user()  { return this._stored()?.user  || null; },
+    save(token, user) { localStorage.setItem(this._key, JSON.stringify({ token, user })); },
+    clear() { localStorage.removeItem(this._key); },
+    isLoggedIn() { return !!this.token; },
+  };
+
+  async function _apiFetch(method, path, data) {
+    if (!API_BASE) return null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (_session.token) headers['Authorization'] = 'Bearer ' + _session.token;
+    let res;
+    try {
+      res = await fetch(API_BASE + path, {
+        method, headers,
+        body: data !== undefined ? JSON.stringify(data) : undefined,
+      });
+    } catch (e) {
+      console.error('STEP API fetch error:', e);
+      throw e;
+    }
+    if (res.status === 401) {
+      _session.clear();
+      window.location.href = 'login.html?from=' + encodeURIComponent(window.location.pathname);
+      return null;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  const api = {
+    enabled: !!API_BASE,
+    session: _session,
+    get: (path, params) => {
+      const qs = params ? '?' + new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v != null))
+      ).toString() : '';
+      return _apiFetch('GET', path + qs, undefined);
+    },
+    post:   (path, data) => _apiFetch('POST',   path, data),
+    put:    (path, data) => _apiFetch('PUT',    path, data),
+    delete: (path)       => _apiFetch('DELETE', path, undefined),
+    login: async (username, password) => {
+      const res = await _apiFetch('POST', '/api/v1/auth/login', { username, password });
+      if (res) _session.save(res.access_token, res.user);
+      return res;
+    },
+    logout: () => { _session.clear(); window.location.href = 'login.html'; },
+  };
+
   return {
     NAV, CROSS, ROLES, ALL_ROLES, HQ_ROLES, PERMISSIONS, DATA, REGIONS, AREAS_BY_REGION, DISTRIBUTORS, SPVS,
     getRole, setRole, getTheme, toggleTheme, applyTheme, dataAsOf,
@@ -797,5 +882,6 @@ const STEP = (function () {
     isoWeekInfo, isoWeekMonday, isoWeekMondayForOffset, isoWeekLabel, fmtDateID,
     MANAGEMENT_TARGET_BY_BRAND, salesmanTargetRp, salesmenForBrand, baselineSpvTargetForBrand,
     complyPct, complyStatus, fmtCompliancePct,
+    api,
   };
 })();
