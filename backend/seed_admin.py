@@ -16,7 +16,7 @@ from google.oauth2 import service_account
 from passlib.context import CryptContext
 
 PROJECT = "skintific-data-warehouse"
-DATASET = "sfa_step"
+DATASET = "sfa_web"
 SA_KEY_PATH = os.getenv("BQ_SA_KEY_PATH", "")
 
 USERNAME = "admin"

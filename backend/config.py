@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     bq_project: str = "skintific-data-warehouse"
-    bq_dataset: str = "sfa_step"
+    bq_dataset: str = "sfa_web"
     bq_sa_key_path: str = ""  # empty = use Application Default Credentials (Cloud Run)
 
     jwt_secret: str
