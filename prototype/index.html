@@ -64,6 +64,10 @@
   STEP.applyTheme();
   STEP.applyTenantBranding();
 
+  if (STEP.api.enabled) {
+    window.location.replace('login.html');
+  }
+
   const ROLE_ICONS = {
     spv: '🧑‍💼', area_manager: '🗂️', distributor_manager: '🏢',
     regional_sales: '🌏', ho_admin: '⚙️', distributor_admin: '📦',
