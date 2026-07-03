@@ -6,7 +6,8 @@ class Settings(BaseSettings):
 
     bq_project: str = "skintific-data-warehouse"
     bq_dataset: str = "sfa_web"
-    bq_sa_key_path: str = ""  # empty = use Application Default Credentials (Cloud Run)
+    bq_sa_key_path: str = ""      # local dev: path to JSON key file
+    bq_sa_key_json: str = ""      # cloud deploy: base64-encoded JSON key content
 
     jwt_secret: str
     jwt_algorithm: str = "HS256"

@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: step-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: BQ_PROJECT
+        value: skintific-data-warehouse
+      - key: BQ_DATASET
+        value: sfa_web
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRY_HOURS
+        value: "24"
+      - key: CORS_ORIGINS
+        value: https://step-prototype.netlify.app
+      # Set these manually in Render dashboard (sensitive):
+      # BQ_SA_KEY_JSON  — base64-encoded service account JSON
+      # JWT_SECRET      — random secret string

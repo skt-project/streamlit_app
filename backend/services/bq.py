@@ -1,9 +1,11 @@
 """
 BigQuery client singleton with in-memory TTL cache for reference data.
-Reads use the service account from config; writes go only to sfa_step tables.
+Reads use the service account from config; writes go only to sfa_web tables.
 """
 from __future__ import annotations
 
+import base64
+import json
 import threading
 import time
 from typing import Any
@@ -45,15 +47,22 @@ class BQClient:
     _lock = threading.Lock()
 
     def __init__(self) -> None:
-        if settings.bq_sa_key_path:
+        creds = None
+        if settings.bq_sa_key_json:
+            # Base64-encoded JSON key — used on cloud deployments (Render, Railway, etc.)
+            raw = base64.b64decode(settings.bq_sa_key_json).decode()
+            info = json.loads(raw)
+            creds = service_account.Credentials.from_service_account_info(
+                info, scopes=["https://www.googleapis.com/auth/bigquery"]
+            )
+        elif settings.bq_sa_key_path:
+            # File path — used for local development
             creds = service_account.Credentials.from_service_account_file(
                 settings.bq_sa_key_path,
                 scopes=["https://www.googleapis.com/auth/bigquery"],
             )
-            self._client = bigquery.Client(project=settings.bq_project, credentials=creds)
-        else:
-            # Application Default Credentials (Cloud Run Workload Identity)
-            self._client = bigquery.Client(project=settings.bq_project)
+        # creds=None → Application Default Credentials (Cloud Run Workload Identity)
+        self._client = bigquery.Client(project=settings.bq_project, credentials=creds)
         self.cache = _TTLCache(default_ttl=300)
 
     @classmethod
