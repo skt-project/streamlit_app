@@ -1,0 +1,158 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Administrasi — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div id="envBanner" class="pill pill-warning" style="display:none; margin-bottom:14px;">⚠ Environment UAT — perubahan di sini tidak memengaruhi production</div>
+
+      <div id="adminRoot"></div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('administration');
+document.getElementById('envBanner').style.display = '';
+const D = STEP.DATA;
+STEP.guardPage('administration', function(scope) {
+  const role = STEP.getRole();
+  document.getElementById('adminRoot').innerHTML = `
+    <div class="h1">Administrasi</div>
+    <div class="text-sm ink-faint mt-8">Konfigurasi nasional — setiap perubahan di bawah ini tercatat di Audit Log.</div>
+    <div class="card mt-20">
+      <div class="tabs" id="adminTabs" style="padding:0 20px;">
+        <button class="active" data-tab="users">User & Role</button>
+        <button data-tab="masterdata">Master Data</button>
+        <button data-tab="rules">Aturan Recommendation</button>
+        <button data-tab="matrix">Approval Matrix</button>
+        <button data-tab="sfa">SFA Integration Monitor</button>
+        <button data-tab="health">System Health</button>
+        <button data-tab="audit">Audit Log</button>
+      </div>
+      <div class="widget-body" id="adminBody"></div>
+    </div>`;
+  initAdminTabs();
+
+function initAdminTabs(){
+  const USERS = [
+    { name:'Ahmad Setiawan', role:'SPV', territory:'Branch Jakarta Selatan 3', status:'active' },
+    { name:'Rina Wulandari', role:'Area Manager', territory:'Area Jakarta Selatan', status:'active' },
+    { name:'Budi Santoso', role:'Distributor Manager', territory:'Nasional — Head Office', status:'active' },
+    { name:'Dewi Anggraini', role:'Regional Sales', territory:'Nasional — Head Office', status:'active' },
+    { name:'Sari Indrawati', role:'Head Office Admin', territory:'Nasional', status:'active' },
+  ];
+
+  const TABS = {
+    users: () => `
+      <div class="flex items-center justify-between"><div class="h3">User</div><button class="btn btn-primary btn-sm" onclick="STEP.toast('Proses undangan disimulasikan','✉️')">+ Undang User</button></div>
+      <table class="table mt-14"><thead><tr><th>Nama</th><th>Role</th><th>Territory</th><th>Status</th><th></th></tr></thead><tbody>
+        ${USERS.map(u=>`<tr><td>${u.name}</td><td>${u.role}</td><td>${u.territory}</td><td>${STEP.statusPill('approved')}</td>
+          <td><button class="btn btn-outline btn-sm" onclick="STEP.toast('Sesi impersonation (read-only) dimulai untuk ${u.name} (tercatat)','🕵️')">Impersonate (read-only)</button></td></tr>`).join('')}
+      </tbody></table>`,
+
+    masterdata: () => `
+      <div class="h3">Master Data</div>
+      <p class="text-sm ink-soft mt-8">Territory, tier store, daftar SKU, dan data referensi lain yang digunakan di seluruh STEP.</p>
+      <div class="grid-3 mt-14">
+        <div class="card card-pad"><div class="kpi-label">Territory</div><div class="kpi-value">42</div></div>
+        <div class="card card-pad"><div class="kpi-label">Tier Store</div><div class="kpi-value">5</div></div>
+        <div class="card card-pad"><div class="kpi-label">Store Aktif</div><div class="kpi-value">${D.outlets.length * 180}</div></div>
+      </div>
+      <a href="import-export.html" class="btn btn-outline btn-sm mt-14">Bulk edit lewat Pusat Import & Export →</a>`,
+
+    rules: () => `
+      <div class="h3">Bobot Aturan Recommendation</div>
+      <p class="text-sm ink-soft mt-8">Atur bobot setiap faktor secara live — tidak perlu deployment. Total harus 100%.</p>
+      <div id="ruleSliders" class="mt-14" style="display:flex; flex-direction:column; gap:16px;"></div>
+      <div class="flex items-center justify-between mt-14">
+        <span class="text-sm" style="font-weight:700;">Total: <span id="ruleTotal"></span>%</span>
+        <button class="btn btn-primary btn-sm" onclick="STEP.toast('Bobot aturan tersimpan — berlaku pada perhitungan score berikutnya','✓')">Simpan Bobot</button>
+      </div>`,
+
+    matrix: () => `
+      <div class="h3">Konfigurasi Approval Matrix</div>
+      <p class="text-sm ink-soft mt-8">Alur default adalah 2 tahap. Distributor Manager adalah role Head Office (nasional, selalu ada) — pengecualian yang bisa dikonfigurasi adalah territory tanpa Area Manager sendiri, yang langsung diarahkan ke Head Office.</p>
+      <table class="table mt-14"><thead><tr><th>Territory</th><th>Alur</th><th></th></tr></thead><tbody>
+        <tr><td>Jakarta Selatan</td><td>SPV → Area Manager → Distributor Manager (HO)</td><td><button class="btn btn-outline btn-sm" onclick="STEP.toast('Approval matrix diperbarui','✓')">Edit</button></td></tr>
+        <tr><td>Jakarta Utara</td><td>SPV → Area Manager → Distributor Manager (HO)</td><td><button class="btn btn-outline btn-sm" onclick="STEP.toast('Approval matrix diperbarui','✓')">Edit</button></td></tr>
+        <tr><td>Bali (tanpa Area Manager sendiri)</td><td>SPV → Distributor Manager (HO) <span class="pill pill-info">1 tahap</span></td><td><button class="btn btn-outline btn-sm" onclick="STEP.toast('Approval matrix diperbarui','✓')">Edit</button></td></tr>
+      </tbody></table>`,
+
+    sfa: () => `
+      <div class="h3">SFA Integration Monitor</div>
+      <div class="grid-3 mt-14">
+        <div class="card card-pad"><div class="kpi-label">Normal</div><div class="kpi-value" style="color:var(--success);">${D.sfaSync.filter(s=>s.status==='healthy').length}</div></div>
+        <div class="card card-pad"><div class="kpi-label">Sebagian</div><div class="kpi-value" style="color:var(--warning);">${D.sfaSync.filter(s=>s.status==='partial').length}</div></div>
+        <div class="card card-pad"><div class="kpi-label">Gagal</div><div class="kpi-value" style="color:var(--danger);">${D.sfaSync.filter(s=>s.status==='failed').length}</div></div>
+      </div>
+      <table class="table mt-14"><thead><tr><th>Salesman</th><th>Status</th><th>Sync Terakhir</th><th>Success Rate</th><th></th></tr></thead><tbody>
+        ${D.sfaSync.map(s=>`<tr><td>${s.salesman}</td><td>${STEP.statusPill(s.status)}</td><td>${s.lastSync}</td><td class="num">${s.successRate}%</td>
+          <td>${s.status!=='healthy'?`<button class="btn btn-outline btn-sm" onclick="STEP.toast('Retry dijadwalkan untuk ${s.salesman}','🔁')">Retry</button>`:''}</td></tr>`).join('')}
+      </tbody></table>`,
+
+    health: () => `
+      <div class="h3">System Health</div>
+      <div class="grid-4 mt-14">
+        <div class="card card-pad"><div class="kpi-label">API Uptime (30 hari)</div><div class="kpi-value" style="color:var(--success);">99.95%</div></div>
+        <div class="card card-pad"><div class="kpi-label">Scheduled Job</div><div class="kpi-value">12 / 12 ✓</div></div>
+        <div class="card card-pad"><div class="kpi-label">Rata-rata Dashboard Load</div><div class="kpi-value">1.8s</div></div>
+        <div class="card card-pad"><div class="kpi-label">Feature Flag Aktif</div><div class="kpi-value">3</div></div>
+      </div>
+      <div class="card card-pad mt-14">
+        <div class="flex items-center justify-between"><span class="text-sm" style="font-weight:700;">Feature Flag</span></div>
+        ${['Heatmap (Phase 2)','Saran Redistribusi Route (Phase 2)','Power BI Embed (Phase 3)'].map((f,i)=>`
+          <div class="flex items-center justify-between" style="padding:10px 0; border-bottom:1px solid var(--line);">
+            <span class="text-sm">${f}</span><label class="flex items-center gap-8 text-sm"><input type="checkbox" ${i===0?'checked':''} onchange="STEP.toast('Feature flag diperbarui','🚩')"> Aktif</label>
+          </div>`).join('')}
+      </div>`,
+
+    audit: () => `
+      <div class="h3">Audit Log</div>
+      <table class="table mt-14"><thead><tr><th>Waktu</th><th>Pelaku</th><th>Aksi</th><th>Entity</th></tr></thead><tbody>
+        ${D.auditLogs.map(l=>`<tr><td>${l.at}</td><td>${l.actor}</td><td>${l.action}</td><td class="ink-faint">${l.entity}</td></tr>`).join('')}
+      </tbody></table>`,
+  };
+
+  function render(tab){ document.getElementById('adminBody').innerHTML = TABS[tab](); if (tab==='rules') initRuleSliders(); }
+  document.querySelectorAll('#adminTabs button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#adminTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+    render(b.dataset.tab);
+  }));
+  render('users');
+
+  function initRuleSliders(){
+    const wrap = document.getElementById('ruleSliders');
+    wrap.innerHTML = D.recommendationRules.map((r,i) => `
+      <div>
+        <div class="flex items-center justify-between"><span class="text-sm" style="font-weight:600;">${r.factor}</span><span class="text-sm num" id="ruleVal${i}">${r.weight}%</span></div>
+        <input type="range" min="0" max="50" value="${r.weight}" data-idx="${i}" class="ruleSlider" style="width:100%; margin-top:6px;">
+      </div>`).join('');
+    function recompute(){
+      let total = 0;
+      document.querySelectorAll('.ruleSlider').forEach(s => { total += parseInt(s.value,10); document.getElementById('ruleVal'+s.dataset.idx).textContent = s.value+'%'; });
+      const totalEl = document.getElementById('ruleTotal');
+      totalEl.textContent = total;
+      totalEl.style.color = total === 100 ? 'var(--success)' : 'var(--danger)';
+    }
+    document.querySelectorAll('.ruleSlider').forEach(s => s.addEventListener('input', recompute));
+    recompute();
+  }
+}
+}); // end guardPage
+</script>
+</body>
+</html>

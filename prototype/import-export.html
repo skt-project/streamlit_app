@@ -1,0 +1,372 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pusat Import & Export — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="h1">Pusat Import &amp; Export</div>
+      <div class="text-sm ink-faint mt-8">Bulk upload Penugasan Route, Override Klasifikasi Store, Outlet Information, Alokasi Target, dan Manajemen User — tidak ada yang di-commit tanpa konfirmasi eksplisit.</div>
+
+      <div class="grid-3 mt-20" id="entityCards"></div>
+
+      <div class="card card-pad mt-20">
+        <div class="stepper" id="ieStepper"></div>
+        <div class="mt-20" id="ieBody"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('import-export');
+STEP.guardPage('import-export', function(scope) {
+const D = STEP.DATA;
+const ENTITIES = [
+  {
+    name: 'Penugasan Route',
+    desc: 'Bulk assign atau reassign store ke route salesman. Ini adalah sumber data untuk Master Data Salesman — kolom Route Code & Route Name diisi dari sini, bukan dari form individual.',
+    icon: '🗺️',
+    note: 'Upload ini menggantikan fungsi "Import Excel" di Master Data Salesman. Perubahan individu (nama, HP, SPV) tetap dilakukan di Master Data Salesman via drawer Edit.',
+  },
+  {
+    name: 'Override Klasifikasi Store',
+    desc: 'Override klasifikasi tier auto-engine untuk store terpilih.',
+    icon: '🏷️', note: null,
+  },
+  {
+    name: 'Outlet Information',
+    desc: 'Bulk update Store 360 information.',
+    icon: '🏬', note: null,
+  },
+  {
+    name: 'Alokasi Target',
+    desc: 'Alokasikan atau sesuaikan target per store untuk periode terpilih.',
+    icon: '🎯', note: null,
+  },
+  {
+    name: 'Manajemen User',
+    desc: 'Bulk create, update, atau deactivate akun user STEP.',
+    icon: '👥', note: null,
+  },
+];
+
+/* ── Penugasan Route mock rows ──────────────────────────────────────
+   These rows represent the Excel template a distributor uploads to bulk-
+   assign stores to salesman routes. Fields:
+     kode_dist    — distributor code (must exist in Master Data)
+     kode_toko    — store code (must exist in Database Basis)
+     nama_toko    — store name (for human-readability, not the key)
+     salesman_id  — salesman ID (must exist in Master Data Salesman)
+     nama_salesman— salesman name (for readability)
+     kode_route   — route code assigned to this store-salesman pair
+     nama_route   — route name
+     action       — ASSIGN | REASSIGN | REMOVE
+   After a successful commit, Master Data Salesman route_code / route_name
+   columns are updated automatically — that is why Master Data Salesman
+   has NO separate Import Excel button.
+   ──────────────────────────────────────────────────────────────────── */
+const ROUTE_ROWS = [
+  { kode_dist:'DST171', kode_toko:'STR00001', nama_toko:'Toko Sumber Jaya',            salesman_id:'DST171-GTI-001', nama_salesman:'Yusuf Maulana',  kode_route:'JKS-RT-01', nama_route:'Route Jakarta Selatan 1', action:'ASSIGN',   error: null },
+  { kode_dist:'DST171', kode_toko:'STR00002', nama_toko:'Apotek Cahaya Sehat Kemang',  salesman_id:'DST171-GTI-001', nama_salesman:'Yusuf Maulana',  kode_route:'JKS-RT-01', nama_route:'Route Jakarta Selatan 1', action:'ASSIGN',   error: null },
+  { kode_dist:'DST171', kode_toko:'STR00003', nama_toko:'Beauty Corner Kemang',        salesman_id:'DST171-MIX-001', nama_salesman:'Agus Setiadi',   kode_route:'JKS-RT-02', nama_route:'Route Jakarta Selatan 2', action:'REASSIGN', error: null },
+  { kode_dist:'DST171', kode_toko:'STR00004', nama_toko:'Indomaret Cipete Raya',       salesman_id:'DST171-GTI-001', nama_salesman:'Yusuf Maulana',  kode_route:'JKS-RT-01', nama_route:'Route Jakarta Selatan 1', action:'ASSIGN',   error: null },
+  { kode_dist:'DST171', kode_toko:'STR00005', nama_toko:'Klinik Estetika Dermis',      salesman_id:'DST171-GTI-002', nama_salesman:'Putri Lestari',  kode_route:'JKU-RT-01', nama_route:'Route Jakarta Utara 1',   action:'ASSIGN',   error: null },
+  { kode_dist:'DST171', kode_toko:'STR00006', nama_toko:'Swalayan Maju Bersama',       salesman_id:'DST171-GTI-002', nama_salesman:'Putri Lestari',  kode_route:'JKU-RT-01', nama_route:'Route Jakarta Utara 1',   action:'ASSIGN',   error: null },
+  { kode_dist:'DST171', kode_toko:'STR00007', nama_toko:'Toko Berkah Abadi',           salesman_id:'DST171-GTI-002', nama_salesman:'Putri Lestari',  kode_route:'JKU-RT-01', nama_route:'Route Jakarta Utara 1',   action:'ASSIGN',   error: null },
+  { kode_dist:'DST171', kode_toko:'STR00099', nama_toko:'Toko Tidak Terdaftar',        salesman_id:'DST171-GTI-001', nama_salesman:'Yusuf Maulana',  kode_route:'JKS-RT-01', nama_route:'Route Jakarta Selatan 1', action:'ASSIGN',   error: 'Kode Toko STR00099 tidak ditemukan di Database Basis' },
+  { kode_dist:'DST171', kode_toko:'STR00008', nama_toko:'Glow Beauty Mart Blok M',     salesman_id:'DST171-XXX-999', nama_salesman:'Salesman Unknown',kode_route:'JKS-RT-02', nama_route:'Route Jakarta Selatan 2', action:'ASSIGN',   error: 'Salesman ID DST171-XXX-999 tidak ditemukan di Master Data Salesman' },
+  { kode_dist:'DST082', kode_toko:'STR00020', nama_toko:'Toko Cantik Bersama Bandung', salesman_id:'DST082-GTI-001', nama_salesman:'Dewi Anggraini', kode_route:'BDG-RT-01', nama_route:'Route Bandung 1',         action:'ASSIGN',   error: null },
+  { kode_dist:'DST082', kode_toko:'STR00021', nama_toko:'Apotek Sejahtera Dago',       salesman_id:'DST082-GTI-001', nama_salesman:'Dewi Anggraini', kode_route:'BDG-RT-01', nama_route:'Route Bandung 1',         action:'ASSIGN',   error: null },
+  { kode_dist:'DST082', kode_toko:'STR00022', nama_toko:'Swalayan Permata Pasteur',    salesman_id:'DST082-GTI-002', nama_salesman:'Hendra Wijaya',  kode_route:'BKS-RT-01', nama_route:'Route Bekasi 1',          action:'REASSIGN', error: null },
+];
+
+/* ---- Outlet Information rows reference real curated outlets (by name) so the resulting audit
+   entries can be looked up by outlet-360.html via STEP.outletById/code — this is what makes the
+   "Store 360 Integration" requirement real rather than just a toast message. ---- */
+const OUTLET_INFO_ROWS = [
+  { store:'Toko Sumber Jaya', field:'Phone Number', newValue:'0812-3456-7890', error:null },
+  { store:'Apotek Cahaya Sehat', field:'Store Address', newValue:'Jl. Fatmawati Raya No. 22, Jakarta Selatan', error:null },
+  { store:'Beauty Corner Kemang', field:'Operational Status', newValue:'Tutup Sementara', error:null },
+  { store:'Toko Kosmetik Melati', field:'Tier Override', newValue:'A', error:null },
+  { store:'Indah Skincare Store', field:'Owner Name', newValue:'Budi Hartono', error:null },
+  { store:'Store Tidak Dikenal', field:'Owner Name', newValue:'Siti Aminah', error:'Kode Store tidak ditemukan' },
+  { store:'Glow Beauty Mart', field:'Phone Number', newValue:'081-INVALID', error:'Format nomor telepon tidak valid' },
+];
+function isOutletInfo()   { return selectedEntity === 'Outlet Information'; }
+function isRouteAssign()  { return selectedEntity === 'Penugasan Route'; }
+let selectedEntity = ENTITIES[0].name;
+let ieStep = 1; // 1 upload, 2 preview/validate, 3 confirm, 4 commit
+
+function renderEntityCards(){
+  document.getElementById('entityCards').innerHTML = ENTITIES.map(e => `
+    <div class="card card-pad" style="${e.name===selectedEntity?'border-color:var(--primary-500); background:var(--primary-50,#EEF2FF);':''}" data-card="${e.name}">
+      <div class="flex items-center justify-between" style="gap:10px;">
+        <strong style="font-size:13.5px;">${e.icon || '📄'} ${e.name}</strong>
+        <button class="icon-btn" data-download="${e.name}" title="Download Template">⬇️</button>
+      </div>
+      <p class="text-sm ink-soft mt-8">${e.desc}</p>
+      ${e.note ? `<p class="text-xs" style="margin-top:6px; padding:6px 8px; background:#FFF9E6; border-radius:6px; color:#92400E;">💡 ${e.note}</p>` : ''}
+      <button class="btn btn-outline btn-sm w-full mt-14" data-select="${e.name}">Upload File</button>
+    </div>`).join('');
+  document.querySelectorAll('[data-download]').forEach(btn => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    STEP.toast(`Template untuk "${btn.dataset.download}" berhasil di-download`, '⬇️');
+  }));
+  document.querySelectorAll('[data-select]').forEach(btn => btn.addEventListener('click', () => {
+    selectedEntity = btn.dataset.select; ieStep = 1;
+    renderEntityCards();
+    render();
+    document.getElementById('ieStepper').scrollIntoView({ behavior:'smooth', block:'center' });
+  }));
+}
+renderEntityCards();
+
+const MOCK_ROWS = [
+  { outlet:'Toko Sumber Jaya', value:'22.000.000', error:null },
+  { outlet:'Apotek Cahaya Sehat', value:'9.500.000', error:null },
+  { outlet:'Store Tidak Dikenal', value:'5.000.000', error:'Kode Store tidak ditemukan' },
+  { outlet:'Beauty Corner Kemang', value:'-2.000.000', error:'Nilai negatif tidak diperbolehkan' },
+  { outlet:'Toko Kosmetik Melati', value:'6.200.000', error:null },
+];
+
+function stepperHtml(){
+  const steps = ['Upload','Preview & Validasi','Konfirmasi','Commit'];
+  return steps.map((s,i) => `
+    <div class="step ${i+1===ieStep?'active':(i+1<ieStep?'done':'')}"><div class="dot">${i+1<ieStep?'✓':i+1}</div><span class="lbl">${s}</span></div>${i<steps.length-1?'<div class="sep"></div>':''}`).join('');
+}
+
+function render(){
+  document.getElementById('ieStepper').innerHTML = stepperHtml();
+  const body = document.getElementById('ieBody');
+
+  if (ieStep===1){
+    const routeTemplateNote = isRouteAssign() ? `
+      <div style="margin-top:20px; text-align:left; padding:14px 16px; background:var(--soft-white); border-radius:8px;">
+        <div style="font-size:var(--text-xs); font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint); margin-bottom:10px;">Kolom template Excel — Penugasan Route</div>
+        <table class="table" style="font-size:12px;">
+          <thead><tr><th>Kolom</th><th>Contoh</th><th>Keterangan</th></tr></thead>
+          <tbody>
+            <tr><td><code>kode_distributor</code></td><td>DST171</td><td>Wajib — harus ada di Master Data</td></tr>
+            <tr><td><code>kode_toko</code></td><td>STR00001</td><td>Wajib — harus ada di Database Basis</td></tr>
+            <tr><td><code>nama_toko</code></td><td>Toko Sumber Jaya</td><td>Opsional, untuk keterbacaan</td></tr>
+            <tr><td><code>salesman_id</code></td><td>DST171-GTI-001</td><td>Wajib — harus ada di Master Data Salesman</td></tr>
+            <tr><td><code>nama_salesman</code></td><td>Yusuf Maulana</td><td>Opsional, untuk keterbacaan</td></tr>
+            <tr><td><code>kode_route</code></td><td>JKS-RT-01</td><td>Wajib — dipakai untuk update Master Data Salesman</td></tr>
+            <tr><td><code>nama_route</code></td><td>Route Jakarta Selatan 1</td><td>Wajib</td></tr>
+            <tr><td><code>action</code></td><td>ASSIGN / REASSIGN / REMOVE</td><td>Wajib</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:10px; font-size:var(--text-xs); color:var(--ink-secondary);">
+          💡 Setelah commit, <code>route_code</code> dan <code>route_name</code> di Master Data Salesman diperbarui otomatis.
+          Tidak perlu mengisi route secara manual di Master Data Salesman.
+        </div>
+      </div>` : '';
+
+    body.innerHTML = `
+      <div class="empty-state" style="border:2px dashed var(--line); border-radius:var(--radius-md);">
+        <div class="ic">⇪</div>
+        <div class="h3">Upload template yang sudah diisi — ${selectedEntity}</div>
+        <p>Validasi berjalan otomatis di background dengan progress indicator. Tidak ada yang di-commit sampai Anda konfirmasi.</p>
+        <button class="btn btn-primary btn-sm" id="btnUpload">Pilih file & Upload</button>
+      </div>
+      ${routeTemplateNote}`;
+    document.getElementById('btnUpload').addEventListener('click', () => simulateUpload());
+  }
+  if (ieStep===2){
+    const rows = isRouteAssign() ? ROUTE_ROWS : isOutletInfo() ? OUTLET_INFO_ROWS : MOCK_ROWS;
+    const errCount = rows.filter(r=>r.error).length;
+
+    let previewTable;
+    if (isRouteAssign()) {
+      previewTable = `
+        ${errCount ? `<div style="margin-bottom:12px; padding:10px 14px; background:#FFF9E6; border:1px solid #FCD34D; border-radius:8px; font-size:var(--text-sm);">
+          💡 <strong>Catatan:</strong> Baris valid akan memperbarui kolom <code>route_code</code> dan <code>route_name</code> di Master Data Salesman secara otomatis setelah commit.
+          Baris error tidak ikut di-commit.
+        </div>` : ''}
+        <table class="table mt-14"><thead><tr>
+          <th>Distributor</th><th>Kode Toko</th><th>Nama Toko</th>
+          <th>ID Salesman</th><th>Nama Salesman</th>
+          <th>Kode Route</th><th>Nama Route</th><th>Aksi</th><th>Validasi</th>
+        </tr></thead><tbody>
+          ${rows.map(r=>`<tr style="${r.error?'background:var(--danger-bg);':''}">
+            <td style="font-family:monospace; font-size:12px;">${r.kode_dist}</td>
+            <td style="font-family:monospace; font-size:12px;">${r.kode_toko}</td>
+            <td>${r.nama_toko}</td>
+            <td style="font-family:monospace; font-size:12px;">${r.salesman_id}</td>
+            <td>${r.nama_salesman}</td>
+            <td style="font-family:monospace; font-size:12px;">${r.kode_route}</td>
+            <td>${r.nama_route}</td>
+            <td><span class="pill ${r.action==='REASSIGN'?'pill-warning':r.action==='REMOVE'?'pill-danger':'pill-info'}">${r.action}</span></td>
+            <td>${r.error?`<span class="pill pill-danger" title="${r.error}">Error</span>`:'<span class="pill pill-success">OK</span>'}</td>
+          </tr>`).join('')}
+        </tbody></table>`;
+    } else if (isOutletInfo()) {
+      previewTable = `<table class="table mt-14"><thead><tr><th>Store</th><th>Field Diubah</th><th>Nilai Baru</th><th>Validasi</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr style="${r.error?'background:var(--danger-bg);':''}"><td>${r.store}</td><td>${r.field}</td><td>${r.newValue}</td><td>${r.error?`<span class="pill pill-danger">${r.error}</span>`:'<span class="pill pill-success">OK</span>'}</td></tr>`).join('')}
+        </tbody></table>`;
+    } else {
+      previewTable = `<table class="table mt-14"><thead><tr><th>Store</th><th>Nilai</th><th>Validasi</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr style="${r.error?'background:var(--danger-bg);':''}"><td>${r.outlet}</td><td class="num">${r.value}</td><td>${r.error?`<span class="pill pill-danger">${r.error}</span>`:'<span class="pill pill-success">OK</span>'}</td></tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    body.innerHTML = `
+      <div class="flex items-center justify-between"><strong>Preview — ${rows.length} baris</strong>${errCount?`<span class="pill pill-danger">${errCount} error ditemukan</span>`:`<span class="pill pill-success">Semua baris valid</span>`}</div>
+      ${previewTable}
+      ${errCount?`<button class="btn btn-outline btn-sm mt-14" onclick="STEP.toast('File error berhasil di-download','📄')">Download File Error</button>`:''}
+      <div class="flex gap-10 mt-20">
+        <button class="btn btn-ghost" onclick="ieStep=1; render();">Kembali</button>
+        <button class="btn btn-primary" onclick="ieStep=3; render();">Lanjut ke Konfirmasi</button>
+      </div>`;
+  }
+  if (ieStep===3){
+    const rows = isRouteAssign() ? ROUTE_ROWS : isOutletInfo() ? OUTLET_INFO_ROWS : MOCK_ROWS;
+    const valid  = rows.filter(r=>!r.error);
+    const failed = rows.filter(r=>r.error);
+
+    let kpis;
+    if (isRouteAssign()) {
+      const salesmen = new Set(valid.map(r=>r.salesman_id));
+      const routes   = new Set(valid.map(r=>r.kode_route));
+      const dists    = new Set(valid.map(r=>r.kode_dist));
+      const reassign = valid.filter(r=>r.action==='REASSIGN').length;
+      kpis = [
+        ['Toko Terdampak',     valid.length],
+        ['Salesman Terdampak', salesmen.size],
+        ['Route Diperbarui',   routes.size],
+        ['Distributor',        dists.size],
+      ];
+      body.innerHTML = `
+        <strong>Konfirmasi — Penugasan Route</strong>
+        <div class="grid-4 mt-14">
+          ${kpis.map(([label,val])=>`<div class="card card-pad"><div class="kpi-label">${label}</div><div class="kpi-value">${val}</div></div>`).join('')}
+        </div>
+        <div style="margin-top:14px; padding:12px 16px; background:var(--primary-50,#EEF2FF); border:1px solid var(--primary-200,#C7D2FE); border-radius:8px; font-size:var(--text-sm);">
+          <strong style="color:var(--primary-700,#4338CA);">🔄 Yang terjadi setelah commit:</strong>
+          <ul style="margin:8px 0 0 16px; line-height:1.8;">
+            <li>${valid.length} baris penugasan store ↔ salesman ↔ route di-commit ke <code>sfa_step.salesman_route_assignment</code></li>
+            <li>Kolom <code>route_code</code> dan <code>route_name</code> di <strong>Master Data Salesman</strong> diperbarui otomatis untuk ${salesmen.size} salesman</li>
+            ${reassign > 0 ? `<li>${reassign} toko REASSIGN — route lama otomatis di-detach dan diganti</li>` : ''}
+            <li>${failed.length} baris error <strong>tidak</strong> ikut di-commit — download file error untuk perbaiki</li>
+          </ul>
+        </div>
+        <p class="text-sm ink-soft mt-14">Setelah commit, lihat hasilnya di <a href="master-data-salesman.html" style="color:var(--primary-600); font-weight:600;">Master Data Salesman →</a></p>
+        <div class="flex gap-10 mt-14">
+          <button class="btn btn-ghost" onclick="ieStep=2; render();">Kembali</button>
+          <button class="btn btn-primary" onclick="ieStep=4; render(); simulateCommit();">Commit ${valid.length} record</button>
+        </div>`;
+      return;
+    }
+
+    const kpisGeneric = isOutletInfo()
+      ? [
+          ['Affected Stores', new Set(valid.map(r=>r.store)).size],
+          ['Updated Fields', valid.length],
+          ['Failed Rows', failed.length],
+          ['Successful Rows', valid.length],
+        ]
+      : [
+          ['Store Terdampak', valid.length],
+          ['Salesman Terdampak', 2],
+          ['Target Terdampak', valid.length],
+          ['Route Terdampak', 0],
+        ];
+    body.innerHTML = `
+      <strong>Konfirmasi — record yang terdampak</strong>
+      <div class="grid-4 mt-14">
+        ${kpisGeneric.map(([label,val])=>`<div class="card card-pad"><div class="kpi-label">${label}</div><div class="kpi-value">${val}</div></div>`).join('')}
+      </div>
+      <p class="text-sm ink-soft mt-14">Baris yang error tidak akan ikut di-commit. Upload ulang file yang sudah diperbaiki secara terpisah untuk menyertakannya.</p>
+      <div class="flex gap-10 mt-14">
+        <button class="btn btn-ghost" onclick="ieStep=2; render();">Kembali</button>
+        <button class="btn btn-primary" onclick="ieStep=4; render(); simulateCommit();">Commit ${valid.length} record</button>
+      </div>`;
+  }
+  if (ieStep===4){
+    body.innerHTML = `
+      <div class="flex items-center gap-14">
+        <div class="progress w-full" id="commitProgress" style="height:10px;"><div style="width:0%"></div></div>
+        <strong id="commitPct">0%</strong>
+      </div>
+      <div id="commitDone" class="mt-20"></div>`;
+  }
+}
+
+function simulateUpload(){
+  const body = document.getElementById('ieBody');
+  body.innerHTML = `<div class="flex items-center gap-14"><div class="progress w-full" id="uploadProgress" style="height:10px;"><div style="width:0%"></div></div><strong id="uploadPct">0%</strong></div><p class="text-sm ink-faint mt-14">Validasi berjalan di background — Anda bisa berpindah halaman, proses ini tetap berjalan di server.</p>`;
+  let pct = 0;
+  const t = setInterval(() => {
+    pct += 20;
+    document.getElementById('uploadProgress').querySelector('div').style.width = pct+'%';
+    document.getElementById('uploadPct').textContent = pct+'%';
+    if (pct>=100){ clearInterval(t); ieStep=2; render(); }
+  }, 220);
+}
+/* ---- Store 360 Integration: every successful Outlet Information row writes a real audit entry
+   (User/Action/Date/Time + the field/value changed) keyed by the outlet's code, so outlet-360.html
+   can read the same localStorage array and show it in Last Updated Information / Timeline / Change
+   History — this is what makes "automatically updates all related Store 360 screens" real instead
+   of just a commit-screen toast. ---- */
+function outletAuditLog(){ try { return JSON.parse(localStorage.getItem('step_outlet_audit')||'[]'); } catch(e){ return []; } }
+function pushOutletAudit(entry){ const log = outletAuditLog(); log.unshift(entry); localStorage.setItem('step_outlet_audit', JSON.stringify(log.slice(0,50))); }
+function nowParts(){
+  const d = new Date();
+  return { date: d.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}), time: d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) };
+}
+
+function simulateCommit(){
+  let pct = 0;
+  const t = setInterval(() => {
+    pct += 20;
+    const bar = document.getElementById('commitProgress'); if (!bar) { clearInterval(t); return; }
+    bar.querySelector('div').style.width = pct+'%';
+    document.getElementById('commitPct').textContent = pct+'%';
+    if (pct>=100){
+      clearInterval(t);
+      if (isOutletInfo()) {
+        const valid = OUTLET_INFO_ROWS.filter(r=>!r.error);
+        const { date, time } = nowParts();
+        const actor = STEP.ROLES[STEP.getRole()].name;
+        valid.forEach(r => {
+          const outlet = D.outlets.find(o=>o.name===r.store);
+          pushOutletAudit({
+            outletCode: outlet ? outlet.code : null, outletName: r.store,
+            field: r.field, newValue: r.newValue, updatedBy: actor, date, time,
+          });
+        });
+        document.getElementById('commitDone').innerHTML = `<div class="empty-state"><div class="ic">✅</div><div class="h3">Commit selesai</div><p>${valid.length} record Outlet Information berhasil di-commit. Perubahan otomatis tercermin di Store 360 dan tercatat di Audit Timeline, Last Updated Information, Updated By, Updated Date, dan Change History.</p><a class="btn btn-outline btn-sm" href="outlet-salesman.html">Lihat Store 360 →</a></div>`;
+      } else if (isRouteAssign()) {
+        const valid = ROUTE_ROWS.filter(r=>!r.error);
+        const salesmen = new Set(valid.map(r=>r.salesman_id)).size;
+        document.getElementById('commitDone').innerHTML = `<div class="empty-state"><div class="ic">✅</div><div class="h3">Penugasan Route berhasil di-commit</div>
+          <p>${valid.length} penugasan store ↔ route berhasil disimpan. <strong>${salesmen} salesman</strong> di Master Data Salesman telah diperbarui route-nya secara otomatis.</p>
+          <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:14px;">
+            <a class="btn btn-outline btn-sm" href="master-data-salesman.html">Lihat Master Data Salesman →</a>
+            <a class="btn btn-outline btn-sm" href="master-data-pjp.html">Lanjut ke Master Data PJP →</a>
+          </div></div>`;
+      } else {
+        document.getElementById('commitDone').innerHTML = `<div class="empty-state"><div class="ic">✅</div><div class="h3">Commit selesai</div><p>4 record berhasil di-commit. Lihat record yang terdampak di modul masing-masing.</p><a class="btn btn-outline btn-sm" href="target-management.html">Buka Manajemen Target →</a></div>`;
+      }
+      STEP.toast('Import berhasil di-commit','✅');
+    }
+  }, 220);
+}
+render();
+}); // end guardPage
+</script>
+</body>
+</html>

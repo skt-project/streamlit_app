@@ -1,0 +1,290 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manajemen Target — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  .summary-card{ position:sticky; top:calc(var(--topbar-h) + 12px); z-index:15; }
+  .target-input{ width:140px; text-align:right; font-size:14px; }
+  .row-actions{ display:flex; gap:8px; align-items:center; justify-content:flex-end; }
+  .ach-cards{ display:none; }
+  @media (max-width:1279px){ .summary-card{ position:static; } }
+  @media (max-width:767px){
+    .table-desktop-ach{ display:none; }
+    .ach-cards{ display:block; }
+    .content{ padding-bottom:170px; }
+    .target-input{ width:100%; font-size:16px; }
+    .brand-comply-grid{ grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:12px;">
+        <div>
+          <div class="h1">Manajemen Target</div>
+          <div class="text-sm ink-faint mt-8" id="periodLabel"></div>
+        </div>
+        <div class="flex gap-10" style="flex-wrap:wrap;">
+          <a class="btn btn-outline" href="import-export.html">⇅ Upload</a>
+          <button class="btn btn-outline" id="btnSaveDraft">Simpan Draft</button>
+          <button class="btn btn-primary" id="btnSubmit">Submit</button>
+        </div>
+      </div>
+      <div class="card card-pad mt-14" style="background:var(--primary-50); border:1px solid var(--primary-100);">
+        <div class="text-sm" style="color:var(--primary-700);">📐 <strong>Comply</strong> mengukur apakah <strong>total target yang diajukan SPV</strong> sesuai dengan <strong>target yang ditetapkan Management</strong> — bukan pencapaian sales aktual. Formula: <strong>Comply % = Total Target SPV ÷ Total Target Management × 100%</strong>.</div>
+      </div>
+
+      <div class="h3 mt-20">Ringkasan per Brand — <span id="groupLabel"></span></div>
+      <div class="grid-3 mt-14" id="kpiCards"></div>
+
+      <div class="card mt-20">
+        <div class="widget-head"><div class="h3">Comply per Brand</div><span class="text-sm ink-faint">Klik salah satu brand untuk melihat & mengatur distribusi target SPV</span></div>
+        <div class="widget-body" id="brandComplyList"></div>
+      </div>
+
+      <div class="card mt-20" id="drilldownCard" style="display:none;">
+        <div class="widget-head">
+          <div class="h3">Distribusi Target SPV — <span id="ddBrandName"></span></div>
+          <button class="btn btn-outline btn-sm" id="btnBulk">Atur Target Massal</button>
+        </div>
+        <div class="widget-body">
+          <table class="table table-desktop-ach">
+            <thead><tr><th>Salesman</th><th>Area</th><th>Target (Rp)</th><th></th></tr></thead>
+            <tbody id="ddBody"></tbody>
+          </table>
+          <div class="ach-cards" id="ddCards"></div>
+        </div>
+      </div>
+
+      <div class="row-2-1 mt-20">
+        <div class="card card-pad">
+          <div class="h3">Simulasi Distribusi Target</div>
+          <p class="text-sm ink-soft mt-8">Simulasikan kenaikan/penurunan target SPV untuk brand terpilih — lihat dampaknya pada Comply % sebelum diterapkan.</p>
+          <div class="flex items-center gap-14 mt-14">
+            <input type="range" min="-20" max="20" value="0" id="simSlider" style="flex:1;">
+            <strong id="simPctLabel" style="width:50px; text-align:right;">0%</strong>
+          </div>
+          <div class="grid-2 mt-20">
+            <div><div class="label">SPV Target Baru (Simulasi)</div><div class="mt-8 num" id="simTotal" style="font-size:18px; font-weight:700;"></div></div>
+            <div><div class="label">Comply % Baru</div><div class="mt-8 num" id="simAch" style="font-size:18px; font-weight:700;"></div></div>
+          </div>
+        </div>
+        <div class="card card-pad">
+          <div class="h3">Riwayat Versi Target</div>
+          <div class="timeline mt-14" id="versionHistory"></div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<div class="sticky-summary-bottom" id="mobileSummary"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('target-management');
+STEP.guardPage('target-management', function(scope) {
+const D = STEP.DATA;
+document.getElementById('periodLabel').textContent = `Juli 2026 — Target Sell-In, ditetapkan top-down oleh Management dan didistribusikan oleh SPV`;
+document.getElementById('groupLabel').textContent = STEP.BRAND_GROUPS[STEP.getBrandGroup()].label;
+
+/* ---- Management Target is a fixed top-down figure per brand (set by HO, independent of how many
+   salesmen the mock data happens to generate) — shared with dashboard.html via STEP so both pages
+   always agree. SPV Target here is a page-local LIVE rollup of editable per-salesman targets — this
+   is what "SPV proposes and distributes targets" means in practice; Dashboard shows the read-only
+   baseline instead, since it has no editing UI. ---- */
+const MANAGEMENT_TARGET_BY_BRAND = STEP.MANAGEMENT_TARGET_BY_BRAND;
+const salesmanTargetRp = STEP.salesmanTargetRp;
+const salesmenForBrand = STEP.salesmenForBrand;
+const complyStatus = STEP.complyStatus;
+const fmtPct = STEP.fmtCompliancePct;
+const salesmanTargets = {};
+D.salesmen.forEach(sm => salesmanTargets[sm.id] = salesmanTargetRp(sm));
+
+function spvTargetForBrand(brand){ return salesmenForBrand(brand).reduce((a,sm)=>a+salesmanTargets[sm.id],0); }
+function complyPctRaw(brand){ const mgmt = MANAGEMENT_TARGET_BY_BRAND[brand]||0; const spv = spvTargetForBrand(brand); return STEP.complyPct(mgmt, spv); }
+
+let selectedBrand = null;
+
+function renderKpiCards(){
+  const brands = STEP.brandsInCurrentGroup();
+  document.getElementById('kpiCards').innerHTML = brands.map(brand => {
+    const mgmt = MANAGEMENT_TARGET_BY_BRAND[brand]||0;
+    const spv = spvTargetForBrand(brand);
+    const pct = complyPctRaw(brand);
+    const st = complyStatus(pct);
+    return `<div class="card card-pad">
+      <div class="flex items-center justify-between"><div class="kpi-label">${brand}</div><span class="comply-badge ${st.cls}">${st.label}</span></div>
+      <div class="grid-2 mt-10">
+        <div><div class="text-sm ink-faint">Management Target</div><div class="num" style="font-weight:700;">${STEP.fmtIDR(mgmt)}</div></div>
+        <div><div class="text-sm ink-faint">SPV Target</div><div class="num" style="font-weight:700;">${STEP.fmtIDR(spv)}</div></div>
+      </div>
+      <div class="progress mt-10 ${st.cls}"><div style="width:${Math.min(100,pct)}%"></div></div>
+      <div class="text-sm mt-6" style="font-weight:700;">${fmtPct(pct)} Comply</div>
+    </div>`;
+  }).join('');
+}
+
+function renderBrandComplyList(){
+  const brands = STEP.brandsInCurrentGroup();
+  if (!selectedBrand || !brands.includes(selectedBrand)) selectedBrand = brands[0];
+  document.getElementById('brandComplyList').innerHTML = brands.map(brand => {
+    const mgmt = MANAGEMENT_TARGET_BY_BRAND[brand]||0;
+    const spv = spvTargetForBrand(brand);
+    const pct = complyPctRaw(brand);
+    const st = complyStatus(pct);
+    return `<div class="brand-comply-row ${brand===selectedBrand?'selected':''}" data-brand="${brand}">
+      <div class="brand-comply-grid">
+        <div><div class="bc-val" style="font-size:15px;">${brand}</div><div class="text-sm ink-faint">${salesmenForBrand(brand).length} salesman</div></div>
+        <div><div class="bc-label">Management Target</div><div class="bc-val num">${STEP.fmtIDR(mgmt)}</div></div>
+        <div><div class="bc-label">SPV Target</div><div class="bc-val num">${STEP.fmtIDR(spv)}</div></div>
+        <div><div class="bc-label">Comply %</div><div class="bc-val num">${fmtPct(pct)}</div><div class="progress mt-6 ${st.cls}" style="height:6px;"><div style="width:${Math.min(100,pct)}%"></div></div></div>
+        <div style="text-align:right;"><span class="comply-badge ${st.cls}">${st.label}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('[data-brand]').forEach(el => el.addEventListener('click', () => {
+    selectedBrand = el.dataset.brand;
+    renderBrandComplyList();
+    renderDrilldown();
+    updateSim();
+  }));
+}
+
+function rowHtml(sm){
+  return `<tr data-row="${sm.id}">
+    <td>${sm.name}</td>
+    <td class="ink-faint">${sm.area}</td>
+    <td><input class="input target-input" type="number" min="0" step="5000000" data-target-input="${sm.id}" value="${salesmanTargets[sm.id]}"></td>
+    <td class="row-actions"></td>
+  </tr>`;
+}
+function cardHtml(sm){
+  return `<div class="accordion-item open" data-card="${sm.id}">
+    <div class="accordion-head" data-toggle="${sm.id}">
+      <div style="flex:1;"><span class="nm" style="font-weight:700; font-size:13.5px;">${sm.name}</span><div class="text-sm ink-faint">${sm.area}</div></div>
+    </div>
+    <div class="accordion-body">
+      <div class="field"><label>Target (Rp)</label><input class="input target-input" type="number" min="0" step="5000000" data-target-input="${sm.id}" value="${salesmanTargets[sm.id]}"></div>
+    </div>
+  </div>`;
+}
+
+function renderDrilldown(){
+  document.getElementById('drilldownCard').style.display = '';
+  document.getElementById('ddBrandName').textContent = selectedBrand;
+  const list = salesmenForBrand(selectedBrand);
+  document.getElementById('ddBody').innerHTML = list.map(rowHtml).join('');
+  document.getElementById('ddCards').innerHTML = list.map(cardHtml).join('');
+  wireDrilldownEvents();
+}
+function wireDrilldownEvents(){
+  document.querySelectorAll('[data-target-input]').forEach(inp => inp.addEventListener('input', () => {
+    salesmanTargets[inp.dataset.targetInput] = parseInt(inp.value || '0', 10);
+    renderKpiCards();
+    renderBrandComplyList();
+    updateSim();
+  }));
+}
+
+function recalc(){
+  renderKpiCards();
+  renderBrandComplyList();
+  renderMobileSummary();
+}
+function renderMobileSummary(){
+  const pct = complyPctRaw(selectedBrand);
+  const st = complyStatus(pct);
+  document.getElementById('mobileSummary').innerHTML = `
+    <div class="flex items-center justify-between text-sm" style="font-weight:700;">
+      <span>${selectedBrand} — Comply</span>
+      <span class="comply-badge ${st.cls}">${st.label}</span>
+    </div>
+    <div class="progress mt-8 ${st.cls}" style="height:7px;"><div style="width:${Math.min(100,pct)}%;"></div></div>`;
+}
+
+renderKpiCards();
+renderBrandComplyList();
+renderDrilldown();
+
+document.getElementById('versionHistory').innerHTML = [
+  { v:'v3', date:'01 Jun 2026', amt: spvTargetForBrand('Skintific'), status:'approved' },
+  { v:'v2', date:'15 May 2026', amt: 88000000, status:'approved' },
+  { v:'v1', date:'01 May 2026', amt: 85000000, status:'locked' },
+].map(x => `<div class="timeline-item"><div class="t-title">${x.v} — ${STEP.fmtIDR(x.amt)} ${STEP.statusPill(x.status)}</div><div class="t-meta">Berlaku sejak ${x.date}</div></div>`).join('');
+
+const slider = document.getElementById('simSlider');
+function updateSim(){
+  const pct = parseInt(slider.value,10);
+  document.getElementById('simPctLabel').textContent = (pct>0?'+':'')+pct+'%';
+  const spv = spvTargetForBrand(selectedBrand);
+  const mgmt = MANAGEMENT_TARGET_BY_BRAND[selectedBrand]||0;
+  const newSpv = Math.round(spv * (1 + pct/100));
+  document.getElementById('simTotal').textContent = STEP.fmtIDR(newSpv);
+  const newPct = mgmt ? (newSpv/mgmt)*100 : 0;
+  const st = complyStatus(newPct);
+  const el = document.getElementById('simAch');
+  el.textContent = fmtPct(newPct);
+  el.style.color = st.cls === 'comply-ok' ? 'var(--success)' : st.cls === 'comply-under' ? 'var(--warning)' : 'var(--info)';
+}
+slider.addEventListener('input', updateSim);
+updateSim();
+
+document.getElementById('btnSaveDraft').addEventListener('click', () => STEP.toast('Draft tersimpan', '💾'));
+
+document.getElementById('btnBulk').addEventListener('click', () => {
+  STEP.openResponsiveModal(`
+    <div class="modal-head"><strong>Atur Target Massal — ${selectedBrand}</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body">
+      <p class="text-sm ink-soft">Terapkan perubahan ke semua salesman brand <strong>${selectedBrand}</strong>.</p>
+      <div class="field mt-14"><label>Aksi</label>
+        <select class="input" id="bulkAction">
+          <option value="pct_increase">Naikkan target sebesar %</option>
+          <option value="pct_decrease">Turunkan target sebesar %</option>
+          <option value="reset">Reset ke target awal</option>
+        </select>
+      </div>
+      <div class="field mt-14" id="bulkPctField"><label>Persentase</label><input class="input" type="number" id="bulkPct" value="5" min="0" max="100"></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="STEP.closeModal()">Batal</button><button class="btn btn-primary" id="bulkApply">Terapkan</button></div>
+  `);
+  document.getElementById('bulkAction')?.addEventListener('change', (e) => {
+    document.getElementById('bulkPctField').style.display = e.target.value.startsWith('pct_') ? '' : 'none';
+  });
+  document.getElementById('bulkApply')?.addEventListener('click', () => {
+    const action = document.getElementById('bulkAction').value;
+    const pct = parseInt(document.getElementById('bulkPct').value || '0', 10);
+    salesmenForBrand(selectedBrand).forEach(sm => {
+      if (action === 'pct_increase') salesmanTargets[sm.id] = Math.round(salesmanTargets[sm.id] * (1 + pct/100));
+      if (action === 'pct_decrease') salesmanTargets[sm.id] = Math.round(salesmanTargets[sm.id] * (1 - pct/100));
+      if (action === 'reset') salesmanTargets[sm.id] = salesmanTargetRp(sm);
+    });
+    STEP.closeModal();
+    recalc();
+    renderDrilldown();
+    updateSim();
+    STEP.toast('Target massal diterapkan — Comply % dihitung ulang', '✓');
+  });
+});
+
+document.getElementById('btnSubmit').addEventListener('click', () => {
+  STEP.openModal(`<div class="modal-head"><strong>Submit Target</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body"><p class="text-sm ink-soft">Ini akan mengajukan distribusi target SPV untuk approval: <strong>SPV → Area Manager → Distributor Manager</strong>. Comply % akan dievaluasi terhadap Management Target yang berlaku.</p>
+    <div class="field mt-14"><label>Komentar</label><textarea class="input" rows="3" placeholder="Alasan perubahan target ini..."></textarea></div></div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="STEP.closeModal()">Batal</button><button class="btn btn-primary" onclick="STEP.closeModal(); STEP.toast('Diajukan untuk approval — v4 menunggu review Area Manager','📤')">Submit</button></div>`);
+});
+}); // end guardPage
+</script>
+</body>
+</html>

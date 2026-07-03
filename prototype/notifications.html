@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pusat Notification — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  .notif-row{ display:flex; gap:14px; padding:14px 20px; border-bottom:1px solid var(--line); align-items:flex-start; }
+  .notif-row.unread{ background: var(--primary-50); }
+  .notif-row .dot-cat{ width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; background:var(--soft-white); }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:10px;">
+        <div class="h1">Pusat Notification</div>
+        <div class="flex gap-10">
+          <button class="btn btn-outline btn-sm" id="btnMarkAll">Tandai Semua Dibaca</button>
+          <button class="btn btn-outline btn-sm" id="btnPrefs">Preferensi</button>
+        </div>
+      </div>
+
+      <div class="card mt-20">
+        <div class="tabs" id="catTabs" style="padding:0 20px;">
+          <button class="active" data-cat="all">Semua</button>
+          <button data-cat="approval">Approval</button>
+          <button data-cat="routing">Routing</button>
+          <button data-cat="target">Target</button>
+          <button data-cat="system">System</button>
+          <button data-cat="announcement">Announcement</button>
+        </div>
+        <div id="notifList"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('notifications');
+const D = STEP.DATA;
+let cat = 'all';
+const ICONS = { approval:'📥', routing:'🗺️', target:'🎯', system:'⚙️', announcement:'📣' };
+const CAT_LABEL = { approval:'Approval', routing:'Routing', target:'Target', system:'System', announcement:'Announcement' };
+
+function render(){
+  const items = D.notifications.filter(n => cat==='all' || n.category===cat);
+  document.getElementById('notifList').innerHTML = items.length ? items.map(n => `
+    <a href="${n.deepLink}" class="notif-row ${n.read?'':'unread'}" data-id="${n.id}">
+      <div class="dot-cat">${ICONS[n.category]}</div>
+      <div style="flex:1;">
+        <div class="flex items-center justify-between"><strong style="font-size:13.5px;">${n.title}</strong><span class="text-sm ink-faint">${n.at}</span></div>
+        <div class="text-sm ink-soft mt-8">${n.body}</div>
+        <span class="pill pill-neutral mt-8" style="display:inline-block;">${CAT_LABEL[n.category]}</span>
+      </div>
+    </a>`).join('') : `<div class="empty-state"><div class="ic">🔔</div><div class="h3">Tidak ada notification di sini</div><p>Semua sudah selesai untuk kategori ini.</p></div>`;
+}
+document.querySelectorAll('#catTabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#catTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  cat = b.dataset.cat; render();
+}));
+document.getElementById('btnMarkAll').addEventListener('click', () => { D.notifications.forEach(n=>n.read=true); render(); STEP.toast('Semua notification ditandai dibaca','✓'); });
+document.getElementById('btnPrefs').addEventListener('click', () => {
+  STEP.openModal(`<div class="modal-head"><strong>Preferensi Notification</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body">
+      ${['Approval','Routing','Target','System','Announcement'].map(c => `
+        <div class="flex items-center justify-between" style="padding:10px 0; border-bottom:1px solid var(--line);">
+          <span class="text-sm" style="font-weight:600;">${c}</span>
+          <div class="flex gap-10 text-sm ink-faint"><label><input type="checkbox" checked> In-app</label><label><input type="checkbox" checked> Email</label><label><input type="checkbox"> Push</label></div>
+        </div>`).join('')}
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="STEP.closeModal(); STEP.toast('Preferensi tersimpan','✓')">Simpan</button></div>`);
+});
+render();
+</script>
+</body>
+</html>

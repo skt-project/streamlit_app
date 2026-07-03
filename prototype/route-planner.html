@@ -1,0 +1,1018 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Route Planner — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  .planner-layout{ display:grid; grid-template-columns: 260px minmax(0,1fr) 300px; gap:16px; align-items:start; }
+  .salesman-rail{ display:flex; flex-direction:column; gap:10px; max-height:74vh; overflow-y:auto; padding-right:2px; }
+  .salesman-card{ border:1px solid var(--line); border-radius:var(--radius-md); padding:14px; background:var(--surface); cursor:pointer; transition:border-color .15s, background .15s; }
+  .salesman-card:hover{ border-color:var(--primary-300); }
+  .salesman-card.active{ border-color:var(--primary-500); background:var(--primary-50); }
+  .salesman-card .sc-name{ font-weight:700; font-size:13.5px; }
+  .salesman-card .sc-meta{ font-size:11px; color:var(--ink-faint); margin-top:1px; }
+  .salesman-card .sc-stats{ display:flex; gap:14px; margin-top:10px; font-size:12px; color:var(--ink-soft); flex-wrap:wrap; }
+  .salesman-card .sc-stats strong{ color:var(--ink); }
+  .reco-panel{ max-height: 80vh; overflow-y:auto; position:sticky; top:80px; }
+  .planner-search-row{ display:flex; gap:10px; align-items:center; margin-bottom:14px; }
+  .planner-search-row .topbar-search{ max-width:none; flex:1; }
+  .filter-btn{ position:relative; }
+  .filter-badge{ position:absolute; top:-6px; right:-6px; background:var(--danger); color:#fff; font-size:10px; font-weight:700; border-radius:999px; min-width:16px; height:16px; display:flex; align-items:center; justify-content:center; padding:0 4px; }
+  .week-nav{ display:flex; align-items:center; gap:8px; }
+  .week-nav button{ width:32px; height:32px; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--surface); cursor:pointer; }
+  .copy-banner{ display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; background:var(--info-bg); color:var(--info); border-radius:var(--radius-md); padding:12px 16px; margin-bottom:16px; }
+  .copy-banner .msg{ font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+
+  /* ---- Day tabs + density summary ---- */
+  .day-tabs{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; }
+  .day-tab{ flex:0 0 auto; padding:10px 20px; border-radius:var(--radius-pill); border:1px solid var(--line); background:var(--surface); font-weight:700; font-size:13px; cursor:pointer; white-space:nowrap; }
+  .day-tab.active{ background:var(--navy-900); color:#fff; border-color:var(--navy-900); }
+  .day-summary{ display:flex; align-items:center; justify-content:space-between; margin:18px 0 16px; flex-wrap:wrap; gap:10px; }
+  .day-summary .day-name{ font-size:19px; font-weight:800; }
+  .density-badge{ display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:var(--radius-pill); font-size:12px; font-weight:700; }
+  .density-normal{ background:var(--success-bg); color:var(--success); }
+  .density-padat{ background:var(--danger-bg); color:var(--danger); }
+  .density-ringan{ background:var(--info-bg); color:var(--info); }
+
+  /* ---- Premium store card: no truncation, wraps naturally ---- */
+  .store-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg);
+    padding:16px 18px; margin-bottom:16px; box-shadow:var(--shadow-sm); transition:box-shadow .15s, border-color .15s;
+    display:flex; gap:14px; align-items:flex-start; cursor:grab;
+  }
+  .store-card:hover{ box-shadow:var(--shadow-md); border-color:var(--primary-300); }
+  .store-card.dragging{ opacity:.45; }
+  .store-card .grip{ color:var(--ink-faint); font-size:14px; flex-shrink:0; padding-top:6px; }
+  .store-card .time-badge{ background:var(--primary-50); color:var(--primary-700); border-radius:var(--radius-sm); padding:9px 11px; font-weight:800; font-size:15px; text-align:center; min-width:70px; flex-shrink:0; }
+  .store-card .time-badge .seq{ display:block; font-size:10.5px; font-weight:700; color:var(--primary-600); margin-top:3px; }
+  .store-card-body{ flex:1; min-width:0; }
+  .store-card-body .store-name{ font-weight:700; font-size:15.5px; line-height:1.4; white-space:normal; overflow-wrap:break-word; }
+  .store-card-body .store-code{ font-size:12px; color:var(--ink-faint); margin-top:3px; }
+  .store-card-meta{ display:flex; flex-wrap:wrap; gap:14px 18px; margin-top:12px; font-size:12.5px; color:var(--ink-soft); }
+  .store-card-meta .lbl{ color:var(--ink-faint); margin-right:4px; }
+  .store-card-actions{ display:flex; gap:8px; margin-top:14px; }
+  .store-card-actions button{ flex:1; padding:9px 10px; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--soft-white); font-size:12px; font-weight:700; cursor:pointer; min-height:38px; color:var(--ink-soft); }
+  .store-card-actions button:hover{ border-color:var(--primary-300); color:var(--primary-700); }
+  .store-card-actions button.danger:hover{ border-color:var(--danger); color:var(--danger); }
+  .day-off-state{ text-align:center; padding:40px 20px; color:var(--ink-faint); }
+
+  /* ---- Mobile FAB ---- */
+  .fab{ display:none; }
+  .reco-mobile-trigger{ display:none; }
+
+  /* ---- Calendar header (week/month nav + view mode + quick actions) ---- */
+  .cal-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .cal-header-actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+  /* ---- Recommendation panel: collapsible ---- */
+  .reco-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .reco-panel.collapsed .reco-panel-content{ display:none; }
+  .reco-panel.collapsed{ padding-bottom:14px; }
+
+  /* ---- Monthly calendar grid ---- */
+  .cal-grid{ display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:8px; }
+  .cal-dow{ font-size:11px; font-weight:700; color:var(--ink-faint); text-transform:uppercase; text-align:center; padding-bottom:4px; }
+  .cal-cell{
+    border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; min-height:88px; background:var(--surface);
+    cursor:pointer; transition:border-color .15s, box-shadow .15s; display:flex; flex-direction:column; gap:4px;
+  }
+  .cal-cell:hover{ border-color:var(--primary-300); box-shadow:var(--shadow-sm); }
+  .cal-cell.cal-dim{ background:var(--soft-white); color:var(--ink-faint); }
+  .cal-cell.cal-today{ border-color:var(--primary-500); border-width:2px; }
+  .cal-date{ font-weight:800; font-size:13px; }
+  .cal-stat{ font-size:11.5px; color:var(--ink-soft); font-weight:600; }
+  .cal-compliance{ font-size:11px; font-weight:700; color:var(--success); }
+  .cal-density{ font-size:11px; font-weight:700; color:var(--info); }
+  .cal-density.over{ color:var(--danger); }
+  @media (max-width:1023px){ .cal-cell{ min-height:68px; } }
+  @media (max-width:767px){
+    .cal-grid{ grid-template-columns: 1fr; }
+    .cal-dow{ display:none; }
+    .cal-cell{ flex-direction:row; align-items:center; justify-content:space-between; min-height:auto; padding:12px; }
+  }
+
+  @media (max-width:1279px){ .planner-layout{ grid-template-columns: minmax(0,1fr); } .reco-panel{ position:static; max-height:none; } .salesman-rail{ max-height:300px; } }
+  @media (max-width:767px){
+    .planner-search-row{ position:sticky; top: var(--topbar-h); z-index:30; background:var(--soft-white); padding:8px 0; margin:0 0 12px; }
+    .content{ padding-bottom:200px; }
+    .store-card{ padding:14px; }
+    .fab{
+      display:flex; position:fixed; right:18px; bottom:158px; z-index:46; align-items:center; gap:8px;
+      height:50px; padding:0 20px; border-radius:999px; background:var(--primary-500); color:#fff;
+      font-weight:700; font-size:13px; border:none; box-shadow:var(--shadow-lg); cursor:pointer;
+    }
+    .day-tabs{ position:sticky; top:calc(var(--topbar-h) + 56px); background:var(--soft-white); z-index:25; padding:6px 0; }
+    #recoPanelDesktop{ display:none; }
+    .reco-mobile-trigger{ display:inline-flex; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="margin-bottom:10px; flex-wrap:wrap; gap:12px;">
+        <div class="h1">Route Planner</div>
+        <button class="btn btn-primary" id="openWizard">+ Buat Route</button>
+      </div>
+
+      <div class="cal-header">
+        <div class="week-nav">
+          <button id="weekPrev" title="Sebelumnya">‹</button>
+          <span class="text-sm" id="weekLabel" style="font-weight:800; min-width:230px; text-align:center; font-size:14.5px;"></span>
+          <button id="weekNext" title="Berikutnya">›</button>
+          <button class="icon-btn" id="btnJumpTo" title="Lompat ke tanggal/minggu">📅</button>
+        </div>
+        <div class="cal-header-actions">
+          <div class="role-switch" id="viewModeSwitch">
+            <button data-view="monthly">Monthly</button>
+            <button data-view="weekly" class="active">Weekly</button>
+          </div>
+          <button class="btn btn-outline btn-sm" id="btnToday">Hari Ini</button>
+          <button class="btn btn-outline btn-sm filter-btn" id="openFilters">⚙ Filter<span class="filter-badge" id="filterBadge" style="display:none;">0</span></button>
+          <button class="btn btn-outline btn-sm" id="recoMobileBtnHeader">💡 Recommendation</button>
+        </div>
+      </div>
+
+      <!-- Cari Salesman -->
+      <div class="planner-search-row">
+        <div class="topbar-search"><span>🔎</span><input id="salesmanSearch" placeholder="Cari Salesman (nama, ID, area, atau distributor)..."></div>
+      </div>
+
+      <div id="copyBanner"></div>
+
+      <div class="planner-layout">
+        <div>
+          <div class="text-sm ink-faint mt-8" id="salesmanCount" style="margin-bottom:8px;"></div>
+          <div class="salesman-rail" id="salesmanRail"></div>
+        </div>
+
+        <div>
+          <div id="weeklyViewRoot">
+            <div class="h3">Weekly Route Planner</div>
+            <div class="day-tabs mt-14" id="dayTabs"></div>
+            <div class="day-summary" id="daySummary"></div>
+            <div id="storeCardsList"></div>
+          </div>
+          <div id="monthlyViewRoot" style="display:none;">
+            <div class="h3" id="monthlyTitle">Monthly Route Planner</div>
+            <div class="cal-grid mt-14" id="calDow"></div>
+            <div class="cal-grid mt-8" id="calGrid"></div>
+          </div>
+        </div>
+
+        <div class="card card-pad reco-panel" id="recoPanelDesktop">
+          <div class="reco-panel-head">
+            <div class="h3">Recommendation</div>
+            <button class="icon-btn" id="recoCollapseToggle" title="Ciutkan panel">⌃</button>
+          </div>
+          <div class="reco-panel-content" id="recoPanelContent">
+            <div class="text-sm ink-faint mt-8">Berbasis aturan dan dapat dijelaskan. Keputusan akhir tetap di tangan Anda.</div>
+            <div class="chip-row mt-14" id="recoQuickFilters"></div>
+            <div id="recoList" class="mt-14"></div>
+            <a href="administration.html" class="text-sm" style="color:var(--primary-600); font-weight:600; display:block; margin-top:10px;">⚙️ Atur bobot Recommendation Rule →</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<button class="fab" id="fabAddStore">+ <span>Tambah Store</span></button>
+<div class="sticky-actionbar" id="mobileActionBar">
+  <button class="btn btn-outline" id="mobileSaveDraft">Simpan Draft</button>
+  <button class="btn btn-primary" id="mobileSubmit">Submit</button>
+</div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('route-planner');
+STEP.guardPage('route-planner', function(scope) {
+const D = STEP.DATA;
+const DAY_DEFS = [
+  {key:'mon', label:'Sen', full:'Senin'}, {key:'tue', label:'Sel', full:'Selasa'}, {key:'wed', label:'Rab', full:'Rabu'},
+  {key:'thu', label:'Kam', full:'Kamis'}, {key:'fri', label:'Jum', full:'Jumat'}, {key:'sat', label:'Sab', full:'Sabtu'},
+];
+/* ---- ISO-8601 week (Mon-Sun) is the single source of truth for week math — STEP.isoWeekMonday()
+   anchors week 0 to the real current date, so "Minggu Ini" always actually means this week. ---- */
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+const BASE_MONDAY = STEP.isoWeekMonday(TODAY);
+
+function weekMonday(offset){ const d = new Date(BASE_MONDAY); d.setDate(d.getDate() + offset*7); return d; }
+function fmtShort(d){ return d.toLocaleDateString('id-ID',{day:'2-digit',month:'short'}); }
+function dayDate(offset, idx){ const d = weekMonday(offset); d.setDate(d.getDate()+idx); return fmtShort(d); }
+function weekLabel(offset){
+  const iso = STEP.isoWeekLabel(TODAY, offset);
+  return `Week ${iso.week} · ${iso.range}`;
+}
+function fmtTime(mins){ const h=Math.floor(mins/60), m=mins%60; return String(h).padStart(2,'0')+'.'+String(m).padStart(2,'0'); }
+
+/* ---- Maps any calendar date to the (weekOffset, dayKey) pair the existing route storage
+   already keys on — keeps Monthly View backed by the exact same localStorage routes as Weekly. ---- */
+function dateToWeekOffsetAndDay(date){
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((d - BASE_MONDAY) / 86400000);
+  const weekOffset = Math.floor(diffDays / 7);
+  const dayIdx = ((diffDays % 7) + 7) % 7; // 0=Mon..6=Sun
+  const dayKey = dayIdx === 6 ? 'sun' : DAY_DEFS[dayIdx].key;
+  return { weekOffset, dayKey, dayIdx };
+}
+function simpleHash(str){ let h=0; for(let i=0;i<str.length;i++){ h=(h*31+str.charCodeAt(i))|0; } return Math.abs(h); }
+function complianceForDate(sid, dateStr, baseline){
+  const jitter = (simpleHash(sid+dateStr) % 21) - 10;
+  return Math.max(50, Math.min(100, baseline + jitter));
+}
+
+/* ---- Salesman roster is scoped to the active Brand Group — switching brand context refreshes
+   the whole planner (rail, search, recommendations) since the page is reloaded by setBrandGroup(). ---- */
+const groupSalesmen = STEP.salesmenInCurrentGroup();
+const storedSalesmanId = localStorage.getItem('step_planner_salesman');
+let activeSalesmanId = (storedSalesmanId && groupSalesmen.some(s => s.id === storedSalesmanId)) ? storedSalesmanId : groupSalesmen[0].id;
+let currentWeekOffset = parseInt(localStorage.getItem('step_planner_week_offset') || '0', 10);
+let activeDay = 'mon';
+let salesmanQuery = '';
+const filters = { region: new Set(), distributor: new Set(), area: new Set(), spv: new Set() };
+
+/* ---- View mode: Weekly (default, day-tabs) vs Monthly (calendar grid) ---- */
+let viewMode = localStorage.getItem('step_planner_viewmode') || 'weekly';
+let calendarMonth = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
+
+/* ---- Recommendation quick filters: Critical/Recommended/Optional are categories (OR'd among
+   themselves, no constraint if none active); Tier S/Tier A/High Sell-In/Long Time No Visit/Nearby
+   Route are attributes (also OR'd among themselves) — both groups AND together. ---- */
+const RECO_CATEGORY_KEYS = new Set(['critical','recommended','optional']);
+let recoFilters = new Set(['critical']);
+const RECO_QUICK_FILTERS = [
+  { key:'critical', label:'Critical' }, { key:'recommended', label:'Recommended' }, { key:'optional', label:'Optional' },
+  { key:'tierS', label:'Tier S' }, { key:'tierA', label:'Tier A' }, { key:'highsellin', label:'High Sell-In' },
+  { key:'longnovisit', label:'Long Time No Visit' }, { key:'nearby', label:'Nearby Route' },
+];
+function isRecoPanelCollapsed(){ return localStorage.getItem('step_reco_panel_collapsed') === '1'; }
+function setRecoPanelCollapsed(v){ localStorage.setItem('step_reco_panel_collapsed', v ? '1' : '0'); }
+
+/* ---- Route storage: each day holds full store "stub" objects (code/name/tier/time/sell-in/last visit),
+   so the realistic per-visit fields travel with the card — never just an ID to resolve later. ---- */
+function routeStorageKey(sid, offset){ return `step_route_${sid}_w${offset}`; }
+function metaStorageKey(sid, offset){ return `step_route_meta_${sid}_w${offset}`; }
+function emptyRoute(){ const r = Object.fromEntries(DAY_DEFS.map(d=>[d.key,[]])); r.sun = []; return r; }
+
+function getRouteForWeek(sid, offset){
+  const raw = localStorage.getItem(routeStorageKey(sid, offset));
+  if (raw) {
+    const meta = JSON.parse(localStorage.getItem(metaStorageKey(sid, offset)) || '{"source":"manual"}');
+    return { route: JSON.parse(raw), source: meta.source };
+  }
+  if (offset <= 0) {
+    const sm = D.salesmen.find(s=>s.id===sid);
+    const route = sm ? STEP.generateWeeklyRoute(sid, sm.area || sm.territory, offset) : emptyRoute();
+    return { route, source: 'baseline' };
+  }
+  const prev = getRouteForWeek(sid, offset - 1);
+  const copied = JSON.parse(JSON.stringify(prev.route));
+  saveRoute(sid, offset, copied, 'copied', { silent: true });
+  return { route: copied, source: 'copied' };
+}
+function saveRoute(sid, offset, route, source, opts){
+  opts = opts || {};
+  localStorage.setItem(routeStorageKey(sid, offset), JSON.stringify(route));
+  localStorage.setItem(metaStorageKey(sid, offset), JSON.stringify({ source: source || 'manual' }));
+  if (!opts.silent) STEP.toast('Route otomatis tersimpan sebagai draft', '💾');
+}
+function storeCountFor(sid){
+  const sm = D.salesmen.find(s=>s.id===sid);
+  if (!sm) return 0;
+  const baseline = STEP.generateWeeklyRoute(sid, sm.area || sm.territory, 0);
+  const codes = new Set(DAY_DEFS.flatMap(d => baseline[d.key].map(o=>o.code)));
+  return codes.size;
+}
+function targetJutaFor(sm){ return Math.round(sm.capacityPerDay * 6 * 1.7 / 5) * 5; }
+
+/* ---- Cari Salesman + Filter ---- */
+function filteredSalesmen(){
+  const q = salesmanQuery.toLowerCase();
+  return groupSalesmen.filter(s => {
+    const matchesQuery = !q || s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q) || s.area.toLowerCase().includes(q) || s.distributor.toLowerCase().includes(q);
+    const matchesRegion = !filters.region.size || filters.region.has(s.region);
+    const matchesDist = !filters.distributor.size || filters.distributor.has(s.distributor);
+    const matchesArea = !filters.area.size || filters.area.has(s.area);
+    const matchesSpv = !filters.spv.size || filters.spv.has(s.spv);
+    return matchesQuery && matchesRegion && matchesDist && matchesArea && matchesSpv;
+  });
+}
+function activeFilterCount(){ return Object.values(filters).reduce((a,s)=>a+s.size,0); }
+function updateFilterBadge(){
+  const c = activeFilterCount();
+  const b = document.getElementById('filterBadge');
+  b.style.display = c ? '' : 'none'; b.textContent = c;
+}
+
+function renderSalesmanRail(){
+  const list = filteredSalesmen();
+  document.getElementById('salesmanCount').textContent = `${list.length} dari ${groupSalesmen.length} salesman`;
+  document.getElementById('salesmanRail').innerHTML = list.length ? list.map(s => `
+    <div class="salesman-card ${s.id===activeSalesmanId?'active':''}" data-id="${s.id}">
+      <div class="flex items-center gap-10">
+        <div class="avatar" style="width:34px;height:34px;font-size:12px;">${s.name.split(' ').map(n=>n[0]).join('').slice(0,2)}</div>
+        <div style="min-width:0; flex:1;">
+          <div class="sc-name">${s.name}</div>
+          <div class="sc-meta">${s.code} · ${s.area}</div>
+        </div>
+        ${STEP.statusPill(s.status)}
+      </div>
+      <div class="sc-stats">
+        <div><strong>${storeCountFor(s.id)}</strong> Store</div>
+        <div>Target <strong>${s.achievementPct}%</strong></div>
+        <div>Compliance <strong>${s.routeCompliancePct}%</strong></div>
+      </div>
+      <button class="btn btn-outline btn-sm w-full mt-10" data-open="${s.id}">Buka Route</button>
+    </div>
+  `).join('') : `<div class="empty-state" style="padding:24px 0;"><div class="ic">🔍</div><p>Tidak ada salesman yang cocok dengan pencarian/filter Anda.</p></div>`;
+  document.querySelectorAll('.salesman-card').forEach(el => {
+    el.addEventListener('click', () => selectSalesman(el.dataset.id));
+  });
+}
+function selectSalesman(sid){
+  activeSalesmanId = sid;
+  localStorage.setItem('step_planner_salesman', activeSalesmanId);
+  renderAll();
+}
+
+function filterPanelHtml(){
+  const areas = [...new Set(Object.values(STEP.AREAS_BY_REGION).flat())];
+  const group = (title, key, options) => `
+    <div class="filter-group">
+      <span class="label">${title}</span>
+      <div class="chip-row">${options.map(o => `<span class="chip ${filters[key].has(o)?'active':''}" data-fkey="${key}" data-fval="${o}">${o}${filters[key].has(o)?' <span class="x">✕</span>':''}</span>`).join('')}</div>
+    </div>`;
+  return group('Regional', 'region', STEP.REGIONS)
+    + group('Distributor', 'distributor', STEP.DISTRIBUTORS)
+    + group('Area', 'area', areas)
+    + group('SPV', 'spv', STEP.SPVS);
+}
+function wireFilterPanel(container){
+  container.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', () => {
+    const { fkey, fval } = chip.dataset;
+    filters[fkey].has(fval) ? filters[fkey].delete(fval) : filters[fkey].add(fval);
+    refreshFilterUI();
+  }));
+}
+function refreshFilterUI(){
+  updateFilterBadge();
+  renderSalesmanRail();
+  const dContent = document.getElementById('filterPanelDrawer');
+  if (dContent) { dContent.innerHTML = filterPanelHtml(); wireFilterPanel(dContent); }
+  const sContent = document.getElementById('filterPanelSheet');
+  if (sContent) { sContent.innerHTML = filterPanelHtml(); wireFilterPanel(sContent); }
+}
+document.getElementById('openFilters').addEventListener('click', () => {
+  if (STEP.isMobile()) {
+    STEP.openSheet(`
+      <div class="bottom-sheet-head"><strong>Filter</strong><button class="icon-btn" onclick="STEP.closeSheet()">✕</button></div>
+      <div class="bottom-sheet-body" id="filterPanelSheet"></div>
+      <div class="bottom-sheet-foot"><button class="btn btn-outline w-full" id="clearFiltersBtn">Hapus semua</button><button class="btn btn-primary w-full" onclick="STEP.closeSheet()">Selesai</button></div>
+    `);
+    document.getElementById('filterPanelSheet').innerHTML = filterPanelHtml();
+    wireFilterPanel(document.getElementById('filterPanelSheet'));
+    document.getElementById('clearFiltersBtn').addEventListener('click', () => { Object.values(filters).forEach(s=>s.clear()); refreshFilterUI(); });
+  } else {
+    STEP.openDrawer(`
+      <div class="drawer-head"><strong>Filter</strong><button class="icon-btn" onclick="STEP.closeDrawer()">✕</button></div>
+      <div class="drawer-body" id="filterPanelDrawer"></div>
+      <div style="padding:16px 22px; border-top:1px solid var(--line);"><button class="btn btn-outline w-full" id="clearFiltersBtnD">Hapus semua filter</button></div>
+    `);
+    document.getElementById('filterPanelDrawer').innerHTML = filterPanelHtml();
+    wireFilterPanel(document.getElementById('filterPanelDrawer'));
+    document.getElementById('clearFiltersBtnD').addEventListener('click', () => { Object.values(filters).forEach(s=>s.clear()); refreshFilterUI(); });
+  }
+});
+document.getElementById('salesmanSearch').addEventListener('input', e => { salesmanQuery = e.target.value; renderSalesmanRail(); });
+
+/* ---- Week/Month navigation (view-mode aware) + default-copy banner ---- */
+function renderWeekNav(){
+  document.getElementById('weekLabel').textContent = viewMode === 'weekly'
+    ? (currentWeekOffset===0 ? `Minggu Ini · ${weekLabel(0)}` : weekLabel(currentWeekOffset))
+    : calendarMonth.toLocaleDateString('id-ID', { month:'long', year:'numeric' });
+}
+document.getElementById('weekPrev').addEventListener('click', () => {
+  if (viewMode === 'weekly') { currentWeekOffset--; localStorage.setItem('step_planner_week_offset', currentWeekOffset); }
+  else { calendarMonth.setMonth(calendarMonth.getMonth()-1); }
+  renderAll();
+});
+document.getElementById('weekNext').addEventListener('click', () => {
+  if (viewMode === 'weekly') { currentWeekOffset++; localStorage.setItem('step_planner_week_offset', currentWeekOffset); }
+  else { calendarMonth.setMonth(calendarMonth.getMonth()+1); }
+  renderAll();
+});
+
+function setViewMode(mode){
+  viewMode = mode;
+  localStorage.setItem('step_planner_viewmode', viewMode);
+  document.querySelectorAll('#viewModeSwitch button').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode));
+  document.getElementById('weeklyViewRoot').style.display = viewMode === 'weekly' ? '' : 'none';
+  document.getElementById('monthlyViewRoot').style.display = viewMode === 'monthly' ? '' : 'none';
+  renderAll();
+}
+document.querySelectorAll('#viewModeSwitch button').forEach(b => b.addEventListener('click', () => setViewMode(b.dataset.view)));
+document.querySelectorAll('#viewModeSwitch button').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode));
+document.getElementById('weeklyViewRoot').style.display = viewMode === 'weekly' ? '' : 'none';
+document.getElementById('monthlyViewRoot').style.display = viewMode === 'monthly' ? '' : 'none';
+
+document.getElementById('btnToday').addEventListener('click', () => {
+  if (viewMode === 'weekly') {
+    currentWeekOffset = 0; localStorage.setItem('step_planner_week_offset', '0');
+    const dow = TODAY.getDay(); const idx = dow === 0 ? -1 : dow - 1;
+    activeDay = (idx >= 0 && idx <= 5) ? DAY_DEFS[idx].key : 'mon';
+  } else {
+    calendarMonth = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
+  }
+  renderAll();
+});
+
+document.getElementById('btnJumpTo').addEventListener('click', () => {
+  STEP.openModal(`
+    <div class="modal-head"><strong>Lompat ke...</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Tanggal</label><input class="input" type="date" id="jumpDate"></div>
+      <div class="text-sm ink-faint mt-10" style="text-align:center;">— atau —</div>
+      <div class="flex gap-10 mt-10">
+        <div class="field" style="flex:1;"><label>ISO Week</label><input class="input" type="number" id="jumpWeek" min="1" max="53" placeholder="cth. 27"></div>
+        <div class="field" style="flex:1;"><label>Tahun</label><input class="input" type="number" id="jumpYear" value="${TODAY.getFullYear()}"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="STEP.closeModal()">Batal</button>
+      <button class="btn btn-primary" id="jumpApply">Lompat</button>
+    </div>`);
+  document.getElementById('jumpApply').addEventListener('click', () => {
+    const dateVal = document.getElementById('jumpDate').value;
+    const weekVal = parseInt(document.getElementById('jumpWeek').value || '0', 10);
+    const yearVal = parseInt(document.getElementById('jumpYear').value || TODAY.getFullYear(), 10);
+    let target = null;
+    if (dateVal) target = new Date(dateVal + 'T00:00:00');
+    else if (weekVal) { target = STEP.isoWeekMonday(new Date(yearVal, 0, 4)); target.setDate(target.getDate() + (weekVal - 1) * 7); }
+    if (!target) { STEP.toast('Masukkan tanggal atau ISO Week', '⚠️'); return; }
+    if (viewMode === 'weekly') {
+      const diffDays = Math.round((new Date(target.getFullYear(), target.getMonth(), target.getDate()) - BASE_MONDAY) / 86400000);
+      currentWeekOffset = Math.floor(diffDays / 7);
+      localStorage.setItem('step_planner_week_offset', currentWeekOffset);
+    } else {
+      calendarMonth = new Date(target.getFullYear(), target.getMonth(), 1);
+    }
+    STEP.closeModal();
+    renderAll();
+  });
+});
+
+/* ---- Monthly View: calendar grid backed by the same per-day route storage as Weekly View ---- */
+function renderMonthlyView(){
+  if (viewMode !== 'monthly') return;
+  document.getElementById('monthlyTitle').textContent = `Monthly Route Planner — ${calendarMonth.toLocaleDateString('id-ID',{month:'long',year:'numeric'})}`;
+  document.getElementById('calDow').innerHTML = ['Sen','Sel','Rab','Kam','Jum','Sab','Min'].map(l=>`<div class="cal-dow">${l}</div>`).join('');
+
+  const year = calendarMonth.getFullYear(), month = calendarMonth.getMonth();
+  const startDow = (new Date(year, month, 1).getDay() + 6) % 7;
+  const gridStart = new Date(year, month, 1 - startDow);
+  const sm = D.salesmen.find(s=>s.id===activeSalesmanId);
+  const cells = Array.from({length:42}, (_,i) => { const d = new Date(gridStart); d.setDate(gridStart.getDate()+i); return d; });
+
+  document.getElementById('calGrid').innerHTML = cells.map(d => {
+    const inMonth = d.getMonth() === month;
+    const isToday = d.getTime() === TODAY.getTime();
+    const { weekOffset, dayKey } = dateToWeekOffsetAndDay(d);
+    let statHtml = '<div class="cal-stat ink-faint">—</div>';
+    if (dayKey !== 'sun') {
+      const { route } = getRouteForWeek(activeSalesmanId, weekOffset);
+      const count = route[dayKey].length;
+      if (!count) {
+        statHtml = `<div class="cal-stat ink-faint">Tidak ada Store</div>`;
+      } else if (d < TODAY) {
+        const comp = complianceForDate(activeSalesmanId, d.toISOString().slice(0,10), sm.routeCompliancePct);
+        statHtml = `<div class="cal-stat">${count} Store</div><div class="cal-compliance">Compliance ${comp}%</div>`;
+      } else {
+        const dens = densityInfo(count, sm.capacityPerDay);
+        statHtml = `<div class="cal-stat">${count} Store</div><div class="cal-density ${dens.cls==='density-padat'?'over':''}">${dens.icon} ${dens.label}</div>`;
+      }
+    }
+    return `<div class="cal-cell ${inMonth?'':'cal-dim'} ${isToday?'cal-today':''}" data-cal-date="${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}">
+      <div class="cal-date">${d.getDate()}</div>
+      ${statHtml}
+    </div>`;
+  }).join('');
+  document.querySelectorAll('[data-cal-date]').forEach(el => el.addEventListener('click', () => openDailyDetailDrawer(new Date(el.dataset.calDate+'T00:00:00'))));
+}
+
+function openDailyDetailDrawer(date){
+  const { weekOffset, dayKey } = dateToWeekOffsetAndDay(date);
+  if (dayKey === 'sun') { STEP.toast('Tidak ada route pada hari Minggu', 'ℹ️'); return; }
+  const { route } = getRouteForWeek(activeSalesmanId, weekOffset);
+  const list = route[dayKey];
+  const sm = D.salesmen.find(s=>s.id===activeSalesmanId);
+  const dens = densityInfo(list.length, sm.capacityPerDay);
+  const dateLabel = date.toLocaleDateString('id-ID', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  STEP.openDrawer(`
+    <div class="drawer-head"><strong>Daily Route Detail</strong><button class="icon-btn" onclick="STEP.closeDrawer()">✕</button></div>
+    <div class="drawer-body">
+      <div class="text-sm ink-faint">${dateLabel}</div>
+      <div class="flex items-center gap-10 mt-10" style="flex-wrap:wrap;">
+        <span class="text-sm ink-soft"><strong>${list.length}</strong> Store</span>
+        <span class="density-badge ${dens.cls}">${dens.icon} ${dens.label}</span>
+      </div>
+      <div class="mt-14">${list.length ? list.map(stub=>storeCardHtml(stub, dayKey, true)).join('') : `<div class="empty-state"><div class="ic">🗺️</div><p>Belum ada Store di hari ini.</p></div>`}</div>
+      <button class="btn btn-primary w-full mt-14" id="gotoWeeklyBtn">Buka di Weekly View untuk Edit →</button>
+    </div>`);
+  document.getElementById('gotoWeeklyBtn').addEventListener('click', () => {
+    STEP.closeDrawer();
+    currentWeekOffset = weekOffset; localStorage.setItem('step_planner_week_offset', currentWeekOffset);
+    activeDay = dayKey;
+    setViewMode('weekly');
+  });
+}
+
+function renderCopyBanner(source){
+  const el = document.getElementById('copyBanner');
+  if (source !== 'copied') { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="copy-banner">
+      <span class="msg">📋 Route minggu ini menggunakan route minggu sebelumnya.</span>
+      <div class="flex gap-10">
+        <button class="btn btn-sm btn-outline" id="bannerEdit">Edit Route</button>
+        <button class="btn btn-sm btn-outline" id="bannerReset">Reset</button>
+        <button class="btn btn-sm btn-outline" id="bannerTemplate">Gunakan Template</button>
+      </div>
+    </div>`;
+  document.getElementById('bannerEdit').addEventListener('click', () => {
+    const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+    saveRoute(activeSalesmanId, currentWeekOffset, route, 'manual', { silent: true });
+    renderAll();
+  });
+  document.getElementById('bannerReset').addEventListener('click', () => resetToPreviousWeek(activeSalesmanId, currentWeekOffset));
+  document.getElementById('bannerTemplate').addEventListener('click', () => applyTemplate(activeSalesmanId, currentWeekOffset));
+}
+function resetToPreviousWeek(sid, offset){
+  const prev = getRouteForWeek(sid, offset - 1);
+  saveRoute(sid, offset, JSON.parse(JSON.stringify(prev.route)), 'copied');
+  renderAll();
+}
+function applyTemplate(sid, offset){
+  const sm = D.salesmen.find(s=>s.id===sid);
+  const route = STEP.generateWeeklyRoute(sid, sm.area || sm.territory, offset);
+  saveRoute(sid, offset, route, 'manual');
+  STEP.toast('Template route diterapkan', '📋');
+  renderAll();
+}
+
+/* ---- Density ---- */
+function densityInfo(count, capacity){
+  if (count > capacity) return { label: 'Padat', cls: 'density-padat', icon: '🔴' };
+  if (count < capacity * 0.75) return { label: 'Ringan', cls: 'density-ringan', icon: '🔵' };
+  return { label: 'Normal', cls: 'density-normal', icon: '🟢' };
+}
+
+/* ---- Day tabs + store cards (center panel) ---- */
+function renderDayTabs(){
+  const sm = D.salesmen.find(s=>s.id===activeSalesmanId);
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  document.getElementById('dayTabs').innerHTML = DAY_DEFS.map(d => {
+    const count = route[d.key].length;
+    const dens = densityInfo(count, sm.capacityPerDay);
+    return `<button class="day-tab ${d.key===activeDay?'active':''}" data-day="${d.key}">${d.label} <span class="ink-faint">· ${count}</span></button>`;
+  }).join('');
+  document.querySelectorAll('.day-tab').forEach(b => b.addEventListener('click', () => { activeDay = b.dataset.day; renderDayTabs(); renderStoreCards(); }));
+}
+
+function storeCardHtml(stub, day, readonly){
+  return `<div class="store-card" ${readonly?'':'draggable="true"'} data-code="${stub.code}" data-day="${day}">
+    ${readonly?'':'<span class="grip">⠿</span>'}
+    <div class="time-badge">${stub.plannedTime}<span class="seq">#${String(stub.seq).padStart(2,'0')}</span></div>
+    <div class="store-card-body">
+      <div class="store-name">${stub.name}</div>
+      <div class="store-code">${stub.code}</div>
+      <div class="store-card-meta">
+        <span>${STEP.tierBadge(stub.tier)}</span>
+        <span><span class="lbl">Last Visit:</span>${stub.lastVisitDays} hari lalu</span>
+        <span><span class="lbl">Sell-In Terakhir:</span>${STEP.fmtIDR(stub.lastSellIn)}</span>
+      </div>
+      ${readonly?'':`<div class="store-card-actions">
+        <button data-move="${stub.code}" data-day="${day}">Move</button>
+        <button class="danger" data-remove="${stub.code}" data-day="${day}">Remove</button>
+        <button data-detail="${stub.code}" data-day="${day}">Detail</button>
+      </div>`}
+    </div>
+  </div>`;
+}
+
+function renderStoreCards(){
+  const sm = D.salesmen.find(s=>s.id===activeSalesmanId);
+  const { route, source } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  renderCopyBanner(source);
+  const dayDef = DAY_DEFS.find(d=>d.key===activeDay);
+  const list = route[activeDay];
+  const dens = densityInfo(list.length, sm.capacityPerDay);
+
+  document.getElementById('daySummary').innerHTML = `
+    <div><span class="day-name">${dayDef.full}</span> <span class="ink-faint text-sm">${dayDate(currentWeekOffset, DAY_DEFS.indexOf(dayDef))}</span></div>
+    <div class="flex items-center gap-10" style="flex-wrap:wrap;">
+      <span class="text-sm ink-soft"><strong>${list.length}</strong> Store</span>
+      <span class="density-badge ${dens.cls}">${dens.icon} ${dens.label}</span>
+      <button class="day-add-btn btn btn-outline btn-sm" id="addStoreBtn">+ Tambah Store</button>
+      <button class="btn btn-outline btn-sm reco-mobile-trigger" id="recoMobileBtn">💡 Recommendation</button>
+    </div>`;
+  document.getElementById('addStoreBtn').addEventListener('click', () => openAddStorePanel(activeDay));
+  document.getElementById('recoMobileBtn').addEventListener('click', openRecoSheetMobile);
+
+  document.getElementById('storeCardsList').innerHTML = list.length
+    ? list.map(stub => storeCardHtml(stub, activeDay)).join('')
+    : `<div class="card"><div class="day-off-state"><div style="font-size:32px;">🗺️</div><div class="h3 mt-8">Belum ada Store di hari ini</div><p class="text-sm mt-8">Tambahkan Store atau gunakan Recommendation di panel sebelah.</p><button class="btn btn-primary btn-sm mt-14" onclick="openAddStorePanel('${activeDay}')">+ Tambah Store</button></div></div>`;
+
+  wireStoreCardEvents();
+}
+
+function wireStoreCardEvents(){
+  document.querySelectorAll('.store-card').forEach(card => {
+    card.addEventListener('dragstart', e => { card.classList.add('dragging'); e.dataTransfer.setData('text/plain', card.dataset.code); });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    card.addEventListener('dragover', e => e.preventDefault());
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      const draggedCode = e.dataTransfer.getData('text/plain');
+      reorderWithinDay(draggedCode, card.dataset.code, activeDay);
+    });
+  });
+  document.querySelectorAll('[data-move]').forEach(btn => btn.addEventListener('click', () => openMoveSheet(btn.dataset.move, btn.dataset.day)));
+  document.querySelectorAll('[data-remove]').forEach(btn => btn.addEventListener('click', () => removeStub(btn.dataset.remove, btn.dataset.day)));
+  document.querySelectorAll('[data-detail]').forEach(btn => btn.addEventListener('click', () => openDetailPanel(btn.dataset.detail, btn.dataset.day)));
+}
+
+function reorderWithinDay(draggedCode, targetCode, day){
+  if (draggedCode === targetCode) return;
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  const list = route[day];
+  const fromIdx = list.findIndex(o=>o.code===draggedCode);
+  const toIdx = list.findIndex(o=>o.code===targetCode);
+  if (fromIdx<0 || toIdx<0) return;
+  const [moved] = list.splice(fromIdx,1);
+  list.splice(toIdx,0,moved);
+  list.forEach((o,i)=>o.seq=i+1);
+  saveRoute(activeSalesmanId, currentWeekOffset, route, 'manual');
+  renderStoreCards();
+}
+
+function removeStub(code, day){
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  route[day] = route[day].filter(o => o.code !== code);
+  route[day].forEach((o,i)=>o.seq=i+1);
+  saveRoute(activeSalesmanId, currentWeekOffset, route, 'manual');
+  STEP.toast('Store dihapus dari route', '🗑️');
+  renderDayTabs(); renderStoreCards();
+}
+
+function openMoveSheet(code, day){
+  const others = DAY_DEFS.filter(d => d.key !== day);
+  const html = `
+    <div class="${STEP.isMobile() ? 'bottom-sheet-head' : 'drawer-head'}"><strong>Pindahkan ${code}</strong><button class="icon-btn" onclick="${STEP.isMobile()?'STEP.closeSheet()':'STEP.closeDrawer()'}">✕</button></div>
+    <div class="${STEP.isMobile() ? 'bottom-sheet-body' : 'drawer-body'}">
+      <div class="label" style="margin-bottom:10px;">Pindahkan ke hari</div>
+      <div class="chip-row">${others.map(d=>`<span class="chip" data-moveto="${d.key}">${d.full}</span>`).join('')}</div>
+    </div>`;
+  if (STEP.isMobile()) STEP.openSheet(html); else STEP.openDrawer(html);
+  document.querySelectorAll('[data-moveto]').forEach(c => c.addEventListener('click', () => {
+    const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+    const stub = route[day].find(o => o.code === code);
+    if (!stub) return;
+    route[day] = route[day].filter(o => o !== stub);
+    route[day].forEach((o,i)=>o.seq=i+1);
+    route[c.dataset.moveto].push(stub);
+    route[c.dataset.moveto].forEach((o,i)=>o.seq=i+1);
+    saveRoute(activeSalesmanId, currentWeekOffset, route, 'manual');
+    STEP.isMobile()?STEP.closeSheet():STEP.closeDrawer();
+    renderDayTabs(); renderStoreCards();
+    STEP.toast(`Store dipindahkan ke ${DAY_DEFS.find(d=>d.key===c.dataset.moveto).full}`, '↪️');
+  }));
+}
+
+function openDetailPanel(code, day){
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  const stub = route[day].find(o => o.code === code);
+  if (!stub) return;
+  const html = `
+    <div class="${STEP.isMobile() ? 'bottom-sheet-head' : 'drawer-head'}"><strong>Detail Store</strong><button class="icon-btn" onclick="${STEP.isMobile()?'STEP.closeSheet()':'STEP.closeDrawer()'}">✕</button></div>
+    <div class="${STEP.isMobile() ? 'bottom-sheet-body' : 'drawer-body'}">
+      <div class="h3">${stub.name}</div>
+      <div class="text-sm ink-faint mt-8">${stub.code} · ${stub.area}</div>
+      <div class="grid-2 mt-20">
+        <div><div class="label">Tier</div><div class="mt-8">${STEP.tierBadge(stub.tier)}</div></div>
+        <div><div class="label">Sequence</div><div class="mt-8">#${String(stub.seq).padStart(2,'0')}</div></div>
+        <div><div class="label">Visit Time</div><div class="mt-8">${stub.plannedTime}</div></div>
+        <div><div class="label">Last Visit</div><div class="mt-8">${stub.lastVisitDays} hari lalu</div></div>
+        <div><div class="label">Sell-In Terakhir</div><div class="mt-8 num">${STEP.fmtIDR(stub.lastSellIn)}</div></div>
+      </div>
+    </div>`;
+  if (STEP.isMobile()) STEP.openSheet(html); else STEP.openDrawer(html);
+}
+
+/* ---- Tambah Store (full-screen searchable drawer) ---- */
+function nextTimeForDay(day){
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  const count = route[day].length;
+  return fmtTime(8*60 + count*40);
+}
+function addStoreResultsHtml(query, tierFilter, areaFilter){
+  const results = D.outlets.filter(o => {
+    const q = (query||'').toLowerCase();
+    const matchesQ = !q || o.name.toLowerCase().includes(q) || o.code.toLowerCase().includes(q);
+    const matchesTier = !tierFilter || o.tier === tierFilter;
+    const matchesArea = !areaFilter || o.territory === areaFilter;
+    return matchesQ && matchesTier && matchesArea;
+  });
+  return results.map(o => `
+    <div class="card card-pad shadow-hover" style="margin-bottom:10px;">
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:10px;">
+        <div>
+          <div style="font-weight:700; font-size:14px;">${o.name}</div>
+          <div class="text-sm ink-faint mt-8">${o.code}</div>
+          <div class="flex items-center gap-10 mt-8">${STEP.tierBadge(o.tier)}<span class="text-sm ink-soft">Sell-In: ${STEP.fmtIDR(o.achieved)}</span></div>
+          <div class="text-sm ink-faint mt-8">Last Visit: ${o.lastVisitDays} hari lalu</div>
+        </div>
+        <button class="btn btn-primary btn-sm" data-addoutlet="${o.id}">Tambahkan</button>
+      </div>
+    </div>`).join('') || `<div class="empty-state"><div class="ic">🔍</div><p>Tidak ada Store yang cocok.</p></div>`;
+}
+function addStorePanelHtml(day, query, tierFilter, areaFilter){
+  const areas = [...new Set(D.outlets.map(o=>o.territory))];
+  return `
+    <div class="modal-head"><strong>Tambah Store — ${DAY_DEFS.find(d=>d.key===day).full}</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="topbar-search" style="max-width:none; margin-bottom:10px;"><span>🔎</span><input id="aoSearch" placeholder="Cari Store..." value="${query||''}"></div>
+      <div class="text-sm ink-faint" style="margin-bottom:14px;">Cari berdasarkan: Nama Store, Kode Store, Tier, atau Area</div>
+      <div class="flex gap-10" style="margin-bottom:16px;">
+        <select class="input" id="aoTier"><option value="">Semua Tier</option>${['S','A','B','C','D'].map(t=>`<option ${t===tierFilter?'selected':''}>${t}</option>`).join('')}</select>
+        <select class="input" id="aoArea"><option value="">Semua Area</option>${areas.map(a=>`<option ${a===areaFilter?'selected':''}>${a}</option>`).join('')}</select>
+      </div>
+      <div id="aoResults">${addStoreResultsHtml(query, tierFilter, areaFilter)}</div>
+    </div>`;
+}
+function openAddStorePanel(day){
+  STEP.openResponsiveModal(addStorePanelHtml(day, '', '', ''));
+  wireAddStorePanel(day);
+}
+function wireAddStorePanel(day){
+  const rerender = () => {
+    const q = document.getElementById('aoSearch').value;
+    const tier = document.getElementById('aoTier').value;
+    const area = document.getElementById('aoArea').value;
+    document.getElementById('aoResults').innerHTML = addStoreResultsHtml(q, tier, area);
+    wireAddStoreResults(day);
+  };
+  document.getElementById('aoSearch').addEventListener('input', rerender);
+  document.getElementById('aoTier').addEventListener('change', rerender);
+  document.getElementById('aoArea').addEventListener('change', rerender);
+  wireAddStoreResults(day);
+}
+function wireAddStoreResults(day){
+  document.querySelectorAll('[data-addoutlet]').forEach(btn => btn.addEventListener('click', () => {
+    const o = STEP.outletById(btn.dataset.addoutlet);
+    addStoreToRoute(o, day);
+    STEP.closeModal();
+    STEP.toast(`${o.name} ditambahkan ke ${DAY_DEFS.find(d=>d.key===day).full}`, '✅');
+  }));
+}
+function addStoreToRoute(o, day){
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  route[day].push({ seq: route[day].length+1, code: o.code, name: o.name, tier: o.tier, area: o.territory, plannedTime: nextTimeForDay(day), lastSellIn: o.achieved, lastVisitDays: o.lastVisitDays, sourceOutletId: o.id });
+  saveRoute(activeSalesmanId, currentWeekOffset, route, 'manual');
+  renderDayTabs(); renderStoreCards(); renderReco();
+}
+document.getElementById('fabAddStore').addEventListener('click', () => openAddStorePanel(activeDay));
+
+/* ---- Recommendation panel: shared content, two shells (desktop right panel / mobile bottom sheet) ---- */
+const DAY_ID_BY_LABEL = { Mon:'mon', Tue:'tue', Wed:'wed', Thu:'thu', Fri:'fri', Sat:'sat' };
+const DAY_FULL_ID = { mon:'Senin', tue:'Selasa', wed:'Rabu', thu:'Kamis', fri:'Jumat', sat:'Sabtu' };
+
+function matchesRecoFilters(r, o){
+  const activeCats = [...recoFilters].filter(k => RECO_CATEGORY_KEYS.has(k));
+  if (activeCats.length && !activeCats.includes(r.category)) return false;
+  const activeAttrs = [...recoFilters].filter(k => !RECO_CATEGORY_KEYS.has(k));
+  if (!activeAttrs.length) return true;
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  const todayAreas = new Set(route[activeDay].map(s => s.area));
+  return activeAttrs.some(k => {
+    if (k === 'tierS') return o.tier === 'S';
+    if (k === 'tierA') return o.tier === 'A';
+    if (k === 'highsellin') return o.lastSellIn >= 2000000;
+    if (k === 'longnovisit') return o.lastVisitDays >= 15;
+    if (k === 'nearby') return todayAreas.has(o.territory);
+    return false;
+  });
+}
+function recoQuickFiltersHtml(){
+  return RECO_QUICK_FILTERS.map(f => `<span class="chip ${recoFilters.has(f.key)?'active':''}" data-recof="${f.key}">${f.label}${recoFilters.has(f.key)?' <span class="x">✕</span>':''}</span>`).join('');
+}
+function wireRecoQuickFilters(container){
+  container.querySelectorAll('[data-recof]').forEach(c => c.addEventListener('click', () => {
+    const k = c.dataset.recof;
+    recoFilters.has(k) ? recoFilters.delete(k) : recoFilters.add(k);
+    renderRecoQuickFiltersAll();
+    renderReco();
+  }));
+}
+function renderRecoQuickFiltersAll(){
+  const d = document.getElementById('recoQuickFilters');
+  if (d) { d.innerHTML = recoQuickFiltersHtml(); wireRecoQuickFilters(d); }
+  const m = document.getElementById('recoQuickFiltersMobile');
+  if (m) { m.innerHTML = recoQuickFiltersHtml(); wireRecoQuickFilters(m); }
+}
+function recoListHtml(){
+  const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset);
+  const assignedOutletIds = new Set(DAY_DEFS.flatMap(d => route[d.key].filter(s=>s.sourceOutletId).map(s=>s.sourceOutletId)));
+  const items = D.recommendations.filter(r => !assignedOutletIds.has(r.outletId) && matchesRecoFilters(r, STEP.outletById(r.outletId)));
+  const catBadge = { critical:'pill-danger', recommended:'pill-warning', optional:'pill-info' };
+  const catLabel = { critical:'Critical', recommended:'Recommended', optional:'Optional' };
+  return items.length ? items.map(r => {
+    const o = STEP.outletById(r.outletId);
+    return `<div class="reco-card reco-${r.category}">
+      <div class="reco-head">
+        <span class="pill ${catBadge[r.category]}">${catLabel[r.category]}</span>
+        <span class="reco-score">Score ${Math.round(r.score*100)}</span>
+      </div>
+      <div style="margin-top:8px;"><strong style="font-size:13px;">${o.name}</strong> ${STEP.tierBadge(o.tier)}</div>
+      <div class="text-sm ink-faint" style="margin-bottom:4px;">${o.code}</div>
+      <div class="reco-reasoning"><div class="label" style="margin-bottom:4px;">Alasan:</div>${r.reasons.map(x=>`<div><span class="ok">✓</span>${x}</div>`).join('')}</div>
+      <div class="flex gap-8 mt-8">
+        <button class="btn btn-outline btn-sm" style="flex:1;" data-recodetail="${o.id}">Lihat Detail</button>
+        <button class="btn btn-primary btn-sm reco-add-btn" style="flex:1.4;" data-add="${o.id}">+ Tambahkan ke Route</button>
+      </div>
+    </div>`;
+  }).join('') : `<div class="empty-state" style="padding:24px 0;"><div class="ic">✨</div><p>Tidak ada rekomendasi yang cocok dengan filter saat ini.</p></div>`;
+}
+function wireRecoListEvents(container){
+  container.querySelectorAll('.reco-add-btn').forEach(btn => btn.addEventListener('click', () => {
+    const o = STEP.outletById(btn.dataset.add);
+    addStoreToRoute(o, activeDay);
+    STEP.toast(`${o.name} ditambahkan ke ${DAY_FULL_ID[activeDay]}`, '✅');
+  }));
+  container.querySelectorAll('[data-recodetail]').forEach(btn => btn.addEventListener('click', () => openRecoDetailPanel(btn.dataset.recodetail)));
+}
+function renderReco(){
+  const desktopList = document.getElementById('recoList');
+  if (desktopList) { desktopList.innerHTML = recoListHtml(); wireRecoListEvents(desktopList); }
+  const mobileList = document.getElementById('recoListMobile');
+  if (mobileList) { mobileList.innerHTML = recoListHtml(); wireRecoListEvents(mobileList); }
+}
+renderRecoQuickFiltersAll();
+
+function openRecoDetailPanel(outletId){
+  const o = STEP.outletById(outletId);
+  const r = D.recommendations.find(rec => rec.outletId === outletId);
+  const html = `
+    <div class="${STEP.isMobile() ? 'bottom-sheet-head' : 'drawer-head'}"><strong>Detail Recommendation</strong><button class="icon-btn" onclick="${STEP.isMobile()?'STEP.closeSheet()':'STEP.closeDrawer()'}">✕</button></div>
+    <div class="${STEP.isMobile() ? 'bottom-sheet-body' : 'drawer-body'}">
+      <div class="h3">${o.name}</div>
+      <div class="text-sm ink-faint mt-8">${o.code} · ${o.territory}</div>
+      <div class="grid-2 mt-20">
+        <div><div class="label">Tier</div><div class="mt-8">${STEP.tierBadge(o.tier)}</div></div>
+        <div><div class="label">Score</div><div class="mt-8 num">${r?Math.round(r.score*100):'—'}</div></div>
+        <div><div class="label">Last Visit</div><div class="mt-8">${o.lastVisitDays} hari lalu</div></div>
+        <div><div class="label">Sell-In Growth</div><div class="mt-8" style="color:${o.sellInGrowthPct>=0?'var(--success)':'var(--danger)'}; font-weight:700;">${o.sellInGrowthPct>=0?'+':''}${o.sellInGrowthPct}%</div></div>
+      </div>
+      ${r ? `<div class="reco-reasoning mt-20"><div class="label" style="margin-bottom:4px;">Alasan:</div>${r.reasons.map(x=>`<div><span class="ok">✓</span>${x}</div>`).join('')}</div>` : ''}
+      <button class="btn btn-primary w-full mt-20" id="recoDetailAddBtn">+ Tambahkan ke Route</button>
+    </div>`;
+  if (STEP.isMobile()) STEP.openSheet(html); else STEP.openDrawer(html);
+  document.getElementById('recoDetailAddBtn').addEventListener('click', () => {
+    addStoreToRoute(o, activeDay);
+    STEP.isMobile() ? STEP.closeSheet() : STEP.closeDrawer();
+    STEP.toast(`${o.name} ditambahkan ke ${DAY_FULL_ID[activeDay]}`, '✅');
+  });
+}
+
+document.getElementById('recoCollapseToggle').addEventListener('click', () => {
+  const panel = document.getElementById('recoPanelDesktop');
+  const collapsed = !panel.classList.contains('collapsed');
+  panel.classList.toggle('collapsed', collapsed);
+  setRecoPanelCollapsed(collapsed);
+  document.getElementById('recoCollapseToggle').textContent = collapsed ? '⌄' : '⌃';
+});
+if (isRecoPanelCollapsed()) { document.getElementById('recoPanelDesktop').classList.add('collapsed'); document.getElementById('recoCollapseToggle').textContent = '⌄'; }
+
+function openRecoSheetMobile(){
+  STEP.openSheet(`
+    <div class="bottom-sheet-head"><strong>Recommendation</strong><button class="icon-btn" onclick="STEP.closeSheet()">✕</button></div>
+    <div class="bottom-sheet-body">
+      <div class="chip-row" id="recoQuickFiltersMobile"></div>
+      <div id="recoListMobile" class="mt-14"></div>
+    </div>`, { full: true });
+  renderRecoQuickFiltersAll();
+  renderReco();
+}
+document.getElementById('recoMobileBtnHeader').addEventListener('click', () => {
+  if (STEP.isMobile()) { openRecoSheetMobile(); return; }
+  const panel = document.getElementById('recoPanelDesktop');
+  if (panel.classList.contains('collapsed')) {
+    panel.classList.remove('collapsed'); setRecoPanelCollapsed(false);
+    document.getElementById('recoCollapseToggle').textContent = '⌃';
+  }
+  panel.scrollIntoView({ behavior:'smooth', block:'start' });
+});
+
+/* ---- Mobile sticky action bar ---- */
+document.getElementById('mobileSaveDraft').addEventListener('click', () => { const { route } = getRouteForWeek(activeSalesmanId, currentWeekOffset); saveRoute(activeSalesmanId, currentWeekOffset, route, 'manual'); });
+document.getElementById('mobileSubmit').addEventListener('click', () => STEP.toast('Route berhasil di-submit — terlihat oleh tim Anda', '✅'));
+
+/* ---- Wizard: + Buat Route ---- */
+let wizardStep = 1;
+let wizardSalesman = activeSalesmanId;
+let wizardSearch = '';
+function wizardHtml(){
+  const steps = ['Pilih Salesman','Pilih Minggu','Tambah Store','Review','Simpan'];
+  const stepperHtml = steps.map((s,i) => `
+    <div class="step ${i+1===wizardStep?'active':(i+1<wizardStep?'done':'')}">
+      <div class="dot">${i+1<wizardStep?'✓':i+1}</div><span class="lbl">${s}</span>
+    </div>${i<steps.length-1?'<div class="sep"></div>':''}`).join('');
+
+  let body = '';
+  if (wizardStep===1) {
+    const q = wizardSearch.toLowerCase();
+    const matches = groupSalesmen.filter(s => !q || s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q) || s.area.toLowerCase().includes(q)).slice(0, 8);
+    body = `<div class="field"><label>Cari Salesman</label><input class="input" id="wizSmSearch" placeholder="Nama, ID, atau area..." value="${wizardSearch}"></div>
+      <div class="mt-14">${matches.map(s=>`
+      <label class="flex items-center gap-10" style="padding:10px; border:1px solid var(--line); border-radius:var(--radius-sm); margin-top:8px; cursor:pointer;">
+        <input type="radio" name="wsm" value="${s.id}" ${s.id===wizardSalesman?'checked':''}> <span>${s.name} <span class="ink-faint text-sm">(${s.code} · ${s.area})</span></span>
+      </label>`).join('') || '<p class="text-sm ink-faint mt-10">Tidak ada hasil.</p>'}</div>`;
+  }
+  if (wizardStep===2) body = `<div class="field"><label>Minggu</label>
+    <div class="card card-pad" style="background:var(--soft-white);">Minggu <strong>${weekLabel(currentWeekOffset)}</strong></div>
+    <div class="flex gap-10 mt-14">
+      <button class="btn btn-outline btn-sm" id="wizCopyPrev">Gunakan Route Minggu Sebelumnya</button>
+      <button class="btn btn-outline btn-sm" id="wizApplyTpl">Gunakan Template</button>
+    </div></div>`;
+  if (wizardStep===3) {
+    const { route } = getRouteForWeek(wizardSalesman, currentWeekOffset);
+    const assigned = new Set(DAY_DEFS.flatMap(d=>route[d.key].filter(s=>s.sourceOutletId).map(s=>s.sourceOutletId)));
+    const critical = D.recommendations.filter(r=>r.category==='critical' && !assigned.has(r.outletId));
+    body = `<p class="text-sm ink-soft">Tambahkan rekomendasi Critical sekarang, atau gunakan panel Recommendation setelah menutup wizard ini.</p>
+      <div class="mt-14">${critical.map(r=>{ const o=STEP.outletById(r.outletId); const dk = DAY_ID_BY_LABEL[r.suggestedDay]; return `<label class="flex items-center gap-10" style="padding:8px 0;"><input type="checkbox" class="wizAddChk" value="${r.outletId}" data-day="${dk}"> <span>${o.name} — tambahkan ke ${DAY_FULL_ID[dk]}</span></label>`; }).join('') || '<p class="text-sm ink-faint">Tidak ada Store Critical untuk salesman ini.</p>'}</div>`;
+  }
+  if (wizardStep===4) {
+    const sm = D.salesmen.find(s=>s.id===wizardSalesman);
+    const { route } = getRouteForWeek(wizardSalesman, currentWeekOffset);
+    const total = DAY_DEFS.reduce((a,d)=>a+route[d.key].length,0);
+    const overDays = DAY_DEFS.filter(d=>route[d.key].length > sm.capacityPerDay);
+    body = `<div class="card card-pad" style="background:var(--soft-white);">
+      <div class="flex justify-between"><span>Salesman</span><strong>${sm.name}</strong></div>
+      <div class="flex justify-between mt-8"><span>Total Store direncanakan</span><strong>${total}</strong></div>
+      <div class="flex justify-between mt-8"><span>Hari melebihi kapasitas</span><strong style="color:${overDays.length?'var(--danger)':'var(--success)'}">${overDays.length}</strong></div>
+    </div>
+    ${overDays.length ? `<div class="text-sm" style="color:var(--danger); margin-top:10px;">⚠️ ${overDays.map(d=>d.full).join(', ')} melebihi kapasitas harian — mohon ditinjau sebelum disimpan.</div>` : `<div class="text-sm" style="color:var(--success); margin-top:10px;">✓ Semua hari masih dalam kapasitas.</div>`}`;
+  }
+  if (wizardStep===5) body = `<div class="empty-state"><div class="ic">✅</div><div class="h3">Siap disimpan</div><p>Route ini akan disimpan dan terlihat oleh tim Anda. Draft sudah otomatis tersimpan sejak awal.</p></div>`;
+
+  return `<div class="modal-head"><strong>Buat Route</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="stepper" style="margin-bottom:22px; flex-wrap:wrap;">${stepperHtml}</div>
+      ${body}
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="wizBack" ${wizardStep===1?'disabled':''}>Kembali</button>
+      <button class="btn btn-primary" id="wizNext">${wizardStep===5?'Simpan Route':'Lanjut'}</button>
+    </div>`;
+}
+function openWizard(){
+  wizardStep = 1; wizardSalesman = activeSalesmanId; wizardSearch = '';
+  STEP.openResponsiveModal(wizardHtml());
+  wireWizard();
+}
+function wireWizard(){
+  document.getElementById('wizBack')?.addEventListener('click', () => { wizardStep--; STEP.openResponsiveModal(wizardHtml()); wireWizard(); });
+  document.getElementById('wizSmSearch')?.addEventListener('input', (e) => { wizardSearch = e.target.value; STEP.openResponsiveModal(wizardHtml()); wireWizard(); });
+  document.getElementById('wizNext')?.addEventListener('click', () => {
+    if (wizardStep===1){ const sel = document.querySelector('input[name="wsm"]:checked'); if (sel) wizardSalesman = sel.value; }
+    if (wizardStep===3){ document.querySelectorAll('.wizAddChk:checked').forEach(chk => { const { route } = getRouteForWeek(wizardSalesman, currentWeekOffset); const o = STEP.outletById(chk.value); route[chk.dataset.day].push({ seq: route[chk.dataset.day].length+1, code:o.code, name:o.name, tier:o.tier, area:o.territory, plannedTime: nextTimeForDay(chk.dataset.day), lastSellIn:o.achieved, lastVisitDays:o.lastVisitDays, sourceOutletId:o.id }); saveRoute(wizardSalesman, currentWeekOffset, route, 'manual', {silent:true}); }); }
+    if (wizardStep===5){ selectSalesmanQuiet(wizardSalesman); STEP.closeModal(); STEP.toast('Route tersimpan — terlihat oleh tim Anda', '✅'); renderAll(); return; }
+    wizardStep++; STEP.openResponsiveModal(wizardHtml()); wireWizard();
+  });
+  document.getElementById('wizCopyPrev')?.addEventListener('click', () => { resetToPreviousWeek(wizardSalesman, currentWeekOffset); STEP.toast('Route minggu sebelumnya disalin ke draft', '📋'); });
+  document.getElementById('wizApplyTpl')?.addEventListener('click', () => { applyTemplate(wizardSalesman, currentWeekOffset); });
+}
+function selectSalesmanQuiet(sid){ activeSalesmanId = sid; localStorage.setItem('step_planner_salesman', activeSalesmanId); }
+document.getElementById('openWizard').addEventListener('click', openWizard);
+
+function renderAll(){
+  renderWeekNav();
+  renderSalesmanRail();
+  if (viewMode === 'weekly') { renderDayTabs(); renderStoreCards(); } else { document.getElementById('copyBanner').innerHTML = ''; renderMonthlyView(); }
+  renderReco();
+  updateFilterBadge();
+}
+renderAll();
+}); // end guardPage
+</script>
+</body>
+</html>

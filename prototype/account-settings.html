@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pengaturan Akun — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="h1">Pengaturan Akun</div>
+      <div class="text-sm ink-faint mt-8">Kelola profil dan keamanan akun Anda.</div>
+
+      <div class="card mt-20">
+        <div class="tabs" id="accTabs" style="padding:0 20px;">
+          <button class="active" data-tab="profile">Profil Saya</button>
+          <button data-tab="password">Ubah Password</button>
+        </div>
+        <div class="widget-body" id="accBody" style="padding:24px 20px;"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('account-settings');
+const role = STEP.getRole();
+const roleInfo = STEP.ROLES[role];
+
+function securityAuditLog() {
+  try { return JSON.parse(localStorage.getItem('step_security_audit') || '[]'); } catch (e) { return []; }
+}
+function pushSecurityAudit(entry) {
+  const log = securityAuditLog();
+  log.unshift(entry);
+  localStorage.setItem('step_security_audit', JSON.stringify(log.slice(0, 20)));
+}
+function mockDeviceInfo() {
+  const ua = navigator.userAgent;
+  const browser = /Edg/.test(ua) ? 'Edge' : /Chrome/.test(ua) ? 'Chrome' : /Firefox/.test(ua) ? 'Firefox' : /Safari/.test(ua) ? 'Safari' : 'Browser';
+  const os = /Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : 'Unknown OS';
+  return `${browser} di ${os}`;
+}
+function nowParts() {
+  const d = new Date();
+  const date = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  return { date, time };
+}
+
+const TABS = {
+  profile: () => `
+    <div class="account-shell">
+      <div class="flex items-center gap-14" style="margin-bottom:20px;">
+        <div class="avatar" style="width:56px; height:56px; font-size:18px;">${roleInfo.initials}</div>
+        <div>
+          <div style="font-weight:700; font-size:16px;">${roleInfo.name}</div>
+          <div class="text-sm ink-faint">${roleInfo.label} · ${roleInfo.territory}</div>
+        </div>
+      </div>
+      <div class="field"><label>Nama Lengkap</label><input class="input" value="${roleInfo.name}" disabled></div>
+      <div class="field mt-14"><label>Role</label><input class="input" value="${roleInfo.label}" disabled></div>
+      <div class="field mt-14"><label>Territory</label><input class="input" value="${roleInfo.territory}" disabled></div>
+      <div class="field mt-14"><label>Brand Group</label><input class="input" value="${STEP.BRAND_GROUPS[STEP.getBrandGroup()].label}" disabled></div>
+      <div class="field mt-14"><label>Email</label><input class="input" value="${roleInfo.name.toLowerCase().replace(/\s+/g,'.')}@skintific.com" disabled></div>
+      <div class="text-sm ink-faint mt-14">Perubahan data profil (nama, email, foto) dikelola oleh Head Office Admin. Hubungi admin jika ada data yang tidak sesuai.</div>
+    </div>`,
+
+  password: () => `
+    <div class="account-shell" id="pwShell">
+      <div class="card card-pad" style="border:1px solid var(--line); box-shadow:none;">
+        <div class="field">
+          <label>Password Saat Ini</label>
+          <div class="pw-input-wrap">
+            <input class="input" type="password" id="pwCurrent" placeholder="Masukkan password saat ini" autocomplete="current-password">
+            <button class="pw-toggle" data-target="pwCurrent" type="button">👁</button>
+          </div>
+          <div class="field-error" id="errCurrent" style="display:none;">Password saat ini salah.</div>
+        </div>
+
+        <div class="field mt-14">
+          <label>Password Baru</label>
+          <div class="pw-input-wrap">
+            <input class="input" type="password" id="pwNew" placeholder="Masukkan password baru" autocomplete="new-password">
+            <button class="pw-toggle" data-target="pwNew" type="button">👁</button>
+          </div>
+          <div class="pw-strength-track"><div class="pw-strength-fill" id="pwStrengthFill"></div></div>
+          <div class="pw-strength-label" id="pwStrengthLabel">Kekuatan password: —</div>
+          <ul class="pw-requirements" id="pwReqList">
+            <li data-rule="len"><span class="chk">○</span> Minimum 8 karakter</li>
+            <li data-rule="upper"><span class="chk">○</span> Minimal 1 huruf besar</li>
+            <li data-rule="lower"><span class="chk">○</span> Minimal 1 huruf kecil</li>
+            <li data-rule="num"><span class="chk">○</span> Minimal 1 angka</li>
+            <li data-rule="special"><span class="chk">○</span> Minimal 1 karakter khusus</li>
+            <li data-rule="notsame"><span class="chk">○</span> Tidak sama dengan password saat ini</li>
+            <li data-rule="nohistory"><span class="chk">○</span> Tidak menggunakan 5 password terakhir</li>
+          </ul>
+        </div>
+
+        <div class="field mt-14">
+          <label>Konfirmasi Password Baru</label>
+          <div class="pw-input-wrap">
+            <input class="input" type="password" id="pwConfirm" placeholder="Ulangi password baru" autocomplete="new-password">
+            <button class="pw-toggle" data-target="pwConfirm" type="button">👁</button>
+          </div>
+          <div class="field-error" id="errConfirm" style="display:none;">New password dan confirmation password tidak cocok.</div>
+        </div>
+
+        <div class="field-error mt-14" id="errGeneral" style="display:none;">Password tidak memenuhi requirement.</div>
+
+        <button class="btn btn-primary mt-20" id="btnSavePw" style="width:100%;">Simpan Password</button>
+      </div>
+
+      <div class="card card-pad mt-20" style="border:1px solid var(--line); box-shadow:none;">
+        <div class="h3">Keamanan Akun</div>
+        <p class="text-sm ink-soft mt-8">Perlindungan yang sudah aktif untuk akun Anda.</p>
+        <div class="security-list mt-14">
+          <div class="sec-row"><div><div class="sec-title">🔐 Password dienkripsi saat disimpan</div><div class="sec-desc">Password tidak pernah disimpan dalam bentuk teks biasa.</div></div></div>
+          <div class="sec-row"><div><div class="sec-title">⏱ Session Timeout otomatis</div><div class="sec-desc">Anda akan logout otomatis setelah periode tidak aktif.</div></div></div>
+          <div class="sec-row"><div><div class="sec-title">📜 Validasi riwayat password</div><div class="sec-desc">5 password terakhir tidak dapat digunakan kembali.</div></div></div>
+          <div class="sec-row"><div><div class="sec-title">🚪 Logout otomatis dari semua device</div><div class="sec-desc">Mengubah password akan mengakhiri sesi di device lain.</div></div></div>
+        </div>
+      </div>
+
+      <div class="card card-pad mt-20" style="border:1px solid var(--line); box-shadow:none;">
+        <div class="h3">Keamanan Lanjutan</div>
+        <p class="text-sm ink-soft mt-8">Fitur ini belum aktif, namun sistem sudah dirancang untuk mendukungnya di masa depan.</p>
+        <div class="security-list mt-14">
+          <div class="sec-row"><div><div class="sec-title">Two-Factor Authentication (2FA)</div><div class="sec-desc">Verifikasi tambahan saat login.</div></div><span class="pill-soon">Coming Soon</span></div>
+          <div class="sec-row"><div><div class="sec-title">Email OTP Verification</div><div class="sec-desc">Kode OTP dikirim ke email untuk aksi sensitif.</div></div><span class="pill-soon">Coming Soon</span></div>
+          <div class="sec-row"><div><div class="sec-title">Password Expiration Policy</div><div class="sec-desc">Password wajib diperbarui secara berkala.</div></div><span class="pill-soon">Coming Soon</span></div>
+          <div class="sec-row"><div><div class="sec-title">Suspicious Login Detection</div><div class="sec-desc">Peringatan otomatis untuk login dari device/lokasi baru.</div></div><span class="pill-soon">Coming Soon</span></div>
+        </div>
+      </div>
+
+      <div class="card card-pad mt-20" style="border:1px solid var(--line); box-shadow:none;">
+        <div class="h3">Riwayat Keamanan Terbaru</div>
+        <div id="secAuditList" class="mt-14"></div>
+      </div>
+    </div>
+    <div class="sticky-actionbar" id="pwStickyBar"><button class="btn btn-primary" id="btnSavePwMobile">Simpan Password</button></div>`,
+};
+
+function renderSecurityAuditList() {
+  const el = document.getElementById('secAuditList');
+  if (!el) return;
+  const log = securityAuditLog();
+  if (!log.length) { el.innerHTML = `<div class="text-sm ink-faint">Belum ada aktivitas keamanan tercatat pada sesi ini.</div>`; return; }
+  el.innerHTML = `<table class="table"><thead><tr><th>User</th><th>Aksi</th><th>Tanggal</th><th>Waktu</th><th>IP Address</th><th>Device</th></tr></thead><tbody>
+    ${log.map(l => `<tr><td>${l.user}</td><td>${l.action}</td><td>${l.date}</td><td>${l.time}</td><td class="ink-faint">${l.ip}</td><td class="ink-faint">${l.device}</td></tr>`).join('')}
+  </tbody></table>`;
+}
+
+function renderAccTab(tab) {
+  document.getElementById('accBody').innerHTML = TABS[tab]();
+  if (tab === 'password') initPasswordTab();
+}
+
+function initPasswordTab() {
+  document.querySelectorAll('.pw-toggle').forEach(btn => btn.addEventListener('click', () => {
+    const input = document.getElementById(btn.dataset.target);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? '🙈' : '👁';
+  }));
+
+  const MOCK_CURRENT_PASSWORD = 'Skintific2026!';
+  const PASSWORD_HISTORY = ['OldPass123!', 'Password2024@', 'Skintific123#'];
+
+  function ruleChecks(pw, current) {
+    return {
+      len: pw.length >= 8,
+      upper: /[A-Z]/.test(pw),
+      lower: /[a-z]/.test(pw),
+      num: /[0-9]/.test(pw),
+      special: /[^A-Za-z0-9]/.test(pw),
+      notsame: pw.length > 0 && pw !== current,
+      nohistory: pw.length > 0 && !PASSWORD_HISTORY.includes(pw),
+    };
+  }
+
+  function updateStrength(pw) {
+    const checks = ruleChecks(pw, MOCK_CURRENT_PASSWORD);
+    const passed = Object.values(checks).filter(Boolean).length;
+    const total = Object.keys(checks).length;
+    document.querySelectorAll('#pwReqList li').forEach(li => {
+      const rule = li.dataset.rule;
+      const met = checks[rule];
+      li.classList.toggle('met', !!met);
+      li.querySelector('.chk').textContent = met ? '✓' : '○';
+    });
+    const pct = pw.length === 0 ? 0 : Math.round((passed / total) * 100);
+    const fill = document.getElementById('pwStrengthFill');
+    const label = document.getElementById('pwStrengthLabel');
+    fill.style.width = pct + '%';
+    let strengthText = '—', color = 'var(--danger)';
+    if (pw.length === 0) { strengthText = '—'; color = 'var(--line)'; }
+    else if (pct < 50) { strengthText = 'Lemah'; color = 'var(--danger)'; }
+    else if (pct < 85) { strengthText = 'Sedang'; color = 'var(--warning)'; }
+    else if (pct < 100) { strengthText = 'Kuat'; color = 'var(--success)'; }
+    else { strengthText = 'Sangat Kuat'; color = 'var(--success)'; }
+    fill.style.background = color;
+    label.textContent = 'Kekuatan password: ' + strengthText;
+    label.style.color = color === 'var(--line)' ? 'var(--ink-faint)' : color;
+    return checks;
+  }
+
+  document.getElementById('pwNew').addEventListener('input', (e) => updateStrength(e.target.value));
+
+  function attemptSubmit() {
+    const current = document.getElementById('pwCurrent').value;
+    const next = document.getElementById('pwNew').value;
+    const confirm = document.getElementById('pwConfirm').value;
+    document.getElementById('errCurrent').style.display = 'none';
+    document.getElementById('errConfirm').style.display = 'none';
+    document.getElementById('errGeneral').style.display = 'none';
+    document.getElementById('pwCurrent').classList.remove('invalid');
+    document.getElementById('pwConfirm').classList.remove('invalid');
+
+    let hasError = false;
+    if (current !== MOCK_CURRENT_PASSWORD) {
+      document.getElementById('errCurrent').style.display = 'block';
+      document.getElementById('pwCurrent').classList.add('invalid');
+      hasError = true;
+    }
+    const checks = ruleChecks(next, current);
+    const allMet = Object.values(checks).every(Boolean);
+    if (!allMet) {
+      document.getElementById('errGeneral').style.display = 'block';
+      hasError = true;
+    }
+    if (next !== confirm || confirm.length === 0) {
+      document.getElementById('errConfirm').style.display = 'block';
+      document.getElementById('pwConfirm').classList.add('invalid');
+      hasError = true;
+    }
+    if (hasError) return;
+
+    const { date, time } = nowParts();
+    pushSecurityAudit({ user: roleInfo.name, action: 'Change Password', date, time, ip: '103.47.132.18', device: mockDeviceInfo() });
+
+    document.getElementById('accBody').innerHTML = `
+      <div class="account-shell">
+        <div class="empty-state">
+          <div class="ic">✅</div>
+          <div class="h3">Password berhasil diperbarui.</div>
+          <p>Anda telah logout otomatis dari semua device lain demi keamanan akun Anda.</p>
+          <a class="btn btn-primary mt-14" href="dashboard.html">Kembali ke Dashboard</a>
+        </div>
+      </div>`;
+    document.getElementById('pwStickyBar')?.remove();
+  }
+
+  document.getElementById('btnSavePw').addEventListener('click', attemptSubmit);
+  document.getElementById('btnSavePwMobile').addEventListener('click', attemptSubmit);
+  renderSecurityAuditList();
+}
+
+document.querySelectorAll('#accTabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#accTabs button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  renderAccTab(b.dataset.tab);
+}));
+
+const initialTab = new URLSearchParams(location.search).get('tab') === 'password' ? 'password' : 'profile';
+document.querySelectorAll('#accTabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === initialTab));
+renderAccTab(initialTab);
+</script>
+</body>
+</html>

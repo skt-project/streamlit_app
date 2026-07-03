@@ -1,0 +1,147 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Approval — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  .appr-row{ display:flex; align-items:center; gap:14px; padding:14px 20px; border-bottom:1px solid var(--line); cursor:pointer; transition: background .15s; }
+  .appr-row:hover{ background: var(--soft-white); }
+  .appr-row .ti{ flex:1; min-width:0; }
+  .appr-row .ti .title{ font-weight:700; font-size:13.5px; }
+  .appr-row .ti .sub{ font-size:11.5px; color:var(--ink-faint); margin-top:3px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="h1">Approval</div>
+      <div class="text-sm ink-faint mt-8" id="apprSubtitle"></div>
+
+      <div class="card mt-20">
+        <div class="flex items-center justify-between" style="padding:0 20px; flex-wrap:wrap; gap:10px;">
+          <div class="tabs" id="statusTabs">
+            <button class="active" data-tab="pending">Menunggu</button>
+            <button data-tab="history">Riwayat</button>
+          </div>
+          <div class="tabs" id="typeTabs">
+            <button class="active" data-type="all">Semua Tipe</button>
+            <button data-type="target_adjustment">Penyesuaian Target</button>
+            <button data-type="tier_override">Override Tier</button>
+            <button data-type="reopen_request">Buka Kembali</button>
+          </div>
+        </div>
+        <div id="apprList"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('approvals');
+STEP.guardPage('approvals', function(scope) {
+const D = STEP.DATA;
+const role = STEP.getRole();
+let statusTab = 'pending';
+let typeTab = 'all';
+
+const subtitles = {
+  spv: 'Pantau status permintaan yang sudah Anda ajukan.',
+  area_manager: 'Bertindak sebagai approver Level 1 untuk area Anda.',
+  distributor_manager: 'Role Head Office — bertindak sebagai approver Level 2 secara nasional, untuk seluruh area dan distributor.',
+  regional_sales: 'Role Head Office — view-only approval monitoring, secara nasional.',
+  ho_admin: 'View-only — approval monitoring nasional.',
+};
+document.getElementById('apprSubtitle').textContent = subtitles[role];
+
+function isPending(a){ return a.status==='pending_l1' || a.status==='pending_l2' || a.status==='rejected_back_to_submitter'; }
+
+function canAct(a){
+  if (role==='area_manager') return a.status==='pending_l1';
+  if (role==='distributor_manager') return a.status==='pending_l2';
+  return false;
+}
+
+function renderList(){
+  let items = D.approvals.filter(a => statusTab==='pending' ? isPending(a) : !isPending(a));
+  if (typeTab !== 'all') items = items.filter(a => a.type === typeTab);
+  document.getElementById('apprList').innerHTML = items.length ? items.map(a => `
+    <div class="appr-row" data-id="${a.id}">
+      <div class="avatar" style="width:34px;height:34px;font-size:11px;">${a.requestedBy.split(' ').map(w=>w[0]).slice(0,2).join('')}</div>
+      <div class="ti">
+        <div class="title">${a.title}</div>
+        <div class="sub">${a.id} · ${STEP.typeLabel(a.type)} · diajukan ${a.submittedAt} oleh ${a.requestedBy}</div>
+      </div>
+      ${STEP.slaChip(a.sla)}
+      ${STEP.statusPill(a.status)}
+    </div>
+  `).join('') : `<div class="empty-state"><div class="ic">🎉</div><div class="h3">Semua sudah selesai.</div><p>Tidak ada item ${statusTab==='pending'?'menunggu':'riwayat'} saat ini.</p></div>`;
+
+  document.querySelectorAll('.appr-row').forEach(row => row.addEventListener('click', () => openDetail(row.dataset.id)));
+}
+
+function openDetail(id){
+  const a = D.approvals.find(x=>x.id===id);
+  const actionable = canAct(a);
+  STEP.openDrawer(`
+    <div class="drawer-head"><strong>${a.id}</strong><button class="icon-btn" onclick="STEP.closeDrawer()">✕</button></div>
+    <div class="drawer-body">
+      <div class="pill pill-info">${STEP.typeLabel(a.type)}</div>
+      <div class="h3 mt-14">${a.title}</div>
+      <div class="flex items-center gap-10 mt-8">${STEP.statusPill(a.status)} ${STEP.slaChip(a.sla)}</div>
+
+      <div class="grid-2 mt-20">
+        <div><div class="label">Diajukan Oleh</div><div class="mt-8 text-sm">${a.requestedBy}</div></div>
+        <div><div class="label">Tanggal Submit</div><div class="mt-8 text-sm">${a.submittedAt}</div></div>
+        <div><div class="label">Saat Ini</div><div class="mt-8 text-sm">${a.current}</div></div>
+        <div><div class="label">Usulan</div><div class="mt-8 text-sm" style="font-weight:700;">${a.proposed} ${a.deltaPct?`<span class="ink-faint">(${a.deltaPct})</span>`:''}</div></div>
+        ${a.autoEngine ? `<div><div class="label">Saran Auto-Engine</div><div class="mt-8 text-sm">${a.autoEngine}</div></div>` : ''}
+        <div><div class="label">Batas SLA</div><div class="mt-8 text-sm">${a.slaDueAt}</div></div>
+      </div>
+
+      <div class="mt-20"><div class="label">Alasan</div><p class="text-sm mt-8">${a.reason}</p></div>
+
+      <div class="mt-20"><div class="label">Komentar & Timeline</div>
+        <div class="timeline mt-10">${a.comments.map(c=>`<div class="timeline-item"><div class="t-title">"${c.text}"</div><div class="t-meta">${c.by} · ${c.at}</div></div>`).join('')}</div>
+      </div>
+
+      ${actionable ? `
+        <div class="field mt-14"><label>Komentar Anda</label><textarea class="input" id="decisionComment" rows="3" placeholder="Wajib diisi untuk Reject, opsional untuk Approve..."></textarea></div>
+        <div class="flex gap-10 mt-14">
+          <button class="btn btn-danger" id="btnReject">Reject</button>
+          <button class="btn btn-primary" id="btnApprove">Approve</button>
+        </div>
+      ` : (role==='spv' && a.status==='rejected_back_to_submitter' ? `<button class="btn btn-primary mt-14" onclick="STEP.closeDrawer(); STEP.toast('Revisi permintaan dan submit ulang dari halaman asalnya','✏️')">Revisi & Submit Ulang</button>` : '')}
+    </div>
+  `);
+
+  document.getElementById('btnApprove')?.addEventListener('click', () => { STEP.closeDrawer(); STEP.toast('Disetujui — kurang dari 1 detik', '✅'); });
+  document.getElementById('btnReject')?.addEventListener('click', () => {
+    const c = document.getElementById('decisionComment').value.trim();
+    if (!c) { STEP.toast('Komentar wajib diisi untuk menolak', '⚠️'); return; }
+    STEP.closeDrawer(); STEP.toast('Ditolak — dikembalikan ke pengaju', '↩️');
+  });
+}
+
+document.querySelectorAll('#statusTabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#statusTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  statusTab = b.dataset.tab; renderList();
+}));
+document.querySelectorAll('#typeTabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#typeTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  typeTab = b.dataset.type; renderList();
+}));
+renderList();
+}); // end guardPage
+</script>
+</body>
+</html>

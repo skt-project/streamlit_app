@@ -1,0 +1,518 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Master Data PJP — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  .source-badge-pjp   { background:var(--primary-50,#EEF2FF); color:var(--primary-700,#4338CA); padding:2px 8px; border-radius:10px; font-size:var(--text-xs); font-weight:600; }
+  .source-badge-basis { background:#FFF9E6; color:#92400E; padding:2px 8px; border-radius:10px; font-size:var(--text-xs); font-weight:600; }
+  .coverage-bar       { height:8px; border-radius:4px; background:var(--border); overflow:hidden; margin-top:4px; }
+  .coverage-fill      { height:100%; border-radius:4px; background:var(--success); }
+  .metric-mini        { display:flex; flex-direction:column; gap:2px; }
+  .metric-mini .val   { font-size:1.5rem; font-weight:700; color:var(--ink); }
+  .metric-mini .lbl   { font-size:var(--text-xs); color:var(--ink-faint); }
+  .deadline-chip      { display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:var(--text-sm); font-weight:600; }
+  .chip-open   { background:#DCFCE7; color:#166534; }
+  .chip-closed { background:#FEE2E2; color:#991B1B; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:12px;">
+        <div>
+          <div class="h1">Master Data PJP</div>
+          <div class="text-sm ink-faint" style="margin-top:4px;">
+            PJP efektif per distributor — PJP eksplisit + fallback Database Basis untuk toko tanpa assignment.
+          </div>
+        </div>
+        <div id="actionBar" style="display:flex; gap:10px; align-items:center;"></div>
+      </div>
+
+      <div id="roleBanner" style="display:none; margin-top:16px;"></div>
+
+      <!-- Config strip -->
+      <div id="configStrip" class="card mt-16" style="display:none; padding:14px 20px;">
+        <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
+          <div class="metric-mini">
+            <div class="lbl">Deadline Input PJP</div>
+            <div style="margin-top:4px;" id="deadlineDisplay"></div>
+          </div>
+          <div class="metric-mini" id="distSelectorWrap">
+            <div class="lbl">Distributor</div>
+            <select id="distSelector" style="margin-top:4px; padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:var(--text-sm); background:var(--surface); color:var(--ink);">
+              <option value="">— Semua —</option>
+            </select>
+          </div>
+          <div class="metric-mini">
+            <div class="lbl">Navigasi</div>
+            <div style="margin-top:4px; display:flex; gap:8px;">
+              <a href="master-data-salesman.html" class="btn btn-outline btn-sm">👤 Kelola Salesman</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Coverage summary -->
+      <div id="summaryRow" class="mt-16" style="display:none; display:grid; grid-template-columns:repeat(4,1fr); gap:12px;"></div>
+
+      <!-- Main card -->
+      <div class="card mt-16" id="mainCard" style="display:none;">
+        <div class="tabs" id="pjpTabs" style="padding:0 20px;">
+          <button class="active" data-tab="effective">PJP Efektif</button>
+          <button data-tab="upload">Upload / Perbarui PJP</button>
+          <button data-tab="config">Konfigurasi Deadline</button>
+        </div>
+        <div class="widget-body">
+          <div id="pjpTabBody"></div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('master-data');
+STEP.guardPage('master-data-pjp', function(scope) {
+const role = STEP.getRole();
+document.getElementById('configStrip').style.display = '';
+document.getElementById('summaryRow').style.display = 'grid';
+document.getElementById('mainCard').style.display = '';
+
+/* ══════════════════════════════════════════════════════════════════
+   MASTER DATA PJP — Comprehensive mock dataset
+   ──────────────────────────────────────────────────────────────────
+   PJP (Plan Journey Plan / Rencana Kunjungan) is the schedule that
+   defines WHICH salesman visits WHICH store, on WHICH DAY, at WHAT
+   FREQUENCY, and in WHICH WEEK CYCLE.
+
+   Two sources:
+     • PJP   — explicitly uploaded by distributor each period.
+               Contains day, frequency, and week cycle.
+     • Basis — fallback from Database Basis when no PJP uploaded yet.
+               Only salesman assignment is known; day/freq/week = null.
+
+   Coverage = (stores with PJP) / (total stores in Basis DB)
+   Goal: 100% stores covered by explicit PJP (not just Basis).
+   ══════════════════════════════════════════════════════════════════ */
+
+const DISTS = [
+  { code: 'DST171', name: 'PT Mitra Jaya Distribusi'  },
+  { code: 'DST082', name: 'PT Sinar Abadi Sejahtera'  },
+  { code: 'DST055', name: 'PT Cahaya Nusantara'        },
+  { code: 'DST033', name: 'PT Berkah Sentosa'          },
+  { code: 'DST019', name: 'PT Anugerah Makmur'         },
+];
+
+const BRANDS = ['SKT', 'G2G', 'TPH'];
+const DAYS   = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const FREQS  = ['F4+', 'F4', 'F2', 'F1'];
+const WEEKS  = ['Ganjil', 'Genap', 'Ganjil+Genap'];
+
+/* ── Effective PJP dataset ──
+   Rows = one record per (store × brand × salesman) combination.
+   PJP rows have day/freq/week filled.
+   Basis rows have them null — used as last-resort coverage.          */
+let EFF_PJP = [
+
+  /* ═══════════════════════════════════════════════════════════════
+     DST171 — PT Mitra Jaya Distribusi (Jakarta)
+     10 stores. STR00001–STR00007 have explicit PJP.
+     STR00008–STR00010 still basis-only (belum di-upload).
+     ════════════════════════════════════════════════════════════ */
+
+  // STR00001 — Tier S store, dikunjungi 3 brand
+  { dist_code:'DST171', kode_toko:'STR00001', store_name:'Toko Sumber Jaya Jakarta Selatan', brand:'SKT', salesman:'Yusuf Maulana',  hari:'Senin',  frekuensi:'F4+', minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST171', kode_toko:'STR00001', store_name:'Toko Sumber Jaya Jakarta Selatan', brand:'G2G', salesman:'Agus Setiadi',   hari:'Rabu',   frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST171', kode_toko:'STR00001', store_name:'Toko Sumber Jaya Jakarta Selatan', brand:'TPH', salesman:'Maya Kusuma',    hari:'Jumat',  frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+
+  // STR00002 — Apotek (2 brand)
+  { dist_code:'DST171', kode_toko:'STR00002', store_name:'Apotek Cahaya Sehat Kemang',       brand:'SKT', salesman:'Yusuf Maulana',  hari:'Selasa', frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST171', kode_toko:'STR00002', store_name:'Apotek Cahaya Sehat Kemang',       brand:'TPH', salesman:'Maya Kusuma',    hari:'Kamis',  frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+
+  // STR00003 — Beauty store (SKT only)
+  { dist_code:'DST171', kode_toko:'STR00003', store_name:'Beauty Corner Kemang',             brand:'SKT', salesman:'Agus Setiadi',   hari:'Kamis',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+
+  // STR00004 — Mini market (3 brand)
+  { dist_code:'DST171', kode_toko:'STR00004', store_name:'Indomaret Cipete Raya',            brand:'SKT', salesman:'Yusuf Maulana',  hari:'Senin',  frekuensi:'F4+', minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST171', kode_toko:'STR00004', store_name:'Indomaret Cipete Raya',            brand:'G2G', salesman:'Agus Setiadi',   hari:'Rabu',   frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST171', kode_toko:'STR00004', store_name:'Indomaret Cipete Raya',            brand:'TPH', salesman:'Maya Kusuma',    hari:'Jumat',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+
+  // STR00005 — Klinik estetika
+  { dist_code:'DST171', kode_toko:'STR00005', store_name:'Klinik Estetika Dermis',           brand:'SKT', salesman:'Putri Lestari',  hari:'Rabu',   frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+  { dist_code:'DST171', kode_toko:'STR00005', store_name:'Klinik Estetika Dermis',           brand:'TPH', salesman:'Maya Kusuma',    hari:'Jumat',  frekuensi:'F1',  minggu:'Ganjil',       source:'PJP' },
+
+  // STR00006 — Swalayan (2 brand)
+  { dist_code:'DST171', kode_toko:'STR00006', store_name:'Swalayan Maju Bersama',            brand:'SKT', salesman:'Putri Lestari',  hari:'Selasa', frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST171', kode_toko:'STR00006', store_name:'Swalayan Maju Bersama',            brand:'G2G', salesman:'Agus Setiadi',   hari:'Kamis',  frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+
+  // STR00007 — Toko kelontong (1 brand)
+  { dist_code:'DST171', kode_toko:'STR00007', store_name:'Toko Berkah Abadi',                brand:'SKT', salesman:'Putri Lestari',  hari:'Sabtu',  frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+
+  // STR00008–00010 — BELUM TER-PJP (Basis only — 3 toko ini coverage gap)
+  { dist_code:'DST171', kode_toko:'STR00008', store_name:'Glow Beauty Mart Blok M',          brand:'SKT', salesman:'Agus Setiadi',   hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST171', kode_toko:'STR00008', store_name:'Glow Beauty Mart Blok M',          brand:'G2G', salesman:'Agus Setiadi',   hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST171', kode_toko:'STR00009', store_name:'Apotek Sehat Selalu Pondok Indah', brand:'SKT', salesman:'Yusuf Maulana',  hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST171', kode_toko:'STR00010', store_name:'Mini Market Harmoni',              brand:'SKT', salesman:'Putri Lestari',  hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST171', kode_toko:'STR00010', store_name:'Mini Market Harmoni',              brand:'G2G', salesman:'Agus Setiadi',   hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST171', kode_toko:'STR00010', store_name:'Mini Market Harmoni',              brand:'TPH', salesman:'Maya Kusuma',    hari:null, frekuensi:null, minggu:null, source:'Basis' },
+
+  /* ═══════════════════════════════════════════════════════════════
+     DST082 — PT Sinar Abadi Sejahtera (Jawa Barat)
+     8 stores. STR00020–STR00025 PJP. STR00026–STR00027 Basis only.
+     ════════════════════════════════════════════════════════════ */
+  { dist_code:'DST082', kode_toko:'STR00020', store_name:'Toko Cantik Bersama Bandung',      brand:'SKT', salesman:'Dewi Anggraini', hari:'Senin',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00020', store_name:'Toko Cantik Bersama Bandung',      brand:'G2G', salesman:'Lina Marlina',   hari:'Rabu',   frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00021', store_name:'Apotek Sejahtera Dago',            brand:'SKT', salesman:'Dewi Anggraini', hari:'Selasa', frekuensi:'F4+', minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00021', store_name:'Apotek Sejahtera Dago',            brand:'TPH', salesman:'Rudi Permana',   hari:'Kamis',  frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00022', store_name:'Swalayan Permata Pasteur',         brand:'SKT', salesman:'Hendra Wijaya',  hari:'Rabu',   frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00022', store_name:'Swalayan Permata Pasteur',         brand:'G2G', salesman:'Lina Marlina',   hari:'Jumat',  frekuensi:'F2',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00023', store_name:'Beauty Store Setiabudhi',          brand:'SKT', salesman:'Hendra Wijaya',  hari:'Kamis',  frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00024', store_name:'Toko Kencana Bogor Kota',         brand:'SKT', salesman:'Lina Marlina',   hari:'Senin',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00024', store_name:'Toko Kencana Bogor Kota',         brand:'G2G', salesman:'Lina Marlina',   hari:'Rabu',   frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+  { dist_code:'DST082', kode_toko:'STR00025', store_name:'Apotek Mulia Bekasi Selatan',     brand:'SKT', salesman:'Hendra Wijaya',  hari:'Selasa', frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  // Basis only
+  { dist_code:'DST082', kode_toko:'STR00026', store_name:'Mini Market Makmur Cimahi',       brand:'SKT', salesman:'Dewi Anggraini', hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST082', kode_toko:'STR00026', store_name:'Mini Market Makmur Cimahi',       brand:'G2G', salesman:'Lina Marlina',   hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST082', kode_toko:'STR00027', store_name:'Klinik Kecantikan Cirebon',       brand:'SKT', salesman:'Hendra Wijaya',  hari:null, frekuensi:null, minggu:null, source:'Basis' },
+
+  /* ═══════════════════════════════════════════════════════════════
+     DST055 — PT Cahaya Nusantara (Jawa Tengah)
+     7 stores. Semua sudah ter-PJP (coverage 100%).
+     ════════════════════════════════════════════════════════════ */
+  { dist_code:'DST055', kode_toko:'STR00030', store_name:'Toko Sentosa Semarang Tengah',    brand:'SKT', salesman:'Siti Rahayu',    hari:'Senin',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00030', store_name:'Toko Sentosa Semarang Tengah',    brand:'G2G', salesman:'Bambang Wibowo', hari:'Rabu',   frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00031', store_name:'Apotek Abadi Simpang Lima',       brand:'SKT', salesman:'Fitri Handayani',hari:'Selasa', frekuensi:'F4+', minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00031', store_name:'Apotek Abadi Simpang Lima',       brand:'TPH', salesman:'Surya Gunawan',  hari:'Kamis',  frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00032', store_name:'Swalayan Nusantara Banyumanik',   brand:'SKT', salesman:'Siti Rahayu',    hari:'Rabu',   frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00033', store_name:'Beauty Mart Solo Baru',           brand:'SKT', salesman:'Bambang Wibowo', hari:'Kamis',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00033', store_name:'Beauty Mart Solo Baru',           brand:'G2G', salesman:'Bambang Wibowo', hari:'Sabtu',  frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00034', store_name:'Klinik Estetika Gatsu Semarang',  brand:'SKT', salesman:'Fitri Handayani',hari:'Jumat',  frekuensi:'F2',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00034', store_name:'Klinik Estetika Gatsu Semarang',  brand:'TPH', salesman:'Surya Gunawan',  hari:'Selasa', frekuensi:'F1',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00035', store_name:'Apotek Purwokerto Indah',         brand:'SKT', salesman:'Surya Gunawan',  hari:'Senin',  frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+  { dist_code:'DST055', kode_toko:'STR00036', store_name:'Toko Makmur Kudus',               brand:'SKT', salesman:'Siti Rahayu',    hari:'Sabtu',  frekuensi:'F2',  minggu:'Ganjil+Genap', source:'PJP' },
+
+  /* ═══════════════════════════════════════════════════════════════
+     DST033 — PT Berkah Sentosa (Jawa Timur)
+     9 stores. STR00040–STR00045 PJP. STR00046–STR00048 Basis only.
+     ════════════════════════════════════════════════════════════ */
+  { dist_code:'DST033', kode_toko:'STR00040', store_name:'Swalayan Bahagia Surabaya Pusat', brand:'SKT', salesman:'Anton Firmansyah',hari:'Senin', frekuensi:'F4+', minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00040', store_name:'Swalayan Bahagia Surabaya Pusat', brand:'G2G', salesman:'Iwan Setiawan',  hari:'Rabu',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00040', store_name:'Swalayan Bahagia Surabaya Pusat', brand:'TPH', salesman:'Nina Wulandari', hari:'Jumat', frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00041', store_name:'Apotek Sehat Prima Darmo',        brand:'SKT', salesman:'Anton Firmansyah',hari:'Selasa',frekuensi:'F4', minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00042', store_name:'Beauty Box Tunjungan',            brand:'SKT', salesman:'Ratna Sari',     hari:'Rabu',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00042', store_name:'Beauty Box Tunjungan',            brand:'G2G', salesman:'Iwan Setiawan',  hari:'Jumat', frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00043', store_name:'Toko Lestari Malang Kota',        brand:'SKT', salesman:'Ratna Sari',     hari:'Kamis', frekuensi:'F2',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00044', store_name:'Apotek Mitra Sehat Gresik',       brand:'SKT', salesman:'Nina Wulandari', hari:'Selasa',frekuensi:'F2',  minggu:'Genap',        source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00045', store_name:'Swalayan Mulia Sidoarjo',         brand:'SKT', salesman:'Anton Firmansyah',hari:'Jumat',frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST033', kode_toko:'STR00045', store_name:'Swalayan Mulia Sidoarjo',         brand:'G2G', salesman:'Iwan Setiawan',  hari:'Sabtu', frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  // Basis only — 3 toko belum di-upload PJP
+  { dist_code:'DST033', kode_toko:'STR00046', store_name:'Toko Utama Kediri',               brand:'SKT', salesman:'Ratna Sari',     hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST033', kode_toko:'STR00047', store_name:'Klinik Cantik Mojokerto',         brand:'SKT', salesman:'Anton Firmansyah',hari:null,frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST033', kode_toko:'STR00047', store_name:'Klinik Cantik Mojokerto',         brand:'TPH', salesman:'Nina Wulandari', hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST033', kode_toko:'STR00048', store_name:'Apotek Berkah Tulungagung',       brand:'SKT', salesman:'Ratna Sari',     hari:null, frekuensi:null, minggu:null, source:'Basis' },
+
+  /* ═══════════════════════════════════════════════════════════════
+     DST019 — PT Anugerah Makmur (Sumatera Utara)
+     6 stores. STR00050–STR00052 PJP. STR00053–STR00055 Basis only.
+     (Distributor baru — coverage masih rendah, wajar)
+     ════════════════════════════════════════════════════════════ */
+  { dist_code:'DST019', kode_toko:'STR00050', store_name:'Toko Kencana Medan Baru',         brand:'SKT', salesman:'Mira Lestari',   hari:'Senin',  frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST019', kode_toko:'STR00050', store_name:'Toko Kencana Medan Baru',         brand:'G2G', salesman:'Doni Kurniawan', hari:'Rabu',   frekuensi:'F2',  minggu:'Ganjil',       source:'PJP' },
+  { dist_code:'DST019', kode_toko:'STR00051', store_name:'Apotek Prima Sunggal',            brand:'SKT', salesman:'Teguh Wibawa',   hari:'Selasa', frekuensi:'F4',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST019', kode_toko:'STR00052', store_name:'Swalayan Binjai Indah',           brand:'SKT', salesman:'Rani Safitri',   hari:'Kamis',  frekuensi:'F2',  minggu:'Ganjil+Genap', source:'PJP' },
+  { dist_code:'DST019', kode_toko:'STR00052', store_name:'Swalayan Binjai Indah',           brand:'G2G', salesman:'Rani Safitri',   hari:'Sabtu',  frekuensi:'F1',  minggu:'Ganjil',       source:'PJP' },
+  // Basis only — distributor baru, belum PJP penuh
+  { dist_code:'DST019', kode_toko:'STR00053', store_name:'Klinik Estetika Gatot Subroto',  brand:'SKT', salesman:'Mira Lestari',   hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST019', kode_toko:'STR00053', store_name:'Klinik Estetika Gatot Subroto',  brand:'TPH', salesman:'Fani Rahmawati', hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST019', kode_toko:'STR00054', store_name:'Apotek Deli Serdang Raya',       brand:'SKT', salesman:'Teguh Wibawa',   hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST019', kode_toko:'STR00054', store_name:'Apotek Deli Serdang Raya',       brand:'G2G', salesman:'Doni Kurniawan', hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST019', kode_toko:'STR00055', store_name:'Mini Market Pematang Siantar',   brand:'SKT', salesman:'Rani Safitri',   hari:null, frekuensi:null, minggu:null, source:'Basis' },
+  { dist_code:'DST019', kode_toko:'STR00055', store_name:'Mini Market Pematang Siantar',   brand:'G2G', salesman:'Doni Kurniawan', hari:null, frekuensi:null, minggu:null, source:'Basis' },
+];
+
+let currentTab   = 'effective';
+let selectedDist = '';
+let deadlineOpen = true;
+let deadlineDate = '2026-07-31';
+
+/* ── Scope helper ──────────────────────────────────────────────────── */
+function scopedRows() {
+  let rows = EFF_PJP;
+  if (role === 'distributor_admin') {
+    rows = rows.filter(r => r.dist_code === STEP.ROLES['distributor_admin'].distributor_code);
+  } else if (selectedDist) {
+    rows = rows.filter(r => r.dist_code === selectedDist);
+  }
+  return rows;
+}
+
+/* ── Coverage summary ──────────────────────────────────────────────── */
+function buildSummary(rows) {
+  const stores     = new Set(rows.map(r => r.kode_toko));
+  const pjpStores  = new Set(rows.filter(r => r.source==='PJP').map(r => r.kode_toko));
+  const basStores  = [...stores].filter(s => !pjpStores.has(s));
+  const pjpPct     = stores.size ? Math.round(pjpStores.size / stores.size * 100) : 0;
+  return { total: stores.size, pjp: pjpStores.size, basis: basStores.length, pjpPct };
+}
+
+function renderSummaryCards(rows) {
+  const s = buildSummary(rows);
+  const wrap = document.getElementById('summaryRow');
+  wrap.innerHTML = [
+    { val: s.total, lbl: 'Total Toko (Basis DB)' },
+    { val: s.pjp,   lbl: 'Toko dengan PJP' },
+    { val: s.basis, lbl: 'Toko Basis Saja (belum ter-PJP)' },
+    { val: s.pjpPct + '%', lbl: 'Coverage PJP' },
+  ].map(m => `
+    <div class="card card-pad">
+      <div class="metric-mini">
+        <div class="val">${m.val}</div>
+        <div class="lbl">${m.lbl}</div>
+        ${m.lbl==='Coverage PJP'?`<div class="coverage-bar"><div class="coverage-fill" style="width:${s.pjpPct}%"></div></div>`:''}
+      </div>
+    </div>`).join('');
+}
+
+/* ── Tab: Effective PJP ────────────────────────────────────────────── */
+let lastSourceFilter = '';
+let lastBrandFilter  = '';
+
+function renderEffective() {
+  const rows = scopedRows();
+  if (!rows.length) return `<div class="empty-state"><div class="ic">📋</div><p>Tidak ada data PJP efektif untuk filter ini.</p></div>`;
+
+  const search = document.getElementById('effSearch')?.value.toLowerCase() || '';
+  let filtered = applyEffFilters(rows, search);
+
+  /* Per-salesman summary */
+  const bySmn = {};
+  rows.filter(r=>r.source==='PJP').forEach(r => {
+    if (!bySmn[r.salesman]) bySmn[r.salesman] = { stores: new Set(), rows: 0 };
+    bySmn[r.salesman].stores.add(r.kode_toko);
+    bySmn[r.salesman].rows++;
+  });
+
+  return `
+    <!-- ── Penjelasan konsep PJP ── -->
+    <div style="margin-bottom:18px; padding:14px 18px; background:var(--primary-50,#EEF2FF); border:1px solid var(--primary-200,#C7D2FE); border-radius:10px; font-size:var(--text-sm);">
+      <strong style="color:var(--primary-700,#4338CA);">📖 Apa itu PJP?</strong>
+      <div style="margin-top:8px; color:var(--ink-secondary); line-height:1.6;">
+        <strong>PJP (Plan Journey Plan)</strong> = jadwal kunjungan salesman ke toko. Setiap baris PJP menjawab:
+        <em>"Salesman A mengunjungi Toko X untuk brand SKT setiap <u>Hari Senin</u>, <u>4× sebulan</u>, di minggu <u>Ganjil + Genap</u>."</em><br>
+        <div style="margin-top:8px; display:flex; gap:16px; flex-wrap:wrap;">
+          <span><strong>F4+</strong> = lebih dari 4× sebulan (Tier S)</span>
+          <span><strong>F4</strong> = 4× sebulan (semua minggu)</span>
+          <span><strong>F2</strong> = 2× sebulan (Ganjil atau Genap)</span>
+          <span><strong>F1</strong> = 1× sebulan</span>
+        </div>
+        <div style="margin-top:8px;">
+          <span class="source-badge-pjp">PJP</span> = jadwal eksplisit dari file upload distributor &nbsp;|&nbsp;
+          <span class="source-badge-basis">Basis</span> = toko sudah ada di Database Basis tapi belum di-PJP — salesman diketahui, hari/frekuensi belum.
+          <strong>Goal: semua toko coverage 100% PJP.</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Filter bar ── -->
+    <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+      <div class="topbar-search" style="max-width:260px;"><span>🔎</span><input id="effSearch" placeholder="Cari toko / kode / salesman..." oninput="rerenderEffective()" value="${search}"></div>
+      <select id="sourceFilter" style="padding:7px 12px; border:1px solid var(--border); border-radius:6px; font-size:var(--text-sm); background:var(--surface); color:var(--ink);" onchange="rerenderEffective()">
+        <option value="">Semua Sumber</option>
+        <option value="PJP"   ${lastSourceFilter==='PJP'  ?'selected':''}>PJP saja</option>
+        <option value="Basis" ${lastSourceFilter==='Basis'?'selected':''}>Basis saja</option>
+      </select>
+      <select id="brandFilter" style="padding:7px 12px; border:1px solid var(--border); border-radius:6px; font-size:var(--text-sm); background:var(--surface); color:var(--ink);" onchange="rerenderEffective()">
+        <option value="">Semua Brand</option>
+        <option value="SKT" ${lastBrandFilter==='SKT'?'selected':''}>SKT (Skintific)</option>
+        <option value="G2G" ${lastBrandFilter==='G2G'?'selected':''}>G2G (Glad2Glow)</option>
+        <option value="TPH" ${lastBrandFilter==='TPH'?'selected':''}>TPH (Timephoria)</option>
+      </select>
+    </div>
+
+    <!-- ── Salesman load summary ── -->
+    <div style="margin-bottom:14px; padding:12px 16px; background:var(--soft-white); border-radius:8px;">
+      <div style="font-size:var(--text-xs); font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint); margin-bottom:8px;">Beban Toko per Salesman (PJP)</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        ${Object.entries(bySmn).map(([name, d]) => `
+          <div style="padding:5px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; font-size:var(--text-sm);">
+            <span style="font-weight:600;">${name}</span>
+            <span style="color:var(--ink-secondary); margin-left:6px;">🏪 ${d.stores.size} toko</span>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    ${buildEffTable(filtered)}
+    <div class="text-sm ink-faint mt-14">
+      🟡 Baris kuning = sumber <strong>Basis</strong> — toko belum memiliki PJP eksplisit. Hari / Frekuensi / Minggu hanya diisi pada baris PJP.
+    </div>`;
+}
+
+function applyEffFilters(rows, search) {
+  let filtered = rows;
+  if (search)           filtered = filtered.filter(r => r.kode_toko.toLowerCase().includes(search) || r.store_name.toLowerCase().includes(search) || (r.salesman||'').toLowerCase().includes(search));
+  if (lastSourceFilter) filtered = filtered.filter(r => r.source === lastSourceFilter);
+  if (lastBrandFilter)  filtered = filtered.filter(r => r.brand  === lastBrandFilter);
+  return filtered;
+}
+
+function rerenderEffective() {
+  lastSourceFilter = document.getElementById('sourceFilter')?.value || '';
+  lastBrandFilter  = document.getElementById('brandFilter')?.value  || '';
+  const rows   = scopedRows();
+  const search = document.getElementById('effSearch')?.value.toLowerCase() || '';
+  const filtered = applyEffFilters(rows, search);
+  const tbody = document.querySelector('#effTable tbody');
+  if (tbody) tbody.innerHTML = effRows(filtered);
+}
+
+function buildEffTable(rows) {
+  return `<table class="table" id="effTable"><thead><tr>
+    <th>Kode Toko</th><th>Nama Toko</th><th>Brand</th><th>Salesman</th>
+    <th>Hari</th><th>Frekuensi</th><th>Minggu</th><th>Sumber</th>
+  </tr></thead><tbody>${effRows(rows)}</tbody></table>`;
+}
+
+function effRows(rows) {
+  if (!rows.length) return `<tr><td colspan="8" style="text-align:center; color:var(--ink-faint); padding:20px;">Tidak ada data.</td></tr>`;
+  return rows.map(r => `<tr style="${r.source==='Basis'?'background:#FFF9E6':''}" >
+    <td class="ink-faint" style="font-family:monospace;">${r.kode_toko}</td>
+    <td>${r.store_name}</td>
+    <td>${r.brand}</td>
+    <td>${r.salesman||'—'}</td>
+    <td>${r.hari||'—'}</td>
+    <td>${r.frekuensi||'—'}</td>
+    <td>${r.minggu||'—'}</td>
+    <td><span class="${r.source==='PJP'?'source-badge-pjp':'source-badge-basis'}">${r.source}</span></td>
+  </tr>`).join('');
+}
+
+/* ── Tab: Upload / Perbarui PJP ────────────────────────────────────── */
+function renderUpload() {
+  const isOpen = deadlineOpen;
+  return `
+    <div class="flex items-center gap-12" style="margin-bottom:18px;">
+      <span>Status Input Period:</span>
+      <span class="deadline-chip ${isOpen?'chip-open':'chip-closed'}">${isOpen?'🟢 Terbuka':'🔴 Ditutup'} — deadline ${deadlineDate}</span>
+    </div>
+    ${!isOpen ? `<div class="card card-pad" style="background:#FEF2F2; border:1px solid #FCA5A5; margin-bottom:16px;">
+      <strong>⛔ Periode Input Ditutup</strong><br>
+      <span class="text-sm ink-faint">Deadline <strong>${deadlineDate}</strong> telah lewat. Upload baru tidak dapat dilakukan sampai periode berikutnya dibuka di tab Konfigurasi.</span>
+    </div>` : ''}
+    <div class="card card-pad" style="${!isOpen?'opacity:.5; pointer-events:none;':''}">
+      <div class="h3">Upload File PJP</div>
+      <p class="text-sm ink-faint">Upload file Excel PJP menggunakan template resmi. Data lama untuk scope yang dipilih akan dihapus secara atomik dan diganti dengan data baru.</p>
+      <div style="margin-top:16px;">
+        <label class="text-sm" style="font-weight:600;">Scope Update:</label>
+        <div style="display:flex; gap:12px; margin-top:8px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="radio" name="scope" value="dist" checked> Seluruh Distributor</label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="radio" name="scope" value="sal"> Per Salesman</label>
+        </div>
+      </div>
+      <div style="margin-top:16px; border:2px dashed var(--border); border-radius:8px; padding:32px; text-align:center;" id="dropZone"
+        onclick="STEP.toast('Upload file Excel di sini (produksi mengarahkan ke Streamlit v2 untuk eksekusi)','📁')">
+        <div style="font-size:2rem;">📎</div>
+        <div class="text-sm ink-faint mt-8">Klik atau seret file Excel (.xlsx) ke sini</div>
+        <div class="text-xs ink-faint" style="margin-top:4px;">Gunakan template dari Download Template</div>
+      </div>
+      <div style="margin-top:16px; display:flex; gap:10px;">
+        <button class="btn btn-outline btn-sm" onclick="STEP.toast('Mengunduh template PJP kosong...','📥')">📥 Download Template</button>
+        <button class="btn btn-primary btn-sm" onclick="STEP.toast('Di produksi, proses upload dikirim ke API Streamlit v2 untuk validasi &amp; atomic commit','⚙️')">🔄 Proses Upload (simulasi)</button>
+      </div>
+    </div>
+    <div class="text-sm ink-faint mt-14">
+      Catatan arsitektur: upload PJP diorkestrasi oleh Streamlit app <code>salesman_pjp_v2</code> menggunakan BigQuery scripted transaction (BEGIN … EXCEPTION WHEN ERROR THEN RAISE … END) untuk atomisitas penuh — jika INSERT gagal, DELETE sebelumnya otomatis di-rollback.
+    </div>`;
+}
+
+/* ── Tab: Konfigurasi Deadline ─────────────────────────────────────── */
+function renderConfig() {
+  if (role !== 'ho_admin') return `<div class="empty-state"><div class="ic">🔒</div><p>Konfigurasi deadline hanya dapat diubah oleh <strong>HO Admin</strong>.</p></div>`;
+  return `
+    <div class="h3" style="margin-bottom:16px;">Konfigurasi Deadline Input PJP</div>
+    <div class="card card-pad" style="max-width:480px;">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div>
+          <label class="text-sm" style="font-weight:600;">Deadline Input PJP (YYYY-MM-DD)</label>
+          <input id="deadlineInput" type="date" value="${deadlineDate}" style="margin-top:6px; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-size:var(--text-sm); background:var(--surface); color:var(--ink); width:100%; box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="deadlineOpenCheck" ${deadlineOpen?'checked':''}>
+            <span class="text-sm">Periode input sedang terbuka</span>
+          </label>
+          <div class="text-xs ink-faint" style="margin-top:4px;">Hilangkan centang untuk menutup input tanpa mengubah tanggal deadline.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" style="align-self:flex-start;" onclick="saveDeadlineConfig()">Simpan Konfigurasi</button>
+      </div>
+    </div>
+    <div class="text-sm ink-faint mt-14">
+      Di produksi, nilai ini disimpan di <code>sfa_step.app_config</code> (BigQuery) dengan key <code>pjp_input_deadline</code> dan dibaca oleh Streamlit v2 via <code>st.secrets["pjp_input_deadline"]</code>. HO Admin dapat mengubah setiap bulan tanpa deploy ulang.
+    </div>`;
+}
+
+function saveDeadlineConfig() {
+  deadlineDate = document.getElementById('deadlineInput').value;
+  deadlineOpen = document.getElementById('deadlineOpenCheck').checked;
+  renderTabBody();
+  STEP.toast('Konfigurasi deadline disimpan', '✅');
+}
+
+/* ── Render orchestration ──────────────────────────────────────────── */
+function renderTabBody() {
+  const rows = scopedRows();
+  renderSummaryCards(rows);
+  const body = document.getElementById('pjpTabBody');
+  if (currentTab === 'effective') body.innerHTML = renderEffective();
+  if (currentTab === 'upload')    body.innerHTML = renderUpload();
+  if (currentTab === 'config')    body.innerHTML = renderConfig();
+}
+
+function initPage() {
+  /* Distributor selector for ho_admin */
+  const distSel = document.getElementById('distSelector');
+  if (role === 'distributor_admin') {
+    document.getElementById('distSelectorWrap').style.display = 'none';
+  } else {
+    DISTS.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.code; opt.textContent = d.name;
+      distSel.appendChild(opt);
+    });
+    distSel.addEventListener('change', e => { selectedDist = e.target.value; renderTabBody(); });
+  }
+
+  /* Deadline display */
+  const deadlineEl = document.getElementById('deadlineDisplay');
+  deadlineEl.innerHTML = `<span class="deadline-chip ${deadlineOpen?'chip-open':'chip-closed'}">${deadlineOpen?'🟢':'🔴'} ${deadlineDate}</span>`;
+
+  /* Action bar */
+  document.getElementById('actionBar').innerHTML = `
+    <a href="master-data-salesman.html" class="btn btn-outline btn-sm">👤 Kelola Salesman</a>`;
+
+  /* Tabs */
+  document.querySelectorAll('#pjpTabs button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#pjpTabs button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    currentTab = b.dataset.tab;
+    renderTabBody();
+  }));
+
+  renderTabBody();
+}
+
+initPage();
+}); // end guardPage
+</script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pusat Pengumuman — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:10px;">
+        <div>
+          <div class="h1">Pusat Pengumuman</div>
+          <div class="text-sm ink-faint mt-8">Broadcast Campaign, Policy, Meeting, Distributor Announcement, dan Training.</div>
+        </div>
+        <button class="btn btn-primary" id="btnNew" style="display:none;">+ Pengumuman Baru</button>
+      </div>
+
+      <div class="tabs mt-20" id="typeTabs">
+        <button class="active" data-type="all">Semua</button>
+        <button data-type="campaign">Campaign</button>
+        <button data-type="policy">Policy</button>
+        <button data-type="meeting">Meeting</button>
+        <button data-type="distributor">Distributor</button>
+        <button data-type="training">Training</button>
+      </div>
+
+      <div class="mt-20" id="annList" style="display:flex; flex-direction:column; gap:14px;"></div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('announcements');
+const footLink = document.querySelector('#sidebarMount a[href="announcements.html"]');
+if (footLink) { footLink.style.color = '#fff'; footLink.style.fontWeight = '700'; }
+const D = STEP.DATA;
+let type = 'all';
+
+if (STEP.getRole() === 'ho_admin') document.getElementById('btnNew').style.display = '';
+
+function render(){
+  const items = type==='all' ? D.announcements : D.announcements.filter(a=>a.type===type);
+  document.getElementById('annList').innerHTML = items.map(a => `
+    <div class="card card-pad">
+      <div class="flex items-center justify-between">
+        <span class="pill pill-info">${STEP.announcementTypeLabel(a.type)}</span>
+        <span class="text-sm ink-faint">${a.publishedAt}</span>
+      </div>
+      <div class="h3 mt-10">${a.title}</div>
+      <p class="text-sm ink-soft mt-8">${a.body}</p>
+      <div class="text-sm ink-faint mt-10">Audience: ${a.audience}</div>
+    </div>`).join('') || `<div class="empty-state"><div class="ic">📣</div><div class="h3">Tidak ada pengumuman di kategori ini</div></div>`;
+}
+document.querySelectorAll('#typeTabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#typeTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  type = b.dataset.type; render();
+}));
+document.getElementById('btnNew').addEventListener('click', () => {
+  STEP.openModal(`<div class="modal-head"><strong>Pengumuman Baru</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Tipe</label><select class="input"><option>Campaign</option><option>Policy</option><option>Meeting</option><option>Distributor Announcement</option><option>Training</option></select></div>
+      <div class="field mt-14"><label>Judul</label><input class="input" placeholder="Judul pengumuman"></div>
+      <div class="field mt-14"><label>Isi</label><textarea class="input" rows="4" placeholder="Isi pengumuman..."></textarea></div>
+      <div class="field mt-14"><label>Audience</label><input class="input" placeholder="contoh: Semua role, SPV, Area Manager"></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="STEP.closeModal()">Batal</button><button class="btn btn-primary" onclick="STEP.closeModal(); STEP.toast('Pengumuman dipublikasikan','📣')">Publikasikan</button></div>`);
+});
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salesman 360 — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <a href="outlet-salesman.html" class="text-sm ink-faint">← Kembali ke Store & Salesman</a>
+
+      <div class="card card-pad mt-14">
+        <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:14px;">
+          <div class="flex items-center gap-14">
+            <div class="avatar" style="width:52px; height:52px; font-size:18px; border-radius:14px;" id="sInitials"></div>
+            <div>
+              <div class="h1" id="sName" style="font-size:22px;"></div>
+              <div class="text-sm ink-faint mt-8" id="sMeta"></div>
+            </div>
+          </div>
+          <a class="btn btn-primary" href="route-planner.html">Buka di Route Planner →</a>
+        </div>
+      </div>
+
+      <div class="card mt-20">
+        <div class="tabs" id="s360Tabs" style="padding:0 20px;">
+          <button class="active" data-tab="profile">Profile</button>
+          <button data-tab="outlets">Store Ditugaskan</button>
+          <button data-tab="coverage">Coverage</button>
+          <button data-tab="compliance">Route Compliance</button>
+          <button data-tab="sellin">Sell-In</button>
+          <button data-tab="achievement">Achievement</button>
+          <button data-tab="timeline">Timeline</button>
+        </div>
+        <div class="widget-body" id="s360Body"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('outlet-salesman');
+const D = STEP.DATA;
+const id = new URLSearchParams(location.search).get('id') || D.salesmen[0].id;
+const s = D.salesmen.find(x=>x.id===id) || D.salesmen[0];
+const myOutlets = D.outlets.slice(0, 6);
+
+document.getElementById('sInitials').textContent = s.name.split(' ').map(w=>w[0]).slice(0,2).join('');
+document.getElementById('sName').textContent = s.name;
+document.getElementById('sMeta').textContent = `${s.code} · ${s.territory} · kapasitas ${s.capacityPerDay}/hari`;
+
+/* ---- Overall Status hexagon — 6 axes derived from real salesman/outlet fields, no fabricated
+   metrics: Achievement/Compliance/Coverage already exist on `s`; Capacity normalizes capacityPerDay
+   (range ~9-15 across the roster); Portfolio Quality averages the tier of assigned outlets;
+   Sell-In Momentum averages the 3 mock weekly growth deltas shown in the Sell-In tab. ---- */
+function overallStatusAxes(){
+  const tierScore = { S:100, A:80, B:60, C:40, D:20 };
+  const portfolioQuality = Math.round(myOutlets.reduce((a,o)=>a+(tierScore[o.tier]||40),0) / myOutlets.length);
+  const sellInDeltas = [6,2,-3];
+  const sellInMomentum = Math.max(0, Math.min(100, Math.round(50 + (sellInDeltas.reduce((a,b)=>a+b,0)/sellInDeltas.length) * 8)));
+  const capacityUtil = Math.round(((s.capacityPerDay - 9) / (15 - 9)) * 100);
+  return [
+    { label:'Achievement', value: Math.min(120, s.achievementPct) },
+    { label:'Compliance', value: s.routeCompliancePct },
+    { label:'Coverage', value: s.coveragePct },
+    { label:'Capacity', value: Math.max(0, Math.min(100, capacityUtil)) },
+    { label:'Portfolio', value: portfolioQuality },
+    { label:'Momentum', value: sellInMomentum },
+  ];
+}
+
+const TABS = {
+  profile: () => `
+    <div class="grid-3">
+      <div><div class="label">Kode Salesman</div><div class="mt-8">${s.code}</div></div>
+      <div><div class="label">Territory</div><div class="mt-8">${s.territory}</div></div>
+      <div><div class="label">Kapasitas Harian</div><div class="mt-8">${s.capacityPerDay} store/hari</div></div>
+    </div>
+    <div class="card card-pad mt-20" style="background:var(--soft-white); border:1px solid var(--line);">
+      <div class="h3" style="text-align:center;">Overall Performance</div>
+      <div class="text-sm ink-faint mt-6" style="text-align:center;">Ringkasan 6 dimensi performa — gaya kartu statistik pemain.</div>
+      <div class="mt-14">${STEP.hexChartSvg(overallStatusAxes())}</div>
+    </div>`,
+  outlets: () => `<table class="table"><thead><tr><th>Store</th><th>Tier</th><th>Last Visit</th></tr></thead><tbody>
+    ${myOutlets.map(o=>`<tr><td><a href="outlet-360.html?id=${o.id}" style="color:var(--primary-600); font-weight:600;">${o.name}</a></td><td>${STEP.tierBadge(o.tier)}</td><td>${o.lastVisitDays} hari lalu</td></tr>`).join('')}
+  </tbody></table>`,
+  coverage: () => `<div class="flex items-center gap-14">
+    <div class="gauge" style="--pct:${s.coveragePct};"><span class="gauge-val">${s.coveragePct}%</span></div>
+    <p class="text-sm ink-soft">Store yang dikunjungi minimal satu kali dalam 30 hari terakhir, dari seluruh store yang terpetakan.</p>
+  </div>`,
+  compliance: () => `<div class="flex items-center gap-14">
+    <div class="gauge ${s.routeCompliancePct<80?'warn':''}" style="--pct:${s.routeCompliancePct};"><span class="gauge-val">${s.routeCompliancePct}%</span></div>
+    <p class="text-sm ink-soft">Kunjungan yang direncanakan dan benar-benar terlaksana bulan ini, disinkronkan dari checkpoint kunjungan SFA-Handheldv2.</p>
+  </div>`,
+  sellin: () => `<table class="table"><thead><tr><th>Minggu</th><th>Sell-In</th><th>vs. Minggu Lalu</th></tr></thead><tbody>
+    <tr><td>Minggu 25</td><td class="num">${STEP.fmtIDR(18200000)}</td><td style="color:var(--success); font-weight:700;">+6%</td></tr>
+    <tr><td>Minggu 24</td><td class="num">${STEP.fmtIDR(17100000)}</td><td style="color:var(--success); font-weight:700;">+2%</td></tr>
+    <tr><td>Minggu 23</td><td class="num">${STEP.fmtIDR(16800000)}</td><td style="color:var(--danger); font-weight:700;">-3%</td></tr>
+  </tbody></table>`,
+  achievement: () => `<div class="flex justify-between"><span class="label">Achievement Bulanan</span><span class="num text-sm">${s.achievementPct}%</span></div>
+    <div class="progress mt-8 ${s.achievementPct<70?'warn':''}"><div style="width:${Math.min(s.achievementPct,100)}%"></div></div>`,
+  timeline: () => `<div class="timeline">
+    <div class="timeline-item"><div class="t-title">Route untuk minggu 22 Jun 2026 tersimpan</div><div class="t-meta">Ahmad Setiawan (SPV) · 21 Jun 2026</div></div>
+    <div class="timeline-item"><div class="t-title">Sinkronisasi SFA normal — success rate 100%</div><div class="t-meta">System · 23 Jun 2026</div></div>
+  </div>`,
+};
+function render(tab){ document.getElementById('s360Body').innerHTML = TABS[tab](); }
+document.querySelectorAll('#s360Tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#s360Tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  render(b.dataset.tab);
+}));
+render('profile');
+</script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="margin-bottom:18px;">
+        <div>
+          <div class="h1" id="dashTitle">Dashboard</div>
+          <div class="text-sm ink-faint" id="dashFreshness" style="margin-top:4px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="location.reload()">↻ Muat Ulang</button>
+      </div>
+
+      <div class="kpi-grid" id="kpiGrid"></div>
+
+      <div class="flex items-center justify-between mt-20" style="flex-wrap:wrap; gap:10px;">
+        <div class="h3" style="margin:0;">Comply Target — <span id="dashGroupLabel"></span></div>
+        <a class="text-sm" href="target-management.html" style="color:var(--primary-600); font-weight:600;">Kelola Target →</a>
+      </div>
+      <div class="grid-3 mt-14" id="complyCards"></div>
+
+      <div class="row-2-1 mt-20">
+        <div class="card card-pad">
+          <div class="flex items-center justify-between">
+            <div class="h3">Achievement vs Target — per Salesman</div>
+            <a class="text-sm" href="reports.html" style="color:var(--primary-600); font-weight:600;">Lihat Reports →</a>
+          </div>
+          <div class="barlist mt-14" id="achList"></div>
+        </div>
+        <div class="card card-pad flex" style="flex-direction:column; gap:14px;">
+          <div class="h3">Route Compliance</div>
+          <div class="flex items-center gap-14">
+            <div class="gauge" id="complianceGauge" style="--pct:0;"><span class="gauge-val" id="complianceVal">—</span></div>
+            <div>
+              <div class="text-sm ink-soft">Rata-rata tim minggu ini</div>
+              <div class="text-sm ink-faint mt-8">Kunjungan yang direncanakan vs. yang benar-benar terlaksana, untuk seluruh salesman dalam scope Anda.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row-2-1 mt-20">
+        <div class="card card-pad">
+          <div class="h3">Tindakan Diperlukan</div>
+          <div id="pendingAction" class="mt-14"></div>
+        </div>
+        <div class="card card-pad">
+          <div class="h3">Peringatan Kritis</div>
+          <div id="criticalAlerts" class="mt-14"></div>
+        </div>
+      </div>
+
+      <div class="card mt-20">
+        <div class="tabs" id="leaderTabs" style="padding:0 20px;">
+          <button class="active" data-tab="top">Performa Terbaik</button>
+          <button data-tab="attention">Area yang Memerlukan Perhatian</button>
+          <button data-tab="leaderboard">Leaderboard</button>
+        </div>
+        <div class="widget-body" id="leaderBody"></div>
+      </div>
+
+      <div class="card mt-20">
+        <div class="widget-head"><div class="h3">Feed Pengumuman</div><a href="announcements.html" class="text-sm" style="color:var(--primary-600); font-weight:600;">Lihat semua →</a></div>
+        <div class="widget-body" id="annFeed"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('dashboard');
+STEP.guardPage('dashboard', function(scope) {
+document.getElementById('dashFreshness').textContent = 'Data per ' + STEP.dataAsOf();
+
+const role = STEP.getRole();
+const D = STEP.DATA;
+
+const KPI_BY_ROLE = {
+  spv: [
+    { label: 'Achievement Tim Saya', value: '81%', trend: 'up', trendText: '▲ 4pp vs minggu lalu' },
+    { label: 'Route Compliance', value: '88%', trend: 'flat', trendText: 'stabil vs minggu lalu' },
+    { label: 'Store Dikunjungi Hari Ini', value: '34', trend: 'up', trendText: '▲ 6 vs kemarin' },
+    { label: 'Store dengan Coverage Gap', value: '3', trend: 'down', trendText: '▼ 1 vs minggu lalu' },
+  ],
+  area_manager: [
+    { label: 'Achievement Area', value: '79%', trend: 'up', trendText: '▲ 2pp vs minggu lalu' },
+    { label: 'Approval Menunggu', value: String(D.approvals.filter(a=>a.status==='pending_l1').length), trend: 'flat', trendText: 'menunggu review Anda' },
+    { label: 'SPV Performa Rendah', value: '1', trend: 'flat', trendText: 'di bawah 70% achievement' },
+    { label: 'Route Compliance (Area)', value: '86%', trend: 'up', trendText: '▲ 1pp vs minggu lalu' },
+  ],
+  distributor_manager: [
+    { label: 'Achievement Distributor Nasional', value: '83%', trend: 'up', trendText: '▲ 3pp vs minggu lalu' },
+    { label: 'Approval Menunggu (L2, Nasional)', value: String(D.approvals.filter(a=>a.status==='pending_l2').length), trend: 'flat', trendText: 'menunggu review Anda' },
+    { label: 'Exception Aktif (Nasional)', value: String(D.exceptions.length), trend: 'down', trendText: '▼ 2 vs minggu lalu' },
+    { label: 'Sell-In YTD (Nasional)', value: 'Rp4,8M', trend: 'up', trendText: '▲ 8% YoY' },
+  ],
+  regional_sales: [
+    { label: 'Achievement Nasional', value: '80%', trend: 'up', trendText: '▲ 2pp vs bulan lalu' },
+    { label: 'Area On-Track', value: '6 / 8', trend: 'flat', trendText: '2 area berisiko' },
+    { label: 'Rata-rata Route Compliance', value: '85%', trend: 'up', trendText: '▲ 1pp vs bulan lalu' },
+    { label: 'Area Terbaik', value: 'Jakarta Selatan', trend: 'flat', trendText: '94% achievement' },
+  ],
+  ho_admin: [
+    { label: 'Achievement Nasional', value: '78%', trend: 'up', trendText: '▲ 1pp vs bulan lalu' },
+    { label: 'SFA Sync Health', value: '92%', trend: 'down', trendText: '▼ 3pp — 2 salesman terdampak' },
+    { label: 'Data Quality Issue Aktif', value: String(D.exceptions.length), trend: 'flat', trendText: 'lihat Data Quality Dashboard' },
+    { label: 'Exception Terbuka', value: String(D.exceptions.length), trend: 'flat', trendText: 'di seluruh territory' },
+  ],
+};
+
+document.getElementById('kpiGrid').innerHTML = KPI_BY_ROLE[role].map(k => `
+  <div class="card kpi-card">
+    <div class="kpi-label">${k.label}</div>
+    <div class="kpi-value num">${k.value}</div>
+    <div class="kpi-trend ${k.trend}">${k.trendText}</div>
+  </div>
+`).join('');
+
+// Comply Target per brand — Management Target vs SPV Target, within the active Brand Group
+document.getElementById('dashGroupLabel').textContent = STEP.BRAND_GROUPS[STEP.getBrandGroup()].label;
+document.getElementById('complyCards').innerHTML = STEP.brandsInCurrentGroup().map(brand => {
+  const mgmt = STEP.MANAGEMENT_TARGET_BY_BRAND[brand] || 0;
+  const spv = STEP.baselineSpvTargetForBrand(brand);
+  const pct = STEP.complyPct(mgmt, spv);
+  const st = STEP.complyStatus(pct);
+  return `<div class="card card-pad">
+    <div class="flex items-center justify-between"><div class="kpi-label">${brand}</div><span class="comply-badge ${st.cls}">${st.label}</span></div>
+    <div class="grid-2 mt-10">
+      <div><div class="text-sm ink-faint">Management Target</div><div class="num" style="font-weight:700;">${STEP.fmtIDR(mgmt)}</div></div>
+      <div><div class="text-sm ink-faint">SPV Target</div><div class="num" style="font-weight:700;">${STEP.fmtIDR(spv)}</div></div>
+    </div>
+    <div class="progress mt-10 ${st.cls}"><div style="width:${Math.min(100,pct)}%"></div></div>
+    <div class="text-sm mt-6" style="font-weight:700;">${STEP.fmtCompliancePct(pct)} Comply</div>
+  </div>`;
+}).join('');
+
+// Salesman-based widgets are scoped to the active Brand Group — switching brand context refreshes them
+const groupSalesmen = STEP.salesmenInCurrentGroup();
+
+// Achievement vs Target per salesman
+document.getElementById('achList').innerHTML = groupSalesmen.map(s => `
+  <div class="barlist-row">
+    <div class="name">${s.name}</div>
+    <div class="progress ${s.achievementPct>100?'':(s.achievementPct<70?'warn':'')}"><div style="width:${Math.min(s.achievementPct,100)}%"></div></div>
+    <div class="pct num">${s.achievementPct}%</div>
+  </div>
+`).join('');
+
+// Route compliance gauge — rata-rata tim
+const avgCompliance = Math.round(groupSalesmen.reduce((a,s)=>a+s.routeCompliancePct,0) / groupSalesmen.length);
+document.getElementById('complianceGauge').style.setProperty('--pct', avgCompliance);
+document.getElementById('complianceVal').textContent = avgCompliance + '%';
+
+// Widget Tindakan Diperlukan (per role)
+const pendingHtml = {
+  spv: () => {
+    const items = [
+      { label: 'Alokasi target belum lengkap', count: 1, href: 'target-management.html' },
+      { label: 'Route minggu ini belum dibuat', count: 1, href: 'route-planner.html' },
+      { label: 'Store belum dikunjungi (lewat jadwal)', count: 3, href: 'outlet-salesman.html' },
+    ];
+    return items.map(i => rowAction(i)).join('');
+  },
+  area_manager: () => {
+    const items = [
+      { label: 'Antrean approval menunggu', count: D.approvals.filter(a=>a.status==='pending_l1').length, href: 'approvals.html' },
+      { label: 'Tim dengan performa rendah', count: 1, href: 'reports.html' },
+    ];
+    return items.map(i => rowAction(i)).join('');
+  },
+  distributor_manager: () => {
+    const items = [
+      { label: 'Antrean approval menunggu (nasional)', count: D.approvals.filter(a=>a.status==='pending_l2').length, href: 'approvals.html' },
+      { label: 'Area dengan performa rendah (nasional)', count: 1, href: 'reports.html' },
+    ];
+    return items.map(i => rowAction(i)).join('');
+  },
+  regional_sales: () => `<div class="empty-state" style="padding:18px 0;"><div class="ic">👁️</div><div class="h3">View-only — Approval Monitoring</div><p>2 approval berisiko melewati batas SLA secara nasional.</p><a class="btn btn-outline btn-sm" href="approvals.html">Pantau approval</a></div>`,
+  ho_admin: () => {
+    const items = [
+      { label: 'Isu nasional ditandai', count: 1, href: 'administration.html' },
+      { label: 'Sinkronisasi gagal', count: D.sfaSync.filter(s=>s.status==='failed').length, href: 'administration.html' },
+      { label: 'Isu data quality', count: D.exceptions.length, href: 'administration.html' },
+    ];
+    return items.map(i => rowAction(i)).join('');
+  },
+};
+function rowAction(i){
+  return `<a href="${i.href}" class="flex items-center justify-between" style="padding:10px 0; border-bottom:1px solid var(--line);">
+    <span class="text-sm" style="font-weight:600;">${i.label}</span>
+    <span class="pill pill-warning">${i.count}</span>
+  </a>`;
+}
+document.getElementById('pendingAction').innerHTML = pendingHtml[role]();
+
+// Peringatan kritis dari exceptions
+const alerts = D.exceptions.slice(0,4);
+document.getElementById('criticalAlerts').innerHTML = alerts.length ? alerts.map(e => `
+  <div class="flex items-center justify-between" style="padding:10px 0; border-bottom:1px solid var(--line);">
+    <span class="text-sm">${e.detail}</span>
+    <a href="reports.html" class="pill pill-danger">${STEP.exceptionTypeLabel(e.type)}</a>
+  </div>
+`).join('') : `<div class="empty-state"><div class="ic">✅</div><div class="h3">Tidak ada peringatan kritis</div><p>Semua masih dalam batas normal.</p></div>`;
+
+// Leaderboard tabs
+function renderLeaderTab(tab){
+  if (tab === 'top') {
+    const top = [...D.outlets].sort((a,b)=>b.achievementPct-a.achievementPct).slice(0,5);
+    return `<table class="table"><thead><tr><th>Store</th><th>Tier</th><th>Achievement</th></tr></thead><tbody>
+      ${top.map(o=>`<tr><td>${o.name}</td><td>${STEP.tierBadge(o.tier)}</td><td class="num" style="color:var(--success); font-weight:700;">${o.achievementPct}%</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+  if (tab === 'attention') {
+    const low = [...D.outlets].sort((a,b)=>a.achievementPct-b.achievementPct).slice(0,5);
+    return `<table class="table"><thead><tr><th>Store</th><th>Tier</th><th>Achievement</th><th>Last Visit</th></tr></thead><tbody>
+      ${low.map(o=>`<tr><td>${o.name}</td><td>${STEP.tierBadge(o.tier)}</td><td class="num" style="color:var(--danger); font-weight:700;">${o.achievementPct}%</td><td>${o.lastVisitDays} hari lalu</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+  if (tab === 'leaderboard') {
+    const lb = [...groupSalesmen].sort((a,b)=>b.achievementPct-a.achievementPct);
+    return `<table class="table"><thead><tr><th>#</th><th>Salesman</th><th>Achievement</th><th>Route Compliance</th><th>Coverage</th></tr></thead><tbody>
+      ${lb.map((s,i)=>`<tr><td>${i+1}</td><td>${s.name}</td><td class="num">${s.achievementPct}%</td><td class="num">${s.routeCompliancePct}%</td><td class="num">${s.coveragePct}%</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+}
+document.getElementById('leaderBody').innerHTML = renderLeaderTab('top');
+document.querySelectorAll('#leaderTabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#leaderTabs button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('leaderBody').innerHTML = renderLeaderTab(btn.dataset.tab);
+  });
+});
+
+// Feed Pengumuman
+document.getElementById('annFeed').innerHTML = D.announcements.slice(0,3).map(a => `
+  <div style="padding:10px 0; border-bottom:1px solid var(--line);">
+    <div class="flex items-center gap-8"><span class="pill pill-info">${STEP.announcementTypeLabel(a.type)}</span><span class="text-sm ink-faint">${a.publishedAt}</span></div>
+    <div style="font-weight:700; font-size:13.5px; margin-top:6px;">${a.title}</div>
+    <div class="text-sm ink-soft" style="margin-top:3px;">${a.body}</div>
+  </div>
+`).join('');
+}); // end guardPage
+</script>
+</body>
+</html>

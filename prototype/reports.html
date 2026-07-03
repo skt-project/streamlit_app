@@ -1,0 +1,241 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reports — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  .report-layout{ display:grid; grid-template-columns: 260px 1fr; gap:18px; align-items:start; }
+  .report-item{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:var(--radius-sm); cursor:pointer; min-height:44px; }
+  .report-item:hover{ background: var(--soft-white); }
+  .report-item.active{ background: var(--primary-50); color: var(--primary-700); font-weight:700; }
+  .star{ cursor:pointer; }
+  .report-search-row{ display:flex; gap:10px; align-items:center; }
+  .report-search-row .topbar-search{ max-width:none; flex:1; }
+  .desktop-filters{ display:flex; gap:10px; }
+  .mobile-filter-btn{ display:none; }
+  @media (max-width:1279px){ .report-layout{ grid-template-columns:1fr; } }
+  @media (max-width:767px){
+    .report-search-row{ position:sticky; top:var(--topbar-h); z-index:30; background:var(--soft-white); padding:8px 0; }
+    .desktop-filters{ display:none; }
+    .mobile-filter-btn{ display:inline-flex; }
+    .report-rail-mobile{ display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; }
+    .report-rail-mobile .chip{ flex-shrink:0; }
+    .report-list-desktop{ display:none; }
+  }
+  @media (min-width:768px){ .report-rail-mobile{ display:none; } }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:10px;">
+        <div class="h1">Reports</div>
+        <div class="flex gap-10">
+          <button class="btn btn-outline btn-sm" onclick="STEP.toast('Berhasil di-export sebagai Excel','📊')">Export Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="STEP.toast('Berhasil di-export sebagai CSV','📄')">Export CSV</button>
+          <button class="btn btn-outline btn-sm" onclick="STEP.toast('Berhasil di-export sebagai PDF','🧾')">Export PDF</button>
+        </div>
+      </div>
+
+      <!-- pemilih report khusus mobile -->
+      <div class="report-rail-mobile mt-14" id="reportRailMobile"></div>
+
+      <div class="report-layout mt-14">
+        <div class="card card-pad report-list-desktop">
+          <div class="label">Reports</div>
+          <div class="mt-10" id="reportList"></div>
+          <hr class="div">
+          <div class="label">Filter Tersimpan</div>
+          <div class="text-sm ink-faint mt-8">Belum ada filter tersimpan — atur filter lalu klik "Simpan filter ini."</div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:10px;">
+            <div class="h3" id="reportTitle"></div>
+            <div class="desktop-filters">
+              <select class="input" id="periodFilter"><option>Bulan Ini</option><option>Bulan Lalu</option><option>Kuartal Ini</option><option>YTD</option></select>
+              <select class="input" id="tierFilter"><option>Semua Tier</option><option>Tier S</option><option>Tier A</option><option>Tier B</option><option>Tier C</option><option>Tier D</option></select>
+              <button class="btn btn-outline btn-sm" onclick="STEP.toast('Filter tersimpan','⭐')">Simpan filter ini</button>
+            </div>
+            <button class="btn btn-outline btn-sm mobile-filter-btn" id="mobileFilterBtn">⚙ Filter</button>
+          </div>
+
+          <div class="report-search-row mt-14">
+            <div class="topbar-search"><span>🔎</span><input id="reportSearch" placeholder=""></div>
+          </div>
+
+          <div class="grid-3 mt-14" id="reportKpis"></div>
+
+          <div class="mt-20" id="reportBody"></div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('reports');
+STEP.guardPage('reports', function(scope) {
+const D = STEP.DATA;
+const REPORTS = [
+  { id:'sellin', label:'Sell-In YTD', fav:true, searchHint:'Cari berdasarkan Kode Store, Nama Store, atau Area...' },
+  { id:'avgsellin', label:'Rata-rata Sell-In YTD', fav:false, searchHint:'Cari berdasarkan Kode Store, Nama Store, atau Area...' },
+  { id:'compliance', label:'Route Compliance', fav:true, searchHint:'Cari berdasarkan Salesman, Store, atau Area...' },
+  { id:'coverage', label:'Coverage', fav:false, searchHint:'Cari berdasarkan Salesman, Store, atau Area...' },
+  { id:'productivity', label:'Produktivitas', fav:false, searchHint:'Cari berdasarkan Salesman atau Area...' },
+  { id:'outletperf', label:'Performa Store', fav:false, searchHint:'Cari berdasarkan Kode Store, Nama Store, atau Area...' },
+  { id:'salesmanperf', label:'Performa Salesman', fav:false, searchHint:'Cari berdasarkan Salesman, Distributor, atau Region...' },
+  { id:'achievement', label:'Achievement', fav:true, searchHint:'Cari berdasarkan Salesman, Distributor, atau Region...' },
+  { id:'leaderboard', label:'Leaderboard', fav:false, searchHint:'Cari berdasarkan Salesman, Distributor, atau Region...' },
+  { id:'exception', label:'Exception Reports', fav:false, searchHint:'Cari berdasarkan tipe atau detail...' },
+];
+let active = 'sellin';
+let query = '';
+let tierFilter = '';
+const favs = new Set(REPORTS.filter(r=>r.fav).map(r=>r.id));
+
+function renderReportList(){
+  document.getElementById('reportList').innerHTML = REPORTS.map(r => `
+    <div class="report-item ${r.id===active?'active':''}" data-id="${r.id}">
+      <span>${r.label}</span><span class="star" data-star="${r.id}">${favs.has(r.id)?'⭐':'☆'}</span>
+    </div>`).join('');
+  document.getElementById('reportRailMobile').innerHTML = REPORTS.map(r => `<span class="chip ${r.id===active?'active':''}" data-id="${r.id}">${favs.has(r.id)?'⭐ ':''}${r.label}</span>`).join('');
+  document.querySelectorAll('[data-id]').forEach(el => el.addEventListener('click', (e) => {
+    if (e.target.dataset.star) return;
+    active = el.dataset.id; query=''; document.getElementById('reportSearch').value=''; renderReportList(); renderReportBody();
+  }));
+  document.querySelectorAll('[data-star]').forEach(el => el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const id = el.dataset.star;
+    favs.has(id) ? favs.delete(id) : favs.add(id);
+    renderReportList();
+  }));
+}
+
+function growthCell(pct){ return `<span style="color:${pct>=0?'var(--success)':'var(--danger)'}; font-weight:700;">${pct>=0?'+':''}${pct}%</span>`; }
+
+function reportDataset(){
+  const meta = REPORTS.find(r=>r.id===active);
+  let rows, columns, searchFields, kpis = [];
+
+  const outletRows = () => D.outlets.filter(o => !tierFilter || o.tier === tierFilter);
+  const salesmanRows = () => STEP.salesmenInCurrentGroup();
+
+  if (active === 'sellin' || active === 'avgsellin') {
+    rows = outletRows();
+    searchFields = o => [o.name, o.code, o.territory];
+    columns = [
+      { label:'Store', render:o=>`${o.name} <span class="ink-faint text-sm">${o.code}</span>` },
+      { label:'Tier', render:o=>STEP.tierBadge(o.tier) },
+      { label:'Sell-In MTD', render:o=>STEP.fmtIDR(o.achieved), numeric:true },
+      { label:'Growth', render:o=>growthCell(o.sellInGrowthPct) },
+    ];
+    const avgGrowth = rows.length ? Math.round(rows.reduce((a,o)=>a+o.sellInGrowthPct,0)/rows.length) : 0;
+    kpis = [['Store ditampilkan', rows.length], ['Rata-rata Growth', (avgGrowth>=0?'+':'')+avgGrowth+'%'], ['Total Sell-In', STEP.fmtIDR(rows.reduce((a,o)=>a+o.achieved,0))]];
+  } else if (active === 'compliance') {
+    rows = salesmanRows(); searchFields = s => [s.name, s.code, s.area, s.distributor];
+    columns = [
+      { label:'Salesman', render:s=>`${s.name} <span class="ink-faint text-sm">${s.code}</span>` },
+      { label:'Area', render:s=>s.area },
+      { label:'Compliance', render:s=>s.routeCompliancePct+'%', numeric:true },
+    ];
+    kpis = [['Salesman ditampilkan', rows.length], ['Rata-rata Compliance', Math.round(rows.reduce((a,s)=>a+s.routeCompliancePct,0)/(rows.length||1))+'%'], ['Di bawah 80%', rows.filter(s=>s.routeCompliancePct<80).length]];
+  } else if (active === 'coverage') {
+    rows = salesmanRows(); searchFields = s => [s.name, s.code, s.area, s.distributor];
+    columns = [
+      { label:'Salesman', render:s=>s.name },
+      { label:'Area', render:s=>s.area },
+      { label:'Coverage', render:s=>s.coveragePct+'%', numeric:true },
+    ];
+    kpis = [['Salesman ditampilkan', rows.length], ['Rata-rata Coverage', Math.round(rows.reduce((a,s)=>a+s.coveragePct,0)/(rows.length||1))+'%'], ['Di bawah 80%', rows.filter(s=>s.coveragePct<80).length]];
+  } else if (active === 'productivity') {
+    rows = salesmanRows(); searchFields = s => [s.name, s.area];
+    columns = [
+      { label:'Salesman', render:s=>s.name },
+      { label:'Store/Hari (avg)', render:s=>(s.capacityPerDay*0.8).toFixed(1), numeric:true },
+      { label:'Order/Visit (avg)', render:()=>'0.7', numeric:true },
+    ];
+    kpis = [['Salesman ditampilkan', rows.length], ['Rata-rata Kapasitas/Hari', Math.round(rows.reduce((a,s)=>a+s.capacityPerDay,0)/(rows.length||1))], ['', '']];
+  } else if (active === 'outletperf') {
+    rows = outletRows(); searchFields = o => [o.name, o.code, o.territory];
+    columns = [
+      { label:'Store', render:o=>o.name },
+      { label:'Tier', render:o=>STEP.tierBadge(o.tier) },
+      { label:'Target', render:o=>STEP.fmtIDR(o.target), numeric:true },
+      { label:'Tercapai', render:o=>STEP.fmtIDR(o.achieved), numeric:true },
+      { label:'%', render:o=>`<span style="font-weight:700; color:${o.achievementPct>=80?'var(--success)':'var(--warning)'}">${o.achievementPct}%</span>`, numeric:true },
+    ];
+    kpis = [['Store ditampilkan', rows.length], ['Rata-rata Achievement', Math.round(rows.reduce((a,o)=>a+o.achievementPct,0)/(rows.length||1))+'%'], ['Di bawah 60%', rows.filter(o=>o.achievementPct<60).length]];
+  } else if (active === 'salesmanperf' || active === 'achievement' || active === 'leaderboard') {
+    rows = [...salesmanRows()].sort((a,b)=>b.achievementPct-a.achievementPct);
+    searchFields = s => [s.name, s.code, s.distributor, s.region];
+    columns = [
+      { label:'#', render:(s)=>rows.indexOf(s)+1 },
+      { label:'Salesman', render:s=>s.name },
+      { label:'Distributor', render:s=>s.distributor },
+      { label:'Region', render:s=>s.region },
+      { label:'Achievement', render:s=>`<strong>${s.achievementPct}%</strong>`, numeric:true },
+      { label:'Compliance', render:s=>s.routeCompliancePct+'%', numeric:true },
+    ];
+    kpis = [['Salesman ditampilkan', rows.length], ['Achievement Tertinggi', rows[0]?.name || '—'], ['Rata-rata Achievement', Math.round(rows.reduce((a,s)=>a+s.achievementPct,0)/(rows.length||1))+'%']];
+  } else if (active === 'exception') {
+    rows = D.exceptions; searchFields = e => [e.type, e.detail, e.territory];
+    columns = [
+      { label:'Tipe', render:e=>`<span class="pill pill-danger">${STEP.exceptionTypeLabel(e.type)}</span>` },
+      { label:'Detail', render:e=>e.detail },
+      { label:'Status', render:e=>STEP.statusPill(e.status) },
+    ];
+    kpis = [['Exception terbuka', rows.filter(e=>e.status==='open').length], ['Total exception', rows.length], ['', '']];
+  }
+
+  if (query) {
+    const q = query.toLowerCase();
+    rows = rows.filter(r => searchFields(r).some(f => String(f).toLowerCase().includes(q)));
+  }
+  return { meta, rows, columns, kpis };
+}
+
+function renderReportBody(){
+  const { meta, rows, columns, kpis } = reportDataset();
+  document.getElementById('reportTitle').textContent = meta.label;
+  document.getElementById('reportSearch').placeholder = meta.searchHint;
+  document.getElementById('reportKpis').innerHTML = kpis.filter(k=>k[0]).map(([label,val]) => `<div class="card card-pad"><div class="kpi-label">${label}</div><div class="kpi-value" style="font-size:20px;">${val}</div></div>`).join('');
+  document.getElementById('reportBody').innerHTML = STEP.tableOrCards(columns, rows, { emptyTitle: 'Tidak ada hasil', emptyText: 'Coba kata kunci lain atau hapus filter Anda.' });
+}
+
+document.getElementById('reportSearch').addEventListener('input', e => { query = e.target.value; renderReportBody(); });
+document.getElementById('tierFilter').addEventListener('change', e => { tierFilter = e.target.value.replace('Tier ',''); if (e.target.value==='Semua Tier') tierFilter=''; renderReportBody(); });
+
+document.getElementById('mobileFilterBtn').addEventListener('click', () => {
+  STEP.openSheet(`
+    <div class="bottom-sheet-head"><strong>Filter</strong><button class="icon-btn" onclick="STEP.closeSheet()">✕</button></div>
+    <div class="bottom-sheet-body">
+      <div class="field"><label>Periode</label><select class="input" id="sheetPeriod"><option>Bulan Ini</option><option>Bulan Lalu</option><option>Kuartal Ini</option><option>YTD</option></select></div>
+      <div class="field mt-14"><label>Tier</label><select class="input" id="sheetTier"><option>Semua Tier</option><option>Tier S</option><option>Tier A</option><option>Tier B</option><option>Tier C</option><option>Tier D</option></select></div>
+    </div>
+    <div class="bottom-sheet-foot"><button class="btn btn-outline w-full" onclick="STEP.toast('Filter tersimpan','⭐')">Simpan filter ini</button><button class="btn btn-primary w-full" id="sheetApply">Terapkan</button></div>
+  `);
+  document.getElementById('sheetApply').addEventListener('click', () => {
+    const t = document.getElementById('sheetTier').value;
+    tierFilter = t === 'Semua Tier' ? '' : t.replace('Tier ','');
+    STEP.closeSheet();
+    renderReportBody();
+  });
+});
+
+renderReportList();
+renderReportBody();
+}); // end guardPage
+</script>
+</body>
+</html>

@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Master Data Salesman — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  /* ── Status indicators ── */
+  .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  .dot-active   { background:#22C55E; }
+  .dot-inactive { background:#94A3B8; }
+
+  /* ── Filter bar ── */
+  .filter-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .filter-bar select { padding:7px 12px; border:1px solid var(--border); border-radius:6px; font-size:var(--text-sm); background:var(--surface); color:var(--ink); }
+  .filter-bar .search-wrap { flex:1; min-width:200px; max-width:280px; }
+
+  /* ── Summary chips ── */
+  .summary-chips { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .summary-chip { display:flex; align-items:center; gap:6px; padding:5px 12px; border-radius:20px; font-size:var(--text-sm); font-weight:600; background:var(--surface-2); color:var(--ink-secondary); border:1px solid var(--border); }
+  .chip-active   { background:#F0FDF4; color:#166534; border-color:#BBF7D0; }
+  .chip-inactive { background:#F8FAFC; color:#64748B; border-color:#CBD5E1; }
+  .chip-total    { background:var(--primary-50,#EEF2FF); color:var(--primary-700,#4338CA); border-color:var(--primary-200,#C7D2FE); }
+
+  /* ── Table extras ── */
+  .table td .store-badge { font-size:11px; background:var(--soft-white); color:var(--ink-secondary); padding:2px 7px; border-radius:10px; }
+  .action-group { display:flex; gap:6px; white-space:nowrap; }
+
+  /* ── Pagination ── */
+  .pager { display:flex; align-items:center; gap:8px; padding:14px 20px; border-top:1px solid var(--border); font-size:var(--text-sm); }
+  .pager .page-info { color:var(--ink-secondary); flex:1; }
+  .pager-btn { padding:5px 11px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--ink); cursor:pointer; font-size:var(--text-sm); }
+  .pager-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .pager-btn.active { background:var(--primary-600); color:#fff; border-color:var(--primary-600); }
+
+  /* ── Form grid ── */
+  .form-grid   { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .form-full   { grid-column:1/-1; }
+  .form-group  { display:flex; flex-direction:column; gap:5px; }
+  .form-group label { font-size:var(--text-sm); font-weight:600; color:var(--ink-secondary); }
+  .form-group input, .form-group select, .form-group textarea {
+    padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-size:var(--text-sm);
+    background:var(--surface); color:var(--ink); width:100%; box-sizing:border-box; font-family:inherit;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline:none; border-color:var(--primary-600); box-shadow:0 0 0 3px rgba(99,102,241,.12);
+  }
+  .form-group input:disabled { opacity:.5; background:var(--soft-white); cursor:not-allowed; }
+  .form-divider { border:none; border-top:1px solid var(--border); margin:14px 0; grid-column:1/-1; }
+  .form-section { font-size:var(--text-xs); font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint); margin-bottom:4px; grid-column:1/-1; }
+
+  /* ── Detail grid ── */
+  .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .detail-item { display:flex; flex-direction:column; gap:3px; }
+  .detail-label { font-size:var(--text-xs); font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-faint); }
+  .detail-value { font-size:var(--text-sm); color:var(--ink); font-weight:500; }
+
+  /* ── Export btn ── */
+  .btn-export { display:inline-flex; align-items:center; gap:6px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:12px; margin-bottom:20px;">
+        <div>
+          <div class="h1">Master Data Salesman</div>
+          <div class="text-sm ink-faint" style="margin-top:4px;">
+            Data salesman aktif dan non-aktif seluruh distributor — mutasi tercatat di Audit Log.
+          </div>
+          <div style="margin-top:8px; font-size:var(--text-xs); padding:5px 10px; background:#FFF9E6; border-radius:6px; color:#92400E; display:inline-flex; align-items:center; gap:6px;">
+            💡 Untuk bulk assign store ke route salesman, gunakan
+            <a href="import-export.html" style="color:#92400E; font-weight:700; text-decoration:underline;">Import &amp; Export → Penugasan Route</a>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn btn-outline btn-export" id="exportCsvBtn">⬇ Export CSV</button>
+          <a href="master-data-pjp.html" class="btn btn-outline">🗓️ Master Data PJP</a>
+          <button class="btn btn-primary" id="addSalesmanBtn">+ Tambah Salesman</button>
+        </div>
+      </div>
+
+      <div class="card" id="mainCard" style="display:none;">
+        <div class="tabs" id="mainTabs" style="padding:0 20px;">
+          <button class="active" data-tab="list">Daftar Salesman</button>
+          <button data-tab="mapping">Mapping Distributor</button>
+          <button data-tab="audit">Audit Log</button>
+        </div>
+
+        <div class="widget-body" id="tabContent"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('master-data');
+STEP.guardPage('master-data-salesman', function(scope) {
+
+const role = STEP.getRole();
+document.getElementById('mainCard').style.display = '';
+
+/* ══════════════════════════════════════════════════════════════════
+   MASTER DATA — Comprehensive mock dataset (25 records)
+   Designed to reflect real salesman master data structure.
+   All fields included to support production DB integration.
+   ══════════════════════════════════════════════════════════════════ */
+
+const DISTRIBUTORS = [
+  { code:'DST171', name:'PT Mitra Jaya Distribusi',    region:'Jabodetabek',    area_manager:'Rina Wulandari' },
+  { code:'DST082', name:'PT Sinar Abadi Sejahtera',    region:'Jawa Barat',     area_manager:'Fitriani Putri' },
+  { code:'DST055', name:'PT Cahaya Nusantara',         region:'Jawa Tengah',    area_manager:'Wahyu Nugroho'  },
+  { code:'DST033', name:'PT Berkah Sentosa',           region:'Jawa Timur',     area_manager:'Dedi Nugraha'   },
+  { code:'DST019', name:'PT Anugerah Makmur',          region:'Sumatera Utara', area_manager:'Tika Permata'   },
+];
+
+const SALESMEN = [
+  /* ─── DST171 Jabodetabek ─── */
+  { id:'DST171-GTI-001', employee_id:'EMP-0042', name:'Yusuf Maulana',     type:'GTI', brand:'Skintific',
+    phone:'0812-3456-7890', email:'yusuf.maulana@mitrajaya.co.id',
+    distributor_code:'DST171', distributor_name:'PT Mitra Jaya Distribusi',
+    region:'Jabodetabek', area:'Jakarta Selatan', branch:'Branch JKS-3',
+    spv:'Ahmad Setiawan', area_manager:'Rina Wulandari',
+    route_code:'JKS-RT-01', route_name:'Route Jakarta Selatan 1',
+    store_count:48, status:'active', join_date:'2025-01-10', last_updated:'2026-06-15', notes:'' },
+
+  { id:'DST171-GTI-002', employee_id:'EMP-0043', name:'Putri Lestari',     type:'GTI', brand:'Skintific',
+    phone:'0821-9876-5432', email:'putri.lestari@mitrajaya.co.id',
+    distributor_code:'DST171', distributor_name:'PT Mitra Jaya Distribusi',
+    region:'Jabodetabek', area:'Jakarta Utara', branch:'Branch JKU-1',
+    spv:'Rizal Ramadhan', area_manager:'Rina Wulandari',
+    route_code:'JKU-RT-01', route_name:'Route Jakarta Utara 1',
+    store_count:42, status:'active', join_date:'2025-02-14', last_updated:'2026-06-10', notes:'' },
+
+  { id:'DST171-MIX-001', employee_id:'EMP-0044', name:'Agus Setiadi',      type:'MIX', brand:'Glad2Glow',
+    phone:'0813-1111-2222', email:'agus.setiadi@mitrajaya.co.id',
+    distributor_code:'DST171', distributor_name:'PT Mitra Jaya Distribusi',
+    region:'Jabodetabek', area:'Jakarta Selatan', branch:'Branch JKS-3',
+    spv:'Ahmad Setiawan', area_manager:'Rina Wulandari',
+    route_code:'JKS-RT-02', route_name:'Route Jakarta Selatan 2',
+    store_count:35, status:'active', join_date:'2025-03-01', last_updated:'2026-05-28', notes:'' },
+
+  { id:'DST171-MTI-001', employee_id:'EMP-0045', name:'Maya Kusuma',       type:'MTI', brand:'Timephoria',
+    phone:'0819-4444-5555', email:'maya.kusuma@mitrajaya.co.id',
+    distributor_code:'DST171', distributor_name:'PT Mitra Jaya Distribusi',
+    region:'Jabodetabek', area:'Tangerang', branch:'Branch TNG-2',
+    spv:'Rizal Ramadhan', area_manager:'Rina Wulandari',
+    route_code:'TNG-RT-01', route_name:'Route Tangerang 1',
+    store_count:52, status:'active', join_date:'2024-11-15', last_updated:'2026-06-20', notes:'' },
+
+  { id:'DST171-GTI-003', employee_id:'EMP-0038', name:'Budi Santoso',      type:'GTI', brand:'Skintific',
+    phone:'0811-7777-8888', email:'budi.santoso@mitrajaya.co.id',
+    distributor_code:'DST171', distributor_name:'PT Mitra Jaya Distribusi',
+    region:'Jabodetabek', area:'Bekasi', branch:'Branch BKS-1',
+    spv:'Ahmad Setiawan', area_manager:'Rina Wulandari',
+    route_code:'', route_name:'',
+    store_count:0, status:'inactive', join_date:'2024-08-01', last_updated:'2026-04-01', notes:'Resign — mengundurkan diri April 2026' },
+
+  /* ─── DST082 Jawa Barat ─── */
+  { id:'DST082-GTI-001', employee_id:'EMP-0061', name:'Dewi Anggraini',    type:'GTI', brand:'Skintific',
+    phone:'0815-2233-4455', email:'dewi.anggraini@sinarabadi.co.id',
+    distributor_code:'DST082', distributor_name:'PT Sinar Abadi Sejahtera',
+    region:'Jawa Barat', area:'Bandung', branch:'Branch BDG-1',
+    spv:'Sandi Kurniawan', area_manager:'Fitriani Putri',
+    route_code:'BDG-RT-01', route_name:'Route Bandung 1',
+    store_count:38, status:'active', join_date:'2024-12-01', last_updated:'2026-06-18', notes:'' },
+
+  { id:'DST082-GTI-002', employee_id:'EMP-0062', name:'Hendra Wijaya',     type:'GTI', brand:'Skintific',
+    phone:'0818-5566-7788', email:'hendra.wijaya@sinarabadi.co.id',
+    distributor_code:'DST082', distributor_name:'PT Sinar Abadi Sejahtera',
+    region:'Jabodetabek', area:'Bekasi', branch:'Branch BKS-2',
+    spv:'Sandi Kurniawan', area_manager:'Fitriani Putri',
+    route_code:'BKS-RT-01', route_name:'Route Bekasi 1',
+    store_count:45, status:'active', join_date:'2025-04-10', last_updated:'2026-06-01', notes:'' },
+
+  { id:'DST082-MIX-001', employee_id:'EMP-0063', name:'Lina Marlina',      type:'MIX', brand:'Glad2Glow',
+    phone:'0822-9900-1122', email:'lina.marlina@sinarabadi.co.id',
+    distributor_code:'DST082', distributor_name:'PT Sinar Abadi Sejahtera',
+    region:'Jawa Barat', area:'Bogor', branch:'Branch BGR-1',
+    spv:'Sandi Kurniawan', area_manager:'Fitriani Putri',
+    route_code:'BGR-RT-01', route_name:'Route Bogor 1',
+    store_count:29, status:'active', join_date:'2025-06-15', last_updated:'2026-06-22', notes:'' },
+
+  { id:'DST082-MTI-001', employee_id:'EMP-0064', name:'Rudi Permana',      type:'MTI', brand:'Timephoria',
+    phone:'0817-3344-5566', email:'rudi.permana@sinarabadi.co.id',
+    distributor_code:'DST082', distributor_name:'PT Sinar Abadi Sejahtera',
+    region:'Jawa Barat', area:'Bandung', branch:'Branch BDG-2',
+    spv:'Sandi Kurniawan', area_manager:'Fitriani Putri',
+    route_code:'BDG-RT-02', route_name:'Route Bandung 2',
+    store_count:41, status:'active', join_date:'2024-09-20', last_updated:'2026-05-15', notes:'' },
+
+  { id:'DST082-GTI-003', employee_id:'EMP-0059', name:'Eko Prasetyo',      type:'GTI', brand:'Skintific',
+    phone:'0816-6677-8899', email:'eko.prasetyo@sinarabadi.co.id',
+    distributor_code:'DST082', distributor_name:'PT Sinar Abadi Sejahtera',
+    region:'Jawa Barat', area:'Cirebon', branch:'Branch CRB-1',
+    spv:'Sandi Kurniawan', area_manager:'Fitriani Putri',
+    route_code:'', route_name:'',
+    store_count:0, status:'inactive', join_date:'2024-03-01', last_updated:'2025-12-15', notes:'Non-aktif — cuti panjang sakit' },
+
+  /* ─── DST055 Jawa Tengah ─── */
+  { id:'DST055-GTI-001', employee_id:'EMP-0081', name:'Siti Rahayu',       type:'GTI', brand:'Skintific',
+    phone:'0823-1122-3344', email:'siti.rahayu@cahaya-nusantara.co.id',
+    distributor_code:'DST055', distributor_name:'PT Cahaya Nusantara',
+    region:'Jawa Tengah', area:'Semarang', branch:'Branch SMG-1',
+    spv:'Andi Saputra', area_manager:'Wahyu Nugroho',
+    route_code:'SMG-RT-01', route_name:'Route Semarang 1',
+    store_count:36, status:'active', join_date:'2025-01-25', last_updated:'2026-06-19', notes:'' },
+
+  { id:'DST055-MIX-001', employee_id:'EMP-0082', name:'Bambang Wibowo',    type:'MIX', brand:'Glad2Glow',
+    phone:'0824-5566-7788', email:'bambang.wibowo@cahaya-nusantara.co.id',
+    distributor_code:'DST055', distributor_name:'PT Cahaya Nusantara',
+    region:'Jawa Tengah', area:'Solo', branch:'Branch SLO-1',
+    spv:'Andi Saputra', area_manager:'Wahyu Nugroho',
+    route_code:'SLO-RT-01', route_name:'Route Solo 1',
+    store_count:28, status:'active', join_date:'2025-05-10', last_updated:'2026-06-05', notes:'' },
+
+  { id:'DST055-GTI-002', employee_id:'EMP-0083', name:'Fitri Handayani',   type:'GTI', brand:'Skintific',
+    phone:'0825-9900-1122', email:'fitri.handayani@cahaya-nusantara.co.id',
+    distributor_code:'DST055', distributor_name:'PT Cahaya Nusantara',
+    region:'Jawa Tengah', area:'Semarang', branch:'Branch SMG-2',
+    spv:'Andi Saputra', area_manager:'Wahyu Nugroho',
+    route_code:'SMG-RT-02', route_name:'Route Semarang 2',
+    store_count:44, status:'active', join_date:'2024-10-05', last_updated:'2026-06-24', notes:'' },
+
+  { id:'DST055-MTI-001', employee_id:'EMP-0084', name:'Surya Gunawan',     type:'MTI', brand:'Timephoria',
+    phone:'0826-3344-5566', email:'surya.gunawan@cahaya-nusantara.co.id',
+    distributor_code:'DST055', distributor_name:'PT Cahaya Nusantara',
+    region:'Jawa Tengah', area:'Purwokerto', branch:'Branch PWK-1',
+    spv:'Andi Saputra', area_manager:'Wahyu Nugroho',
+    route_code:'PWK-RT-01', route_name:'Route Purwokerto 1',
+    store_count:21, status:'active', join_date:'2025-08-01', last_updated:'2026-04-30', notes:'Tambah toko baru Nov 2025' },
+
+  /* ─── DST033 Jawa Timur ─── */
+  { id:'DST033-GTI-001', employee_id:'EMP-0101', name:'Anton Firmansyah',  type:'GTI', brand:'Skintific',
+    phone:'0831-2233-4455', email:'anton.firmansyah@berkah-sentosa.co.id',
+    distributor_code:'DST033', distributor_name:'PT Berkah Sentosa',
+    region:'Jawa Timur', area:'Surabaya', branch:'Branch SBY-1',
+    spv:'Arif Hidayat', area_manager:'Dedi Nugraha',
+    route_code:'SBY-RT-01', route_name:'Route Surabaya 1',
+    store_count:55, status:'active', join_date:'2024-07-15', last_updated:'2026-06-23', notes:'' },
+
+  { id:'DST033-GTI-002', employee_id:'EMP-0102', name:'Ratna Sari',        type:'GTI', brand:'Skintific',
+    phone:'0832-6677-8899', email:'ratna.sari@berkah-sentosa.co.id',
+    distributor_code:'DST033', distributor_name:'PT Berkah Sentosa',
+    region:'Jawa Timur', area:'Malang', branch:'Branch MLG-1',
+    spv:'Arif Hidayat', area_manager:'Dedi Nugraha',
+    route_code:'MLG-RT-01', route_name:'Route Malang 1',
+    store_count:31, status:'active', join_date:'2025-02-20', last_updated:'2026-05-30', notes:'' },
+
+  { id:'DST033-MIX-001', employee_id:'EMP-0103', name:'Iwan Setiawan',     type:'MIX', brand:'Glad2Glow',
+    phone:'0833-1100-2211', email:'iwan.setiawan@berkah-sentosa.co.id',
+    distributor_code:'DST033', distributor_name:'PT Berkah Sentosa',
+    region:'Jawa Timur', area:'Surabaya', branch:'Branch SBY-2',
+    spv:'Arif Hidayat', area_manager:'Dedi Nugraha',
+    route_code:'SBY-RT-02', route_name:'Route Surabaya 2',
+    store_count:48, status:'active', join_date:'2024-11-01', last_updated:'2026-06-12', notes:'' },
+
+  { id:'DST033-MTI-001', employee_id:'EMP-0104', name:'Nina Wulandari',    type:'MTI', brand:'Timephoria',
+    phone:'0834-5544-6677', email:'nina.wulandari@berkah-sentosa.co.id',
+    distributor_code:'DST033', distributor_name:'PT Berkah Sentosa',
+    region:'Jawa Timur', area:'Gresik', branch:'Branch GRK-1',
+    spv:'Arif Hidayat', area_manager:'Dedi Nugraha',
+    route_code:'GRK-RT-01', route_name:'Route Gresik 1',
+    store_count:22, status:'active', join_date:'2025-07-10', last_updated:'2026-03-15', notes:'' },
+
+  { id:'DST033-GTI-003', employee_id:'EMP-0099', name:'Hadi Susanto',      type:'GTI', brand:'Skintific',
+    phone:'0835-9988-7766', email:'hadi.susanto@berkah-sentosa.co.id',
+    distributor_code:'DST033', distributor_name:'PT Berkah Sentosa',
+    region:'Jawa Timur', area:'Kediri', branch:'Branch KDR-1',
+    spv:'Arif Hidayat', area_manager:'Dedi Nugraha',
+    route_code:'', route_name:'',
+    store_count:0, status:'inactive', join_date:'2024-05-01', last_updated:'2025-10-01', notes:'Non-aktif — pindah ke distributor lain (Nov 2025)' },
+
+  /* ─── DST019 Sumatera Utara ─── */
+  { id:'DST019-GTI-001', employee_id:'EMP-0121', name:'Mira Lestari',      type:'GTI', brand:'Skintific',
+    phone:'0811-6655-4433', email:'mira.lestari@anugerah-makmur.co.id',
+    distributor_code:'DST019', distributor_name:'PT Anugerah Makmur',
+    region:'Sumatera Utara', area:'Medan', branch:'Branch MDN-1',
+    spv:'Surya Gunawan', area_manager:'Tika Permata',
+    route_code:'MDN-RT-01', route_name:'Route Medan 1',
+    store_count:39, status:'active', join_date:'2025-03-15', last_updated:'2026-06-22', notes:'' },
+
+  { id:'DST019-MIX-001', employee_id:'EMP-0122', name:'Doni Kurniawan',    type:'MIX', brand:'Glad2Glow',
+    phone:'0812-4433-5566', email:'doni.kurniawan@anugerah-makmur.co.id',
+    distributor_code:'DST019', distributor_name:'PT Anugerah Makmur',
+    region:'Sumatera Utara', area:'Medan', branch:'Branch MDN-2',
+    spv:'Surya Gunawan', area_manager:'Tika Permata',
+    route_code:'MDN-RT-02', route_name:'Route Medan 2',
+    store_count:33, status:'active', join_date:'2025-01-08', last_updated:'2026-06-17', notes:'' },
+
+  { id:'DST019-MTI-001', employee_id:'EMP-0123', name:'Fani Rahmawati',    type:'MTI', brand:'Timephoria',
+    phone:'0813-7788-9900', email:'fani.rahmawati@anugerah-makmur.co.id',
+    distributor_code:'DST019', distributor_name:'PT Anugerah Makmur',
+    region:'Sumatera Utara', area:'Deli Serdang', branch:'Branch DLS-1',
+    spv:'Surya Gunawan', area_manager:'Tika Permata',
+    route_code:'DLS-RT-01', route_name:'Route Deli Serdang 1',
+    store_count:27, status:'active', join_date:'2025-06-01', last_updated:'2026-06-08', notes:'' },
+
+  { id:'DST019-GTI-002', employee_id:'EMP-0124', name:'Teguh Wibawa',      type:'GTI', brand:'Skintific',
+    phone:'0814-3322-1100', email:'teguh.wibawa@anugerah-makmur.co.id',
+    distributor_code:'DST019', distributor_name:'PT Anugerah Makmur',
+    region:'Sumatera Utara', area:'Medan', branch:'Branch MDN-1',
+    spv:'Surya Gunawan', area_manager:'Tika Permata',
+    route_code:'MDN-RT-03', route_name:'Route Medan 3',
+    store_count:45, status:'active', join_date:'2024-09-10', last_updated:'2026-06-20', notes:'' },
+
+  { id:'DST019-MIX-002', employee_id:'EMP-0125', name:'Rani Safitri',      type:'MIX', brand:'Glad2Glow',
+    phone:'0815-5544-3322', email:'rani.safitri@anugerah-makmur.co.id',
+    distributor_code:'DST019', distributor_name:'PT Anugerah Makmur',
+    region:'Sumatera Utara', area:'Binjai', branch:'Branch BNJ-1',
+    spv:'Surya Gunawan', area_manager:'Tika Permata',
+    route_code:'BNJ-RT-01', route_name:'Route Binjai 1',
+    store_count:19, status:'active', join_date:'2025-09-20', last_updated:'2026-05-25', notes:'Baru onboard — masih training route' },
+
+  { id:'DST019-GTI-003', employee_id:'EMP-0119', name:'Vina Anggraini',    type:'GTI', brand:'Skintific',
+    phone:'0816-1122-3344', email:'vina.anggraini@anugerah-makmur.co.id',
+    distributor_code:'DST019', distributor_name:'PT Anugerah Makmur',
+    region:'Sumatera Utara', area:'Pematang Siantar', branch:'Branch PMS-1',
+    spv:'Surya Gunawan', area_manager:'Tika Permata',
+    route_code:'', route_name:'',
+    store_count:0, status:'inactive', join_date:'2024-06-01', last_updated:'2026-01-15', notes:'Non-aktif — kontrak berakhir Januari 2026' },
+];
+
+const AUDIT_LOG = [
+  { ts:'2026-06-24 10:32', user:'Sari Indrawati (ho_admin)',           action:'UPDATE',     entity:'Putri Lestari',    detail:'No. HP dan email diperbarui' },
+  { ts:'2026-06-23 14:15', user:'Wahyu Nugroho (distributor_admin)',   action:'INSERT',     entity:'Surya Gunawan',    detail:'Salesman baru (MTI) ditambahkan — Branch PWK-1' },
+  { ts:'2026-06-22 09:41', user:'Sari Indrawati (ho_admin)',           action:'UPDATE',     entity:'Teguh Wibawa',     detail:'Route dipindah dari MDN-RT-02 ke MDN-RT-03' },
+  { ts:'2026-06-20 09:08', user:'Sari Indrawati (ho_admin)',           action:'DEACTIVATE', entity:'Vina Anggraini',   detail:'Mapping dinonaktifkan — kontrak berakhir' },
+  { ts:'2026-06-18 16:25', user:'Dedi Nugraha (distributor_admin)',    action:'UPDATE',     entity:'Anton Firmansyah', detail:'Store count diperbarui dari 50 → 55' },
+  { ts:'2026-06-15 11:03', user:'Sari Indrawati (ho_admin)',           action:'UPDATE',     entity:'Rani Safitri',     detail:'Catatan ditambahkan: "Baru onboard — masih training route"' },
+  { ts:'2026-06-10 08:50', user:'Fitriani Putri (distributor_admin)',  action:'INSERT',     entity:'Lina Marlina',     detail:'Salesman baru (MIX) ditambahkan — Branch BGR-1' },
+  { ts:'2026-05-30 14:00', user:'Sari Indrawati (ho_admin)',           action:'DEACTIVATE', entity:'Hadi Susanto',     detail:'Mapping dinonaktifkan — pindah ke distributor lain' },
+  { ts:'2026-05-20 10:22', user:'Sari Indrawati (ho_admin)',           action:'UPDATE',     entity:'Maya Kusuma',      detail:'Branch diperbarui ke TNG-2' },
+  { ts:'2026-04-15 15:35', user:'Ahmad Setiawan (spv)',                action:'UPDATE',     entity:'Agus Setiadi',     detail:'SPV direalokasi ke Branch JKS-3' },
+  { ts:'2026-04-01 09:00', user:'Sari Indrawati (ho_admin)',           action:'DEACTIVATE', entity:'Budi Santoso',     detail:'Mapping dinonaktifkan — resign' },
+  { ts:'2025-12-15 14:10', user:'Sari Indrawati (ho_admin)',           action:'DEACTIVATE', entity:'Eko Prasetyo',     detail:'Mapping dinonaktifkan — cuti panjang sakit' },
+];
+
+/* ══════════════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════════════ */
+let currentTab  = 'list';
+let searchQ     = '';
+let filterType  = '';
+let filterStatus= '';
+let filterRegion= '';
+let filterDist  = '';
+let page        = 1;
+const PAGE_SIZE = 10;
+
+/* ══════════════════════════════════════════════════════════════════
+   SCOPE FILTER (distributor_admin sees only their distributor)
+   ══════════════════════════════════════════════════════════════════ */
+function scopedSalesmen() {
+  let rows = SALESMEN;
+  if (role === 'distributor_admin') {
+    const myDist = STEP.ROLES['distributor_admin'].distributor_code;
+    rows = rows.filter(s => s.distributor_code === myDist);
+  }
+  if (searchQ)      rows = rows.filter(s => s.name.toLowerCase().includes(searchQ) || s.id.toLowerCase().includes(searchQ) || (s.employee_id||'').toLowerCase().includes(searchQ) || (s.route_code||'').toLowerCase().includes(searchQ));
+  if (filterType)   rows = rows.filter(s => s.type === filterType);
+  if (filterStatus) rows = rows.filter(s => s.status === filterStatus);
+  if (filterRegion) rows = rows.filter(s => s.region === filterRegion);
+  if (filterDist)   rows = rows.filter(s => s.distributor_code === filterDist);
+  return rows;
+}
+
+function uniqueRegions() { return [...new Set(SALESMEN.map(s => s.region))].sort(); }
+
+/* ══════════════════════════════════════════════════════════════════
+   TAB ROUTING
+   ══════════════════════════════════════════════════════════════════ */
+function renderTabContent() {
+  const body = document.getElementById('tabContent');
+  if (currentTab === 'list')    body.innerHTML = renderList();
+  if (currentTab === 'mapping') body.innerHTML = renderMapping();
+  if (currentTab === 'audit')   body.innerHTML = renderAudit();
+  wireListActions();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SUMMARY CHIPS
+   ══════════════════════════════════════════════════════════════════ */
+function summaryHtml(rows) {
+  const active   = rows.filter(s => s.status === 'active').length;
+  const inactive = rows.filter(s => s.status === 'inactive').length;
+  return `<div class="summary-chips">
+    <span class="summary-chip chip-total">👥 Total: ${rows.length}</span>
+    <span class="summary-chip chip-active">🟢 Aktif: ${active}</span>
+    <span class="summary-chip chip-inactive">⚫ Non-aktif: ${inactive}</span>
+    ${rows.length < SALESMEN.length ? `<span class="summary-chip" style="background:#FFF9E6; color:#92400E; border-color:#FCD34D;">🔍 Filter aktif — ${SALESMEN.length - rows.length} tersembunyi</span>` : ''}
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FILTER BAR
+   ══════════════════════════════════════════════════════════════════ */
+function filterBarHtml() {
+  const regions = uniqueRegions();
+  const showDistFilter = role !== 'distributor_admin';
+  return `
+    <div class="filter-bar">
+      <div class="search-wrap topbar-search"><span>🔎</span><input id="listSearch" placeholder="Cari nama / ID / emp-id / route..." value="${searchQ}"></div>
+      <select id="typeFilter">
+        <option value="">Semua Tipe</option>
+        <option value="GTI" ${filterType==='GTI'?'selected':''}>GTI</option>
+        <option value="MIX" ${filterType==='MIX'?'selected':''}>MIX</option>
+        <option value="MTI" ${filterType==='MTI'?'selected':''}>MTI</option>
+      </select>
+      <select id="statusFilter">
+        <option value="">Semua Status</option>
+        <option value="active" ${filterStatus==='active'?'selected':''}>Aktif</option>
+        <option value="inactive" ${filterStatus==='inactive'?'selected':''}>Non-aktif</option>
+      </select>
+      <select id="regionFilter">
+        <option value="">Semua Region</option>
+        ${regions.map(r=>`<option value="${r}" ${filterRegion===r?'selected':''}>${r}</option>`).join('')}
+      </select>
+      ${showDistFilter ? `<select id="distFilter">
+        <option value="">Semua Distributor</option>
+        ${DISTRIBUTORS.map(d=>`<option value="${d.code}" ${filterDist===d.code?'selected':''}>${d.name}</option>`).join('')}
+      </select>` : ''}
+      <button class="btn btn-outline btn-sm" id="clearFilters" style="white-space:nowrap;">✕ Reset</button>
+    </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LIST TAB
+   ══════════════════════════════════════════════════════════════════ */
+function renderList() {
+  const all  = scopedSalesmen();
+  const maxP = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  if (page > maxP) page = maxP;
+  const rows = all.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+
+  return `${filterBarHtml()}${summaryHtml(all)}
+    ${rows.length === 0
+      ? `<div class="empty-state"><div class="ic">👤</div><p>Tidak ada salesman ditemukan.</p></div>`
+      : `<table class="table">
+          <thead><tr>
+            <th>ID Salesman</th><th>Nama</th><th>Tipe</th>
+            <th>Distributor</th><th>Area</th><th>SPV</th>
+            <th>Toko</th><th>Status</th><th style="min-width:110px;"></th>
+          </tr></thead>
+          <tbody>${rows.map(s=>`<tr>
+            <td><span style="font-family:monospace; font-size:12px; color:var(--ink-secondary);">${s.id}</span></td>
+            <td><strong>${s.name}</strong><br><span style="font-size:11px; color:var(--ink-faint);">${s.employee_id}</span></td>
+            <td><span class="pill pill-neutral">${s.type}</span></td>
+            <td style="max-width:160px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${s.distributor_name}">${s.distributor_name.replace('PT ','')}</td>
+            <td>${s.area}</td>
+            <td>${s.spv}</td>
+            <td><span class="store-badge">🏪 ${s.store_count}</span></td>
+            <td><span class="status-dot ${s.status==='active'?'dot-active':'dot-inactive'}"></span>${s.status==='active'?'Aktif':'Non-aktif'}</td>
+            <td><div class="action-group">
+              <button class="btn btn-outline btn-sm action-detail" data-id="${s.id}" title="Lihat detail">🔍</button>
+              <button class="btn btn-outline btn-sm action-edit"   data-id="${s.id}" title="Edit">✏️</button>
+              ${s.status==='active'?`<button class="btn btn-sm action-deact" data-id="${s.id}" title="Non-aktifkan" style="background:#FEF2F2; color:#DC2626; border:1px solid #FECACA;">⊘</button>`:''}
+            </div></td>
+          </tr>`).join('')}</tbody>
+        </table>
+        ${pagerHtml(page, maxP, all.length)}`
+    }`;
+}
+
+function pagerHtml(cur, max, total) {
+  if (max <= 1) return `<div class="pager"><span class="page-info">${total} salesman</span></div>`;
+  const pages = [];
+  for (let i=1; i<=max; i++) {
+    if (i===1 || i===max || Math.abs(i-cur)<=1) pages.push(i);
+    else if (pages[pages.length-1]!=='…') pages.push('…');
+  }
+  return `<div class="pager">
+    <span class="page-info">Halaman ${cur} dari ${max} (${total} salesman)</span>
+    <button class="pager-btn" id="pgPrev" ${cur<=1?'disabled':''}>‹</button>
+    ${pages.map(p=>p==='…'
+      ? `<span style="padding:0 4px; color:var(--ink-faint);">…</span>`
+      : `<button class="pager-btn ${p===cur?'active':''}" data-pg="${p}">${p}</button>`).join('')}
+    <button class="pager-btn" id="pgNext" ${cur>=max?'disabled':''}>›</button>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MAPPING TAB
+   ══════════════════════════════════════════════════════════════════ */
+function renderMapping() {
+  const rows = scopedSalesmen();
+  if (!rows.length) return `<div class="empty-state"><div class="ic">🔗</div><p>Tidak ada mapping ditemukan.</p></div>`;
+  return `
+    <div class="text-sm ink-faint" style="margin-bottom:14px;">Mapping salesman ↔ distributor aktif. Mapping non-aktif tersimpan di riwayat (Audit Log).</div>
+    <table class="table">
+      <thead><tr><th>ID Salesman</th><th>Nama</th><th>Tipe</th><th>Distributor</th><th>Area Manager</th><th>SPV</th><th>Route</th><th>Status Mapping</th></tr></thead>
+      <tbody>${rows.map(s=>`<tr>
+        <td style="font-family:monospace; font-size:12px;">${s.id}</td>
+        <td>${s.name}</td>
+        <td>${s.type}</td>
+        <td>${s.distributor_name}</td>
+        <td>${s.area_manager}</td>
+        <td>${s.spv}</td>
+        <td style="font-family:monospace; font-size:12px;">${s.route_code||'—'}</td>
+        <td><span class="status-dot ${s.status==='active'?'dot-active':'dot-inactive'}"></span>${s.status==='active'?'Aktif':'Non-aktif'}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AUDIT LOG TAB
+   ══════════════════════════════════════════════════════════════════ */
+function renderAudit() {
+  if (!AUDIT_LOG.length) return `<div class="empty-state"><div class="ic">📋</div><p>Belum ada aktivitas.</p></div>`;
+  return `<table class="table">
+    <thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Entitas</th><th>Keterangan</th></tr></thead>
+    <tbody>${AUDIT_LOG.map(l=>`<tr>
+      <td style="font-size:12px; white-space:nowrap;">${l.ts}</td>
+      <td style="font-size:12px;">${l.user}</td>
+      <td><span class="pill ${l.action==='INSERT'?'pill-info':l.action==='DEACTIVATE'?'pill-warning':'pill-neutral'}">${l.action}</span></td>
+      <td><strong>${l.entity}</strong></td>
+      <td style="font-size:12px;">${l.detail}</td>
+    </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   WIRE ACTIONS & EVENTS
+   ══════════════════════════════════════════════════════════════════ */
+function wireListActions() {
+  // Filter events
+  document.getElementById('listSearch')?.addEventListener('input',  e => { searchQ=e.target.value.toLowerCase(); page=1; renderTabContent(); });
+  document.getElementById('typeFilter')?.addEventListener('change', e => { filterType=e.target.value; page=1; renderTabContent(); });
+  document.getElementById('statusFilter')?.addEventListener('change',e => { filterStatus=e.target.value; page=1; renderTabContent(); });
+  document.getElementById('regionFilter')?.addEventListener('change',e => { filterRegion=e.target.value; page=1; renderTabContent(); });
+  document.getElementById('distFilter')?.addEventListener('change', e => { filterDist=e.target.value; page=1; renderTabContent(); });
+  document.getElementById('clearFilters')?.addEventListener('click',() => { searchQ=filterType=filterStatus=filterRegion=filterDist=''; page=1; renderTabContent(); });
+
+  // Pagination
+  document.getElementById('pgPrev')?.addEventListener('click', () => { page--; renderTabContent(); });
+  document.getElementById('pgNext')?.addEventListener('click', () => { page++; renderTabContent(); });
+  document.querySelectorAll('[data-pg]').forEach(b => b.addEventListener('click', () => { page=+b.dataset.pg; renderTabContent(); }));
+
+  // Row actions
+  document.querySelectorAll('.action-detail').forEach(b => b.addEventListener('click', () => openDetail(b.dataset.id)));
+  document.querySelectorAll('.action-edit').forEach(b => b.addEventListener('click', () => openEdit(b.dataset.id)));
+  document.querySelectorAll('.action-deact').forEach(b => b.addEventListener('click', () => confirmDeact(b.dataset.id)));
+}
+
+function find(id) { return SALESMEN.find(s => s.id === id); }
+
+/* ══════════════════════════════════════════════════════════════════
+   DETAIL DRAWER
+   ══════════════════════════════════════════════════════════════════ */
+function openDetail(id) {
+  const s = find(id);
+  STEP.openDrawer(`
+    <div class="drawer-head">
+      <div>
+        <strong>${s.name}</strong>
+        <span class="pill ${s.status==='active'?'pill-success':'pill-neutral'}" style="margin-left:8px;">${s.status==='active'?'Aktif':'Non-aktif'}</span>
+      </div>
+      <button class="icon-btn" onclick="STEP.closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="detail-grid">
+        <div class="detail-item"><span class="detail-label">ID Salesman</span><span class="detail-value" style="font-family:monospace;">${s.id}</span></div>
+        <div class="detail-item"><span class="detail-label">Employee ID</span><span class="detail-value" style="font-family:monospace;">${s.employee_id}</span></div>
+        <div class="detail-item"><span class="detail-label">Nama Lengkap</span><span class="detail-value">${s.name}</span></div>
+        <div class="detail-item"><span class="detail-label">Tipe Salesman</span><span class="detail-value"><span class="pill pill-neutral">${s.type}</span></span></div>
+        <div class="detail-item"><span class="detail-label">No. HP</span><span class="detail-value">${s.phone||'—'}</span></div>
+        <div class="detail-item"><span class="detail-label">Email</span><span class="detail-value" style="word-break:break-all;">${s.email||'—'}</span></div>
+      </div>
+      <hr style="margin:16px 0; border:none; border-top:1px solid var(--border);">
+      <div class="detail-grid">
+        <div class="detail-item"><span class="detail-label">Distributor</span><span class="detail-value">${s.distributor_name}</span></div>
+        <div class="detail-item"><span class="detail-label">Kode Distributor</span><span class="detail-value" style="font-family:monospace;">${s.distributor_code}</span></div>
+        <div class="detail-item"><span class="detail-label">Region</span><span class="detail-value">${s.region}</span></div>
+        <div class="detail-item"><span class="detail-label">Area</span><span class="detail-value">${s.area}</span></div>
+        <div class="detail-item"><span class="detail-label">Branch</span><span class="detail-value">${s.branch}</span></div>
+        <div class="detail-item"><span class="detail-label">Area Manager</span><span class="detail-value">${s.area_manager}</span></div>
+        <div class="detail-item"><span class="detail-label">SPV</span><span class="detail-value">${s.spv}</span></div>
+        <div class="detail-item"><span class="detail-label">Jumlah Toko Tertugas</span><span class="detail-value">${s.store_count > 0 ? `🏪 ${s.store_count} toko` : '—'}</span></div>
+      </div>
+      <hr style="margin:16px 0; border:none; border-top:1px solid var(--border);">
+      <div class="detail-grid">
+        <div class="detail-item"><span class="detail-label">Kode Route</span><span class="detail-value" style="font-family:monospace;">${s.route_code||'—'}</span></div>
+        <div class="detail-item"><span class="detail-label">Nama Route</span><span class="detail-value">${s.route_name||'—'}</span></div>
+        <div class="detail-item"><span class="detail-label">Tanggal Bergabung</span><span class="detail-value">${s.join_date}</span></div>
+        <div class="detail-item"><span class="detail-label">Terakhir Diperbarui</span><span class="detail-value">${s.last_updated}</span></div>
+      </div>
+      ${s.notes ? `<div style="margin-top:14px; padding:12px; background:var(--soft-white); border-radius:8px; font-size:var(--text-sm);"><span style="font-weight:700; color:var(--ink-secondary);">📝 Catatan:</span> ${s.notes}</div>` : ''}
+      <div style="margin-top:20px; display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="STEP.closeDrawer(); openEdit('${s.id}')">✏️ Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="STEP.closeDrawer()">Tutup</button>
+      </div>
+    </div>`);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   EDIT DRAWER
+   ══════════════════════════════════════════════════════════════════ */
+function openEdit(id) {
+  const s = find(id);
+  STEP.openDrawer(`
+    <div class="drawer-head">
+      <strong>Edit Salesman — ${s.name}</strong>
+      <button class="icon-btn" onclick="STEP.closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div style="margin-bottom:14px; padding:10px 14px; background:var(--soft-white); border-radius:8px; font-size:var(--text-sm); color:var(--ink-secondary);">
+        ID: <span style="font-family:monospace;">${s.id}</span> · Emp: <span style="font-family:monospace;">${s.employee_id}</span>
+      </div>
+      <div class="form-grid">
+        <span class="form-section">Data Pribadi</span>
+        <div class="form-group">
+          <label>Nama Salesman <span style="color:#DC2626">*</span></label>
+          <input id="eName" value="${s.name}" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>No. HP</label>
+          <input id="ePhone" value="${s.phone}" maxlength="25" placeholder="08xx-xxxx-xxxx">
+        </div>
+        <div class="form-group form-full">
+          <label>Email</label>
+          <input id="eEmail" type="email" value="${s.email}" maxlength="100">
+        </div>
+
+        <span class="form-section">Penempatan</span>
+        <div class="form-group">
+          <label>SPV <span style="color:#DC2626">*</span></label>
+          <input id="eSpv" value="${s.spv}" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Area Manager</label>
+          <input id="eAM" value="${s.area_manager}" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Area</label>
+          <input id="eArea" value="${s.area}" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Branch</label>
+          <input id="eBranch" value="${s.branch}" maxlength="80">
+        </div>
+
+        <span class="form-section">Route</span>
+        <div class="form-group">
+          <label>Kode Route</label>
+          <input id="eRouteCode" value="${s.route_code}" maxlength="30" placeholder="JKS-RT-01">
+        </div>
+        <div class="form-group">
+          <label>Nama Route</label>
+          <input id="eRouteName" value="${s.route_name}" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Jumlah Toko Tertugas</label>
+          <input id="eStores" type="number" min="0" value="${s.store_count}">
+        </div>
+
+        <span class="form-section">Catatan</span>
+        <div class="form-group form-full">
+          <label>Catatan / Remarks</label>
+          <textarea id="eNotes" rows="3" placeholder="Opsional...">${s.notes}</textarea>
+        </div>
+      </div>
+      <div id="editMsg" style="margin-top:10px; display:none;"></div>
+      <div style="display:flex; gap:10px; margin-top:18px;">
+        <button class="btn btn-primary" onclick="submitEdit('${s.id}')">💾 Simpan</button>
+        <button class="btn btn-outline" onclick="STEP.closeDrawer()">Batal</button>
+      </div>
+    </div>`);
+}
+
+function submitEdit(id) {
+  const s    = find(id);
+  const name = document.getElementById('eName').value.trim();
+  const spv  = document.getElementById('eSpv').value.trim();
+  const msg  = document.getElementById('editMsg');
+  if (!name || !spv) { showMsg(msg,'error','Nama dan SPV wajib diisi.'); return; }
+  const prev = s.name;
+  s.name       = name;
+  s.phone      = document.getElementById('ePhone').value.trim();
+  s.email      = document.getElementById('eEmail').value.trim();
+  s.spv        = spv;
+  s.area_manager = document.getElementById('eAM').value.trim();
+  s.area       = document.getElementById('eArea').value.trim();
+  s.branch     = document.getElementById('eBranch').value.trim();
+  s.route_code = document.getElementById('eRouteCode').value.trim();
+  s.route_name = document.getElementById('eRouteName').value.trim();
+  s.store_count= parseInt(document.getElementById('eStores').value)||0;
+  s.notes      = document.getElementById('eNotes').value.trim();
+  s.last_updated = new Date().toISOString().slice(0,10);
+  AUDIT_LOG.unshift({ ts: now(), user: STEP.ROLES[role].name+' ('+role+')', action:'UPDATE', entity: s.name, detail:`Data salesman diperbarui${prev!==s.name?' (nama: '+prev+' → '+s.name+')':''}` });
+  STEP.closeDrawer();
+  renderTabContent();
+  STEP.toast(`${s.name} berhasil diperbarui`, '✅');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ADD DRAWER
+   ══════════════════════════════════════════════════════════════════ */
+function openAdd() {
+  const distOpts = role === 'distributor_admin'
+    ? DISTRIBUTORS.filter(d => d.code === STEP.ROLES['distributor_admin'].distributor_code)
+    : DISTRIBUTORS;
+
+  STEP.openDrawer(`
+    <div class="drawer-head">
+      <strong>Tambah Salesman Baru</strong>
+      <button class="icon-btn" onclick="STEP.closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-grid">
+        <span class="form-section">Identifikasi</span>
+        <div class="form-group">
+          <label>Tipe Salesman <span style="color:#DC2626">*</span></label>
+          <select id="aType" onchange="previewId()">
+            <option value="">— Pilih —</option>
+            <option>GTI</option><option>MIX</option><option>MTI</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Distributor <span style="color:#DC2626">*</span></label>
+          <select id="aDist" onchange="previewId()">
+            <option value="">— Pilih —</option>
+            ${distOpts.map(d=>`<option value="${d.code}">${d.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group form-full">
+          <label>Preview ID</label>
+          <div id="idPreview" style="font-family:monospace; font-size:var(--text-sm); padding:7px 12px; border-radius:6px; background:var(--soft-white); color:var(--ink-secondary);">— pilih tipe & distributor —</div>
+        </div>
+        <div class="form-group">
+          <label>Employee ID</label>
+          <input id="aEmpId" placeholder="EMP-xxxx (opsional)" maxlength="20">
+        </div>
+
+        <span class="form-section">Data Pribadi</span>
+        <div class="form-group">
+          <label>Nama Lengkap <span style="color:#DC2626">*</span></label>
+          <input id="aName" maxlength="80" placeholder="Nama salesman">
+        </div>
+        <div class="form-group">
+          <label>No. HP</label>
+          <input id="aPhone" maxlength="25" placeholder="08xx-xxxx-xxxx">
+        </div>
+        <div class="form-group form-full">
+          <label>Email</label>
+          <input id="aEmail" type="email" maxlength="100" placeholder="nama@distributor.co.id">
+        </div>
+
+        <span class="form-section">Penempatan</span>
+        <div class="form-group">
+          <label>SPV <span style="color:#DC2626">*</span></label>
+          <input id="aSpv" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Area Manager</label>
+          <input id="aAM" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Area</label>
+          <input id="aArea" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Branch</label>
+          <input id="aBranch" maxlength="80">
+        </div>
+
+        <span class="form-section">Route</span>
+        <div class="form-group">
+          <label>Kode Route</label>
+          <input id="aRouteCode" placeholder="JKS-RT-01" maxlength="30">
+        </div>
+        <div class="form-group">
+          <label>Nama Route</label>
+          <input id="aRouteName" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label>Tanggal Bergabung</label>
+          <input id="aJoin" type="date" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        <div class="form-group form-full">
+          <label>Catatan</label>
+          <textarea id="aNotes" rows="2" placeholder="Opsional..."></textarea>
+        </div>
+      </div>
+      <div id="addMsg" style="margin-top:10px; display:none;"></div>
+      <div style="display:flex; gap:10px; margin-top:18px;">
+        <button class="btn btn-primary" onclick="submitAdd()">➕ Tambah Salesman</button>
+        <button class="btn btn-outline" onclick="STEP.closeDrawer()">Batal</button>
+      </div>
+    </div>`);
+}
+
+function previewId() {
+  const dist = document.getElementById('aDist')?.value;
+  const type = document.getElementById('aType')?.value;
+  const el   = document.getElementById('idPreview');
+  if (!el) return;
+  if (!dist || !type) { el.textContent = '— pilih tipe & distributor —'; return; }
+  const count = SALESMEN.filter(s => s.distributor_code===dist && s.type===type).length + 1;
+  el.textContent = `${dist}-${type}-${String(count).padStart(3,'0')}  ← ID final dari server`;
+}
+
+function submitAdd() {
+  const dist  = document.getElementById('aDist').value;
+  const type  = document.getElementById('aType').value;
+  const name  = document.getElementById('aName').value.trim();
+  const spv   = document.getElementById('aSpv').value.trim();
+  const msg   = document.getElementById('addMsg');
+  if (!dist||!type||!name||!spv) { showMsg(msg,'error','Distributor, tipe, nama, dan SPV wajib diisi.'); return; }
+  const count  = SALESMEN.filter(s => s.distributor_code===dist && s.type===type).length + 1;
+  const newId  = `${dist}-${type}-${String(count).padStart(3,'0')}`;
+  const dInfo  = DISTRIBUTORS.find(d=>d.code===dist);
+  SALESMEN.push({
+    id:newId, employee_id:document.getElementById('aEmpId').value.trim()||`EMP-XXXX`,
+    name, type, brand: type==='GTI'?'Skintific':type==='MIX'?'Glad2Glow':'Timephoria',
+    phone:document.getElementById('aPhone').value.trim(),
+    email:document.getElementById('aEmail').value.trim(),
+    distributor_code:dist, distributor_name:dInfo?.name||dist,
+    region:dInfo?.region||'', area:document.getElementById('aArea').value.trim(),
+    branch:document.getElementById('aBranch').value.trim(),
+    spv, area_manager:document.getElementById('aAM').value.trim()||dInfo?.area_manager||'',
+    route_code:document.getElementById('aRouteCode').value.trim(),
+    route_name:document.getElementById('aRouteName').value.trim(),
+    store_count:0, status:'active',
+    join_date:document.getElementById('aJoin').value,
+    last_updated:new Date().toISOString().slice(0,10),
+    notes:document.getElementById('aNotes').value.trim(),
+  });
+  AUDIT_LOG.unshift({ ts:now(), user:STEP.ROLES[role].name+' ('+role+')', action:'INSERT', entity:name, detail:`Salesman baru (${type}) ditambahkan — ID: ${newId}` });
+  STEP.closeDrawer();
+  renderTabContent();
+  STEP.toast(`${name} berhasil ditambahkan (${newId})`, '✅');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DEACTIVATE CONFIRM
+   ══════════════════════════════════════════════════════════════════ */
+function confirmDeact(id) {
+  const s = find(id);
+  STEP.openModal(`
+    <div class="modal-head"><strong>Non-aktifkan Salesman</strong></div>
+    <div class="modal-body">
+      <p>Anda akan <strong>menonaktifkan</strong>:</p>
+      <p style="margin:12px 0; padding:12px; background:var(--soft-white); border-radius:8px;">
+        <strong>${s.name}</strong><br>
+        <span style="font-family:monospace; font-size:12px; color:var(--ink-secondary);">${s.id} · ${s.employee_id}</span><br>
+        <span style="font-size:12px; color:var(--ink-secondary);">${s.distributor_name} · ${s.area}</span>
+      </p>
+      <p class="text-sm ink-faint">Mapping akan diset <code>is_active = FALSE</code>. Data historis tidak dihapus dan tercatat di Audit Log.</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="STEP.closeModal()">Batal</button>
+      <button class="btn btn-primary" style="background:#DC2626; border-color:#DC2626;" onclick="doDeact('${s.id}')">Non-aktifkan</button>
+    </div>`);
+}
+
+function doDeact(id) {
+  const s = find(id);
+  s.status = 'inactive';
+  s.store_count = 0;
+  s.route_code = '';
+  s.route_name = '';
+  s.last_updated = new Date().toISOString().slice(0,10);
+  AUDIT_LOG.unshift({ ts:now(), user:STEP.ROLES[role].name+' ('+role+')', action:'DEACTIVATE', entity:s.name, detail:'Mapping dinonaktifkan (is_active = FALSE)' });
+  STEP.closeModal();
+  renderTabContent();
+  STEP.toast(`${s.name} telah dinonaktifkan`, '⚠️');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   EXPORT CSV
+   ══════════════════════════════════════════════════════════════════ */
+function exportCsv() {
+  const rows = scopedSalesmen();
+  const headers = ['ID Salesman','Employee ID','Nama','Tipe','No HP','Email','Distributor','Kode Distributor','Region','Area','Branch','Area Manager','SPV','Kode Route','Nama Route','Jumlah Toko','Status','Tanggal Bergabung','Terakhir Diperbarui','Catatan'];
+  const lines = [headers.join(',')];
+  rows.forEach(s => {
+    lines.push([s.id,s.employee_id,s.name,s.type,s.phone,s.email,
+      `"${s.distributor_name}"`,s.distributor_code,s.region,s.area,s.branch,
+      s.area_manager,s.spv,s.route_code,`"${s.route_name}"`,s.store_count,s.status,
+      s.join_date,s.last_updated,`"${s.notes}"`].join(','));
+  });
+  const blob = new Blob([lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+  const a    = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `master_salesman_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  STEP.toast(`${rows.length} baris diekspor ke CSV`, '⬇️');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════════════════════ */
+function showMsg(el, type, text) {
+  el.style.display = '';
+  el.className = type==='error' ? 'pill pill-danger' : 'pill pill-success';
+  el.textContent = text;
+}
+function now() { return new Date().toISOString().slice(0,16).replace('T',' '); }
+
+/* ══════════════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════════════ */
+function init() {
+  document.querySelectorAll('#mainTabs button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#mainTabs button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    currentTab = b.dataset.tab;
+    page = 1;
+    renderTabContent();
+  }));
+  document.getElementById('addSalesmanBtn').addEventListener('click', openAdd);
+  document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+  renderTabContent();
+}
+
+init();
+
+}); // end guardPage
+</script>
+</body>
+</html>

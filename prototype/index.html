@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Masuk — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  body{ background: linear-gradient(160deg, var(--navy-900) 0%, #0E2E4A 55%, var(--primary-700) 130%); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .login-wrap{ width:100%; max-width:920px; display:grid; grid-template-columns: 1.1fr 1fr; border-radius:22px; overflow:hidden; box-shadow: var(--shadow-lg); }
+  .login-side{ background: rgba(255,255,255,.06); color:#fff; padding:48px 40px; display:flex; flex-direction:column; justify-content:space-between; backdrop-filter: blur(6px); }
+  .login-side .tag{ font-size:13px; color:#9FD4F2; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+  .login-side h1{ font-size:34px; font-weight:800; line-height:1.15; margin-top:14px; }
+  .login-side p{ color:#C9DCEB; font-size:14px; margin-top:14px; line-height:1.6; }
+  .login-side .feat{ margin-top:28px; display:flex; flex-direction:column; gap:12px; }
+  .login-side .feat div{ display:flex; gap:10px; align-items:flex-start; font-size:13px; color:#DCEAF4; }
+  .login-form{ background: var(--surface); padding:48px 40px; display:flex; flex-direction:column; gap:16px; }
+  .login-form .logo-row{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .login-form .logo-mark{ width:38px; height:38px; border-radius:11px; background: linear-gradient(135deg, var(--primary-500), var(--primary-700)); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; }
+  .login-form h2{ font-size:19px; font-weight:700; }
+  .demo-list{ display:flex; flex-direction:column; gap:8px; margin-top:6px; }
+  .demo-role{ display:flex; align-items:center; gap:12px; border:1px solid var(--line); border-radius: var(--radius-md); padding:11px 14px; cursor:pointer; transition: border-color .15s, background .15s; }
+  .demo-role:hover{ border-color: var(--primary-500); background: var(--primary-50); }
+  .demo-role .dot{ width:30px; height:30px; border-radius:8px; background: var(--soft-white); display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .demo-role .t{ font-weight:700; font-size:13.5px; }
+  .demo-role .s{ font-size:11.5px; color: var(--ink-faint); }
+  @media (max-width: 767px){ .login-wrap{ grid-template-columns:1fr; } .login-side{ display:none; } }
+  .dist-admin-role { border-color: #BBF7D0; background: #F0FDF4; }
+  .dist-admin-role:hover { border-color: #4ADE80; background: #DCFCE7; }
+</style>
+</head>
+<body>
+
+<div class="login-wrap">
+  <div class="login-side">
+    <div>
+      <div class="tag">Skintific Territory & Execution Platform</div>
+      <h1>STEP</h1>
+      <p>Plan. Execute. Monitor. — satu platform untuk territory planning, eksekusi route, governance target, dan monitoring performa sales di seluruh organisasi lapangan.</p>
+      <div class="feat">
+        <div>✅ <span>Recommendation route yang bisa dijelaskan — keputusan akhir tetap manual</span></div>
+        <div>✅ <span>Target berversi — tidak pernah ditimpa secara diam-diam</span></div>
+        <div>✅ <span>Audit trail lengkap untuk setiap approval, perubahan tier, dan perubahan route</span></div>
+      </div>
+    </div>
+    <div style="font-size:11.5px; color:#9FB7CC;">Skintific Group — Hanya untuk Penggunaan Internal</div>
+  </div>
+
+  <div class="login-form">
+    <div class="logo-row"><span class="logo-mark">ST</span><strong style="font-size:16px;">STEP</strong></div>
+    <h2>Masuk untuk melanjutkan</h2>
+    <button class="btn btn-navy btn-block" onclick="STEP.toast('SSO sudah terhubung di production — gunakan Demo Mode di bawah untuk eksplorasi.', '🔐')">🔐 Lanjutkan dengan Skintific SSO</button>
+    <hr class="div" style="margin:6px 0;">
+    <div>
+      <div class="label">Demo Mode — jelajahi sebagai salah satu role</div>
+      <div class="demo-list" id="demoList"></div>
+    </div>
+    <p class="text-sm ink-faint" style="margin-top:4px;">Demo Mode mencerminkan fitur onboarding di production (PRD §12) — pilih sebuah role untuk menjelajahi prototype dengan data contoh. Tidak perlu kredensial asli.</p>
+  </div>
+</div>
+
+<script src="assets/js/step.js"></script>
+<script>
+  STEP.applyTheme();
+  STEP.applyTenantBranding();
+
+  const ROLE_ICONS = {
+    spv: '🧑‍💼', area_manager: '🗂️', distributor_manager: '🏢',
+    regional_sales: '🌏', ho_admin: '⚙️', distributor_admin: '📦',
+  };
+  const ROLE_DESCRIPTIONS = {
+    spv:                  'Akses area + route planner + approval',
+    area_manager:         'Akses area + approval L1 + target',
+    distributor_manager:  'Akses nasional + approval L2',
+    regional_sales:       'Monitoring nasional — view only',
+    ho_admin:             'Akses penuh + Administrasi',
+    distributor_admin:    'Store Opportunity & Salesman Evaluate — cakupan distributor',
+  };
+  const DIST_ADMIN_DEST = 'store-opportunity.html';
+
+  const list = document.getElementById('demoList');
+  STEP.ALL_ROLES.forEach(r => {
+    const info = STEP.ROLES[r];
+    const isDistAdmin = r === 'distributor_admin';
+    const el = document.createElement('div');
+    el.className = 'demo-role' + (isDistAdmin ? ' dist-admin-role' : '');
+    el.innerHTML = `
+      <span class="dot" style="${isDistAdmin ? 'background:var(--success-bg); font-size:16px;' : ''}">${ROLE_ICONS[r] || '👤'}</span>
+      <span style="flex:1;">
+        <span class="t">${info.label}</span>
+        ${isDistAdmin ? '<span class="pill" style="margin-left:8px; font-size:10px; background:#DCFCE7; color:#166534;">Distributor</span>' : ''}
+        <br><span class="s">${ROLE_DESCRIPTIONS[r]}</span>
+      </span>
+      ${isDistAdmin ? '<span style="font-size:11px; color:var(--ink-faint);">→ Store Opp</span>' : ''}`;
+    el.addEventListener('click', () => {
+      localStorage.setItem('step_role', r);
+      window.location.href = isDistAdmin ? DIST_ADMIN_DEST : 'dashboard.html';
+    });
+    list.appendChild(el);
+  });
+</script>
+</body>
+</html>

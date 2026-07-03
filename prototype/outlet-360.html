@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Store 360 — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <a href="outlet-salesman.html" class="text-sm ink-faint">← Kembali ke Store & Salesman</a>
+
+      <div class="card card-pad mt-14">
+        <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:14px;">
+          <div class="flex items-center gap-14">
+            <div class="avatar" style="width:52px; height:52px; font-size:18px; border-radius:14px;" id="oInitials"></div>
+            <div>
+              <div class="h1" id="oName" style="font-size:22px;"></div>
+              <div class="text-sm ink-faint mt-8" id="oMeta"></div>
+            </div>
+          </div>
+          <div class="flex gap-10">
+            <button class="btn btn-outline" id="btnOverrideTier">Override Tier</button>
+            <button class="btn btn-primary" onclick="STEP.toast('Catatan ditambahkan ke timeline','📝')">+ Tambah Catatan</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt-20">
+        <div class="tabs" id="o360Tabs" style="padding:0 20px;">
+          <button class="active" data-tab="basic">Info Dasar</button>
+          <button data-tab="commercial">Commercial</button>
+          <button data-tab="visit">Info Kunjungan</button>
+          <button data-tab="target">Info Target</button>
+          <button data-tab="timeline">Timeline</button>
+          <button data-tab="attachments">Lampiran</button>
+          <button data-tab="comments">Komentar</button>
+        </div>
+        <div class="widget-body" id="o360Body"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('outlet-salesman');
+const D = STEP.DATA;
+const id = new URLSearchParams(location.search).get('id') || D.outlets[0].id;
+const o = STEP.outletById(id) || D.outlets[0];
+
+document.getElementById('oInitials').textContent = o.name.split(' ').map(w=>w[0]).slice(0,2).join('');
+document.getElementById('oName').textContent = o.name;
+document.getElementById('oMeta').innerHTML = `${o.code} · ${o.territory} · ${STEP.tierBadge(o.tier)} ${o.isNew?'<span class="pill pill-info">Store Baru</span>':''}`;
+
+/* ---- Store 360 Integration: reflects bulk updates committed via Import & Export → Outlet
+   Information for this outlet's code — same localStorage array, read here directly. ---- */
+function outletAuditLog(){ try { return JSON.parse(localStorage.getItem('step_outlet_audit')||'[]'); } catch(e){ return []; } }
+const myAudit = outletAuditLog().filter(a => a.outletCode === o.code);
+const lastUpdate = myAudit[0];
+
+const TABS = {
+  basic: () => `<div class="grid-2">
+    <div><div class="label">Kode Store</div><div class="mt-8">${o.code}</div></div>
+    <div><div class="label">Territory</div><div class="mt-8">${o.territory}</div></div>
+    <div><div class="label">Tier</div><div class="mt-8">${STEP.tierBadge(o.tier)} <span class="ink-faint text-sm">(auto rule engine, manual override diperbolehkan)</span></div></div>
+    <div><div class="label">Status</div><div class="mt-8">${STEP.statusPill('approved')}</div></div>
+    <div><div class="label">Alamat</div><div class="mt-8">Jl. Kemang Raya, Jakarta Selatan</div></div>
+    <div><div class="label">Tipe Store</div><div class="mt-8">Modern Retail — Beauty & Skincare</div></div>
+  </div>
+  ${lastUpdate ? `<div class="card card-pad mt-20" style="background:var(--soft-white); border:1px solid var(--line);">
+    <div class="text-sm" style="font-weight:700;">🕘 Last Updated Information</div>
+    <div class="text-sm ink-soft mt-8">Field <strong>${lastUpdate.field}</strong> diubah menjadi "<strong>${lastUpdate.newValue}</strong>" via bulk Import & Export.</div>
+    <div class="text-sm ink-faint mt-6">Updated By <strong>${lastUpdate.updatedBy}</strong> · ${lastUpdate.date} ${lastUpdate.time}</div>
+  </div>` : ''}`,
+  commercial: () => `<div class="grid-2">
+    <div><div class="label">Potential Score</div><div class="mt-8 num" style="font-size:20px; font-weight:700;">${o.potentialScore}</div></div>
+    <div><div class="label">Sell-In Growth (4 minggu terakhir)</div><div class="mt-8" style="color:${o.sellInGrowthPct>=0?'var(--success)':'var(--danger)'}; font-weight:700;">${o.sellInGrowthPct>=0?'+':''}${o.sellInGrowthPct}%</div></div>
+    <div><div class="label">Target Bulanan</div><div class="mt-8 num">${STEP.fmtIDR(o.target)}</div></div>
+    <div><div class="label">Tercapai MTD</div><div class="mt-8 num">${STEP.fmtIDR(o.achieved)}</div></div>
+  </div>`,
+  visit: () => `<div class="grid-2">
+    <div><div class="label">Last Visit</div><div class="mt-8">${o.lastVisitDays} hari lalu</div></div>
+    <div><div class="label">Status Coverage</div><div class="mt-8">${o.lastVisitDays>30?STEP.statusPill('open')+' Coverage gap':'Sesuai jadwal'}</div></div>
+  </div>
+  <div class="mt-20"><div class="label">Riwayat Kunjungan Terbaru</div>
+    <table class="table mt-8"><thead><tr><th>Tanggal</th><th>Salesman</th><th>Order Masuk</th></tr></thead><tbody>
+      <tr><td>${o.lastVisitDays} hari lalu</td><td>Yusuf Maulana</td><td class="num">${STEP.fmtIDR(Math.round(o.target*0.3))}</td></tr>
+      <tr><td>${o.lastVisitDays+7} hari lalu</td><td>Yusuf Maulana</td><td class="num">${STEP.fmtIDR(Math.round(o.target*0.25))}</td></tr>
+      <tr><td>${o.lastVisitDays+14} hari lalu</td><td>Yusuf Maulana</td><td class="num">${STEP.fmtIDR(Math.round(o.target*0.28))}</td></tr>
+    </tbody></table>
+  </div>`,
+  target: () => `<div class="flex justify-between"><span class="label">Progress Target Bulanan</span><span class="text-sm num">${o.achievementPct}%</span></div>
+    <div class="progress mt-8 ${o.achievementPct<60?'warn':''}"><div style="width:${Math.min(o.achievementPct,100)}%"></div></div>
+    <div class="grid-2 mt-20">
+      <div><div class="label">Target Versi Saat Ini</div><div class="mt-8 num">${STEP.fmtIDR(o.target)}</div></div>
+      <div><div class="label">Berlaku Sejak</div><div class="mt-8">01 Jun 2026</div></div>
+    </div>
+    <a href="target-management.html" class="btn btn-outline btn-sm mt-14">Buka Manajemen Target →</a>`,
+  timeline: () => `<div class="timeline">
+    ${[
+      ...myAudit.map(a => ({ t:`Outlet Information diperbarui — ${a.field} → "${a.newValue}" (Change History)`, m:`${a.date} ${a.time} · ${a.updatedBy} · via Import & Export` })),
+      {t:'Tier ditinjau — tidak ada perubahan (auto rule engine)', m:'18 Jun 2026 · System'},
+      {t:'Kunjungan selesai — order masuk', m: o.lastVisitDays+' hari lalu · Yusuf Maulana'},
+      {t:'Target versi v3 mulai berlaku', m:'01 Jun 2026 · Manajemen Target'},
+      {t:'Store onboarded', m:'12 Mar 2025 · Head Office Admin'},
+    ].map(x=>`<div class="timeline-item"><div class="t-title">${x.t}</div><div class="t-meta">${x.m}</div></div>`).join('')}
+  </div>`,
+  attachments: () => `<div class="empty-state"><div class="ic">📎</div><div class="h3">Belum ada lampiran</div><p>Foto, kontrak, atau bukti pendukung untuk store ini akan muncul di sini.</p><button class="btn btn-outline btn-sm" onclick="STEP.toast('Upload disimulasikan','📎')">Upload file</button></div>`,
+  comments: () => `<div class="timeline">
+    <div class="timeline-item"><div class="t-title">"Store meminta tambahan POSM untuk kampanye Juli."</div><div class="t-meta">Ahmad Setiawan (SPV) · 20 Jun 2026</div></div>
+    <div class="timeline-item"><div class="t-title">"Jadwal pengiriman sudah dikonfirmasi dengan distributor."</div><div class="t-meta">Rina Wulandari (Area Manager) · 18 Jun 2026</div></div>
+  </div>`,
+};
+
+function render(tab){ document.getElementById('o360Body').innerHTML = TABS[tab](); }
+document.querySelectorAll('#o360Tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#o360Tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  render(b.dataset.tab);
+}));
+render('basic');
+
+document.getElementById('btnOverrideTier').addEventListener('click', () => {
+  STEP.openModal(`<div class="modal-head"><strong>Override Tier — ${o.name}</strong><button class="icon-btn" onclick="STEP.closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="flex items-center gap-10"><span class="label">Saat ini</span>${STEP.tierBadge(o.tier)}</div>
+      <div class="field mt-14"><label>Tier baru</label>
+        <select class="input" id="newTierSel">${['S','A','B','C','D'].map(t=>`<option ${t===o.tier?'selected':''}>${t}</option>`).join('')}</select>
+      </div>
+      <div class="field mt-14"><label>Alasan (wajib diisi)</label><textarea class="input" rows="3" placeholder="Jelaskan bukti yang mendukung override ini..."></textarea></div>
+      <p class="text-sm ink-faint mt-8">Ini akan membuat approval request yang diajukan ke SPV → Area Manager → Distributor Manager. Tier tidak berubah sampai disetujui sepenuhnya.</p>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="STEP.closeModal()">Batal</button><button class="btn btn-primary" onclick="STEP.closeModal(); STEP.toast('Override tier diajukan untuk approval','📤')">Submit</button></div>`);
+});
+</script>
+</body>
+</html>

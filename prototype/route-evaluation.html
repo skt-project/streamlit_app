@@ -1,0 +1,238 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Route Evaluate — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  .ecrate-badge{ font-weight:800; font-size:12px; padding:4px 11px; border-radius:var(--radius-pill); display:inline-block; }
+  .ecrate-good{ background:var(--success-bg); color:var(--success); }
+  .ecrate-warn{ background:var(--warning-bg); color:var(--warning); }
+  .ecrate-bad{ background:var(--danger-bg); color:var(--danger); }
+  .re-row{ cursor:pointer; }
+  .re-row:hover td{ background:var(--soft-white); }
+  .tier-ecrate-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
+  @media (max-width:767px){ .tier-ecrate-grid{ grid-template-columns:repeat(2,1fr); } }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+    <div class="content">
+
+      <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:12px;">
+        <div>
+          <div class="h1">Route Evaluate</div>
+          <div class="text-sm ink-faint mt-8">Evaluasi efektivitas kunjungan — <strong>Call</strong> (kunjungan benar-benar terlaksana, dari checkpoint SFA) vs <strong>Effective Call</strong> (kunjungan yang menghasilkan order).</div>
+        </div>
+        <div class="week-nav">
+          <button id="weekPrev" title="Minggu sebelumnya">‹</button>
+          <span class="text-sm" id="weekLabel" style="font-weight:800; min-width:230px; text-align:center; font-size:14.5px;"></span>
+          <button id="weekNext" title="Minggu berikutnya">›</button>
+        </div>
+      </div>
+
+      <div id="teamView">
+        <div class="kpi-grid mt-20" id="teamKpis"></div>
+
+        <div class="card mt-20">
+          <div class="widget-head">
+            <div class="h3">Team Roll-up — <span id="groupLabelTeam"></span></div>
+            <span class="text-sm ink-faint">Klik salesman untuk melihat detail per store</span>
+          </div>
+          <div class="widget-body" id="teamBody"></div>
+        </div>
+      </div>
+
+      <div id="detailView" style="display:none;">
+        <a href="#" class="text-sm ink-faint" id="backToTeam">← Kembali ke Team Roll-up</a>
+
+        <div class="card card-pad mt-14">
+          <div class="flex items-center justify-between" style="flex-wrap:wrap; gap:14px;">
+            <div class="flex items-center gap-14">
+              <div class="avatar" style="width:48px; height:48px; font-size:16px; border-radius:14px;" id="dInitials"></div>
+              <div>
+                <div class="h1" id="dName" style="font-size:19px;"></div>
+                <div class="text-sm ink-faint mt-8" id="dMeta"></div>
+              </div>
+            </div>
+            <a class="btn btn-outline btn-sm" id="dGotoPlanner">Buka di Route Planner →</a>
+          </div>
+        </div>
+
+        <div class="kpi-grid mt-20" id="detailKpis"></div>
+
+        <div class="card card-pad mt-20">
+          <div class="h3">Effective Call Rate per Tier</div>
+          <p class="text-sm ink-soft mt-8">Conversi rendah di Tier S/A lebih kritis dibanding Tier C/D — Excel asal tidak bisa membedakan ini.</p>
+          <div class="tier-ecrate-grid mt-14" id="tierEcrateGrid"></div>
+        </div>
+
+        <div class="card mt-20">
+          <div class="widget-head"><div class="h3">Detail per Store</div></div>
+          <div class="widget-body" id="storeDetailBody"></div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('route-evaluation');
+STEP.guardPage('route-evaluation', function(scope) {
+const D = STEP.DATA;
+
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+let weekOffset = 0;
+function weekLabelText(){ const iso = STEP.isoWeekLabel(TODAY, weekOffset); return (weekOffset===0?'Minggu Ini · ':'') + `Week ${iso.week} · ${iso.range}`; }
+
+const groupSalesmen = STEP.salesmenInCurrentGroup();
+document.getElementById('groupLabelTeam').textContent = STEP.BRAND_GROUPS[STEP.getBrandGroup()].label;
+
+function simpleHash(str){ let h=0; for(let i=0;i<str.length;i++){ h=(h*31+str.charCodeAt(i))|0; } return Math.abs(h); }
+
+/* ---- Mock execution data, deterministic per (salesman, week): Call = planned visits that were
+   actually checked-in (rate derived from the salesman's existing routeCompliancePct — the same
+   field Dashboard's Route Compliance gauge already uses, so this isn't a fabricated new number).
+   Effective Call = executed visits where an order was placed (Rp>0), rate derived from the
+   salesman's achievementPct plus a tier boost (higher-tier stores convert more easily). This is
+   what the source Excel structurally cannot do: it only has Rp per cell, so "not visited" and
+   "visited, no sale" both render as blank/zero — indistinguishable. ---- */
+function evaluationDataFor(sid, offset){
+  const sm = D.salesmen.find(s=>s.id===sid);
+  const route = STEP.generateWeeklyRoute(sid, sm.area || sm.territory, offset);
+  const days = ['mon','tue','wed','thu','fri','sat'];
+  const perStore = {};
+  let totalPlanned = 0, totalCall = 0, totalEC = 0;
+  days.forEach(day => {
+    route[day].forEach(stub => {
+      totalPlanned++;
+      if (!perStore[stub.code]) perStore[stub.code] = { name: stub.name, tier: stub.tier, area: stub.area, planned:0, call:0, effective:0 };
+      const rec = perStore[stub.code];
+      rec.planned++;
+      const execRate = sm.routeCompliancePct / 100;
+      const executed = (simpleHash(sid+stub.code+day+'exec') % 1000) < execRate * 1000;
+      if (executed) {
+        totalCall++; rec.call++;
+        const tierBoost = { S:18, A:10, B:0, C:-10, D:-18 }[stub.tier] || 0;
+        const effProb = Math.max(4, Math.min(92, sm.achievementPct * 0.45 + tierBoost));
+        const effective = (simpleHash(sid+stub.code+day+'eff') % 1000) < effProb * 10;
+        if (effective) { totalEC++; rec.effective++; }
+      }
+    });
+  });
+  return { sm, totalPlanned, totalCall, totalEC, perStore };
+}
+
+function ecRateBadge(rate){
+  if (rate >= 30) return { cls:'ecrate-good', label: rate.toFixed(1)+'% — Baik' };
+  if (rate >= 15) return { cls:'ecrate-warn', label: rate.toFixed(1)+'% — Perlu Perhatian' };
+  return { cls:'ecrate-bad', label: rate.toFixed(1)+'% — Kritis' };
+}
+
+function renderTeam(){
+  document.getElementById('weekLabel').textContent = weekLabelText();
+  const rows = groupSalesmen.map(sm => evaluationDataFor(sm.id, weekOffset));
+  const totalCall = rows.reduce((a,r)=>a+r.totalCall,0);
+  const totalEC = rows.reduce((a,r)=>a+r.totalEC,0);
+  const teamRate = totalCall ? (totalEC/totalCall)*100 : 0;
+  const lowConvCount = rows.reduce((a,r)=>a + Object.values(r.perStore).filter(s=>s.planned>=3 && s.effective===0).length, 0);
+
+  document.getElementById('teamKpis').innerHTML = `
+    <div class="card kpi-card"><div class="kpi-label">Total Call</div><div class="kpi-value num">${totalCall}</div><div class="kpi-trend flat">kunjungan terlaksana</div></div>
+    <div class="card kpi-card"><div class="kpi-label">Total Effective Call</div><div class="kpi-value num">${totalEC}</div><div class="kpi-trend flat">kunjungan dengan order</div></div>
+    <div class="card kpi-card"><div class="kpi-label">EC Rate (Team)</div><div class="kpi-value num">${teamRate.toFixed(1)}%</div><div class="kpi-trend ${teamRate>=30?'up':'down'}">${teamRate>=30?'di atas':'di bawah'} target 30%</div></div>
+    <div class="card kpi-card"><div class="kpi-label">Low Conversion Alert</div><div class="kpi-value num" style="color:${lowConvCount?'var(--danger)':'inherit'};">${lowConvCount}</div><div class="kpi-trend flat">store dengan 3+ visit, 0 order</div></div>
+  `;
+
+  const cols = [
+    { label:'Salesman', render:r=>`<strong>${r.sm.name}</strong><div class="text-sm ink-faint">${r.sm.code} · ${r.sm.area}</div>` },
+    { label:'Call', render:r=>r.totalCall, numeric:true },
+    { label:'Effective Call', render:r=>r.totalEC, numeric:true },
+    { label:'EC Rate', render:r=>{ const rate = r.totalCall? (r.totalEC/r.totalCall)*100:0; const b=ecRateBadge(rate); return `<span class="ecrate-badge ${b.cls}">${b.label}</span>`; } },
+    { label:'Low Conversion', render:r=>{ const c = Object.values(r.perStore).filter(s=>s.planned>=3 && s.effective===0).length; return c ? `<span class="pill pill-danger">${c} store</span>` : `<span class="pill pill-success">Tidak ada</span>`; } },
+  ];
+  document.getElementById('teamBody').innerHTML = STEP.tableOrCards(cols, rows, { emptyText:'Tidak ada salesman pada Brand Group ini.' });
+  // tableOrCards doesn't tag rows with an id, so wire click via row index against `rows`
+  document.querySelectorAll('#teamBody table.table-desktop tbody tr').forEach((tr,i) => {
+    tr.classList.add('re-row');
+    tr.addEventListener('click', () => openDetail(rows[i].sm.id));
+  });
+  document.querySelectorAll('#teamBody .report-card').forEach((card,i) => {
+    card.classList.add('re-row');
+    card.addEventListener('click', () => openDetail(rows[i].sm.id));
+  });
+}
+
+function openDetail(sid){
+  document.getElementById('teamView').style.display = 'none';
+  document.getElementById('detailView').style.display = '';
+  renderDetail(sid);
+}
+function closeDetail(){
+  document.getElementById('detailView').style.display = 'none';
+  document.getElementById('teamView').style.display = '';
+}
+document.getElementById('backToTeam').addEventListener('click', (e) => { e.preventDefault(); closeDetail(); });
+
+function renderDetail(sid){
+  const { sm, totalPlanned, totalCall, totalEC, perStore } = evaluationDataFor(sid, weekOffset);
+  document.getElementById('dInitials').textContent = sm.name.split(' ').map(w=>w[0]).slice(0,2).join('');
+  document.getElementById('dName').textContent = sm.name;
+  document.getElementById('dMeta').textContent = `${sm.code} · ${sm.area} · ${weekLabelText()}`;
+  document.getElementById('dGotoPlanner').href = `route-planner.html`;
+
+  const rate = totalCall ? (totalEC/totalCall)*100 : 0;
+  const b = ecRateBadge(rate);
+  document.getElementById('detailKpis').innerHTML = `
+    <div class="card kpi-card"><div class="kpi-label">Planned Visit</div><div class="kpi-value num">${totalPlanned}</div></div>
+    <div class="card kpi-card"><div class="kpi-label">Call (Terlaksana)</div><div class="kpi-value num">${totalCall}</div><div class="kpi-trend flat">Route Compliance ${sm.routeCompliancePct}%</div></div>
+    <div class="card kpi-card"><div class="kpi-label">Effective Call</div><div class="kpi-value num">${totalEC}</div></div>
+    <div class="card kpi-card"><div class="kpi-label">EC Rate</div><div class="kpi-value"><span class="ecrate-badge ${b.cls}">${b.label}</span></div></div>
+  `;
+
+  const tiers = ['S','A','B','C','D'];
+  const byTier = {};
+  tiers.forEach(t => byTier[t] = { call:0, eff:0 });
+  Object.values(perStore).forEach(s => { byTier[s.tier].call += s.call; byTier[s.tier].eff += s.effective; });
+  document.getElementById('tierEcrateGrid').innerHTML = tiers.map(t => {
+    const d = byTier[t];
+    const r = d.call ? (d.eff/d.call)*100 : 0;
+    return `<div class="card card-pad" style="text-align:center;">
+      <div class="tier-badge tier-${t}" style="margin:0 auto 8px;">${t}</div>
+      <div class="num" style="font-size:18px; font-weight:800;">${d.call?r.toFixed(0)+'%':'—'}</div>
+      <div class="text-sm ink-faint mt-6">${d.eff}/${d.call||0} EC</div>
+    </div>`;
+  }).join('');
+
+  const storeRows = Object.entries(perStore).map(([code,s]) => ({ code, ...s }));
+  const storeCols = [
+    { label:'Store', render:s=>`${s.name}<div class="text-sm ink-faint">${s.code}</div>` },
+    { label:'Tier', render:s=>STEP.tierBadge(s.tier) },
+    { label:'Visit (Planned)', render:s=>s.planned, numeric:true },
+    { label:'Call', render:s=>s.call, numeric:true },
+    { label:'Effective Call', render:s=>s.effective, numeric:true },
+    { label:'Status', render:s=>{
+      if (s.planned>=3 && s.effective===0) return `<span class="pill pill-danger">⚠ Low Conversion</span>`;
+      if (s.call===0) return `<span class="pill pill-warning">Belum Terlaksana</span>`;
+      return `<span class="pill pill-success">OK</span>`;
+    }},
+  ];
+  document.getElementById('storeDetailBody').innerHTML = STEP.tableOrCards(storeCols, storeRows, { emptyText:'Tidak ada store pada route minggu ini.' });
+}
+
+document.getElementById('weekPrev').addEventListener('click', () => { weekOffset--; renderTeam(); });
+document.getElementById('weekNext').addEventListener('click', () => { weekOffset++; renderTeam(); });
+
+renderTeam();
+}); // end guardPage
+</script>
+</body>
+</html>

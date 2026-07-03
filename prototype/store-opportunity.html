@@ -1,0 +1,549 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Store Opportunity — STEP</title>
+<link rel="stylesheet" href="assets/css/step.css">
+<style>
+  /* ── Opportunity score badge ── */
+  .opp-score{ display:inline-flex; align-items:center; gap:6px; font-weight:800; font-size:13px; padding:4px 12px; border-radius:999px; }
+  .opp-high{ background:var(--success-bg); color:var(--success); }
+  .opp-mid{ background:var(--warning-bg); color:var(--warning); }
+  .opp-low{ background:var(--danger-bg); color:var(--danger); }
+
+  /* ── Recommendation class badge ── */
+  .rec-badge{ display:inline-flex; align-items:center; gap:5px; font-weight:700; font-size:11.5px; padding:3px 10px; border-radius:999px; }
+  .rec-a{ background:var(--success-bg); color:var(--success); }
+  .rec-b{ background:var(--warning-bg); color:var(--warning); }
+  .rec-c{ background:var(--danger-bg); color:var(--danger); }
+
+  /* ── Sub-page nav ── */
+  .so-subnav{ display:flex; gap:6px; overflow-x:auto; padding:16px 20px 0; border-bottom:1px solid var(--line); background:var(--surface); position:sticky; top:var(--topbar-h); z-index:15; }
+  .so-subnav button{ flex:0 0 auto; padding:10px 16px; border:none; background:none; font-size:13px; font-weight:600; color:var(--ink-soft); cursor:pointer; border-bottom:3px solid transparent; transition:color .15s, border-color .15s; white-space:nowrap; }
+  .so-subnav button.active{ color:var(--primary-700); border-bottom-color:var(--primary-500); }
+  .so-subnav button:hover:not(.active){ color:var(--ink); }
+
+  /* ── Store list rows (clickable) ── */
+  .store-row{ cursor:pointer; }
+  .store-row:hover td{ background:var(--soft-white); }
+
+  /* ── Proposal preview ── */
+  .proposal-preview{ border:1px solid var(--line); border-radius:var(--radius-md); padding:24px; background:var(--soft-white); font-size:13px; line-height:1.7; }
+  .proposal-preview .prop-header{ display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px; }
+  .proposal-preview .prop-logo{ font-size:22px; font-weight:800; color:var(--primary-700); }
+  .proposal-preview .prop-meta{ text-align:right; color:var(--ink-soft); }
+  .proposal-preview .prop-meta strong{ color:var(--ink); display:block; font-size:15px; }
+  .prop-table{ width:100%; border-collapse:collapse; margin-top:12px; }
+  .prop-table th{ background:var(--primary-500); color:#fff; padding:9px 12px; font-size:12px; text-align:left; }
+  .prop-table td{ padding:9px 12px; border-bottom:1px solid var(--line); font-size:12.5px; }
+  .prop-table tr:last-child td{ border-bottom:none; }
+  .prop-summary{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-top:20px; }
+  .prop-sig{ border-top:1px solid var(--ink-faint); margin-top:30px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+  .prop-sig div{ padding-top:8px; font-size:11.5px; color:var(--ink-soft); text-align:center; }
+
+  /* ── Back button ── */
+  .back-link{ display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--ink-soft); cursor:pointer; margin-bottom:16px; }
+  .back-link:hover{ color:var(--primary-600); }
+
+  /* ── SKU table (Page 4) ── */
+  .sku-trend-up{ color:var(--success); font-weight:700; }
+  .sku-trend-dn{ color:var(--danger); font-weight:700; }
+  .sku-trend-fl{ color:var(--ink-faint); font-weight:600; }
+
+  /* ── Proposal history ── */
+  .prop-hist-row{ padding:12px 0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+  .prop-hist-row:last-child{ border-bottom:none; }
+
+  @media(max-width:767px){
+    /* sub-nav: drop sticky positioning so it doesn't expand the document scrollWidth */
+    .so-subnav{ position:relative; max-width:100vw; width:100%; }
+    /* proposal layout */
+    .proposal-preview .prop-header{ grid-template-columns:1fr; }
+    .prop-summary, .prop-sig{ grid-template-columns:1fr; }
+    /* proposal table — horizontal scroll on mobile */
+    .proposal-preview{ overflow-x:auto; }
+    .prop-table{ min-width:480px; }
+    /* row-2-1 override if step.css breakpoint doesn't cover this context */
+    .row-2-1{ grid-template-columns:1fr !important; }
+    /* clip overflow at the content container so any wide sub-element (proposal table,
+       performance table) can scroll within its own wrapper without pushing the whole page */
+    #soContent{ overflow-x:hidden; }
+    .widget-body{ overflow-x:auto; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarMount"></div>
+  <main class="main">
+    <div id="topbarMount"></div>
+
+    <div class="so-subnav" id="soSubnav">
+      <button data-page="dashboard" class="active">📊 Store Dashboard</button>
+      <button data-page="performance">🏆 Store Performance</button>
+      <button data-page="detail" style="display:none;">🏬 Store Detail</button>
+      <button data-page="sku" style="display:none;">📦 SKU Analysis</button>
+      <button data-page="recommendations">💡 Recommendations</button>
+      <button data-page="proposal">📄 Offer Proposal</button>
+    </div>
+
+    <div class="content" id="soContent"></div>
+  </main>
+</div>
+<div id="bottomNavMount"></div>
+
+<script src="assets/js/step.js"></script>
+<script>
+STEP.renderShell('store-opportunity');
+STEP.guardPage('store-opportunity', function(scope) {
+
+/* ══════════════════════════════════════════════════════
+   MOCK DATA — realistic Indonesian G2G channel stores
+   ══════════════════════════════════════════════════════ */
+const MOCK_STORES = [
+  { code:'IWCJ00004', name:'Toko Kosmetik Cantik Jaya', region:'DKI JAKARTA', area:'Jakarta Selatan', salesman:'Yusuf Maulana', channel:'GT', grade:'A',
+    totalQty:1840, lastDemand:'2026-06-27', weeklyAvg:460, monthlyAvg:1840, score:87, trend:'Increasing', weeklyGrowth:14.2, monthlyGrowth:22.1 },
+  { code:'IWSJ01273', name:'Beauty Store Sentosa', region:'DKI JAKARTA', area:'Jakarta Selatan', salesman:'Putri Lestari', channel:'GT', grade:'B',
+    totalQty:1120, lastDemand:'2026-06-26', weeklyAvg:280, monthlyAvg:1120, score:72, trend:'Increasing', weeklyGrowth:8.4, monthlyGrowth:12.3 },
+  { code:'IWSA01024', name:'Apotek Sehat Prima', region:'WEST JAVA', area:'Bandung', salesman:'Agus Setiadi', channel:'GT', grade:'A',
+    totalQty:980, lastDemand:'2026-06-25', weeklyAvg:245, monthlyAvg:980, score:68, trend:'Stable', weeklyGrowth:1.2, monthlyGrowth:-2.1 },
+  { code:'IWCJ00001', name:'Toko Indah Cosmetics', region:'DKI JAKARTA', area:'Jakarta Pusat', salesman:'Maya Kusuma', channel:'GT', grade:'S',
+    totalQty:2340, lastDemand:'2026-06-27', weeklyAvg:585, monthlyAvg:2340, score:94, trend:'Increasing', weeklyGrowth:18.6, monthlyGrowth:31.4 },
+  { code:'IWJS87198', name:'Klinik Estetika Maju', region:'WEST JAVA', area:'Bekasi', salesman:'Yusuf Maulana', channel:'MT', grade:'B',
+    totalQty:640, lastDemand:'2026-06-24', weeklyAvg:160, monthlyAvg:640, score:48, trend:'Declining', weeklyGrowth:-6.2, monthlyGrowth:-11.4 },
+  { code:'IWSA01034', name:'Salon Modern Beauty', region:'EAST JAVA', area:'Surabaya', salesman:'Fitriani Putri', channel:'GT', grade:'C',
+    totalQty:320, lastDemand:'2026-06-21', weeklyAvg:80, monthlyAvg:320, score:31, trend:'Stable', weeklyGrowth:0.5, monthlyGrowth:2.1 },
+  { code:'IWSJ00203', name:'Toko Gloss Skincare', region:'DKI JAKARTA', area:'Jakarta Barat', salesman:'Rizal Ramadhan', channel:'GT', grade:'A',
+    totalQty:1560, lastDemand:'2026-06-27', weeklyAvg:390, monthlyAvg:1560, score:79, trend:'Increasing', weeklyGrowth:11.3, monthlyGrowth:18.7 },
+  { code:'IWSJ01035', name:'Kosmetik Bersinar', region:'CENTRAL JAVA', area:'Semarang', salesman:'Sandi Kurniawan', channel:'GT', grade:'B',
+    totalQty:860, lastDemand:'2026-06-26', weeklyAvg:215, monthlyAvg:860, score:61, trend:'Increasing', weeklyGrowth:5.8, monthlyGrowth:9.2 },
+  { code:'IWSJ00256', name:'Beauty Corner Elite', region:'WEST JAVA', area:'Bogor', salesman:'Lina Marlina', channel:'GT', grade:'C',
+    totalQty:420, lastDemand:'2026-06-20', weeklyAvg:105, monthlyAvg:420, score:35, trend:'Declining', weeklyGrowth:-4.1, monthlyGrowth:-8.3 },
+  { code:'IWCJ00009', name:'Pusat Kecantikan Nusantara', region:'DKI JAKARTA', area:'Jakarta Utara', salesman:'Hendra Wijaya', channel:'GT', grade:'A',
+    totalQty:1280, lastDemand:'2026-06-27', weeklyAvg:320, monthlyAvg:1280, score:74, trend:'Stable', weeklyGrowth:2.1, monthlyGrowth:4.8 },
+];
+
+const MOCK_SKUS = [
+  { code:'IND-SKINTIFIC-315', name:'5X Ceramide Low pH Cleanser 60ml', brand:'Skintific', category:'Cleanser', qty:240, freq:18, weeklyAvg:60, monthlyAvg:240, growth:22.4, score:88, trend:'Increasing', lastDate:'2026-06-27', suggested:264 },
+  { code:'IND-G2G-213', name:'Glad2Glow Niacinamide 10% Serum', brand:'Glad2Glow', category:'Serum', qty:180, freq:14, weeklyAvg:45, monthlyAvg:180, growth:15.8, score:76, trend:'Increasing', lastDate:'2026-06-26', suggested:198 },
+  { code:'IND-SKINTIFIC-17103A', name:'Daily Filter Perfect Skin Tint 03A', brand:'Skintific', category:'Makeup', qty:120, freq:10, weeklyAvg:30, monthlyAvg:120, growth:8.3, score:63, trend:'Stable', lastDate:'2026-06-25', suggested:132 },
+  { code:'IND-G2G-104', name:'Glad2Glow 2% Salicylic Acid Toner', brand:'Glad2Glow', category:'Toner', qty:96, freq:8, weeklyAvg:24, monthlyAvg:96, growth:-3.2, score:41, trend:'Declining', lastDate:'2026-06-22', suggested:96 },
+  { code:'IND-SKINTIFIC-02', name:'Mugwort Pore Clarifying Serum', brand:'Skintific', category:'Serum', qty:200, freq:16, weeklyAvg:50, monthlyAvg:200, growth:19.6, score:82, trend:'Increasing', lastDate:'2026-06-27', suggested:220 },
+  { code:'IND-SKINTIFIC-305', name:'Centella Deep Cleansing Oil', brand:'Skintific', category:'Cleanser', qty:144, freq:12, weeklyAvg:36, monthlyAvg:144, growth:5.1, score:57, trend:'Stable', lastDate:'2026-06-24', suggested:158 },
+  { code:'IND-G2G-36', name:'Glad2Glow SPF 50+ Sunscreen Mist', brand:'Glad2Glow', category:'Sunscreen', qty:80, freq:6, weeklyAvg:20, monthlyAvg:80, growth:-8.7, score:28, trend:'Declining', lastDate:'2026-06-19', suggested:80 },
+];
+
+const MOCK_PROPOSALS = [
+  { no:'PROP/DST171/202606/0003', date:'2026-06-25', store:'Toko Indah Cosmetics', salesman:'Maya Kusuma', skuCount:5, status:'printed', printedAt:'2026-06-25 14:32' },
+  { no:'PROP/DST171/202606/0002', date:'2026-06-20', store:'Beauty Store Sentosa', salesman:'Putri Lestari', skuCount:4, status:'generated', printedAt:null },
+  { no:'PROP/DST171/202606/0001', date:'2026-06-15', store:'Toko Kosmetik Cantik Jaya', salesman:'Yusuf Maulana', skuCount:6, status:'printed', printedAt:'2026-06-15 10:11' },
+];
+
+let currentStore = null;
+let selectedSkus = new Set();
+let activePage = 'dashboard';
+let searchQ = '';
+
+/* ══════════ UTILITY ══════════ */
+function oppBadge(score) {
+  const cls = score >= 70 ? 'opp-high' : score >= 45 ? 'opp-mid' : 'opp-low';
+  const icon = score >= 70 ? '🟢' : score >= 45 ? '🟡' : '🔴';
+  return `<span class="opp-score ${cls}">${icon} ${score}</span>`;
+}
+function recBadge(score, trend) {
+  const cls = (score >= 70 && trend === 'Increasing') ? 'rec-a' : score >= 45 ? 'rec-b' : 'rec-c';
+  const label = (score >= 70 && trend === 'Increasing') ? 'Recommended' : score >= 45 ? 'Potential' : 'Monitor';
+  return `<span class="rec-badge ${cls}">${label}</span>`;
+}
+function trendIcon(g) { return g > 5 ? `<span class="sku-trend-up">▲ ${g.toFixed(1)}%</span>` : g < -5 ? `<span class="sku-trend-dn">▼ ${Math.abs(g).toFixed(1)}%</span>` : `<span class="sku-trend-fl">→ ${g.toFixed(1)}%</span>`; }
+
+function showPage(page) {
+  activePage = page;
+  document.querySelectorAll('.so-subnav button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  document.querySelectorAll('.so-subnav button[data-page="detail"], .so-subnav button[data-page="sku"]').forEach(b => {
+    b.style.display = (page === 'detail' || page === 'sku') ? '' : 'none';
+  });
+  render();
+}
+
+/* ══════════ PAGE RENDERERS ══════════ */
+function renderDashboard() {
+  const total = MOCK_STORES.reduce((a,s)=>a+s.totalQty,0);
+  const growing = MOCK_STORES.filter(s=>s.trend==='Increasing').length;
+  const declining = MOCK_STORES.filter(s=>s.trend==='Declining').length;
+  document.getElementById('soContent').innerHTML = `
+    <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+      <div><div class="h1">Store Opportunity</div><div class="text-sm ink-faint mt-8">Pemantauan demand dan peluang penjualan per toko — distribusi G2G</div></div>
+      <div class="flex gap-10">
+        <select class="input" style="min-width:120px;"><option>Last 30 Days</option><option>Last 7 Days</option><option>This Month</option></select>
+        <button class="btn btn-outline btn-sm">⚙ Filter</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="card kpi-card"><div class="kpi-label">Total Stores with Demand</div><div class="kpi-value">${MOCK_STORES.length}</div><div class="kpi-trend up">▲ 2 vs bulan lalu</div></div>
+      <div class="card kpi-card"><div class="kpi-label">Total Demand Quantity</div><div class="kpi-value num">${total.toLocaleString()}</div><div class="kpi-trend up">▲ 11.2% MoM</div></div>
+      <div class="card kpi-card"><div class="kpi-label">Total Demanded SKUs</div><div class="kpi-value">${MOCK_SKUS.length}</div><div class="kpi-trend flat">stabil</div></div>
+      <div class="card kpi-card"><div class="kpi-label">Stores Growing</div><div class="kpi-value" style="color:var(--success);">${growing}</div><div class="kpi-trend up">▲ vs minggu lalu</div></div>
+      <div class="card kpi-card"><div class="kpi-label">Stores Declining</div><div class="kpi-value" style="color:var(--danger);">${declining}</div><div class="kpi-trend down">⚠ perlu perhatian</div></div>
+    </div>
+
+    <div class="row-2-1 mt-20">
+      <div class="card card-pad">
+        <div class="h3">Top Stores by Demand</div>
+        <div class="barlist mt-14">
+          ${[...MOCK_STORES].sort((a,b)=>b.totalQty-a.totalQty).slice(0,5).map(s=>`
+            <div class="barlist-row" style="cursor:pointer;" onclick="selectStore('${s.code}')">
+              <div class="name" style="font-size:13px;">${s.name}</div>
+              <div class="progress"><div style="width:${Math.round(s.totalQty/24*100)}%;"></div></div>
+              <div class="pct num">${s.totalQty.toLocaleString()}</div>
+            </div>`).join('')}
+        </div>
+        <button class="btn btn-outline btn-sm w-full mt-14" onclick="showPage('performance')">Lihat Semua Store →</button>
+      </div>
+      <div class="card card-pad">
+        <div class="h3">Top SKUs by Demand</div>
+        <div class="mt-14" style="display:flex;flex-direction:column;gap:10px;">
+          ${MOCK_SKUS.slice(0,5).map((k,i)=>`
+            <div class="flex items-center justify-between gap-10">
+              <div><span class="pill pill-info" style="margin-right:6px;">${i+1}</span><span class="text-sm" style="font-weight:600;">${k.name.substring(0,30)}...</span></div>
+              <span class="num" style="font-size:13px;font-weight:700;">${k.qty}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="card card-pad mt-20">
+      <div class="h3">Demand Trend — 7 Hari Terakhir</div>
+      <div class="mt-14" style="display:flex;align-items:flex-end;gap:6px;height:80px;">
+        ${[180,210,195,240,228,265,285].map(v=>`<div style="flex:1;background:var(--primary-500);border-radius:4px 4px 0 0;height:${Math.round(v/285*80)}px;opacity:.85;" title="${v} unit"></div>`).join('')}
+      </div>
+      <div class="flex justify-between mt-8 text-sm ink-faint">
+        <span>25 Jun</span><span>26 Jun</span><span>27 Jun</span><span>28 Jun</span><span>29 Jun</span><span>30 Jun</span><span>01 Jul</span>
+      </div>
+    </div>`;
+}
+
+function renderPerformance() {
+  const filtered = MOCK_STORES.filter(s => !searchQ || s.name.toLowerCase().includes(searchQ) || s.code.toLowerCase().includes(searchQ) || s.salesman.toLowerCase().includes(searchQ));
+  document.getElementById('soContent').innerHTML = `
+    <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+      <div class="h1">Store Performance</div>
+      <div class="flex gap-10">
+        <button class="btn btn-outline btn-sm">⬇ Export</button>
+      </div>
+    </div>
+    <div class="planner-search-row" style="margin-bottom:16px;">
+      <div class="topbar-search" style="max-width:360px;"><span>🔎</span><input id="perfSearch" placeholder="Cari nama store, kode, salesman..." value="${searchQ}"></div>
+      <select class="input" style="min-width:140px;"><option value="">Semua Region</option>${[...new Set(MOCK_STORES.map(s=>s.region))].map(r=>`<option>${r}</option>`).join('')}</select>
+      <select class="input" style="min-width:120px;"><option>Semua Channel</option><option>GT</option><option>MT</option></select>
+    </div>
+    <div class="card">
+      <div class="widget-body">
+        <table class="table">
+          <thead><tr>
+            <th>Store</th><th>Salesman</th><th>Region</th>
+            <th class="num">Total Qty</th><th class="num">SKUs</th>
+            <th>Last Demand</th><th class="num">Avg/Mgg</th><th class="num">Avg/Bln</th>
+            <th>Opportunity</th>
+          </tr></thead>
+          <tbody>
+            ${filtered.map(s=>`
+              <tr class="store-row" onclick="selectStore('${s.code}')">
+                <td><strong>${s.name}</strong><div class="text-sm ink-faint">${s.code} · Grade ${s.grade}</div></td>
+                <td>${s.salesman}</td>
+                <td>${s.region}<div class="text-sm ink-faint">${s.area}</div></td>
+                <td class="num">${s.totalQty.toLocaleString()}</td>
+                <td class="num">${Math.floor(Math.random()*5)+3}</td>
+                <td>${s.lastDemand}</td>
+                <td class="num">${s.weeklyAvg}</td>
+                <td class="num">${s.monthlyAvg.toLocaleString()}</td>
+                <td>${oppBadge(s.score)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  document.getElementById('perfSearch').addEventListener('input', e => { searchQ = e.target.value.toLowerCase(); renderPerformance(); });
+}
+
+function renderDetail() {
+  const s = currentStore;
+  if (!s) return;
+  document.getElementById('soContent').innerHTML = `
+    <div class="back-link" onclick="showPage('performance')">← Kembali ke Store Performance</div>
+
+    <div class="card card-pad mt-8">
+      <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:14px;">
+        <div class="flex items-center gap-14">
+          <div class="avatar" style="width:52px;height:52px;font-size:18px;border-radius:14px;">${s.name.split(' ').map(w=>w[0]).slice(0,2).join('')}</div>
+          <div>
+            <div class="h1" style="font-size:20px;">${s.name}</div>
+            <div class="text-sm ink-faint mt-8">${s.code} · ${s.region} · ${s.area} · Grade ${s.grade} · ${s.channel}</div>
+          </div>
+        </div>
+        <div class="flex gap-10">
+          <button class="btn btn-outline" onclick="showPage('sku')">📦 SKU Analysis</button>
+          <button class="btn btn-primary" onclick="showPage('recommendations')">💡 Recommendations</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpi-grid mt-20">
+      <div class="card kpi-card"><div class="kpi-label">Total Demand (30 hari)</div><div class="kpi-value num">${s.totalQty.toLocaleString()}</div></div>
+      <div class="card kpi-card"><div class="kpi-label">Rata-rata / Minggu</div><div class="kpi-value num">${s.weeklyAvg}</div><div class="kpi-trend ${s.weeklyGrowth>0?'up':'down'}">${trendIcon(s.weeklyGrowth)} vs minggu lalu</div></div>
+      <div class="card kpi-card"><div class="kpi-label">Rata-rata / Bulan</div><div class="kpi-value num">${s.monthlyAvg.toLocaleString()}</div><div class="kpi-trend ${s.monthlyGrowth>0?'up':'down'}">${trendIcon(s.monthlyGrowth)} vs bulan lalu</div></div>
+      <div class="card kpi-card"><div class="kpi-label">Opportunity Score</div><div class="kpi-value">${oppBadge(s.score)}</div></div>
+    </div>
+
+    <div class="row-2-1 mt-20">
+      <div class="card card-pad">
+        <div class="h3">Demand Trend Harian</div>
+        <div class="mt-14" style="display:flex;align-items:flex-end;gap:4px;height:80px;">
+          ${Array.from({length:14},(_,i)=>Math.round(s.weeklyAvg*0.6 + Math.random()*s.weeklyAvg)).map(v=>`<div style="flex:1;background:var(--primary-500);border-radius:4px 4px 0 0;height:${Math.round(v/(s.weeklyAvg*1.6)*80)}px;opacity:.85;"></div>`).join('')}
+        </div>
+        <div class="text-sm ink-faint mt-8">14 hari terakhir</div>
+      </div>
+      <div class="card card-pad">
+        <div class="h3">Store Profile</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px;">
+          <div class="flex justify-between"><span class="ink-faint text-sm">Salesman</span><strong>${s.salesman}</strong></div>
+          <div class="flex justify-between"><span class="ink-faint text-sm">Region</span><span>${s.region}</span></div>
+          <div class="flex justify-between"><span class="ink-faint text-sm">Area</span><span>${s.area}</span></div>
+          <div class="flex justify-between"><span class="ink-faint text-sm">Channel</span><span>${s.channel}</span></div>
+          <div class="flex justify-between"><span class="ink-faint text-sm">Store Grade</span><span>${STEP.tierBadge(s.grade)}</span></div>
+          <div class="flex justify-between"><span class="ink-faint text-sm">Last Demand</span><span>${s.lastDemand}</span></div>
+          <div class="flex justify-between"><span class="ink-faint text-sm">Trend</span><span>${trendIcon(s.monthlyGrowth)}</span></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSku() {
+  const s = currentStore;
+  if (!s) return;
+  document.getElementById('soContent').innerHTML = `
+    <div class="back-link" onclick="showPage('detail')">← Kembali ke Store Detail: ${s.name}</div>
+    <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+      <div class="h1">SKU Analysis — ${s.name}</div>
+      <button class="btn btn-primary" onclick="showPage('recommendations')">💡 Lihat Recommendations →</button>
+    </div>
+    <div class="card">
+      <div class="widget-head"><div class="h3">SKU Demand Breakdown</div><span class="text-sm ink-faint">30 hari terakhir</span></div>
+      <div class="widget-body">
+        <table class="table">
+          <thead><tr>
+            <th>SKU Code</th><th>Nama Produk</th><th>Brand</th><th>Kategori</th>
+            <th class="num">Total Qty</th><th class="num">Frekuensi (hari)</th>
+            <th class="num">Avg/Mgg</th><th class="num">Avg/Bln</th>
+            <th>Growth</th><th>Opportunity</th><th>Last Demand</th>
+          </tr></thead>
+          <tbody>
+            ${MOCK_SKUS.map(k=>`
+              <tr>
+                <td class="ink-faint" style="font-size:12px;">${k.code}</td>
+                <td><strong>${k.name}</strong></td>
+                <td><span class="pill pill-info">${k.brand}</span></td>
+                <td>${k.category}</td>
+                <td class="num">${k.qty}</td>
+                <td class="num">${k.freq}</td>
+                <td class="num">${k.weeklyAvg}</td>
+                <td class="num">${k.monthlyAvg}</td>
+                <td>${trendIcon(k.growth)}</td>
+                <td>${oppBadge(k.score)}</td>
+                <td>${k.lastDate}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderRecommendations() {
+  const s = currentStore;
+  document.getElementById('soContent').innerHTML = `
+    <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+      <div>
+        <div class="h1">Opportunity Recommendations</div>
+        <div class="text-sm ink-faint mt-8">${s ? `Store: ${s.name}` : 'Semua store — pilih store untuk proposal spesifik'}</div>
+      </div>
+      <button class="btn btn-primary" id="createProposalBtn" ${s?'':'disabled'} onclick="showPage('proposal')">📄 Buat Proposal →</button>
+    </div>
+
+    <div class="card card-pad mt-8" style="background:var(--primary-50);border:1px solid var(--primary-100);">
+      <div class="text-sm" style="color:var(--primary-700);">🤖 <strong>Scoring otomatis</strong> berdasarkan demand quantity, frekuensi, dan growth rate — diperbarui setiap hari. Ubah bobot scoring di <a href="administration.html" style="color:var(--primary-600);">Administrasi → Konfigurasi Recommendation</a>.</div>
+    </div>
+
+    <div class="grid-3 mt-20">
+      ${['Recommended','Potential','Monitor'].map((cls,ci)=>{
+        const items = MOCK_SKUS.filter(k=>{ const s=k.score; return ci===0?(s>=70&&k.trend==='Increasing'):ci===1?(s>=45&&!(s>=70&&k.trend==='Increasing')):s<45; });
+        const badgeCls = ['rec-a','rec-b','rec-c'][ci];
+        return `<div class="card card-pad">
+          <div class="flex items-center justify-between"><div class="h3">${['💚 Recommended','🟡 Potential','🔴 Monitor'][ci]}</div><span class="pill ${['pill-success','pill-warning','pill-danger'][ci]}">${items.length} SKU</span></div>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
+            ${items.map(k=>`
+              <div class="card card-pad" style="padding:12px;cursor:pointer;" onclick="toggleSku('${k.code}')">
+                <div class="flex items-center justify-between gap-8">
+                  <div style="min-width:0;flex:1;"><div style="font-weight:700;font-size:13px;">${k.name.substring(0,28)}...</div><div class="text-sm ink-faint">${k.code} · ${k.brand}</div></div>
+                  <input type="checkbox" data-sku="${k.code}" ${selectedSkus.has(k.code)?'checked':''} onclick="event.stopPropagation();toggleSku('${k.code}')">
+                </div>
+                <div class="flex gap-8 mt-8 flex-wrap">
+                  <span class="text-sm ink-soft">Avg/Bln: <strong>${k.monthlyAvg}</strong></span>
+                  <span class="text-sm">${trendIcon(k.growth)}</span>
+                  <span class="text-sm ink-soft">Saran: <strong>${k.suggested} pcs</strong></span>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div class="card card-pad mt-20" style="background:var(--soft-white);">
+      <div class="flex items-center justify-between">
+        <div><strong>${selectedSkus.size} SKU dipilih</strong> untuk proposal</div>
+        <button class="btn btn-primary" ${selectedSkus.size>0&&s?'':'disabled'} onclick="showPage('proposal')">📄 Buat Proposal untuk ${s?s.name:'store terpilih'}</button>
+      </div>
+    </div>`;
+}
+
+function toggleSku(code) {
+  selectedSkus.has(code) ? selectedSkus.delete(code) : selectedSkus.add(code);
+  renderRecommendations();
+}
+
+function renderProposal() {
+  const s = currentStore;
+  const items = selectedSkus.size > 0
+    ? MOCK_SKUS.filter(k => selectedSkus.has(k.code))
+    : MOCK_SKUS.slice(0,4);
+  const totalQty = items.reduce((a,k)=>a+k.suggested,0);
+  const propDate = new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'long',year:'numeric'});
+  const propNo = 'PROP/DST171/202607/0004';
+
+  document.getElementById('soContent').innerHTML = `
+    <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+      <div class="h1">Offer Proposal</div>
+      <div class="flex gap-10">
+        <button class="btn btn-outline" onclick="window.print()">🖨️ Print</button>
+        <button class="btn btn-primary" onclick="STEP.toast('Proposal ${propNo} berhasil disimpan dan di-export','✅')">💾 Simpan & Export PDF</button>
+      </div>
+    </div>
+
+    <div class="row-2-1">
+      <div>
+        <div class="card card-pad proposal-preview" id="proposalDoc">
+          <div class="prop-header">
+            <div>
+              <div class="prop-logo">📦 STEP Distribution</div>
+              <div class="text-sm ink-soft mt-8">Jl. Distribusi Nusantara No. 1<br>Jakarta Selatan 12345<br>Tel: 021-8888-0000</div>
+            </div>
+            <div class="prop-meta">
+              <strong>PENAWARAN PRODUK</strong>
+              <div>No: <strong>${propNo}</strong></div>
+              <div>Tgl: ${propDate}</div>
+              <div style="color:var(--success);font-weight:700;">Valid s/d: 31 Juli 2026</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;padding:14px;background:var(--soft-white);border-radius:var(--radius-md);">
+            <div>
+              <div class="text-sm ink-faint">Kepada Yth:</div>
+              <div style="font-weight:700;">${s ? s.name : 'Beauty Store Pilihan'}</div>
+              <div class="text-sm ink-soft">${s ? s.code : '—'} · ${s ? s.region : '—'}</div>
+            </div>
+            <div>
+              <div class="text-sm ink-faint">Salesman:</div>
+              <div style="font-weight:700;">${s ? s.salesman : '—'}</div>
+            </div>
+          </div>
+
+          <table class="prop-table">
+            <thead><tr>
+              <th>#</th><th>Kode SKU</th><th>Nama Produk</th>
+              <th class="num">Hist. Demand</th><th class="num">Avg/Mgg</th>
+              <th class="num">Avg/Bln</th><th class="num">Rekomendasi</th>
+            </tr></thead>
+            <tbody>
+              ${items.map((k,i)=>`<tr>
+                <td>${i+1}</td>
+                <td style="font-size:11.5px;color:var(--ink-faint);">${k.code}</td>
+                <td><strong>${k.name}</strong></td>
+                <td class="num">${k.qty}</td>
+                <td class="num">${k.weeklyAvg}</td>
+                <td class="num">${k.monthlyAvg}</td>
+                <td class="num"><strong>${k.suggested}</strong></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+
+          <div class="prop-summary mt-20">
+            <div class="card card-pad"><div class="kpi-label">Total SKU</div><div class="kpi-value">${items.length}</div></div>
+            <div class="card card-pad"><div class="kpi-label">Total Qty</div><div class="kpi-value num">${totalQty}</div></div>
+            <div class="card card-pad"><div class="kpi-label">Status</div><div class="kpi-value">${STEP.statusPill('approved')}</div></div>
+          </div>
+
+          <div class="prop-sig">
+            <div>Dibuat oleh<br><strong>Distributor Admin</strong></div>
+            <div>Disetujui<br><strong>${s?s.salesman:'—'}</strong><br>___________________</div>
+            <div>Pelanggan<br><strong>${s?s.name:'—'}</strong><br>___________________</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card card-pad">
+          <div class="h3">Riwayat Proposal</div>
+          <div class="mt-14">
+            ${MOCK_PROPOSALS.map(p=>`
+              <div class="prop-hist-row">
+                <div>
+                  <div style="font-weight:700;font-size:13px;">${p.no}</div>
+                  <div class="text-sm ink-faint">${p.store} · ${p.date}</div>
+                </div>
+                <div class="flex gap-8 items-center">
+                  <span class="pill ${p.status==='printed'?'pill-success':'pill-warning'}">${p.status==='printed'?'Printed':'Generated'}</span>
+                  <button class="btn btn-outline btn-sm" onclick="STEP.toast('Mencetak ulang ${p.no}...','🖨️')">Reprint</button>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <div class="card card-pad mt-20">
+          <div class="h3">Catatan Proposal</div>
+          <textarea class="input mt-10" rows="3" style="width:100%;" placeholder="Tambahkan catatan untuk proposal ini..."></textarea>
+          <button class="btn btn-primary btn-sm w-full mt-10" onclick="STEP.toast('Catatan disimpan','💾')">Simpan Catatan</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ══════════ MAIN ROUTER ══════════ */
+function render() {
+  if (activePage === 'dashboard') renderDashboard();
+  else if (activePage === 'performance') renderPerformance();
+  else if (activePage === 'detail') renderDetail();
+  else if (activePage === 'sku') renderSku();
+  else if (activePage === 'recommendations') renderRecommendations();
+  else if (activePage === 'proposal') renderProposal();
+}
+
+function selectStore(code) {
+  currentStore = MOCK_STORES.find(s => s.code === code);
+  selectedSkus = new Set(MOCK_SKUS.filter(k=>k.score>=70&&k.trend==='Increasing').map(k=>k.code));
+  document.querySelectorAll('.so-subnav button[data-page="detail"], .so-subnav button[data-page="sku"]').forEach(b => b.style.display = '');
+  showPage('detail');
+}
+
+document.querySelectorAll('.so-subnav button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.page === 'detail' && !currentStore) { STEP.toast('Pilih store dari Store Performance terlebih dahulu','ℹ️'); return; }
+  if (b.dataset.page === 'sku' && !currentStore) { STEP.toast('Pilih store dari Store Performance terlebih dahulu','ℹ️'); return; }
+  showPage(b.dataset.page);
+}));
+
+render();
+}); // end guardPage
+</script>
+</body>
+</html>
