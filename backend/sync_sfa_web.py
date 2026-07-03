@@ -176,7 +176,7 @@ CREATE OR REPLACE VIEW {T('vw_salesman_active')} AS
 SELECT
   salesman_sk, source_system, source_salesman_code, salesman_name,
   salesman_type, role_type, distributor_code, region, spv_name, asm_name,
-  is_active, source_updated_at
+  is_active, brand_group, source_updated_at
 FROM {T('dim_salesman')}
 WHERE is_deleted = FALSE
 """, "vw_salesman_active")
@@ -186,7 +186,7 @@ CREATE OR REPLACE VIEW {T('vw_outlet_active')} AS
 SELECT
   outlet_sk, source_system, source_outlet_code, store_name, brand, channel,
   store_grade, customer_category, region, distributor_code, distributor_name,
-  asm_name, spv_name, address, latitude, longitude, operational_status
+  asm_name, spv_name, address, latitude, longitude, operational_status, brand_group
 FROM {T('dim_outlet')}
 WHERE is_deleted = FALSE
 """, "vw_outlet_active")
