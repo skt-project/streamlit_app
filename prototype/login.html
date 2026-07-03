@@ -82,6 +82,12 @@
         document.getElementById('password').value,
       );
       if (res) {
+        // Apply brand theme from the user's brand_group
+        const bg = res.user?.brand_group;
+        if (bg === 'G2G') localStorage.setItem('step_brand_group', 'g2g_group');
+        else if (bg === 'SKT') localStorage.setItem('step_brand_group', 'skintific_group');
+        else localStorage.removeItem('step_brand_group'); // ho_admin: no forced theme
+
         const params = new URLSearchParams(window.location.search);
         window.location.href = params.get('from') || 'dashboard.html';
       }

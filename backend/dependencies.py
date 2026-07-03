@@ -27,6 +27,7 @@ def require_auth(
             role=payload["role"],
             territory=payload.get("territory"),
             distributor_code=payload.get("distributor_code"),
+            brand_group=payload.get("brand_group"),
         )
     except KeyError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token")
@@ -39,3 +40,14 @@ def require_role(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return user
     return _check
+
+
+def brand_group_filter(user: UserContext, param_name: str = "bg") -> tuple[str, list]:
+    """
+    Returns (SQL fragment, BQ params) to filter by brand_group.
+    ho_admin (brand_group=None) gets no filter — sees all groups.
+    """
+    from services.bq import BQClient
+    if user.role == "ho_admin" or not user.brand_group:
+        return "", []
+    return f"AND brand_group = @{param_name}", [BQClient.p(param_name, "STRING", user.brand_group)]

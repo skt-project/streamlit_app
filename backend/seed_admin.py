@@ -13,18 +13,17 @@ from datetime import datetime, timezone
 
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from passlib.context import CryptContext
+import bcrypt
 
 PROJECT = "skintific-data-warehouse"
 DATASET = "sfa_web"
 SA_KEY_PATH = os.getenv("BQ_SA_KEY_PATH", "")
 
 USERNAME = "admin"
-PASSWORD = "change-me-now"   # <-- change before running
+PASSWORD = "Step@2026!"
 ROLE = "ho_admin"
 
-pwd = CryptContext(schemes=["bcrypt"])
-hashed = pwd.hash(PASSWORD)
+hashed = bcrypt.hashpw(PASSWORD.encode(), bcrypt.gensalt()).decode()
 
 if SA_KEY_PATH:
     creds = service_account.Credentials.from_service_account_file(

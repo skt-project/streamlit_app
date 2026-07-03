@@ -21,7 +21,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def _get_user_by_username(username: str) -> dict | None:
     bq = BQClient.get()
     sql = f"""
-        SELECT user_id, username, password_hash, role, territory, distributor_code, is_active
+        SELECT user_id, username, password_hash, role, territory, distributor_code, brand_group, is_active
         FROM {settings.table('users')}
         WHERE username = @username
         LIMIT 1
@@ -55,6 +55,7 @@ def login(body: LoginRequest):
         "role": user["role"],
         "territory": user.get("territory"),
         "distributor_code": user.get("distributor_code"),
+        "brand_group": user.get("brand_group"),
     }
     token = create_access_token(token_payload)
 
@@ -66,6 +67,7 @@ def login(body: LoginRequest):
             role=user["role"],
             territory=user.get("territory"),
             distributor_code=user.get("distributor_code"),
+            brand_group=user.get("brand_group"),
         ),
     )
 
@@ -79,6 +81,7 @@ class _CreateUserRequest(LoginRequest):
     role: str = "salesman"
     territory: str | None = None
     distributor_code: str | None = None
+    brand_group: str | None = None  # 'SKT' | 'G2G' | None for ho_admin
     email: str | None = None
 
 
@@ -97,9 +100,9 @@ def create_user(
     bq.execute(
         f"""
         INSERT INTO {settings.table('users')}
-          (user_id, username, email, password_hash, role, territory, distributor_code, is_active, created_at)
+          (user_id, username, email, password_hash, role, territory, distributor_code, brand_group, is_active, created_at)
         VALUES
-          (@user_id, @username, @email, @password_hash, @role, @territory, @distributor_code, TRUE, CURRENT_TIMESTAMP())
+          (@user_id, @username, @email, @password_hash, @role, @territory, @distributor_code, @brand_group, TRUE, CURRENT_TIMESTAMP())
         """,
         [
             bq.p("user_id", "STRING", user_id),
@@ -109,7 +112,8 @@ def create_user(
             bq.p("role", "STRING", body.role),
             bq.p("territory", "STRING", body.territory),
             bq.p("distributor_code", "STRING", body.distributor_code),
+            bq.p("brand_group", "STRING", body.brand_group),
         ],
     )
     bq.cache.invalidate("users:")
-    return {"user_id": user_id, "username": body.username, "role": body.role}
+    return {"user_id": user_id, "username": body.username, "role": body.role, "brand_group": body.brand_group}

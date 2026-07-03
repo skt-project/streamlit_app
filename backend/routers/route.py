@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from google.cloud import bigquery
 
 from config import settings
-from dependencies import require_auth
+from dependencies import brand_group_filter, require_auth
 from models.auth import UserContext
 from models.route import RouteOutlet, SalesmanMiniOut, WeeklyRoutePlan
 from services.bq import BQClient
@@ -47,7 +47,9 @@ def list_salesmen_for_planner(
         return cached
 
     params: list = []
-    conditions = ["TRUE"]
+    bg_clause, bg_params = brand_group_filter(current_user)
+    conditions = [f"TRUE {bg_clause}"]
+    params.extend(bg_params)
 
     # Scope by role
     if current_user.role == "distributor_admin" and current_user.distributor_code:

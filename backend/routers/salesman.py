@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from google.cloud import bigquery
 
 from config import settings
-from dependencies import require_auth, require_role
+from dependencies import brand_group_filter, require_auth, require_role
 from models.auth import UserContext
 from models.salesman import (
     SalesmanCreateRequest,
@@ -31,13 +31,17 @@ _SALESMAN_COLS = """
 
 
 def _build_scope_filter(user: UserContext) -> tuple[str, list]:
-    """Return (WHERE clause fragment, params) scoped to the user's role."""
+    """Return (WHERE clause fragment, params) for brand_group + role scoping."""
     bq = BQClient.get()
+    bg_clause, bg_params = brand_group_filter(user, "bg_sm")
+    role_clause, role_params = "", []
     if user.role == "distributor_admin" and user.distributor_code:
-        return "AND distributor_code = @scope_dist", [bq.p("scope_dist", "STRING", user.distributor_code)]
-    if user.role in ("spv", "area_manager") and user.territory:
-        return "AND region = @scope_region", [bq.p("scope_region", "STRING", user.territory)]
-    return "", []
+        role_clause = "AND distributor_code = @scope_dist"
+        role_params = [bq.p("scope_dist", "STRING", user.distributor_code)]
+    elif user.role in ("spv", "area_manager") and user.territory:
+        role_clause = "AND region = @scope_region"
+        role_params = [bq.p("scope_region", "STRING", user.territory)]
+    return f"{bg_clause} {role_clause}".strip(), bg_params + role_params
 
 
 @router.get("", response_model=SalesmanListResponse)

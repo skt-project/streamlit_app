@@ -12,6 +12,7 @@ class UserContext(BaseModel):
     role: str
     territory: str | None = None
     distributor_code: str | None = None
+    brand_group: str | None = None  # 'SKT' | 'G2G' | None (ho_admin sees all)
 
 
 class TokenResponse(BaseModel):

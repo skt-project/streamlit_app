@@ -61,13 +61,13 @@ const STEP = (function () {
       id: 'skintific_group', label: 'Skintific Group',
       logo: 'assets/img/logo-skintific-group.png',
       brands: ['Skintific', 'Timephoria', 'Facerinna'],
-      tenant: { appTitle: 'STEP — Skintific Group', primaryHue: '243', accentColor: '#4F46E5', navAccent: '#6366F1', shortName: 'SKT' },
+      tenant: { appTitle: 'STEP — Skintific Group', primaryHue: '203', accentColor: '#0EA5E9', navAccent: '#38BDF8', shortName: 'SKT' },
     },
     g2g_group: {
       id: 'g2g_group', label: 'G2G Group',
       logo: 'assets/img/logo-g2g-group.jpg',
       brands: ['Glad2Glow', 'Bodibreeze', 'Next Prime'],
-      tenant: { appTitle: 'STEP — G2G Group', primaryHue: '197', accentColor: '#0891B2', navAccent: '#06B6D4', shortName: 'G2G' },
+      tenant: { appTitle: 'STEP — G2G Group', primaryHue: '348', accentColor: '#F43F5E', navAccent: '#FDA4AF', shortName: 'G2G' },
     },
   };
 
