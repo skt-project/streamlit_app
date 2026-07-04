@@ -169,7 +169,14 @@ client.query(
 print(f"Inserting {len(rows_to_insert)} SKT salesmen from staging...")
 client.query(f"""
     INSERT INTO {T('dim_salesman')}
-    SELECT * FROM `{STAGING}`
+      (salesman_sk, source_system, source_salesman_code, salesman_name, salesman_type,
+       role_type, distributor_code, region, spv_name, asm_name, is_active,
+       brand_group, sfa_web_loaded_at, is_deleted)
+    SELECT
+      salesman_sk, source_system, source_salesman_code, salesman_name, salesman_type,
+      role_type, distributor_code, region, spv_name, asm_name, is_active,
+      brand_group, sfa_web_loaded_at, is_deleted
+    FROM `{STAGING}`
 """).result()
 
 # Drop staging

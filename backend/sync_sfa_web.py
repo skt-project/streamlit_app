@@ -63,7 +63,8 @@ SK = lambda system, code: f"TO_HEX(MD5(CONCAT('{system}', '|', CAST(({code}) AS 
 # 1. dim_salesman
 # ------------------------------------------------------------------
 print("\n[1] dim_salesman")
-run(f"TRUNCATE TABLE {T('dim_salesman')}", "truncate")
+# Only refresh GT_MAPPING rows — other source_system rows (SKT_EXCEL, etc.) are preserved
+run(f"DELETE FROM {T('dim_salesman')} WHERE source_system = 'GT_MAPPING'", "delete GT_MAPPING rows")
 run(f"""
 INSERT INTO {T('dim_salesman')}
   (salesman_sk, source_system, source_salesman_code, salesman_name, salesman_type,
