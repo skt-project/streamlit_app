@@ -17,10 +17,16 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/kpi", response_model=KpiOut)
 def get_kpi(
-    salesman_sk: str = Query(...),
+    salesman_sk: str | None = Query(None),
     visit_date: str | None = Query(None),
     current_user: UserContext = Depends(require_auth),
 ):
+    # Auto-resolve from JWT so mobile never needs to pass it explicitly
+    sk = str(current_user.salesman_sk) if current_user.salesman_sk else (salesman_sk or "")
+    if not sk:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="salesman_sk required — link this user to a salesman in Administration")
+
     bq = BQClient.get()
     d = visit_date or date.today().isoformat()
 
@@ -35,7 +41,7 @@ def get_kpi(
         FROM {settings.table('fact_visit')}
         WHERE salesman_sk = @sk AND visit_date = @vdate AND is_deleted = FALSE
         """,
-        [bq.p("sk", "STRING", salesman_sk), bq.p("vdate", "DATE", d)],
+        [bq.p("sk", "STRING", sk), bq.p("vdate", "DATE", d)],
     )
 
     # Route completion: scheduled stores vs visited
@@ -45,7 +51,7 @@ def get_kpi(
         WHERE salesman_sk = @sk AND is_deleted = FALSE
           AND visit_day_of_week = FORMAT_DATE('%A', DATE(@vdate))
         """,
-        [bq.p("sk", "STRING", salesman_sk), bq.p("vdate", "DATE", d)],
+        [bq.p("sk", "STRING", sk), bq.p("vdate", "DATE", d)],
     ) or {}).get("n", 0)
 
     total = row.get("total_visits", 0) if row else 0

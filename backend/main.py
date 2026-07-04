@@ -11,6 +11,7 @@ from routers import (
     # Web app routers
     dashboard_web, announcement, approval, target_web, evaluate_web,
     route_planner, report_web, salesman_web, outlet_web, notification, admin_web,
+    store_opportunity,
 )
 
 app = FastAPI(
@@ -51,9 +52,10 @@ app.include_router(report_web.router,     prefix="/api/v1")
 app.include_router(salesman_web.router,   prefix="/api/v1")
 app.include_router(outlet_web.router,     prefix="/api/v1")
 app.include_router(notification.router,   prefix="/api/v1")
-app.include_router(admin_web.router,      prefix="/api/v1")
+app.include_router(admin_web.router,          prefix="/api/v1")
+app.include_router(store_opportunity.router,  prefix="/api/v1")
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.2.0"}

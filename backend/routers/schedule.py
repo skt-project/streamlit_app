@@ -70,15 +70,20 @@ def _week_stores(bq: BQClient, salesman_sk: str, target_date: date) -> list[dict
 
 @router.get("/today", response_model=ScheduleDownloadResponse)
 def get_today_schedule(
-    salesman_sk: str = Query(...),
+    salesman_sk: str | None = Query(None),
     current_user: UserContext = Depends(require_auth),
 ):
+    # Prefer JWT salesman_sk so mobile never needs to pass it explicitly
+    sk = str(current_user.salesman_sk) if current_user.salesman_sk else (salesman_sk or "")
+    if not sk:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="salesman_sk required — link this user to a salesman in Administration")
     bq = BQClient.get()
     today = date.today()
-    rows = _week_stores(bq, salesman_sk, today)
+    rows = _week_stores(bq, sk, today)
     iso_year, iso_week, _ = today.isocalendar()
     return ScheduleDownloadResponse(
-        salesman_sk=salesman_sk,
+        salesman_sk=sk,
         week=f"{iso_year}-W{iso_week:02d}",
         stores=[ScheduleStoreOut(**r) for r in rows],
         total=len(rows),
@@ -87,7 +92,7 @@ def get_today_schedule(
 
 @router.get("/download", response_model=ScheduleDownloadResponse)
 def download_week_schedule(
-    salesman_sk: str = Query(...),
+    salesman_sk: str | None = Query(None),
     week: str | None = Query(None, description="ISO week YYYY-Www e.g. 2026-W28"),
     current_user: UserContext = Depends(require_auth),
 ):
@@ -95,6 +100,10 @@ def download_week_schedule(
     Returns all stores for the entire specified ISO week — used for offline caching.
     Includes ALL days so SE can plan ahead. Stores include lat/lon for GPS.
     """
+    sk = str(current_user.salesman_sk) if current_user.salesman_sk else (salesman_sk or "")
+    if not sk:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="salesman_sk required — link this user to a salesman in Administration")
     bq = BQClient.get()
 
     if week:
@@ -123,13 +132,13 @@ def download_week_schedule(
         ORDER BY p.visit_day_of_week, o.store_name
         """,
         [
-            bq.p("sk",     "STRING", salesman_sk),
+            bq.p("sk",     "STRING", sk),
             bq.p("is_odd", "BOOL",   is_odd),
         ],
     )
 
     return ScheduleDownloadResponse(
-        salesman_sk=salesman_sk,
+        salesman_sk=sk,
         week=f"{iso_year}-W{iso_week:02d}",
         stores=[ScheduleStoreOut(**r) for r in rows],
         total=len(rows),

@@ -21,7 +21,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def _get_user_by_username(username: str) -> dict | None:
     bq = BQClient.get()
     sql = f"""
-        SELECT user_id, username, password_hash, role, territory, distributor_code, brand_group, is_active
+        SELECT user_id, username, password_hash, role, territory, distributor_code, brand_group, is_active, salesman_sk
         FROM {settings.table('users')}
         WHERE username = @username
         LIMIT 1
@@ -49,6 +49,7 @@ def login(body: LoginRequest):
         [bq.p("user_id", "STRING", user["user_id"])],
     )
 
+    sk = user.get("salesman_sk")
     token_payload = {
         "sub": user["user_id"],
         "username": user["username"],
@@ -56,6 +57,7 @@ def login(body: LoginRequest):
         "territory": user.get("territory"),
         "distributor_code": user.get("distributor_code"),
         "brand_group": user.get("brand_group"),
+        "salesman_sk": int(sk) if sk else None,
     }
     token = create_access_token(token_payload)
 
@@ -68,6 +70,7 @@ def login(body: LoginRequest):
             territory=user.get("territory"),
             distributor_code=user.get("distributor_code"),
             brand_group=user.get("brand_group"),
+            salesman_sk=int(sk) if sk else None,
         ),
     )
 

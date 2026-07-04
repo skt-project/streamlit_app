@@ -21,6 +21,7 @@ def require_auth(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     try:
+        sk = payload.get("salesman_sk")
         return UserContext(
             user_id=payload["sub"],
             username=payload["username"],
@@ -28,6 +29,7 @@ def require_auth(
             territory=payload.get("territory"),
             distributor_code=payload.get("distributor_code"),
             brand_group=payload.get("brand_group"),
+            salesman_sk=int(sk) if sk else None,
         )
     except KeyError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token")
