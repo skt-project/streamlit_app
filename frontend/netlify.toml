@@ -1,0 +1,11 @@
+[build]
+  command   = "npm run build"
+  publish   = "dist"
+
+[build.environment]
+  VITE_API_BASE_URL = "https://step-api-141828905128.asia-southeast1.run.app/api/v1"
+
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

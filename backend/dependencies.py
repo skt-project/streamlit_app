@@ -42,12 +42,18 @@ def require_role(*roles: str):
     return _check
 
 
-def brand_group_filter(user: UserContext, param_name: str = "bg") -> tuple[str, list]:
+def brand_group_filter(
+    user: UserContext,
+    param_name: str = "bg",
+    table_alias: str = "",
+) -> tuple[str, list]:
     """
     Returns (SQL fragment, BQ params) to filter by brand_group.
     ho_admin (brand_group=None) gets no filter — sees all groups.
+    Pass table_alias (e.g. "v") when the query joins multiple tables with brand_group.
     """
     from services.bq import BQClient
     if user.role == "ho_admin" or not user.brand_group:
         return "", []
-    return f"AND brand_group = @{param_name}", [BQClient.p(param_name, "STRING", user.brand_group)]
+    col = f"{table_alias}.brand_group" if table_alias else "brand_group"
+    return f"AND {col} = @{param_name}", [BQClient.p(param_name, "STRING", user.brand_group)]
