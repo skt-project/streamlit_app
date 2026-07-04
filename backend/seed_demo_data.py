@@ -75,12 +75,15 @@ for ap in [
     )
 
 print("=== 3. spv_target rows (sample brand targets) ===")
+# salesman_sk values are STRING hashes from sfa_web.dim_salesman
+SK_ERNA    = "60a2ef484fdf77f0be82bc3a1effd132"  # ERNA
+SK_NURLELA = "59c13ab60bc899c3a690138cabe8b5e6"  # NURLELA
 for row in [
-    (12345, "Skintific", 1000, 950),
-    (12345, "G2G",       500,  480),
-    (12346, "Skintific", 800,  760),
-    (12346, "G2G",       400,  400),
-    (12347, "Skintific", 600,  540),
+    (SK_ERNA,    "Skintific", 1000, 950),
+    (SK_ERNA,    "G2G",       500,  480),
+    (SK_NURLELA, "Skintific", 800,  760),
+    (SK_NURLELA, "G2G",       400,  400),
+    (SK_ERNA,    "Skintific", 600,  540),
 ]:
     run(
         f"""
@@ -91,7 +94,7 @@ for row in [
         """,
         [
             bq.p("id",    "STRING",    str(uuid.uuid4())),
-            bq.p("sk",    "INT64",     row[0]),
+            bq.p("sk",    "STRING",    row[0]),
             bq.p("brand", "STRING",    row[1]),
             bq.p("pm",    "DATE",      month_start),
             bq.p("mt",    "FLOAT64",   float(row[2])),

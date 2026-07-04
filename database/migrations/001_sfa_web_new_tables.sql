@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS `skintific-data-warehouse.sfa_web.notification` (
 -- ── 4. spv_target ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `skintific-data-warehouse.sfa_web.spv_target` (
   spv_target_id     STRING    NOT NULL,
-  salesman_sk       INT64     NOT NULL,
+  salesman_sk       STRING    NOT NULL,   -- 32-char hex hash FK → dim_salesman
   brand             STRING    NOT NULL,
   period_month      DATE      NOT NULL,
   management_target FLOAT64   NOT NULL,
@@ -76,8 +76,8 @@ CREATE TABLE IF NOT EXISTS `skintific-data-warehouse.sfa_web.spv_target` (
 -- ── 5. route_assignment ──────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `skintific-data-warehouse.sfa_web.route_assignment` (
   assignment_id   STRING    NOT NULL,
-  salesman_sk     INT64     NOT NULL,
-  outlet_sk       INT64     NOT NULL,
+  salesman_sk     STRING    NOT NULL,   -- 32-char hex hash FK → dim_salesman
+  outlet_sk       STRING    NOT NULL,   -- 32-char hex hash FK → dim_outlet
   day_of_week     STRING    NOT NULL,
   sequence_order  INT64     NOT NULL,
   week_pattern    STRING    NOT NULL,
@@ -97,7 +97,7 @@ ALTER TABLE `skintific-data-warehouse.sfa_web.users`
   ADD COLUMN IF NOT EXISTS email STRING;
 
 ALTER TABLE `skintific-data-warehouse.sfa_web.users`
-  ADD COLUMN IF NOT EXISTS salesman_sk INT64;
+  ADD COLUMN IF NOT EXISTS salesman_sk STRING;  -- 32-char hex hash FK → dim_salesman
 
 ALTER TABLE `skintific-data-warehouse.sfa_web.users`
   ADD COLUMN IF NOT EXISTS is_active BOOL;
