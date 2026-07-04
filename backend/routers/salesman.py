@@ -26,7 +26,7 @@ router = APIRouter(prefix="/salesman", tags=["salesman"])
 
 _SALESMAN_COLS = """
     salesman_sk, source_salesman_code, salesman_name, salesman_type, role_type,
-    distributor_code, region, spv_name, asm_name, is_active, source_updated_at
+    distributor_code, region, spv_name, asm_name, is_active, brand_group, source_updated_at
 """
 
 

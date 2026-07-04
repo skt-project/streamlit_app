@@ -32,3 +32,4 @@ class SalesmanMiniOut(BaseModel):
     region: str | None = None
     spv_name: str | None = None
     is_active: bool | None = None
+    brand_group: str | None = None

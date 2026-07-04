@@ -70,7 +70,7 @@ def list_salesmen_for_planner(
     rows = bq.query(
         f"""
         SELECT salesman_sk, source_salesman_code, salesman_name,
-               distributor_code, region, spv_name, is_active
+               distributor_code, region, spv_name, is_active, brand_group
         FROM {settings.table('vw_salesman_active')}
         WHERE {where}
         ORDER BY salesman_name

@@ -192,10 +192,50 @@ WHERE is_deleted = FALSE
 """, "vw_outlet_active")
 
 # ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# 5. fact_management_target
+# ------------------------------------------------------------------
+print("\n[5] fact_management_target")
+run(f"TRUNCATE TABLE {T('fact_management_target')}", "truncate")
+run(f"""
+INSERT INTO {T('fact_management_target')}
+  (target_sk, outlet_sk, source_customer_id, calendar_date, brand, brand_group,
+   management_target_amount, weekly_visit_target, region, distributor_name,
+   spv_name, asm_name, source_loaded_at, sfa_web_loaded_at, is_deleted)
+SELECT
+  TO_HEX(MD5(CONCAT('TARGET', '|', customer_id, '|', CAST(calendar_date AS STRING), '|', brand_name))),
+  TO_HEX(MD5(CONCAT('GT', '|', customer_id))),
+  customer_id,
+  calendar_date,
+  brand_name,
+  CASE
+    WHEN brand_name IN ('Skintific', 'Timephoria', 'Facerinna') THEN 'SKT'
+    WHEN brand_name IN ('Glad2Glow', 'Bodibreeze', 'Next Prime') THEN 'G2G'
+    ELSE NULL
+  END,
+  target_amount,
+  weekly_visit_target,
+  region,
+  distributor,
+  spv_name,
+  asm_name,
+  CURRENT_TIMESTAMP(),
+  CURRENT_TIMESTAMP(),
+  FALSE
+FROM `{PROJECT}.gt_schema.fact_gt_target_v2_t`,
+UNNEST([
+  STRUCT('Skintific'   AS brand_name, skintific_target AS target_amount),
+  STRUCT('Glad2Glow',  g2g_target),
+  STRUCT('Timephoria', timephoria_target)
+])
+WHERE customer_id IS NOT NULL AND target_amount IS NOT NULL
+""", "insert from fact_gt_target_v2_t (unpivoted 3 brands)")
+
+# ------------------------------------------------------------------
 # Row counts
 # ------------------------------------------------------------------
 print("\n[✓] Row counts:")
-for tbl in ("dim_salesman", "dim_outlet", "fact_route_plan_pjp"):
+for tbl in ("dim_salesman", "dim_outlet", "fact_route_plan_pjp", "fact_management_target"):
     row = list(client.query(f"SELECT COUNT(*) AS n FROM {T(tbl)}").result())[0]
     print(f"    {tbl}: {row['n']:,}")
 

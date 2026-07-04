@@ -13,6 +13,7 @@ class SalesmanOut(BaseModel):
     spv_name: str | None = None
     asm_name: str | None = None
     is_active: bool | None = None
+    brand_group: str | None = None
     source_updated_at: datetime | None = None
 
 
