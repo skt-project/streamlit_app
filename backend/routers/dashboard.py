@@ -22,7 +22,7 @@ def get_kpi(
     current_user: UserContext = Depends(require_auth),
 ):
     # Auto-resolve from JWT so mobile never needs to pass it explicitly
-    sk = str(current_user.salesman_sk) if current_user.salesman_sk else (salesman_sk or "")
+    sk = current_user.salesman_sk or salesman_sk or ""
     if not sk:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="salesman_sk required — link this user to a salesman in Administration")

@@ -74,7 +74,7 @@ def get_today_schedule(
     current_user: UserContext = Depends(require_auth),
 ):
     # Prefer JWT salesman_sk so mobile never needs to pass it explicitly
-    sk = str(current_user.salesman_sk) if current_user.salesman_sk else (salesman_sk or "")
+    sk = current_user.salesman_sk or salesman_sk or ""
     if not sk:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="salesman_sk required — link this user to a salesman in Administration")
@@ -100,7 +100,7 @@ def download_week_schedule(
     Returns all stores for the entire specified ISO week — used for offline caching.
     Includes ALL days so SE can plan ahead. Stores include lat/lon for GPS.
     """
-    sk = str(current_user.salesman_sk) if current_user.salesman_sk else (salesman_sk or "")
+    sk = current_user.salesman_sk or salesman_sk or ""
     if not sk:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="salesman_sk required — link this user to a salesman in Administration")

@@ -29,7 +29,7 @@ def require_auth(
             territory=payload.get("territory"),
             distributor_code=payload.get("distributor_code"),
             brand_group=payload.get("brand_group"),
-            salesman_sk=int(sk) if sk else None,
+            salesman_sk=sk or None,
         )
     except KeyError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token")

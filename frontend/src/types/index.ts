@@ -8,7 +8,7 @@ export interface User {
   territory: string | null;
   distributor_code: string | null;
   brand_group: string | null;
-  salesman_sk: number | null;
+  salesman_sk: string | null;
   is_active: boolean;
 }
 
@@ -175,7 +175,7 @@ export interface Outlet {
   spv_name: string | null;
   salesman_name: string | null;
   salesman_code: string | null;
-  salesman_sk: number | null;
+  salesman_sk: string | null;
   is_active: boolean;
 }
 

@@ -57,7 +57,7 @@ def login(body: LoginRequest):
         "territory": user.get("territory"),
         "distributor_code": user.get("distributor_code"),
         "brand_group": user.get("brand_group"),
-        "salesman_sk": int(sk) if sk else None,
+        "salesman_sk": sk or None,
     }
     token = create_access_token(token_payload)
 
@@ -70,7 +70,7 @@ def login(body: LoginRequest):
             territory=user.get("territory"),
             distributor_code=user.get("distributor_code"),
             brand_group=user.get("brand_group"),
-            salesman_sk=int(sk) if sk else None,
+            salesman_sk=sk or None,
         ),
     )
 

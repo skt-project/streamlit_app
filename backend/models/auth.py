@@ -13,7 +13,7 @@ class UserContext(BaseModel):
     territory: str | None = None
     distributor_code: str | None = None
     brand_group: str | None = None  # 'SKT' | 'G2G' | None (ho_admin sees all)
-    salesman_sk: int | None = None  # FK → sfa_step.dim_salesman; set for SE/SPV users
+    salesman_sk: str | None = None  # FK → sfa_web.dim_salesman (STRING hash); set for SE/SPV users
 
 
 class TokenResponse(BaseModel):
