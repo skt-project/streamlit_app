@@ -27,14 +27,14 @@ def get_web_dashboard(current_user: UserContext = Depends(require_auth)):
         f"""
         SELECT
           brand,
-          SUM(management_target) AS management_target,
-          SUM(spv_target)        AS spv_target,
-          SAFE_DIVIDE(SUM(spv_target), NULLIF(SUM(management_target), 0)) * 100 AS comply_pct
-        FROM {SFA_WEB}.spv_target
-        WHERE period_month = DATE_TRUNC(CURRENT_DATE(), MONTH)
-          AND approval_status IN ('submitted','approved')
-        GROUP BY brand
-        ORDER BY brand
+          SUM(t.management_target) AS management_target,
+          SUM(t.spv_target)        AS spv_target,
+          SAFE_DIVIDE(SUM(t.spv_target), NULLIF(SUM(t.management_target), 0)) * 100 AS comply_pct
+        FROM {SFA_WEB}.spv_target t
+        WHERE t.period_month = DATE_TRUNC(CURRENT_DATE(), MONTH)
+          AND t.approval_status IN ('submitted','approved')
+        GROUP BY t.brand
+        ORDER BY t.brand
         """,
         [],
     )
