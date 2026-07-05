@@ -1,9 +1,11 @@
 """
-GET  /notifications                   — list for current user
-POST /notifications/{id}/read         — mark one read
-POST /notifications/mark-all-read     — mark all read
+GET  /notifications                      — list for current user
+POST /notifications/{id}/read            — mark one read
+POST /notifications/mark-all-read        — mark all read
+POST /notifications/register-push-token  — store Expo push token for this user
 """
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from config import settings
 from dependencies import require_auth
@@ -59,3 +61,28 @@ def mark_all_read(current_user: UserContext = Depends(require_auth)):
         [bq.p("uid", "STRING", current_user.user_id)],
     )
     return {"message": "All notifications marked as read."}
+
+
+class PushTokenRequest(BaseModel):
+    push_token: str
+
+
+@router.post("/register-push-token")
+def register_push_token(
+    body: PushTokenRequest,
+    current_user: UserContext = Depends(require_auth),
+):
+    """Store Expo push token so the server can send push notifications to this device."""
+    bq = BQClient.get()
+    bq.execute(
+        f"""
+        UPDATE {SFA_WEB}.users
+        SET push_token = @token
+        WHERE user_id = @uid
+        """,
+        [
+            bq.p("token", "STRING", body.push_token),
+            bq.p("uid", "STRING", current_user.user_id),
+        ],
+    )
+    return {"message": "Push token registered."}

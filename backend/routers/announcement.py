@@ -12,6 +12,7 @@ from config import settings
 from dependencies import require_auth, require_role
 from models.auth import UserContext
 from services.bq import BQClient
+from services.push import send_push_bulk
 
 router = APIRouter(prefix="/announcements", tags=["announcements"])
 
@@ -77,4 +78,25 @@ def create_announcement(
             bq.p("now",      "TIMESTAMP", now),
         ],
     )
+    # Push to all users who have registered a device token
+    role_clause = "AND role = @role" if body.audience != "Semua" else ""
+    token_params = []
+    if body.audience != "Semua":
+        token_params.append(bq.p("role", "STRING", body.audience))
+    token_rows = bq.query(
+        f"""
+        SELECT push_token FROM {SFA_WEB}.users
+        WHERE is_active = TRUE AND push_token IS NOT NULL
+          AND STARTS_WITH(push_token, 'ExponentPushToken[') {role_clause}
+        """,
+        token_params,
+    )
+    messages = [
+        {"to": r["push_token"], "title": body.title, "body": body.body,
+         "sound": "default", "data": {"type": "announcement", "id": new_id}}
+        for r in token_rows
+    ]
+    if messages:
+        send_push_bulk(messages)
+
     return {"announcement_id": new_id, "message": "Pengumuman berhasil dibuat."}

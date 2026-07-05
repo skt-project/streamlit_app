@@ -14,6 +14,7 @@ from config import settings
 from dependencies import require_auth
 from models.auth import UserContext
 from services.bq import BQClient
+from services.push import send_push
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 
@@ -121,6 +122,20 @@ def _update_approval(approval_id: str, decision: str, comment: str, user: UserCo
             bq.p("id",      "STRING",    approval_id),
         ],
     )
+    # Push notification to the original submitter
+    submitter_row = bq.query_one(
+        f"SELECT push_token FROM {SFA_WEB}.users WHERE username = @uname AND push_token IS NOT NULL",
+        [bq.p("uname", "STRING", row.get("submitted_by", ""))],
+    )
+    if submitter_row and submitter_row.get("push_token"):
+        verb = "disetujui" if decision == "approve" else "ditolak"
+        send_push(
+            submitter_row["push_token"],
+            title=f"Approval {verb.capitalize()}",
+            body=f"Permintaan Anda telah {verb}." + (f" Catatan: {comment}" if comment else ""),
+            data={"type": "approval_decision", "approval_id": approval_id, "status": new_status},
+        )
+
     return {"message": f"Request {new_status}."}
 
 
