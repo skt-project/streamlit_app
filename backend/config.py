@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiry_hours: int = 24
 
-    cors_origins: str = "http://localhost:8080 http://localhost:8081 http://localhost:19006 http://localhost:19000"
+    cors_origins: str = "https://step.netlify.app http://localhost:8080 http://localhost:8081 http://localhost:19006 http://localhost:19000"
 
     @property
     def cors_origins_list(self) -> list[str]:
