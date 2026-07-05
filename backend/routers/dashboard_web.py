@@ -12,8 +12,7 @@ from services.bq import BQClient
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard-web"])
 
-SFA_STEP = f"`{settings.bq_project}.sfa_step`"
-SFA_WEB  = f"`{settings.bq_project}.{settings.bq_dataset}`"
+SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 
 @router.get("/web")
@@ -44,14 +43,19 @@ def get_web_dashboard(current_user: UserContext = Depends(require_auth)):
     total_spv   = sum(r.get("spv_target", 0) or 0 for r in comply_rows)
     comply_pct  = round((total_spv / total_mgmt * 100) if total_mgmt > 0 else 0.0, 1)
 
-    # ── Route compliance (MTD) ──────────────────────────────────────────────────
+    # ── Route compliance (MTD): visits with matching route plan entries ──────────
     rc_row = bq.query_one(
         f"""
         SELECT
-          COUNTIF(is_visited) AS visited,
-          COUNT(*)            AS planned
-        FROM {SFA_STEP}.vw_route_compliance
-        WHERE visit_date BETWEEN @ms AND @today
+          COUNT(DISTINCT CONCAT(v.salesman_sk, v.outlet_sk)) AS visited,
+          COUNT(DISTINCT CONCAT(r.salesman_sk, r.outlet_sk)) AS planned
+        FROM {SFA_WEB}.fact_route_plan_pjp r
+        LEFT JOIN {settings.table('fact_visit')} v
+          ON r.salesman_sk = v.salesman_sk
+         AND r.outlet_sk   = v.outlet_sk
+         AND v.visit_date BETWEEN @ms AND @today
+         AND v.is_deleted  = FALSE
+        WHERE r.is_deleted = FALSE
         """,
         [bq.p("ms", "DATE", month_start), bq.p("today", "DATE", today)],
     ) or {}
@@ -69,7 +73,7 @@ def get_web_dashboard(current_user: UserContext = Depends(require_auth)):
           COUNTIF(v.effective_call = 'YES') AS ec_mtd,
           SAFE_DIVIDE(COUNTIF(v.effective_call='YES'), NULLIF(COUNT(*),0))*100 AS ec_rate
         FROM {settings.table('fact_visit')} v
-        JOIN {SFA_STEP}.dim_salesman sm USING (salesman_sk)
+        JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
         WHERE v.visit_date BETWEEN @ms AND @today AND v.is_deleted = FALSE
           {bg_clause}
         GROUP BY v.salesman_sk, sm.salesman_name

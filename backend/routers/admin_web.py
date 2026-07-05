@@ -4,8 +4,6 @@ POST /admin/users           — create user
 PUT  /admin/users/{id}      — update user
 PATCH /admin/users/{id}     — toggle active
 """
-import hashlib
-import os
 import uuid
 from datetime import datetime, timezone
 
@@ -15,6 +13,7 @@ from pydantic import BaseModel
 from config import settings
 from dependencies import require_role
 from models.auth import UserContext
+from services.auth import hash_password as _hash_password
 from services.bq import BQClient
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -45,12 +44,6 @@ class ToggleActive(BaseModel):
     is_active: bool
 
 
-def _hash_password(plain: str) -> str:
-    salt = os.urandom(16).hex()
-    hashed = hashlib.sha256((plain + salt).encode()).hexdigest()
-    return f"{salt}:{hashed}"
-
-
 @router.get("/users")
 def list_users(
     search: str | None = Query(None),
@@ -66,7 +59,7 @@ def list_users(
         clauses.append("role = @role")
         params.append(bq.p("role", "STRING", role))
 
-    where = ("WHERE " + " AND ".join(clauses) + " AND is_deleted = FALSE") if clauses else "WHERE is_deleted = FALSE"
+    where = ("WHERE " + " AND ".join(clauses) + " AND is_active = TRUE") if clauses else "WHERE is_active = TRUE"
     return bq.query(
         f"""
         SELECT user_id, username, full_name, role, email, brand_group, salesman_sk, is_active
@@ -86,7 +79,7 @@ def create_user(
 ):
     bq = BQClient.get()
     existing = bq.query_one(
-        f"SELECT user_id FROM {SFA_WEB}.users WHERE username = @u AND is_deleted = FALSE",
+        f"SELECT user_id FROM {SFA_WEB}.users WHERE username = @u AND is_active = TRUE",
         [bq.p("u", "STRING", body.username)],
     )
     if existing:
@@ -95,16 +88,15 @@ def create_user(
     new_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     pw_hash = _hash_password(body.password)
-    sk = int(body.salesman_sk) if body.salesman_sk and body.salesman_sk.isdigit() else None
 
     bq.execute(
         f"""
         INSERT INTO {SFA_WEB}.users
           (user_id, username, full_name, password_hash, role, email,
-           brand_group, salesman_sk, is_active, created_at, is_deleted)
+           brand_group, salesman_sk, is_active, created_at, updated_at)
         VALUES
           (@id, @u, @name, @pw, @role, @email,
-           @bg, @sk, TRUE, @now, FALSE)
+           @bg, @sk, TRUE, @now, @now)
         """,
         [
             bq.p("id",    "STRING",    new_id),
@@ -114,7 +106,7 @@ def create_user(
             bq.p("role",  "STRING",    body.role),
             bq.p("email", "STRING",    body.email or ""),
             bq.p("bg",    "STRING",    body.brand_group or ""),
-            bq.p("sk",    "INT64",     sk or 0),
+            bq.p("sk",    "STRING",    body.salesman_sk or ""),
             bq.p("now",   "TIMESTAMP", now),
         ],
     )
@@ -140,8 +132,7 @@ def update_user(
     if body.brand_group is not None:
         sets.append("brand_group = @bg"); params.append(bq.p("bg", "STRING", body.brand_group))
     if body.salesman_sk is not None:
-        sk = int(body.salesman_sk) if body.salesman_sk.isdigit() else 0
-        sets.append("salesman_sk = @sk"); params.append(bq.p("sk", "INT64", sk))
+        sets.append("salesman_sk = @sk"); params.append(bq.p("sk", "STRING", body.salesman_sk))
 
     if not sets:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -150,7 +141,7 @@ def update_user(
     sets.append("updated_at = @now"); params.append(bq.p("now", "TIMESTAMP", now))
     params.append(bq.p("id", "STRING", user_id))
     bq.execute(
-        f"UPDATE {SFA_WEB}.users SET {', '.join(sets)} WHERE user_id = @id AND is_deleted = FALSE",
+        f"UPDATE {SFA_WEB}.users SET {', '.join(sets)} WHERE user_id = @id AND is_active = TRUE",
         params,
     )
     return {"message": "User updated."}
@@ -165,7 +156,7 @@ def toggle_active(
     bq = BQClient.get()
     now = datetime.now(timezone.utc).isoformat()
     bq.execute(
-        f"UPDATE {SFA_WEB}.users SET is_active = @active, updated_at = @now WHERE user_id = @id AND is_deleted = FALSE",
+        f"UPDATE {SFA_WEB}.users SET is_active = @active, updated_at = @now WHERE user_id = @id AND is_active = TRUE",
         [bq.p("active", "BOOL", body.is_active), bq.p("now", "TIMESTAMP", now), bq.p("id", "STRING", user_id)],
     )
     return {"message": "User status updated."}
