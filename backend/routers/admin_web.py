@@ -13,7 +13,8 @@ from pydantic import BaseModel
 from config import settings
 from dependencies import require_role
 from models.auth import UserContext
-from services.auth import hash_password as _hash_password
+from services.audit import log_event
+from services.auth import create_access_token, hash_password as _hash_password
 from services.bq import BQClient
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -159,4 +160,33 @@ def toggle_active(
         f"UPDATE {SFA_WEB}.users SET is_active = @active, updated_at = @now WHERE user_id = @id AND is_active = TRUE",
         [bq.p("active", "BOOL", body.is_active), bq.p("now", "TIMESTAMP", now), bq.p("id", "STRING", user_id)],
     )
+    log_event("user.toggle_active", "user", user_id, current_user.username,
+              payload={"is_active": body.is_active})
     return {"message": "User status updated."}
+
+
+@router.post("/users/{user_id}/reset-token")
+def generate_reset_token(
+    user_id: str,
+    current_user: UserContext = Depends(require_role("ho_admin")),
+):
+    """Generate a 24-hour password reset token for a user. Give this token to the user."""
+    bq = BQClient.get()
+    user = bq.query_one(
+        f"SELECT user_id, username FROM {SFA_WEB}.users WHERE user_id = @id AND is_active = TRUE",
+        [bq.p("id", "STRING", user_id)],
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    token = create_access_token({
+        "sub": user_id,
+        "username": user["username"],
+        "purpose": "password_reset",
+    })
+    log_event("user.reset_token_generated", "user", user_id, current_user.username)
+    return {
+        "reset_token": token,
+        "expires_in": "24 hours",
+        "note": "Pass this token to the user. They POST to /api/v1/auth/reset-password with it.",
+    }

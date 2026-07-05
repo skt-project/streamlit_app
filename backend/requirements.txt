@@ -7,3 +7,5 @@ bcrypt==4.2.1
 python-jose[cryptography]==3.3.0
 pydantic-settings==2.6.1
 python-multipart==0.0.18
+slowapi==0.1.9
+firebase-admin==6.6.0

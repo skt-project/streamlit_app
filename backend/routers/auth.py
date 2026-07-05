@@ -1,21 +1,32 @@
 """
-POST /auth/login   — verify credentials, return JWT
-GET  /auth/me      — return current user from JWT
-POST /auth/users   — create a new user (ho_admin only)
+POST /auth/login              — verify credentials, return JWT
+GET  /auth/me                 — return current user from JWT
+POST /auth/users              — create a new user (ho_admin only)
+POST /auth/reset-password     — reset password with a reset token
 """
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from google.cloud import bigquery
+from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from config import settings
 from dependencies import require_auth, require_role
 from models.auth import LoginRequest, TokenResponse, UserContext
-from services.auth import create_access_token, hash_password, verify_password
+from services.audit import log_event
+from services.auth import (
+    create_access_token,
+    decode_token,
+    hash_password,
+    verify_password,
+)
 from services.bq import BQClient
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _get_user_by_username(username: str) -> dict | None:
@@ -30,24 +41,22 @@ def _get_user_by_username(username: str) -> dict | None:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest):
+@limiter.limit("20/minute")
+def login(request: Request, body: LoginRequest):
     user = _get_user_by_username(body.username)
     if not user or not user.get("is_active"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if not verify_password(body.password, user["password_hash"]):
+        log_event("user.login_failed", "user", user["user_id"], body.username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    # Update last_login
     bq = BQClient.get()
     bq.execute(
-        f"""
-        UPDATE {settings.table('users')}
-        SET last_login = CURRENT_TIMESTAMP()
-        WHERE user_id = @user_id
-        """,
+        f"UPDATE {settings.table('users')} SET last_login = CURRENT_TIMESTAMP() WHERE user_id = @user_id",
         [bq.p("user_id", "STRING", user["user_id"])],
     )
+    log_event("user.login", "user", user["user_id"], user["username"])
 
     sk = user.get("salesman_sk")
     token_payload = {
@@ -80,20 +89,61 @@ def me(current_user: UserContext = Depends(require_auth)):
     return current_user
 
 
+# ── Password reset ──────────────────────────────────────────────────────────
+
+class ResetTokenResponse(BaseModel):
+    reset_token: str
+    expires_in: str = "24 hours"
+    note: str = "Pass this token to the user. They use POST /auth/reset-password to set a new password."
+
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
+
+@router.post("/reset-password")
+def reset_password(body: ResetPasswordRequest):
+    """Use a reset token (issued by admin) to set a new password."""
+    try:
+        payload = decode_token(body.reset_token)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    if payload.get("purpose") != "password_reset":
+        raise HTTPException(status_code=400, detail="Invalid token purpose")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Malformed token")
+
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+
+    bq = BQClient.get()
+    bq.execute(
+        f"UPDATE {settings.table('users')} SET password_hash = @pw, updated_at = CURRENT_TIMESTAMP() WHERE user_id = @uid",
+        [bq.p("pw", "STRING", hash_password(body.new_password)), bq.p("uid", "STRING", user_id)],
+    )
+    log_event("user.password_reset", "user", user_id, "system")
+    return {"message": "Password updated successfully."}
+
+
+# ── Create user (legacy, kept for backward compat) ──────────────────────────
+
 class _CreateUserRequest(LoginRequest):
     role: str = "salesman"
     territory: str | None = None
     distributor_code: str | None = None
-    brand_group: str | None = None  # 'SKT' | 'G2G' | None for ho_admin
+    brand_group: str | None = None
     email: str | None = None
 
 
 @router.post("/users", status_code=201)
 def create_user(
     body: _CreateUserRequest,
-    _: UserContext = Depends(require_role("ho_admin")),
+    current_user: UserContext = Depends(require_role("ho_admin")),
 ):
-    """Create a new STEP user. Only ho_admin can call this."""
     existing = _get_user_by_username(body.username)
     if existing:
         raise HTTPException(status_code=409, detail="Username already exists")
@@ -108,15 +158,15 @@ def create_user(
           (@user_id, @username, @email, @password_hash, @role, @territory, @distributor_code, @brand_group, TRUE, CURRENT_TIMESTAMP())
         """,
         [
-            bq.p("user_id", "STRING", user_id),
-            bq.p("username", "STRING", body.username),
-            bq.p("email", "STRING", body.email),
-            bq.p("password_hash", "STRING", hash_password(body.password)),
-            bq.p("role", "STRING", body.role),
-            bq.p("territory", "STRING", body.territory),
-            bq.p("distributor_code", "STRING", body.distributor_code),
-            bq.p("brand_group", "STRING", body.brand_group),
+            bq.p("user_id",           "STRING", user_id),
+            bq.p("username",          "STRING", body.username),
+            bq.p("email",             "STRING", body.email),
+            bq.p("password_hash",     "STRING", hash_password(body.password)),
+            bq.p("role",              "STRING", body.role),
+            bq.p("territory",         "STRING", body.territory),
+            bq.p("distributor_code",  "STRING", body.distributor_code),
+            bq.p("brand_group",       "STRING", body.brand_group),
         ],
     )
-    bq.cache.invalidate("users:")
-    return {"user_id": user_id, "username": body.username, "role": body.role, "brand_group": body.brand_group}
+    log_event("user.create", "user", user_id, current_user.username, payload={"role": body.role})
+    return {"user_id": user_id, "username": body.username, "role": body.role}

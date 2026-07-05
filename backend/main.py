@@ -2,8 +2,13 @@
 STEP Backend API — FastAPI app entrypoint
 Run locally: uvicorn main:app --reload --port 8000
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from config import settings
 from routers import (
@@ -11,16 +16,22 @@ from routers import (
     # Web app routers
     dashboard_web, announcement, approval, target_web, evaluate_web,
     route_planner, report_web, salesman_web, outlet_web, notification, admin_web,
-    store_opportunity,
+    store_opportunity, pjp_upload,
 )
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 app = FastAPI(
     title="STEP API",
     description="Skintific Territory & Execution Platform backend",
-    version="1.2.0",
+    version="1.3.0",
     docs_url="/docs",
     redoc_url=None,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,10 +63,11 @@ app.include_router(report_web.router,     prefix="/api/v1")
 app.include_router(salesman_web.router,   prefix="/api/v1")
 app.include_router(outlet_web.router,     prefix="/api/v1")
 app.include_router(notification.router,   prefix="/api/v1")
-app.include_router(admin_web.router,          prefix="/api/v1")
-app.include_router(store_opportunity.router,  prefix="/api/v1")
+app.include_router(admin_web.router,      prefix="/api/v1")
+app.include_router(store_opportunity.router, prefix="/api/v1")
+app.include_router(pjp_upload.router,     prefix="/api/v1")
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.2.0"}
+    return {"status": "ok", "version": "1.3.0"}

@@ -16,11 +16,27 @@ SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 
 @router.get("/web")
-def get_web_dashboard(current_user: UserContext = Depends(require_auth)):
+def get_web_dashboard(
+    current_user: UserContext = Depends(require_auth),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    brand: str | None = None,
+    region: str | None = None,
+):
     bq = BQClient.get()
-    today = date.today().isoformat()
-    month_start = date.today().replace(day=1).isoformat()
+    today = (date_to or date.today().isoformat())
+    month_start = (date_from or date.today().replace(day=1).isoformat())
     bg_clause, bg_params = brand_group_filter(current_user, "bg", "v")
+
+    # Additional optional filters (brand overrides bg_clause, region filters dim_salesman join)
+    extra_visit_clause = ""
+    extra_params: list = []
+    if brand and not bg_clause:
+        extra_visit_clause += " AND sm.brand_group = @filter_brand"
+        extra_params.append(bq.p("filter_brand", "STRING", brand))
+    if region:
+        extra_visit_clause += " AND sm.region = @filter_region"
+        extra_params.append(bq.p("filter_region", "STRING", region))
 
     # ── Comply summary ──────────────────────────────────────────────────────────
     comply_rows = bq.query(
@@ -69,18 +85,19 @@ def get_web_dashboard(current_user: UserContext = Depends(require_auth)):
         SELECT
           v.salesman_sk,
           sm.salesman_name,
+          sm.region,
           COUNT(*) AS visit_mtd,
           COUNTIF(v.effective_call = 'YES') AS ec_mtd,
           SAFE_DIVIDE(COUNTIF(v.effective_call='YES'), NULLIF(COUNT(*),0))*100 AS ec_rate
         FROM {settings.table('fact_visit')} v
         JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
         WHERE v.visit_date BETWEEN @ms AND @today AND v.is_deleted = FALSE
-          {bg_clause}
-        GROUP BY v.salesman_sk, sm.salesman_name
+          {bg_clause} {extra_visit_clause}
+        GROUP BY v.salesman_sk, sm.salesman_name, sm.region
         ORDER BY visit_mtd DESC
         LIMIT 10
         """,
-        [bq.p("ms", "DATE", month_start), bq.p("today", "DATE", today)] + bg_params,
+        [bq.p("ms", "DATE", month_start), bq.p("today", "DATE", today)] + bg_params + extra_params,
     )
 
     # ── Recent announcements ────────────────────────────────────────────────────
@@ -102,10 +119,11 @@ def get_web_dashboard(current_user: UserContext = Depends(require_auth)):
           COUNT(*) AS total_visits,
           COUNTIF(effective_call = 'YES') AS ec_today
         FROM {settings.table('fact_visit')} v
+        JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
         WHERE v.visit_date = @today AND v.is_deleted = FALSE
-          {bg_clause}
+          {bg_clause} {extra_visit_clause}
         """,
-        [bq.p("today", "DATE", today)] + bg_params,
+        [bq.p("today", "DATE", today)] + bg_params + extra_params,
     ) or {}
 
     return {
