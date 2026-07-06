@@ -12,7 +12,7 @@ from slowapi.util import get_remote_address
 
 from config import settings
 from routers import (
-    auth, dashboard, photo, route, salesman, schedule, sku, stock, visit,
+    auth, dashboard, photo, product, route, salesman, schedule, sku, stock, visit,
     # Web app routers
     dashboard_web, announcement, approval, target_web, evaluate_web,
     route_planner, report_web, salesman_web, outlet_web, notification, admin_web,
@@ -49,6 +49,7 @@ app.include_router(visit.router,     prefix="/api/v1")
 app.include_router(schedule.router,  prefix="/api/v1")
 app.include_router(photo.router,     prefix="/api/v1")
 app.include_router(sku.router,       prefix="/api/v1")
+app.include_router(product.router,   prefix="/api/v1")
 app.include_router(stock.router,     prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
 
