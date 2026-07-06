@@ -180,6 +180,77 @@ export interface Outlet {
   is_active: boolean;
 }
 
+// ── Visit & Demand ────────────────────────────────────────────────────────────
+export type VisitStatus = "DRAFT" | "CHECKED_IN" | "CHECKED_OUT" | "SUBMITTED";
+export type VisitApprovalStatus =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "PENDING_SPV"
+  | "SPV_APPROVED"
+  | "ASM_APPROVED"
+  | "DDM_APPROVED"
+  | "REVISION_REQUIRED"
+  | "COMPLETED"
+  | "REJECTED";
+
+export interface VisitItem {
+  visit_item_id: string;
+  sku_id: string;
+  sku_name: string | null;
+  brand: string | null;
+  category: string | null;
+  stp: number | null;
+  qty: number | null;
+  demand: number | null;
+}
+
+export interface Visit {
+  visit_id: string;
+  salesman_sk: string;
+  salesman_name: string | null;
+  outlet_sk: string | null;
+  store_name: string | null;
+  schedule_id: string | null;
+  visit_date: string;
+  visit_type: string;
+  brand_group: string | null;
+  checkin_time: string | null;
+  checkin_latitude: number | null;
+  checkin_longitude: number | null;
+  checkin_photo_url: string | null;
+  checkin_distance_m: number | null;
+  gps_warning: boolean;
+  checkout_time: string | null;
+  checkout_latitude: number | null;
+  checkout_longitude: number | null;
+  checkout_photo_url: string | null;
+  total_demand: number | null;
+  effective_call: "YES" | "NO" | null;
+  notes: string | null;
+  duration_minutes: number | null;
+  visit_status: VisitStatus | null;
+  approval_status: VisitApprovalStatus | null;
+  spv_username: string | null;
+  spv_approved_at: string | null;
+  asm_username: string | null;
+  asm_approved_at: string | null;
+  ddm_username: string | null;
+  ddm_approved_at: string | null;
+  rejection_notes: string | null;
+  revision_count: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+  items: VisitItem[];
+}
+
+export interface VisitListResponse {
+  items: Visit[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_next: boolean;
+}
+
 // ── Notification ──────────────────────────────────────────────────────────────
 export type NotificationType = "approval" | "announcement" | "compliance" | "target" | "system";
 

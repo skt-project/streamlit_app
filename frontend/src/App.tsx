@@ -18,6 +18,8 @@ import StoreOpportunity from "@/pages/StoreOpportunity";
 import Administration from "@/pages/Administration";
 import ImportExport from "@/pages/ImportExport";
 import Notifications from "@/pages/Notifications";
+import Visits from "@/pages/Visits";
+import VisitDetail from "@/pages/VisitDetail";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -65,6 +67,10 @@ function AppRoutes() {
         <Route path="store360"             element={<Store360 />} />
         <Route path="salesman360"          element={<Salesman360 />} />
         <Route path="store-opportunity"    element={<StoreOpportunity />} />
+
+        {/* Visits & Demand */}
+        <Route path="visits"               element={<Visits />} />
+        <Route path="visits/:visitId"      element={<VisitDetail />} />
 
         {/* Admin */}
         <Route path="administration"       element={<Administration />} />

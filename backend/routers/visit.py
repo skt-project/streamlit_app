@@ -491,11 +491,16 @@ def list_visits(
 
     rows = bq.query(
         f"""
-        SELECT {_VISIT_COLS}
-        FROM {settings.table('fact_visit')}
-        WHERE {where} AND is_deleted = FALSE
-        ORDER BY created_at DESC
-        LIMIT @lim OFFSET @off
+        SELECT v.*, sm.salesman_name, o.store_name
+        FROM (
+            SELECT {_VISIT_COLS}
+            FROM {settings.table('fact_visit')}
+            WHERE {where} AND is_deleted = FALSE
+            ORDER BY created_at DESC
+            LIMIT @lim OFFSET @off
+        ) v
+        LEFT JOIN {settings.table('dim_salesman')} sm ON v.salesman_sk = sm.salesman_sk
+        LEFT JOIN {settings.table('dim_outlet')} o ON v.outlet_sk = o.outlet_sk
         """,
         params + [bq.p("lim", "INT64", page_size), bq.p("off", "INT64", offset)],
     )

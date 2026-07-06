@@ -120,6 +120,10 @@ class VisitOut(BaseModel):
     updated_at: datetime | None = None
     items: list[VisitItemOut] = Field(default_factory=list)
 
+    # Enriched fields (joined from dim_salesman / dim_outlet in list queries)
+    salesman_name: str | None = None
+    store_name: str | None = None
+
 
 class VisitListResponse(BaseModel):
     items: list[VisitOut]

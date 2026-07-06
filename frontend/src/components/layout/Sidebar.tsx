@@ -14,6 +14,7 @@ const NAV: NavItem[] = [
   { to: "/dashboard",           label: "Dashboard",           icon: "📊", roles: ["spv","asm","dm","rsm","ho_admin"] },
   { to: "/route-planner",       label: "Route Planner",       icon: "🗺️", roles: ["spv","asm","dm","ho_admin"] },
   { to: "/route-evaluate",      label: "Route Evaluate",      icon: "📈", roles: ["spv","asm","dm","rsm","ho_admin"] },
+  { to: "/visits",              label: "Visit & Demand",      icon: "📦", roles: ["spv","asm","dm","rsm","ho_admin"] },
   { to: "/target-management",   label: "Target Management",   icon: "🎯", roles: ["spv","asm","dm","ho_admin"] },
   { to: "/approvals",           label: "Approvals",           icon: "✅", roles: ["spv","asm","dm","rsm","ho_admin"] },
   { to: "/outlet-salesman",     label: "Outlet & Salesman",   icon: "🏬", roles: ["spv","asm","dm","rsm","ho_admin"] },
