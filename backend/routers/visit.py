@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import settings
-from dependencies import brand_group_filter, require_auth
+from dependencies import BRAND_GROUPS, brand_group_filter, require_auth
 from models.auth import UserContext
 from models.visit import (
     ApproveRequest, CheckinRequest, CheckinResponse,
@@ -197,6 +197,17 @@ def checkout(
         if isinstance(cin_time, str):
             cin_time = datetime.fromisoformat(cin_time)
         duration = max(0, int((captured - cin_time.replace(tzinfo=timezone.utc)).total_seconds() / 60))
+
+    # Guard: reject items whose brand falls outside the user's business group.
+    # ho_admin and accounts with no brand_group are unrestricted.
+    if current_user.brand_group and current_user.role != "ho_admin":
+        allowed = set(BRAND_GROUPS.get(current_user.brand_group, []))
+        for item in body.items:
+            if item.qty > 0 and item.brand and item.brand not in allowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Brand '{item.brand}' tidak diizinkan untuk group Anda",
+                )
 
     # Insert visit items
     for item in body.items:
