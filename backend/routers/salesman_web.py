@@ -14,7 +14,10 @@ from services.bq import BQClient
 
 router = APIRouter(prefix="/salesman", tags=["salesman"])
 
-SFA_STEP = f"`{settings.bq_project}.sfa_step`"
+# sfa_web.dim_salesman is the correct table: it has the brand_group column
+# (added by migrate_brand_group.py).  sfa_step.dim_salesman does NOT have
+# brand_group, so brand_group_filter() would fail silently against that table.
+SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 
 @router.get("/list")
@@ -27,8 +30,12 @@ def list_salesmen(
 ):
     bq = BQClient.get()
     bg_clause, bg_params = brand_group_filter(current_user, "bg")
-    clauses, params = list(bg_params), []
 
+    clauses: list[str] = []
+    params: list = list(bg_params)
+
+    if bg_clause:
+        clauses.append(bg_clause.lstrip("AND ").strip())
     if search:
         clauses.append("(LOWER(salesman_name) LIKE LOWER(CONCAT('%',@q,'%')) OR LOWER(source_salesman_code) LIKE LOWER(CONCAT('%',@q,'%')))")
         params.append(bq.p("q", "STRING", search))
@@ -46,8 +53,8 @@ def list_salesmen(
         f"""
         SELECT
           salesman_sk, source_salesman_code, salesman_name, salesman_type,
-          distributor_code, region, spv_name, asm_name, is_active
-        FROM {SFA_STEP}.dim_salesman
+          distributor_code, region, spv_name, asm_name, is_active, brand_group
+        FROM {SFA_WEB}.dim_salesman
         {where}
         ORDER BY salesman_name
         LIMIT @lim
@@ -63,17 +70,20 @@ def search_salesmen(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
+    bg_clause, bg_params = brand_group_filter(current_user, "bg")
+    bg_where = bg_clause if not bg_clause else f" {bg_clause}"
     return bq.query(
         f"""
-        SELECT salesman_sk, source_salesman_code, salesman_name
-        FROM {SFA_STEP}.dim_salesman
+        SELECT salesman_sk, source_salesman_code, salesman_name, brand_group
+        FROM {SFA_WEB}.dim_salesman
         WHERE (LOWER(salesman_name) LIKE LOWER(CONCAT('%',@q,'%'))
            OR  LOWER(source_salesman_code) LIKE LOWER(CONCAT('%',@q,'%')))
           AND is_active = TRUE
+          {bg_where}
         ORDER BY salesman_name
         LIMIT 20
         """,
-        [bq.p("q", "STRING", q)],
+        [bq.p("q", "STRING", q)] + bg_params,
     )
 
 

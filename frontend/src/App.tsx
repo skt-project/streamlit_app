@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import Layout from "@/components/layout/Layout";
@@ -21,11 +20,13 @@ import ImportExport from "@/pages/ImportExport";
 import Notifications from "@/pages/Notifications";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, rehydrate } = useAuthStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const location = useLocation();
 
-  useEffect(() => { rehydrate(); }, []);
-
+  // No useEffect rehydrate — the store initializes synchronously from
+  // localStorage (see authStore.ts loadInitialState), so isAuthenticated is
+  // already correct on the first render.  The old async rehydrate caused a
+  // race where the login page flashed and then redirected back to dashboard.
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
@@ -71,8 +72,11 @@ function AppRoutes() {
         <Route path="notifications"        element={<Notifications />} />
       </Route>
 
-      {/* Fallback */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      {/* Fallback: authenticated → dashboard, unauthenticated → login */}
+      <Route
+        path="*"
+        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
+      />
     </Routes>
   );
 }

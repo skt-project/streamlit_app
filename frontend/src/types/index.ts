@@ -152,6 +152,7 @@ export interface Salesman {
   source_salesman_code: string;
   salesman_name: string;
   salesman_type: string;
+  brand_group: string | null;
   distributor_code: string | null;
   region: string | null;
   spv_name: string | null;

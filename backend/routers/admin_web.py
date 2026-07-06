@@ -49,24 +49,31 @@ class ToggleActive(BaseModel):
 def list_users(
     search: str | None = Query(None),
     role: str | None = Query(None),
+    is_active: bool | None = Query(None),  # None = show all (active + inactive + demo)
     current_user: UserContext = Depends(require_role("ho_admin")),
 ):
     bq = BQClient.get()
-    clauses, params = [], []
+    clauses: list[str] = []
+    params: list = []
     if search:
         clauses.append("(LOWER(username) LIKE LOWER(CONCAT('%',@q,'%')) OR LOWER(full_name) LIKE LOWER(CONCAT('%',@q,'%')))")
         params.append(bq.p("q", "STRING", search))
     if role:
         clauses.append("role = @role")
         params.append(bq.p("role", "STRING", role))
+    # is_active filter is OPTIONAL — when omitted, HO admin sees ALL users
+    # including demo accounts and deactivated users.
+    if is_active is not None:
+        clauses.append("is_active = @active")
+        params.append(bq.p("active", "BOOL", is_active))
 
-    where = ("WHERE " + " AND ".join(clauses) + " AND is_active = TRUE") if clauses else "WHERE is_active = TRUE"
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return bq.query(
         f"""
         SELECT user_id, username, full_name, role, email, brand_group, salesman_sk, is_active
         FROM {SFA_WEB}.users
         {where}
-        ORDER BY role, full_name
+        ORDER BY is_active DESC, role, full_name
         LIMIT 500
         """,
         params,
@@ -106,7 +113,7 @@ def create_user(
             bq.p("pw",    "STRING",    pw_hash),
             bq.p("role",  "STRING",    body.role),
             bq.p("email", "STRING",    body.email or ""),
-            bq.p("bg",    "STRING",    body.brand_group or ""),
+            bq.p("bg",    "STRING",    body.brand_group or None),
             bq.p("sk",    "STRING",    body.salesman_sk or ""),
             bq.p("now",   "TIMESTAMP", now),
         ],

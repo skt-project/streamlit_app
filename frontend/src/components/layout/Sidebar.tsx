@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import type { Role } from "@/types";
 
@@ -31,6 +32,7 @@ const NAV: NavItem[] = [
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const role = user?.role as Role;
 
   const visible = NAV.filter((n) => n.roles.includes(role));
@@ -80,7 +82,11 @@ export default function Sidebar() {
           </div>
         </div>
         <button
-          onClick={() => { logout(); navigate("/login"); }}
+          onClick={() => {
+            qc.clear();                           // purge all cached API data
+            logout();                             // clear token + Zustand state
+            navigate("/login", { replace: true }); // replace history so Back can't return
+          }}
           className="w-full text-left text-primary-300 hover:text-white text-xs py-1 transition-colors"
         >
           → Keluar

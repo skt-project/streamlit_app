@@ -11,6 +11,14 @@ from services.auth import decode_token
 
 _bearer = HTTPBearer()
 
+# Business group → brand mapping.
+# Group A (SKT): Skintific, Timephoria, Facerinna
+# Group B (G2G): G2G, Bodibreze, Nextprime
+BRAND_GROUPS: dict[str, list[str]] = {
+    "SKT": ["Skintific", "Timephoria", "Facerinna"],
+    "G2G": ["G2G", "Bodibreze", "Nextprime"],
+}
+
 
 def require_auth(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
@@ -28,7 +36,7 @@ def require_auth(
             role=payload["role"],
             territory=payload.get("territory"),
             distributor_code=payload.get("distributor_code"),
-            brand_group=payload.get("brand_group"),
+            brand_group=payload.get("brand_group") or None,
             salesman_sk=sk or None,
         )
     except KeyError:
@@ -50,12 +58,36 @@ def brand_group_filter(
     table_alias: str = "",
 ) -> tuple[str, list]:
     """
-    Returns (SQL fragment, BQ params) to filter by brand_group.
-    ho_admin (brand_group=None) gets no filter — sees all groups.
-    Pass table_alias (e.g. "v") when the query joins multiple tables with brand_group.
+    Returns (SQL fragment, BQ params) to filter by brand_group column on dim_salesman.
+    ho_admin or users without a brand_group get no filter — they see all groups.
+    Pass table_alias (e.g. "sm") when the query joins multiple tables.
     """
     from services.bq import BQClient
     if user.role == "ho_admin" or not user.brand_group:
         return "", []
     col = f"{table_alias}.brand_group" if table_alias else "brand_group"
     return f"AND {col} = @{param_name}", [BQClient.p(param_name, "STRING", user.brand_group)]
+
+
+def brand_list_filter(
+    user: UserContext,
+    col: str = "brand",
+    param_prefix: str = "bgb",
+) -> tuple[str, list]:
+    """
+    Returns (SQL fragment, BQ params) to restrict a `brand` column to the brands
+    that belong to the user's business group.  Used for tables (e.g. spv_target)
+    that store the brand name rather than a brand_group foreign key.
+
+    ho_admin / no brand_group → no restriction (sees all brands).
+    Unknown brand_group       → restrict to nothing (AND 1=0).
+    """
+    from services.bq import BQClient
+    if user.role == "ho_admin" or not user.brand_group:
+        return "", []
+    brands = BRAND_GROUPS.get(user.brand_group, [])
+    if not brands:
+        return "AND 1=0", []
+    placeholders = ", ".join(f"@{param_prefix}_{i}" for i in range(len(brands)))
+    params = [BQClient.p(f"{param_prefix}_{i}", "STRING", b) for i, b in enumerate(brands)]
+    return f"AND {col} IN ({placeholders})", params

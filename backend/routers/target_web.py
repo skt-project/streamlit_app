@@ -12,14 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from config import settings
-from dependencies import brand_group_filter, require_auth
+from dependencies import brand_group_filter, brand_list_filter, require_auth
 from models.auth import UserContext
 from services.bq import BQClient
 
 router = APIRouter(prefix="/target", tags=["target"])
 
-SFA_WEB  = f"`{settings.bq_project}.{settings.bq_dataset}`"
-SFA_STEP = f"`{settings.bq_project}.sfa_step`"
+SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 
 class SpvTargetUpsert(BaseModel):
@@ -45,6 +44,9 @@ def get_comply(
 ):
     bq = BQClient.get()
     pm = period_month or date.today().replace(day=1).isoformat()
+    # Restrict to brands that belong to the user's business group.
+    # ho_admin sees all brands; group users see only their group's brands.
+    bl_clause, bl_params = brand_list_filter(current_user, col="brand", param_prefix="bgb")
 
     rows = bq.query(
         f"""
@@ -56,10 +58,11 @@ def get_comply(
         FROM {SFA_WEB}.spv_target
         WHERE DATE_TRUNC(period_month, MONTH) = DATE(@pm)
           AND approval_status IN ('submitted','approved')
+          {bl_clause}
         GROUP BY brand
         ORDER BY brand
         """,
-        [bq.p("pm", "DATE", pm)],
+        [bq.p("pm", "DATE", pm)] + bl_params,
     )
     return rows
 
@@ -72,26 +75,36 @@ def get_spv_targets(
 ):
     bq = BQClient.get()
     pm = period_month or date.today().replace(day=1).isoformat()
-    brand_clause = "AND brand = @brand" if brand else ""
-    params = [bq.p("pm", "DATE", pm)]
-    if brand:
-        params.append(bq.p("brand", "STRING", brand))
+    # Filter salesmen to the user's business group via the brand_group column on
+    # sfa_web.dim_salesman (which has the brand_group column, unlike sfa_step).
+    bg_clause, bg_params = brand_group_filter(current_user, "bg", "sm")
 
+    clauses: list[str] = []
+    params: list = [bq.p("pm", "DATE", pm)]
+    if brand:
+        clauses.append("AND t.brand = @brand")
+        params.append(bq.p("brand", "STRING", brand))
+    if bg_clause:
+        clauses.append(bg_clause)
+        params.extend(bg_params)
+
+    extra = " ".join(clauses)
     rows = bq.query(
         f"""
         SELECT
           t.spv_target_id,
           t.salesman_sk,
           sm.salesman_name,
+          sm.brand_group,
           t.brand,
           CAST(t.period_month AS STRING) AS period_month,
           t.management_target,
           t.spv_target,
           t.approval_status
         FROM {SFA_WEB}.spv_target t
-        JOIN {SFA_STEP}.dim_salesman sm USING (salesman_sk)
+        JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
         WHERE DATE_TRUNC(t.period_month, MONTH) = DATE(@pm)
-          {brand_clause}
+          {extra}
         ORDER BY sm.salesman_name, t.brand
         """,
         params,
@@ -119,6 +132,16 @@ def bulk_upsert(
     if current_user.role not in ("spv", "asm", "ho_admin"):
         raise HTTPException(status_code=403, detail="Not allowed")
     bq = BQClient.get()
+    # Validate every row's brand belongs to the caller's business group.
+    if current_user.brand_group:
+        from dependencies import BRAND_GROUPS
+        allowed_brands = set(BRAND_GROUPS.get(current_user.brand_group, []))
+        for row in body.rows:
+            if allowed_brands and row.brand not in allowed_brands:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Brand '{row.brand}' is not accessible for your business group.",
+                )
     for row in body.rows:
         _upsert_one(bq, row, current_user.username)
     return {"message": f"{len(body.rows)} rows saved."}
