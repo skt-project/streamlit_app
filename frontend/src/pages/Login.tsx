@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, saveToken } from "@/api/client";
+import { api } from "@/api/client";
 import { useAuthStore } from "@/store/authStore";
 
 export default function Login() {
@@ -27,23 +27,32 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-800 to-primary-600 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-white flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="text-5xl mb-3">🗺️</div>
-          <h1 className="text-white text-2xl font-bold">STEP</h1>
-          <p className="text-primary-200 text-sm mt-1">Territory &amp; Execution Platform</p>
-          <p className="text-primary-300 text-xs mt-1">Skintific Group — Hanya untuk Penggunaan Internal</p>
+
+        {/* Skintific logo */}
+        <div className="flex justify-center mb-8">
+          <img
+            src="/skintific-logo.png"
+            alt="Skintific"
+            className="h-8 w-auto object-contain"
+          />
         </div>
 
-        {/* Card */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
+        {/* STEP heading */}
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">STEP</h1>
+          <p className="text-slate-500 text-sm mt-1">Territory &amp; Execution Platform</p>
+          <p className="text-slate-400 text-xs mt-1">Hanya untuk Penggunaan Internal</p>
+        </div>
+
+        {/* Login card */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
           <h2 className="text-slate-800 font-semibold text-lg mb-6">Masuk</h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+              <label className="form-label">Username</label>
               <input
                 className="input"
                 placeholder="username"
@@ -54,7 +63,7 @@ export default function Login() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+              <label className="form-label">Password</label>
               <input
                 type="password"
                 className="input"
@@ -80,7 +89,7 @@ export default function Login() {
           </p>
         </div>
 
-        <p className="text-primary-300 text-xs text-center mt-4">STEP v1.0</p>
+        <p className="text-slate-400 text-xs text-center mt-4">STEP v1.0</p>
       </div>
     </div>
   );
