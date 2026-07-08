@@ -96,18 +96,15 @@ _VISIT_COLS = """
 
 
 def _next_approval_status(current: str, role: str) -> str:
-    """Return next approval_status when caller with `role` approves."""
+    """Return next approval_status when caller with `role` approves.
+    Flow: SE submits → PENDING_SPV → (SPV) SPV_APPROVED → (distributor_admin) COMPLETED
+    """
     transitions = {
-        ("SUBMITTED",    "spv"):         "SPV_APPROVED",
-        ("PENDING_SPV",  "spv"):         "SPV_APPROVED",
-        ("SPV_APPROVED", "asm"):         "ASM_APPROVED",
-        ("ASM_APPROVED", "ddm"):         "DDM_APPROVED",
-        ("DDM_APPROVED", "ho_admin"):    "COMPLETED",
+        ("SUBMITTED",    "spv"):               "SPV_APPROVED",
+        ("PENDING_SPV",  "spv"):               "SPV_APPROVED",
+        ("SPV_APPROVED", "distributor_admin"): "COMPLETED",
     }
-    # also handle lower-case roles stored as sfa_role
-    role_map = {"se": "se", "spv": "spv", "asm": "asm", "ddm": "ddm", "ho_admin": "ho_admin"}
-    r = role_map.get(role, role)
-    key = (current, r)
+    key = (current, role)
     if key not in transitions:
         raise HTTPException(status_code=403, detail=f"Role '{role}' cannot approve visits in status '{current}'")
     return transitions[key]
@@ -420,10 +417,8 @@ def approve_visit(
     new_status = _next_approval_status(visit["approval_status"], effective_role)
 
     role_col_map = {
-        "spv": ("spv_username", "spv_approved_at"),
-        "asm": ("asm_username", "asm_approved_at"),
-        "ddm": ("ddm_username", "ddm_approved_at"),
-        "ho_admin": ("ddm_username", "ddm_approved_at"),
+        "spv":               ("spv_username", "spv_approved_at"),
+        "distributor_admin": ("ddm_username", "ddm_approved_at"),  # reuse ddm col for dist admin final step
     }
     user_col, ts_col = role_col_map.get(effective_role, ("spv_username", "spv_approved_at"))
 
@@ -610,8 +605,8 @@ def list_visits(
         if current_user.distributor_code:
             visit_conditions.append("AND o.distributor_code = @dist_code")
             params.append(bq.p("dist_code", "STRING", current_user.distributor_code))
-        # Only show approved visits to distributor admin
-        visit_conditions.append("AND v.approval_status IN ('SPV_APPROVED','ASM_APPROVED','DDM_APPROVED','COMPLETED')")
+        # Distributor admin sees visits that need their action or are already completed
+        visit_conditions.append("AND v.approval_status IN ('SPV_APPROVED','COMPLETED')")
     elif salesman_sk:
         visit_conditions.append("AND v.salesman_sk = @sm_sk")
         params.append(bq.p("sm_sk", "STRING", salesman_sk))

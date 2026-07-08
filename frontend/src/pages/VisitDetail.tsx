@@ -41,26 +41,21 @@ function fmtRp(val: number | null | undefined) {
 
 function canApprove(approvalStatus: string | null, role: string): boolean {
   const map: Record<string, string[]> = {
-    spv:      ["PENDING_SPV", "SUBMITTED"],
-    asm:      ["SPV_APPROVED"],
-    ddm:      ["ASM_APPROVED"],
-    ho_admin: ["DDM_APPROVED"],
+    spv:               ["PENDING_SPV", "SUBMITTED"],
+    distributor_admin: ["SPV_APPROVED"],
   };
   return map[role]?.includes(approvalStatus ?? "") ?? false;
 }
 
 function canReject(approvalStatus: string | null, role: string): boolean {
-  const rejectableStatuses = [
-    "PENDING_SPV", "SUBMITTED", "SPV_APPROVED", "ASM_APPROVED", "DDM_APPROVED",
-  ];
-  return ["spv", "asm", "ddm", "ho_admin"].includes(role) &&
+  const rejectableStatuses = ["PENDING_SPV", "SUBMITTED", "SPV_APPROVED"];
+  return ["spv", "distributor_admin"].includes(role) &&
     rejectableStatuses.includes(approvalStatus ?? "");
 }
 
 function canEditFinalQty(approvalStatus: string | null, role: string): boolean {
-  // SPV can edit final qty while visit is waiting for their approval
-  return ["spv", "asm", "ho_admin"].includes(role) &&
-    ["PENDING_SPV", "SUBMITTED", "SPV_APPROVED"].includes(approvalStatus ?? "");
+  return role === "spv" &&
+    ["PENDING_SPV", "SUBMITTED"].includes(approvalStatus ?? "");
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -71,7 +66,7 @@ export default function VisitDetail() {
   const qc          = useQueryClient();
   const user        = useAuthStore((s) => s.user);
   const role        = user?.role ?? "";
-  const isDistAdm   = role === "distributor_admin";
+  const isDistAdm   = false; // distributor_admin is now a full approver, not read-only
 
   const [rejectOpen,  setRejectOpen]  = useState(false);
   const [rejectNotes, setRejectNotes] = useState("");
@@ -465,28 +460,14 @@ export default function VisitDetail() {
                       stage: "SPV",
                       approver: visit.spv_username,
                       approvedAt: visit.spv_approved_at,
-                      active: visit.approval_status === "PENDING_SPV",
-                      done:   ["SPV_APPROVED","ASM_APPROVED","DDM_APPROVED","COMPLETED"].includes(visit.approval_status ?? ""),
+                      active: ["PENDING_SPV", "SUBMITTED"].includes(visit.approval_status ?? ""),
+                      done:   ["SPV_APPROVED", "COMPLETED"].includes(visit.approval_status ?? ""),
                     },
                     {
-                      stage: "ASM",
-                      approver: visit.asm_username,
-                      approvedAt: visit.asm_approved_at,
-                      active: visit.approval_status === "SPV_APPROVED",
-                      done:   ["ASM_APPROVED","DDM_APPROVED","COMPLETED"].includes(visit.approval_status ?? ""),
-                    },
-                    {
-                      stage: "DDM",
+                      stage: "Distributor Admin",
                       approver: visit.ddm_username,
                       approvedAt: visit.ddm_approved_at,
-                      active: ["ASM_APPROVED","DDM_APPROVED"].includes(visit.approval_status ?? ""),
-                      done:   ["DDM_APPROVED","COMPLETED"].includes(visit.approval_status ?? ""),
-                    },
-                    {
-                      stage: "Final",
-                      approver: null,
-                      approvedAt: null,
-                      active: visit.approval_status === "DDM_APPROVED",
+                      active: visit.approval_status === "SPV_APPROVED",
                       done:   visit.approval_status === "COMPLETED",
                     },
                   ].map(({ stage, approver, approvedAt, active, done }) => (
