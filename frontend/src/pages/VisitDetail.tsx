@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
@@ -86,19 +86,19 @@ export default function VisitDetail() {
     queryKey: ["visit", visitId],
     queryFn:  () => getVisit(visitId!),
     enabled:  !!visitId,
-    // Seed finalQtyMap once visit loads
-    select: (v) => {
-      // Only init map if not yet dirty (don't clobber user edits on refetch)
-      if (!fqtyDirty && v.items.length > 0) {
-        const init: Record<string, number> = {};
-        for (const it of v.items) {
-          init[it.sku_id] = it.final_qty ?? it.qty ?? 0;
-        }
-        setFinalQtyMap(init);
-      }
-      return v;
-    },
   });
+
+  // Seed finalQtyMap once visit data arrives (only when not actively editing)
+  useEffect(() => {
+    if (visit && !fqtyDirty && visit.items.length > 0) {
+      const init: Record<string, number> = {};
+      for (const it of visit.items) {
+        init[it.sku_id] = it.final_qty ?? it.qty ?? 0;
+      }
+      setFinalQtyMap(init);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visit?.visit_id]);
 
   const invalidate = useCallback(
     () => qc.invalidateQueries({ queryKey: ["visit", visitId] }),
