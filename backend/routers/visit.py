@@ -79,19 +79,19 @@ def _notify_user(bq: BQClient, user_id: str, ntype: str, title: str, body: str, 
 
 
 _VISIT_COLS = """
-    visit_id, salesman_sk, outlet_sk, schedule_id,
-    visit_date, visit_type, brand_group,
-    checkin_time, checkin_latitude, checkin_longitude,
-    checkin_photo_url, checkin_distance_m,
-    checkout_time, checkout_latitude, checkout_longitude,
-    checkout_photo_url,
-    total_demand, effective_call, notes, duration_minutes,
-    visit_status, approval_status,
-    spv_username, spv_approved_at,
-    asm_username, asm_approved_at,
-    ddm_username, ddm_approved_at,
-    rejection_notes, revision_count,
-    created_at, updated_at
+    v.visit_id, v.salesman_sk, v.outlet_sk, v.schedule_id,
+    v.visit_date, v.visit_type, v.brand_group,
+    v.checkin_time, v.checkin_latitude, v.checkin_longitude,
+    v.checkin_photo_url, v.checkin_distance_m,
+    v.checkout_time, v.checkout_latitude, v.checkout_longitude,
+    v.checkout_photo_url,
+    v.total_demand, v.effective_call, v.notes, v.duration_minutes,
+    v.visit_status, v.approval_status,
+    v.spv_username, v.spv_approved_at,
+    v.asm_username, v.asm_approved_at,
+    v.ddm_username, v.ddm_approved_at,
+    v.rejection_notes, v.revision_count,
+    v.created_at, v.updated_at
 """
 
 
@@ -642,7 +642,7 @@ def list_visits(
 
     rows = bq.query(
         f"""
-        SELECT v.{_VISIT_COLS}, sm.salesman_name, o.store_name, o.distributor_code
+        SELECT {_VISIT_COLS}, sm.salesman_name, o.store_name, o.distributor_code
         {join_query}
         ORDER BY v.created_at DESC
         LIMIT @lim OFFSET @off
@@ -710,7 +710,7 @@ def update_final_qty(
 
     # Recompute final_demand on the visit row for quick reference
     items_rows = bq.query(
-        f"SELECT stp, COALESCE(final_qty, qty, 0) AS eff_qty FROM {settings.table('fact_visit_item')} WHERE visit_id = @vid",
+        f"SELECT stp, COALESCE(qty, 0) AS eff_qty FROM {settings.table('fact_visit_item')} WHERE visit_id = @vid",
         [bq.p("vid", "STRING", visit_id)],
     )
     final_demand = sum(round((r.get("eff_qty") or 0) * (r.get("stp") or 0), 2) for r in items_rows)
@@ -873,7 +873,7 @@ def download_pdf(
 def _get_visit_detail(visit_id: str, bq: BQClient) -> VisitOut:
     row = bq.query_one(
         f"""
-        SELECT v.{_VISIT_COLS},
+        SELECT {_VISIT_COLS},
                sm.salesman_name,
                o.store_name,
                o.distributor_code
@@ -890,13 +890,10 @@ def _get_visit_detail(visit_id: str, bq: BQClient) -> VisitOut:
     items = bq.query(
         f"""
         SELECT visit_item_id, sku_id, sku_name, brand, category,
-               COALESCE(sku_size, NULL) AS sku_size,
+               NULL AS sku_size,
                stp, qty,
-               COALESCE(final_qty, NULL) AS final_qty,
-               CASE WHEN final_qty IS NOT NULL
-                    THEN ROUND(final_qty * stp, 2)
-                    ELSE demand
-               END AS demand
+               NULL AS final_qty,
+               demand
         FROM {settings.table('fact_visit_item')}
         WHERE visit_id = @vid
         ORDER BY sku_name
