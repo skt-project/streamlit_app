@@ -372,20 +372,30 @@ def submit_visit(
         ],
     )
 
-    # Notify all SPVs of the new pending submission
+    # Notify all SPVs in one batch INSERT (avoids N×BQ-call timeout)
     try:
-        spv_users = bq.query(
-            f"SELECT user_id FROM {settings.table('users')} WHERE role = 'spv' AND is_active = TRUE",
-            [],
+        bq.execute(
+            f"""
+            INSERT INTO {settings.table('notification')}
+              (notification_id, user_id, type, title, body,
+               is_read, is_deleted, deep_link, created_at)
+            SELECT
+              CONCAT('NOTIF-', SUBSTR(TO_HEX(FARM_FINGERPRINT(CONCAT(user_id, @vid))), 2, 16)),
+              user_id,
+              'VISIT_SUBMITTED',
+              'Kunjungan Baru Perlu Disetujui',
+              @body,
+              FALSE, FALSE, @dl, @now
+            FROM {settings.table('users')}
+            WHERE role = 'spv' AND is_active = TRUE
+            """,
+            [
+                bq.p("vid",  "STRING",    visit_id),
+                bq.p("body", "STRING",    f"Kunjungan {visit_id} menunggu persetujuan Anda."),
+                bq.p("dl",   "STRING",    f"visits/{visit_id}"),
+                bq.p("now",  "TIMESTAMP", now.isoformat()),
+            ],
         )
-        for spv in spv_users:
-            _notify_user(
-                bq, spv["user_id"],
-                "VISIT_SUBMITTED",
-                "Kunjungan Baru Perlu Disetujui",
-                f"Kunjungan {visit_id} menunggu persetujuan Anda.",
-                deep_link=f"visits/{visit_id}",
-            )
     except Exception:
         pass  # notification failure must not block submit
 
