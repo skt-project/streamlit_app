@@ -329,10 +329,10 @@ def submit_visit(
                 f"""
                 INSERT INTO {settings.table('fact_visit_item')} (
                   visit_item_id, visit_id, sku_id, sku_name, brand,
-                  brand_group, category, sku_size, stp, qty, final_qty, demand, created_at
+                  brand_group, category, stp, qty, demand, created_at
                 ) VALUES (
                   @iid, @vid, @sku_id, @sku_name, @brand,
-                  @bg, @cat, @sku_size, @stp, @qty, @qty, @demand, @now
+                  @bg, @cat, @stp, @qty, @demand, @now
                 )
                 """,
                 [
@@ -343,7 +343,6 @@ def submit_visit(
                     bq.p("brand",    "STRING",    item.brand),
                     bq.p("bg",       "STRING",    item.brand_group),
                     bq.p("cat",      "STRING",    item.category),
-                    bq.p("sku_size", "STRING",    getattr(item, "sku_size", None)),
                     bq.p("stp",      "FLOAT64",   item.stp),
                     bq.p("qty",      "INT64",     item.qty),
                     bq.p("demand",   "FLOAT64",   demand),
@@ -534,10 +533,10 @@ def resubmit_visit(
                 f"""
                 INSERT INTO {settings.table('fact_visit_item')} (
                   visit_item_id, visit_id, sku_id, sku_name, brand,
-                  brand_group, category, sku_size, stp, qty, final_qty, demand, created_at
+                  brand_group, category, stp, qty, demand, created_at
                 ) VALUES (
                   @iid, @vid, @sku_id, @sku_name, @brand,
-                  @bg, @cat, @sku_size, @stp, @qty, @qty, @demand, @now
+                  @bg, @cat, @stp, @qty, @demand, @now
                 )
                 """,
                 [
@@ -548,7 +547,6 @@ def resubmit_visit(
                     bq.p("brand",    "STRING",    item.brand),
                     bq.p("bg",       "STRING",    item.brand_group),
                     bq.p("cat",      "STRING",    item.category),
-                    bq.p("sku_size", "STRING",    getattr(item, "sku_size", None)),
                     bq.p("stp",      "FLOAT64",   item.stp),
                     bq.p("qty",      "INT64",     item.qty),
                     bq.p("demand",   "FLOAT64",   round(item.qty * item.stp, 2)),
