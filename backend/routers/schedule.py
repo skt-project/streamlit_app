@@ -50,6 +50,7 @@ def _week_stores(bq: BQClient, salesman_sk: str, target_date: date) -> list[dict
         LEFT JOIN {settings.table('dim_outlet')} o USING (outlet_sk)
         WHERE p.salesman_sk = @sk
           AND p.is_deleted = FALSE
+          AND p.outlet_sk IS NOT NULL
           AND (o.is_deleted = FALSE OR o.is_deleted IS NULL)
           AND p.visit_day_of_week = @day
           AND (
@@ -58,6 +59,10 @@ def _week_stores(bq: BQClient, salesman_sk: str, target_date: date) -> list[dict
             OR (@is_odd = TRUE  AND p.visit_week_pattern = 'Minggu Ganjil')
             OR (@is_odd = FALSE AND p.visit_week_pattern = 'Minggu Genap')
           )
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY p.outlet_sk
+            ORDER BY p.visit_frequency_code DESC
+        ) = 1
         ORDER BY o.store_name
         """,
         [
@@ -124,6 +129,7 @@ def download_week_schedule(
         LEFT JOIN {settings.table('dim_outlet')} o USING (outlet_sk)
         WHERE p.salesman_sk = @sk
           AND p.is_deleted = FALSE
+          AND p.outlet_sk IS NOT NULL
           AND (o.is_deleted = FALSE OR o.is_deleted IS NULL)
           AND (
             p.visit_week_pattern IS NULL OR p.visit_week_pattern = ''
@@ -131,6 +137,10 @@ def download_week_schedule(
             OR (@is_odd = TRUE  AND p.visit_week_pattern = 'Minggu Ganjil')
             OR (@is_odd = FALSE AND p.visit_week_pattern = 'Minggu Genap')
           )
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY p.outlet_sk, p.visit_day_of_week
+            ORDER BY p.visit_frequency_code DESC
+        ) = 1
         ORDER BY p.visit_day_of_week, o.store_name
         """,
         [
