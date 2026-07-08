@@ -61,7 +61,7 @@ const NAV_TREE: NavItem[] = [
     icon: "📈",
     children: [
       { to: "/route-evaluate",    label: "Route Evaluate",    roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
-      { to: "/visits",            label: "Visit & Demand",    roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
+      { to: "/visits",            label: "Visit & Demand",    roles: ["spv", "asm", "dm", "rsm", "ho_admin", "distributor_admin"] },
       { to: "/store-opportunity", label: "Store Opportunity", roles: ["asm", "dm", "rsm", "ho_admin"] },
       { to: "/store360",          label: "Store 360°",        roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
       { to: "/salesman360",       label: "Salesman 360°",     roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
@@ -100,7 +100,7 @@ const NAV_TREE: NavItem[] = [
     to: "/notifications",
     label: "Notifikasi",
     icon: "🔔",
-    roles: ["spv", "asm", "dm", "rsm", "ho_admin"],
+    roles: ["spv", "asm", "dm", "rsm", "ho_admin", "distributor_admin"],
   },
 ];
 
