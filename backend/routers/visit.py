@@ -115,8 +115,10 @@ def _row_to_visit(row: dict, items: list[dict] | None = None) -> VisitOut:
     dist = row.get("checkin_distance_m")
     if dist is not None and dist > GPS_WARN_THRESHOLD_M:
         gps_warn = True
+    # Only pass keys present in the row so Pydantic uses model defaults for missing fields
+    # (e.g. download_count=0 when not in a list query row)
     return VisitOut(
-        **{k: row.get(k) for k in VisitOut.model_fields if k not in ("items", "gps_warning")},
+        **{k: row[k] for k in VisitOut.model_fields if k not in ("items", "gps_warning") and k in row},
         gps_warning=gps_warn,
         items=[VisitItemOut(**i) for i in (items or [])],
     )
@@ -417,7 +419,7 @@ def approve_visit(
     # Use sfa_role if present, fall back to role
     effective_role = current_user.role
     visit = bq.query_one(
-        f"SELECT approval_status, salesman_sk FROM {settings.table('fact_visit')} WHERE visit_id = @vid AND is_deleted = FALSE",
+        f"SELECT approval_status, salesman_sk, spv_username FROM {settings.table('fact_visit')} WHERE visit_id = @vid AND is_deleted = FALSE",
         [bq.p("vid", "STRING", visit_id)],
     )
     if not visit:
@@ -457,6 +459,23 @@ def approve_visit(
             f"Kunjungan {visit_id} telah disetujui oleh {current_user.username}.",
             deep_link=f"visits/{visit_id}",
         )
+
+    # When distributor_admin completes the visit, also notify the SPV who approved it
+    if effective_role == "distributor_admin":
+        spv_username = visit.get("spv_username")
+        if spv_username:
+            spv_row = bq.query_one(
+                f"SELECT user_id FROM {settings.table('users')} WHERE username = @uname LIMIT 1",
+                [bq.p("uname", "STRING", spv_username)],
+            )
+            if spv_row:
+                _notify_user(
+                    bq, spv_row["user_id"],
+                    "VISIT_COMPLETED",
+                    "Kunjungan Selesai",
+                    f"Kunjungan {visit_id} telah disetujui distributor dan berstatus COMPLETED.",
+                    deep_link=f"visits/{visit_id}",
+                )
 
     return _get_visit_detail(visit_id, bq)
 
@@ -597,7 +616,7 @@ def list_visits(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
-    bg_clause, bg_params = brand_group_filter(current_user)
+    bg_clause, bg_params = brand_group_filter(current_user, table_alias="v")
 
     # Build visit-level conditions (applied to fact_visit before join)
     visit_conditions = [f"v.is_deleted = FALSE {bg_clause}"]
@@ -607,7 +626,7 @@ def list_visits(
     role = current_user.role
     if role in ("se", "SE"):
         visit_conditions.append("AND v.salesman_sk = @self_sk")
-        params.append(bq.p("self_sk", "STRING", current_user.user_id))
+        params.append(bq.p("self_sk", "STRING", current_user.salesman_sk or current_user.user_id))
     elif role == "distributor_admin":
         # Distributor admin sees only visits from their distributor's outlets
         if current_user.distributor_code:
@@ -635,11 +654,20 @@ def list_visits(
     visit_where = " ".join(visit_conditions)
     offset = (page - 1) * page_size
 
-    # Use inline join so store_name filter and COUNT work together
+    # Use inline join so store_name filter and COUNT work together.
+    # dim_salesman may have duplicate salesman_sk rows — deduplicate via subquery.
     join_query = f"""
         FROM {settings.table('fact_visit')} v
-        LEFT JOIN {settings.table('dim_salesman')} sm ON v.salesman_sk = sm.salesman_sk
-        LEFT JOIN {settings.table('dim_outlet')} o   ON v.outlet_sk  = o.outlet_sk
+        LEFT JOIN (
+            SELECT salesman_sk, salesman_name
+            FROM {settings.table('dim_salesman')}
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY salesman_sk ORDER BY salesman_sk) = 1
+        ) sm ON v.salesman_sk = sm.salesman_sk
+        LEFT JOIN (
+            SELECT outlet_sk, store_name, distributor_code
+            FROM {settings.table('dim_outlet')}
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY outlet_sk ORDER BY outlet_sk) = 1
+        ) o ON v.outlet_sk = o.outlet_sk
         WHERE {visit_where} {store_filter}
     """
 
@@ -652,6 +680,7 @@ def list_visits(
         f"""
         SELECT {_VISIT_COLS}, sm.salesman_name, o.store_name, o.distributor_code
         {join_query}
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY v.visit_id ORDER BY v.updated_at DESC) = 1
         ORDER BY v.created_at DESC
         LIMIT @lim OFFSET @off
         """,
@@ -688,7 +717,7 @@ def update_final_qty(
     body: UpdateFinalQtyRequest,
     current_user: UserContext = Depends(require_auth),
 ):
-    if current_user.role not in ("spv", "asm", "ddm", "ho_admin"):
+    if current_user.role not in ("spv", "asm", "ddm", "ho_admin", "distributor_admin"):
         raise HTTPException(status_code=403, detail="Only SPV and above can adjust final quantities")
 
     bq = BQClient.get()
@@ -748,13 +777,18 @@ def download_pdf(
     try:
         from fpdf import FPDF
 
+        def _safe(text) -> str:
+            if not text:
+                return "-"
+            return str(text).encode("latin-1", errors="replace").decode("latin-1")
+
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
 
         # ── Header ──────────────────────────────────────────────────
         pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 10, "SKINTIFIC — SURAT PENAWARAN DEMAND", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 10, "SKINTIFIC - SURAT PENAWARAN DEMAND", align="C", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 9)
         pdf.cell(0, 5, f"Dokumen ini digenerate otomatis  |  Visit ID: {visit_id}", align="C", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
@@ -767,16 +801,16 @@ def download_pdf(
             pdf.set_font("Helvetica", "B", 9)
             pdf.cell(50, 6, label, new_x="RIGHT")
             pdf.set_font("Helvetica", "", 9)
-            pdf.cell(0, 6, str(value or "—"), new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 6, str(value or "-"), new_x="LMARGIN", new_y="NEXT")
 
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "Informasi Kunjungan", new_x="LMARGIN", new_y="NEXT")
-        row2("Tanggal Kunjungan :", visit_out.visit_date.strftime("%d %B %Y") if visit_out.visit_date else "—")
-        row2("Salesman          :", visit_out.salesman_name or visit_out.salesman_sk)
-        row2("Toko              :", visit_out.store_name or visit_out.outlet_sk or "—")
-        row2("Distributor       :", visit_out.distributor_code or "—")
+        row2("Tanggal Kunjungan :", visit_out.visit_date.strftime("%d %B %Y") if visit_out.visit_date else "-")
+        row2("Salesman          :", _safe(visit_out.salesman_name or visit_out.salesman_sk))
+        row2("Toko              :", _safe(visit_out.store_name or visit_out.outlet_sk or "-"))
+        row2("Distributor       :", _safe(visit_out.distributor_code or "-"))
         row2("Efektif Call      :", "Ya" if visit_out.effective_call == "YES" else "Tidak")
-        row2("Status Approval   :", visit_out.approval_status or "—")
+        row2("Status Approval   :", visit_out.approval_status or "-")
         pdf.ln(4)
 
         # ── Items table ──────────────────────────────────────────────
@@ -807,9 +841,9 @@ def download_pdf(
             fill = idx % 2 == 0
             pdf.set_fill_color(248, 250, 252)
             pdf.cell(col_w[0], 6, str(idx), border=1, fill=fill)
-            pdf.cell(col_w[1], 6, (item.sku_name or item.sku_id)[:30], border=1, fill=fill)
-            pdf.cell(col_w[2], 6, (item.brand or "—")[:18], border=1, fill=fill)
-            pdf.cell(col_w[3], 6, (item.sku_size or "—"), border=1, fill=fill)
+            pdf.cell(col_w[1], 6, _safe(item.sku_name or item.sku_id)[:30], border=1, fill=fill)
+            pdf.cell(col_w[2], 6, _safe(item.brand or "-")[:18], border=1, fill=fill)
+            pdf.cell(col_w[3], 6, _safe(item.sku_size or "-"), border=1, fill=fill)
             pdf.cell(col_w[4], 6, str(item.qty or 0), border=1, fill=fill, align="R")
             pdf.cell(col_w[5], 6, str(eff_qty), border=1, fill=fill, align="R")
             pdf.cell(col_w[6], 6, f"{eff_demand:,.0f}", border=1, fill=fill, align="R")
@@ -833,9 +867,9 @@ def download_pdf(
         pdf.cell(10)
         pdf.cell(sig_w, 6, "Distributor,", align="C")
         pdf.ln(20)
-        pdf.cell(sig_w, 6, "(" + (visit_out.salesman_name or "___________") + ")", align="C")
+        pdf.cell(sig_w, 6, "(" + _safe(visit_out.salesman_name or "___________") + ")", align="C")
         pdf.cell(10)
-        pdf.cell(sig_w, 6, "(" + (visit_out.spv_username or "___________") + ")", align="C")
+        pdf.cell(sig_w, 6, "(" + _safe(visit_out.spv_username or "___________") + ")", align="C")
         pdf.cell(10)
         pdf.cell(sig_w, 6, "(_________________)", align="C")
         pdf.ln(8)
@@ -895,16 +929,45 @@ def _get_visit_detail(visit_id: str, bq: BQClient) -> VisitOut:
     if not row:
         raise HTTPException(status_code=404, detail="Visit not found")
 
+    P = settings.bq_project
     items = bq.query(
         f"""
-        SELECT visit_item_id, sku_id, sku_name, brand, category,
+        WITH
+        latest_msdb AS (
+          SELECT cust_id, dst_id_skt, dst_id_g2g, dst_id_tph
+          FROM `{P}.gt_schema.master_store_database_basis`
+          QUALIFY ROW_NUMBER() OVER (PARTITION BY cust_id ORDER BY input_date DESC) = 1
+        ),
+        store_dist AS (
+          SELECT
+            MAX(m.dst_id_skt) AS dst_skt,
+            MAX(m.dst_id_g2g) AS dst_g2g,
+            MAX(m.dst_id_tph) AS dst_tph
+          FROM {settings.table('fact_visit')} v
+          JOIN {settings.table('dim_outlet')} o ON o.outlet_sk = v.outlet_sk
+          LEFT JOIN latest_msdb m ON m.cust_id = o.source_outlet_code
+          WHERE v.visit_id = @vid
+        ),
+        latest_stock AS (
+          SELECT distributor_code, product_id, current_stock_qty
+          FROM `{P}.gt_schema.dist_stock_all_v`
+          QUALIFY ROW_NUMBER() OVER (PARTITION BY distributor_code, product_id ORDER BY date DESC) = 1
+        )
+        SELECT vi.visit_item_id, vi.sku_id, vi.sku_name, vi.brand, vi.category,
                NULL AS sku_size,
-               stp, qty,
-               NULL AS final_qty,
-               demand
-        FROM {settings.table('fact_visit_item')}
-        WHERE visit_id = @vid
-        ORDER BY sku_name
+               vi.stp, vi.qty, vi.final_qty, vi.demand,
+               s.current_stock_qty AS warehouse_stock_qty
+        FROM {settings.table('fact_visit_item')} vi
+        CROSS JOIN store_dist d
+        LEFT JOIN latest_stock s
+          ON s.distributor_code = CASE
+            WHEN UPPER(vi.brand) LIKE '%G2G%' THEN d.dst_g2g
+            WHEN UPPER(vi.brand) LIKE '%TPH%' OR UPPER(vi.brand) LIKE '%TIME%' THEN d.dst_tph
+            ELSE d.dst_skt
+          END
+          AND s.product_id = vi.sku_id
+        WHERE vi.visit_id = @vid
+        ORDER BY vi.sku_name
         """,
         [bq.p("vid", "STRING", visit_id)],
     )

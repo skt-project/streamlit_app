@@ -59,13 +59,26 @@ def login(request: Request, body: LoginRequest):
     log_event("user.login", "user", user["user_id"], user["username"])
 
     sk = user.get("salesman_sk")
+    brand_group = user.get("brand_group")
+
+    # Real SE accounts are linked via salesman_sk to dim_salesman which carries
+    # brand_group — the users table may not have it populated, so fall back.
+    if not brand_group and sk:
+        sm_row = bq.query_one(
+            f"SELECT brand_group FROM {settings.table('dim_salesman')}"
+            " WHERE salesman_sk = @sk LIMIT 1",
+            [bq.p("sk", "STRING", sk)],
+        )
+        if sm_row:
+            brand_group = sm_row.get("brand_group") or None
+
     token_payload = {
         "sub": user["user_id"],
         "username": user["username"],
         "role": user["role"],
         "territory": user.get("territory"),
         "distributor_code": user.get("distributor_code"),
-        "brand_group": user.get("brand_group"),
+        "brand_group": brand_group,
         "salesman_sk": sk or None,
     }
     token = create_access_token(token_payload)
@@ -78,7 +91,7 @@ def login(request: Request, body: LoginRequest):
             role=user["role"],
             territory=user.get("territory"),
             distributor_code=user.get("distributor_code"),
-            brand_group=user.get("brand_group"),
+            brand_group=brand_group,
             salesman_sk=sk or None,
         ),
     )

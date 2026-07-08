@@ -354,6 +354,7 @@ export default function VisitDetail() {
                               Qty Final {fqtyEditing && <span className="text-yellow-600">✎</span>}
                             </th>
                           )}
+                          <th className="text-right py-2 text-xs font-medium text-slate-400">Stok Gudang Dist.</th>
                           <th className="text-right py-2 text-xs font-medium text-slate-400">Demand</th>
                         </tr>
                       </thead>
@@ -394,6 +395,9 @@ export default function VisitDetail() {
                                   )}
                                 </td>
                               )}
+                              <td className="py-2.5 text-right text-slate-600">
+                                {item.warehouse_stock_qty != null ? item.warehouse_stock_qty : "—"}
+                              </td>
                               <td className="py-2.5 text-right font-semibold text-primary-700">
                                 {fmtRp(effDemand)}
                               </td>
@@ -403,13 +407,14 @@ export default function VisitDetail() {
 
                         {/* Total row */}
                         <tr className="border-t-2 border-slate-200">
-                          <td colSpan={showFinalQtyCol ? 4 : 4} className="py-2.5 text-xs font-semibold text-slate-500">
+                          <td colSpan={4} className="py-2.5 text-xs font-semibold text-slate-500">
                             TOTAL
                           </td>
                           <td className="py-2.5 text-right font-bold text-slate-800">{totalQty}</td>
                           {showFinalQtyCol && (
                             <td className="py-2.5 text-right font-bold text-green-700">{totalFinalQty}</td>
                           )}
+                          <td className="py-2.5 text-right text-slate-400">—</td>
                           <td className="py-2.5 text-right font-bold text-primary-700">
                             {fmtRp(liveFinalDemand)}
                           </td>

@@ -41,44 +41,65 @@ else:
     donor_sk = donor["salesman_sk"]
     print(f"  Donor salesman: {donor_sk} ({donor['cnt']} routes)")
 
-    outlets = bq.query(f"""
-        SELECT DISTINCT
-            outlet_sk, source_outlet_code, distributor_code, distributor_name,
-            region, asm_name, visit_frequency_code, brand_group
-        FROM `{p}.{d}.fact_route_plan_pjp`
-        WHERE salesman_sk = @sk AND is_deleted = FALSE AND outlet_sk IS NOT NULL
-        LIMIT 70
-    """, [bq.p("sk", "STRING", donor_sk)])
-
-    # Clear old test_se routes
-    bq.execute(
-        f"DELETE FROM `{p}.{d}.fact_route_plan_pjp` WHERE salesman_sk = @sk",
+    # Streaming buffer rows from prior runs ARE visible to SELECT but cannot be
+    # touched by DELETE/UPDATE. Skip the INSERT if routes already exist under this SK.
+    existing = bq.query_one(
+        f"SELECT COUNT(*) as n FROM `{p}.{d}.fact_route_plan_pjp` WHERE salesman_sk = @sk AND is_deleted = FALSE",
         [bq.p("sk", "STRING", TEST_SE_SK)],
     )
+    if existing and existing["n"] > 0:
+        print(f"  test_se already has {existing['n']} routes — skipping clone")
+    else:
+        bq.execute(f"""
+            INSERT INTO `{p}.{d}.fact_route_plan_pjp` (
+                route_plan_sk, salesman_sk, outlet_sk,
+                source_salesman_name, source_outlet_code,
+                distributor_code, distributor_name, region, asm_name,
+                visit_day_of_week, visit_week_pattern, visit_frequency_code,
+                batch_uploaded_at, sfa_web_loaded_at, is_deleted, brand_group
+            )
+            SELECT
+                GENERATE_UUID()                  AS route_plan_sk,
+                @test_sk                         AS salesman_sk,
+                outlet_sk,
+                'TEST SE'                        AS source_salesman_name,
+                COALESCE(source_outlet_code, '') AS source_outlet_code,
+                COALESCE(distributor_code, '')   AS distributor_code,
+                COALESCE(distributor_name, '')   AS distributor_name,
+                COALESCE(region, '')             AS region,
+                COALESCE(asm_name, '')           AS asm_name,
+                CASE MOD(ROW_NUMBER() OVER (), 7)
+                  WHEN 0 THEN 'Senin'
+                  WHEN 1 THEN 'Selasa'
+                  WHEN 2 THEN 'Rabu'
+                  WHEN 3 THEN 'Kamis'
+                  WHEN 4 THEN 'Jumat'
+                  WHEN 5 THEN 'Sabtu'
+                  ELSE        'Minggu'
+                END                              AS visit_day_of_week,
+                ''                               AS visit_week_pattern,
+                COALESCE(NULLIF(visit_frequency_code,''), 'F4') AS visit_frequency_code,
+                CURRENT_TIMESTAMP()              AS batch_uploaded_at,
+                CURRENT_TIMESTAMP()              AS sfa_web_loaded_at,
+                FALSE                            AS is_deleted,
+                COALESCE(brand_group, '')        AS brand_group
+            FROM (
+                SELECT DISTINCT outlet_sk, source_outlet_code, distributor_code,
+                       distributor_name, region, asm_name, visit_frequency_code, brand_group
+                FROM `{p}.{d}.fact_route_plan_pjp`
+                WHERE salesman_sk = @donor_sk AND is_deleted = FALSE AND outlet_sk IS NOT NULL
+                LIMIT 70
+            )
+        """, [
+            bq.p("test_sk",  "STRING", TEST_SE_SK),
+            bq.p("donor_sk", "STRING", donor_sk),
+        ])
 
-    rows = []
-    for i, o in enumerate(outlets):
-        rows.append({
-            "route_plan_sk":        str(uuid.uuid4()),
-            "salesman_sk":          TEST_SE_SK,
-            "outlet_sk":            o["outlet_sk"],
-            "source_salesman_name": "TEST SE",
-            "source_outlet_code":   o.get("source_outlet_code") or "",
-            "distributor_code":     o.get("distributor_code") or "",
-            "distributor_name":     o.get("distributor_name") or "",
-            "region":               o.get("region") or "",
-            "asm_name":             o.get("asm_name") or "",
-            "visit_day_of_week":    DAYS[i % len(DAYS)],
-            "visit_week_pattern":   "",
-            "visit_frequency_code": o.get("visit_frequency_code") or "F4",
-            "batch_uploaded_at":    now,
-            "sfa_web_loaded_at":    now,
-            "is_deleted":           False,
-            "brand_group":          o.get("brand_group") or "",
-        })
-
-    bq.insert_rows("fact_route_plan_pjp", rows)
-    print(f"  Inserted {len(rows)} route rows ({len(outlets)} stores across 7 days)")
+        count = bq.query_one(
+            f"SELECT COUNT(*) as n FROM `{p}.{d}.fact_route_plan_pjp` WHERE salesman_sk = @sk",
+            [bq.p("sk", "STRING", TEST_SE_SK)],
+        )
+        print(f"  Inserted {count['n']} route rows (DML — immediately queryable)")
 
 # ── Step 2: Create / reset user accounts ─────────────────────────────────────
 print("\nCreating user accounts...")
