@@ -137,6 +137,7 @@ DISTRIBUTOR_PASSWORDS = {
     "DST344": "7303ada8",
     "DST345": "f3e22d41",
     "DST346": "0d2d6510",
+    "DST347": "e5f29c41"
 }
 
 # ─── Input Period Deadline ─────────────────────────────────────────────────────
