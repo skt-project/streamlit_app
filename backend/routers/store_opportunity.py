@@ -36,7 +36,7 @@ def get_store_opportunity(
     days_elapsed = today.day  # simplified; good enough for ranking
 
     tier_filter = "AND o.store_grade = @tier" if tier else ""
-    brand_filter = "AND o.brand_group = @brand" if brand else ""
+    brand_filter = "AND o.brand = @brand" if brand else ""
 
     params = [
         bq.p("year_month_prefix", "STRING", year_month),
@@ -46,6 +46,7 @@ def get_store_opportunity(
     if brand:
         params.append(bq.p("brand", "STRING", brand))
 
+    SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
     rows = bq.query(
         f"""
         WITH mtd_demand AS (
@@ -57,29 +58,26 @@ def get_store_opportunity(
           FROM {settings.table('fact_visit')}
           WHERE FORMAT_DATE('%Y-%m', visit_date) = @year_month_prefix
             AND is_deleted = FALSE
-            AND visit_status != 'DRAFT'
           GROUP BY outlet_sk
         )
         SELECT
           o.outlet_sk,
-          o.outlet_id,
           o.source_outlet_code,
           o.store_name,
           o.store_grade,
-          o.tier,
           o.brand,
-          o.brand_group,
+          o.channel,
           o.city,
           o.region,
           sm.salesman_name,
           sm.salesman_sk,
-          COALESCE(m.actual_demand_mtd, 0)  AS actual_demand_mtd,
-          COALESCE(m.last_visit_date, NULL)  AS last_visit_date,
-          COALESCE(m.visit_count_mtd, 0)    AS visit_count_mtd
-        FROM {settings.table('vw_outlet_active')} o
+          COALESCE(m.actual_demand_mtd, 0) AS actual_demand_mtd,
+          m.last_visit_date,
+          COALESCE(m.visit_count_mtd, 0)   AS visit_count_mtd
+        FROM {SFA_WEB}.dim_outlet o
         LEFT JOIN mtd_demand m USING (outlet_sk)
-        LEFT JOIN {settings.table('dim_salesman')} sm ON sm.salesman_sk = o.salesman_sk
-        WHERE o.is_active = TRUE
+        LEFT JOIN {SFA_WEB}.dim_salesman sm ON sm.salesman_sk = o.default_salesman_sk
+        WHERE o.is_deleted = FALSE
           {tier_filter}
           {brand_filter}
         ORDER BY actual_demand_mtd ASC
@@ -90,19 +88,17 @@ def get_store_opportunity(
 
     results = []
     for r in rows:
-        grade = r.get("store_grade") or r.get("tier") or "D"
+        grade = r.get("store_grade") or "D"
         benchmark = _TIER_BENCHMARK.get(grade, _TIER_BENCHMARK["D"])
         actual = float(r.get("actual_demand_mtd") or 0)
         gap = max(0.0, benchmark - actual)
         results.append({
             "outlet_sk":         r.get("outlet_sk"),
-            "outlet_id":         r.get("outlet_id"),
             "source_outlet_code": r.get("source_outlet_code"),
             "store_name":        r.get("store_name"),
-            "store_grade":       r.get("store_grade"),
-            "tier":              r.get("tier"),
+            "store_grade":       grade,
             "brand":             r.get("brand"),
-            "brand_group":       r.get("brand_group"),
+            "channel":           r.get("channel"),
             "city":              r.get("city"),
             "region":            r.get("region"),
             "salesman_name":     r.get("salesman_name"),

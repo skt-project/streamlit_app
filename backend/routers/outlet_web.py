@@ -18,8 +18,7 @@ from services.bq import BQClient
 
 router = APIRouter(tags=["outlet"])
 
-SFA_STEP = f"`{settings.bq_project}.sfa_step`"
-SFA_WEB  = f"`{settings.bq_project}.{settings.bq_dataset}`"
+SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 
 class AssignOutletRequest(BaseModel):
@@ -63,8 +62,8 @@ def list_outlets(
           sm.salesman_name,
           sm.source_salesman_code AS salesman_code,
           sm.salesman_sk AS salesman_sk_linked
-        FROM {SFA_STEP}.dim_outlet o
-        LEFT JOIN {SFA_STEP}.dim_salesman sm
+        FROM {SFA_WEB}.dim_outlet o
+        LEFT JOIN {SFA_WEB}.dim_salesman sm
           ON sm.salesman_sk = o.default_salesman_sk AND sm.is_active = TRUE
         {where}
         ORDER BY o.store_name
@@ -86,7 +85,7 @@ def search_outlets(
     rows = bq.query(
         f"""
         SELECT CAST(outlet_sk AS STRING) AS outlet_id, outlet_sk, source_outlet_code, store_name
-        FROM {SFA_STEP}.dim_outlet
+        FROM {SFA_WEB}.dim_outlet
         WHERE (LOWER(store_name) LIKE LOWER(CONCAT('%',@q,'%'))
            OR  LOWER(source_outlet_code) LIKE LOWER(CONCAT('%',@q,'%')))
           AND is_active = TRUE
@@ -108,7 +107,7 @@ def assign_outlet(
     bq = BQClient.get()
     bq.execute(
         f"""
-        UPDATE {SFA_STEP}.dim_outlet
+        UPDATE {SFA_WEB}.dim_outlet
         SET default_salesman_sk = @sk
         WHERE CAST(outlet_sk AS STRING) = @oid
         """,
@@ -136,9 +135,9 @@ def store_360(outlet_id: str, current_user: UserContext = Depends(require_auth))
           o.store_grade AS tier, o.channel, o.is_active, o.latitude, o.longitude,
           sm.salesman_name, sm.source_salesman_code AS salesman_code,
           spv.salesman_name AS spv_name
-        FROM {SFA_STEP}.dim_outlet o
-        LEFT JOIN {SFA_STEP}.dim_salesman sm ON sm.salesman_sk = o.default_salesman_sk
-        LEFT JOIN {SFA_STEP}.dim_salesman spv ON spv.salesman_sk = sm.spv_salesman_sk
+        FROM {SFA_WEB}.dim_outlet o
+        LEFT JOIN {SFA_WEB}.dim_salesman sm ON sm.salesman_sk = o.default_salesman_sk
+        LEFT JOIN {SFA_WEB}.dim_salesman spv ON spv.salesman_sk = sm.spv_salesman_sk
         WHERE CAST(o.outlet_sk AS STRING) = @oid
         """,
         [bq.p("oid", "STRING", outlet_id)],
@@ -174,7 +173,7 @@ def store_360(outlet_id: str, current_user: UserContext = Depends(require_auth))
           v.visit_date, sm.salesman_name, v.checkin_time, v.checkout_time,
           v.total_demand, v.effective_call
         FROM {settings.table('fact_visit')} v
-        JOIN {SFA_STEP}.dim_salesman sm USING (salesman_sk)
+        JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
         WHERE CAST(v.outlet_sk AS STRING) = @oid AND v.is_deleted = FALSE
         ORDER BY v.visit_date DESC, v.checkin_time DESC
         LIMIT 20
@@ -189,7 +188,7 @@ def store_360(outlet_id: str, current_user: UserContext = Depends(require_auth))
     pjp = bq.query_one(
         f"""
         SELECT visit_day_of_week, visit_frequency_code, visit_week_pattern
-        FROM {SFA_STEP}.fact_route_plan_pjp
+        FROM {SFA_WEB}.fact_route_plan_pjp
         WHERE CAST(outlet_sk AS STRING) = @oid AND is_deleted = FALSE
         LIMIT 1
         """,
@@ -219,8 +218,8 @@ def pjp_summary(current_user: UserContext = Depends(require_auth)):
           COUNT(DISTINCT p.outlet_sk) AS stores_with_pjp,
           COUNT(DISTINCT o.outlet_sk) - COUNT(DISTINCT p.outlet_sk) AS stores_basis_only,
           SAFE_DIVIDE(COUNT(DISTINCT p.outlet_sk), NULLIF(COUNT(DISTINCT o.outlet_sk),0))*100 AS coverage_pct
-        FROM {SFA_STEP}.dim_outlet o
-        LEFT JOIN {SFA_STEP}.fact_route_plan_pjp p ON p.outlet_sk = o.outlet_sk AND p.is_deleted = FALSE
+        FROM {SFA_WEB}.dim_outlet o
+        LEFT JOIN {SFA_WEB}.fact_route_plan_pjp p ON p.outlet_sk = o.outlet_sk AND p.is_deleted = FALSE
         WHERE o.is_active = TRUE
         """,
         [],
@@ -250,9 +249,9 @@ def pjp_list(
           p.visit_frequency_code,
           p.visit_week_pattern,
           'GT' AS source_system
-        FROM {SFA_STEP}.fact_route_plan_pjp p
-        JOIN {SFA_STEP}.dim_outlet o USING (outlet_sk)
-        JOIN {SFA_STEP}.dim_salesman sm USING (salesman_sk)
+        FROM {SFA_WEB}.fact_route_plan_pjp p
+        JOIN {SFA_WEB}.dim_outlet o USING (outlet_sk)
+        JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
         WHERE p.is_deleted = FALSE AND {search_clause}
         ORDER BY o.store_name
         LIMIT @lim

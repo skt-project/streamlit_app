@@ -17,8 +17,7 @@ from services.bq import BQClient
 
 router = APIRouter(prefix="/route-planner", tags=["route-planner"])
 
-SFA_STEP = f"`{settings.bq_project}.sfa_step`"
-SFA_WEB  = f"`{settings.bq_project}.{settings.bq_dataset}`"
+SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 DAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
 
@@ -39,74 +38,65 @@ def list_salesmen_routes(
     bq = BQClient.get()
     bg_clause, bg_params = brand_group_filter(current_user, "bg", "sm")
 
-    salesmen = bq.query(
+    # Single query: join salesman + PJP + outlet to avoid unquoted IN clause
+    rows = bq.query(
         f"""
-        SELECT DISTINCT
+        SELECT
           sm.salesman_sk,
           sm.salesman_name,
           sm.source_salesman_code,
           sm.region,
-          sm.distributor_code
-        FROM {SFA_STEP}.dim_salesman sm
-        WHERE sm.is_active = TRUE {bg_clause}
-        ORDER BY sm.salesman_name
-        LIMIT 200
-        """,
-        bg_params,
-    )
-
-    if not salesmen:
-        return []
-
-    sk_list = ",".join(str(s["salesman_sk"]) for s in salesmen)
-
-    pjp_rows = bq.query(
-        f"""
-        SELECT
-          p.salesman_sk,
+          sm.distributor_code,
           p.outlet_sk,
           o.store_name,
-          o.source_outlet_code,
+          o.source_outlet_code AS outlet_code,
           o.store_grade,
           p.visit_day_of_week,
           p.visit_frequency_code,
           p.visit_week_pattern,
-          ROW_NUMBER() OVER (PARTITION BY p.salesman_sk, p.visit_day_of_week ORDER BY o.store_name) AS seq
-        FROM {SFA_STEP}.fact_route_plan_pjp p
-        JOIN {SFA_STEP}.dim_outlet o USING (outlet_sk)
-        WHERE p.salesman_sk IN ({sk_list}) AND p.is_deleted = FALSE
-        ORDER BY p.visit_day_of_week, seq
+          ROW_NUMBER() OVER (
+            PARTITION BY p.salesman_sk, p.visit_day_of_week ORDER BY o.store_name
+          ) AS seq
+        FROM {SFA_WEB}.dim_salesman sm
+        LEFT JOIN {SFA_WEB}.fact_route_plan_pjp p ON p.salesman_sk = sm.salesman_sk AND p.is_deleted = FALSE
+        LEFT JOIN {SFA_WEB}.dim_outlet o ON o.outlet_sk = p.outlet_sk
+        WHERE sm.is_active = TRUE {bg_clause}
+        ORDER BY sm.salesman_name, p.visit_day_of_week, o.store_name
+        LIMIT 2000
         """,
-        [],
+        bg_params,
     )
 
-    stores_by_sm: dict = {s["salesman_sk"]: {d: [] for d in DAYS} for s in salesmen}
-    for r in pjp_rows:
+    # Group rows by salesman
+    salesmen_map: dict = {}
+    for r in rows:
         sk = r["salesman_sk"]
-        day = r["visit_day_of_week"]
-        if sk in stores_by_sm and day in stores_by_sm[sk]:
-            stores_by_sm[sk][day].append({
-                "route_plan_sk":    str(r["outlet_sk"]),
-                "outlet_sk":        r["outlet_sk"],
-                "store_name":       r["store_name"],
-                "source_outlet_code": r["source_outlet_code"],
-                "store_grade":      r.get("store_grade"),
-                "visit_day_of_week": day,
+        if sk not in salesmen_map:
+            salesmen_map[sk] = {
+                "salesman_sk": sk,
+                "salesman_name": r["salesman_name"],
+                "source_salesman_code": r["source_salesman_code"],
+                "region": r["region"],
+                "distributor_code": r["distributor_code"],
+                "stores_per_day": {d: [] for d in DAYS},
+            }
+        day = r.get("visit_day_of_week")
+        if day and day in salesmen_map[sk]["stores_per_day"] and r.get("outlet_sk"):
+            salesmen_map[sk]["stores_per_day"][day].append({
+                "route_plan_sk":      str(r["outlet_sk"]),
+                "outlet_sk":          r["outlet_sk"],
+                "store_name":         r.get("store_name"),
+                "source_outlet_code": r.get("outlet_code"),
+                "store_grade":        r.get("store_grade"),
+                "visit_day_of_week":  day,
                 "visit_week_pattern": r.get("visit_week_pattern"),
-                "sequence_no":      int(r["seq"]),
+                "sequence_no":        int(r.get("seq") or 1),
             })
 
     result = []
-    for s in salesmen:
-        sk = s["salesman_sk"]
-        total = sum(len(v) for v in stores_by_sm[sk].values())
-        result.append({
-            **s,
-            "stores_per_day":  stores_by_sm[sk],
-            "total_stores":    total,
-            "achievement_pct": None,
-            "compliance_pct":  None,
-        })
+    for sm in salesmen_map.values():
+        total = sum(len(v) for v in sm["stores_per_day"].values())
+        result.append({**sm, "total_stores": total, "achievement_pct": None, "compliance_pct": None})
     return result
 
 
@@ -119,7 +109,7 @@ def search_stores(
     rows = bq.query(
         f"""
         SELECT outlet_sk, source_outlet_code, store_name, store_grade, region
-        FROM {SFA_STEP}.dim_outlet
+        FROM {SFA_WEB}.dim_outlet
         WHERE (LOWER(store_name) LIKE LOWER(CONCAT('%',@q,'%'))
            OR  LOWER(source_outlet_code) LIKE LOWER(CONCAT('%',@q,'%')))
           AND is_active = TRUE

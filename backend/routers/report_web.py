@@ -87,16 +87,19 @@ def _build_rows(
             f"""
             SELECT
               sm.salesman_name,
-              SUM(rc.planned_outlets_per_week) AS planned,
-              SUM(rc.visited_outlets) AS visited,
-              SAFE_DIVIDE(SUM(rc.visited_outlets), NULLIF(SUM(rc.planned_outlets_per_week), 0))*100 AS comply_pct
-            FROM {SFA_WEB}.vw_route_compliance rc
-            JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
-            WHERE rc.iso_year = EXTRACT(YEAR FROM @ds)
-              AND rc.iso_week BETWEEN EXTRACT(ISOWEEK FROM @ds)
-                                  AND EXTRACT(ISOWEEK FROM @de)
+              COUNT(DISTINCT p.outlet_sk) AS planned,
+              COUNT(DISTINCT v.outlet_sk) AS visited,
+              SAFE_DIVIDE(COUNT(DISTINCT v.outlet_sk), NULLIF(COUNT(DISTINCT p.outlet_sk), 0))*100 AS comply_pct
+            FROM {SFA_WEB}.dim_salesman sm
+            LEFT JOIN {SFA_WEB}.fact_route_plan_pjp p ON p.salesman_sk = sm.salesman_sk AND p.is_deleted = FALSE
+            LEFT JOIN {settings.table('fact_visit')} v
+              ON v.salesman_sk = sm.salesman_sk
+              AND v.visit_date BETWEEN @ds AND @de
+              AND v.is_deleted = FALSE
+            WHERE sm.is_active = TRUE
               {bg_clause.replace('v.brand_group', 'sm.brand_group')}
             GROUP BY sm.salesman_name
+            HAVING COUNT(DISTINCT p.outlet_sk) > 0
             ORDER BY comply_pct DESC
             LIMIT 500
             """,

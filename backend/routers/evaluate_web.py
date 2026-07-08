@@ -1,8 +1,8 @@
 """
-GET /evaluate/team             — team-level call/EC rollup
-GET /evaluate/salesman/{sk}    — individual salesman store-level detail
+GET /evaluate/team             — team-level call/EC rollup for a ISO week
+GET /evaluate/salesman/{sk}    — individual salesman store-level detail for a ISO week
 """
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 
@@ -13,16 +13,29 @@ from services.bq import BQClient
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
-SFA_STEP = f"`{settings.bq_project}.sfa_step`"
+SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
+
+
+def _parse_week(week: str | None) -> tuple[str, str]:
+    """Parse '2026-W27' → (Monday ISO date, Sunday ISO date). Defaults to current week."""
+    if week:
+        try:
+            monday = datetime.strptime(week + "-1", "%G-W%V-%u").date()
+            return monday.isoformat(), (monday + timedelta(days=6)).isoformat()
+        except ValueError:
+            pass
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    return monday.isoformat(), (monday + timedelta(days=6)).isoformat()
 
 
 @router.get("/team")
 def evaluate_team(
-    visit_date: str | None = Query(None),
+    week: str | None = Query(None),
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
-    d = visit_date or date.today().isoformat()
+    date_from, date_to = _parse_week(week)
     bg_clause, bg_params = brand_group_filter(current_user, "bg", "v")
 
     rows = bq.query(
@@ -30,57 +43,75 @@ def evaluate_team(
         SELECT
           v.salesman_sk,
           sm.salesman_name,
-          COUNT(DISTINCT p.outlet_sk) AS planned,
           COUNT(DISTINCT v.outlet_sk) AS call_count,
           COUNTIF(v.effective_call = 'YES') AS effective_call_count,
           SAFE_DIVIDE(COUNTIF(v.effective_call='YES'), NULLIF(COUNT(*),0))*100 AS ec_rate_pct
         FROM {settings.table('fact_visit')} v
-        JOIN {SFA_STEP}.dim_salesman sm USING (salesman_sk)
-        LEFT JOIN {SFA_STEP}.vw_route_compliance p
-          ON p.salesman_sk = v.salesman_sk AND p.visit_date = v.visit_date
-        WHERE v.visit_date = @vdate AND v.is_deleted = FALSE {bg_clause}
+        JOIN {SFA_WEB}.dim_salesman sm USING (salesman_sk)
+        WHERE v.visit_date BETWEEN @dfrom AND @dto AND v.is_deleted = FALSE {bg_clause}
         GROUP BY v.salesman_sk, sm.salesman_name
         ORDER BY call_count DESC
         """,
-        [bq.p("vdate", "DATE", d)] + bg_params,
+        [bq.p("dfrom", "DATE", date_from), bq.p("dto", "DATE", date_to)] + bg_params,
     )
-    return {"date": d, "rows": rows}
+    return rows  # plain array — frontend expects EvaluateTeamRow[]
 
 
 @router.get("/salesman/{salesman_sk}")
 def evaluate_salesman(
     salesman_sk: str,
-    visit_date: str | None = Query(None),
+    week: str | None = Query(None),
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
-    d = visit_date or date.today().isoformat()
+    date_from, date_to = _parse_week(week)
 
+    # Show visited outlets + planned-but-not-visited outlets for the week.
+    # Uses fact_route_plan_pjp directly (no vw_route_compliance needed).
     rows = bq.query(
         f"""
+        -- Visited outlets (may or may not be in the PJP route plan)
         SELECT
           o.outlet_sk,
           o.store_name,
           o.store_grade,
           p.outlet_sk IS NOT NULL AS planned,
-          v.visit_id IS NOT NULL AS is_call,
-          CASE WHEN v.visit_id IS NOT NULL AND v.effective_call = 'YES' THEN TRUE
-               WHEN v.visit_id IS NOT NULL THEN FALSE ELSE NULL END AS is_effective,
-          CASE
-            WHEN v.visit_id IS NOT NULL AND v.effective_call = 'YES' THEN 'OK'
-            WHEN v.visit_id IS NOT NULL THEN 'Low Conversion'
-            ELSE 'Belum Terlaksana'
-          END AS status
-        FROM {SFA_STEP}.vw_route_compliance p
-        JOIN {SFA_STEP}.dim_outlet o USING (outlet_sk)
-        LEFT JOIN {settings.table('fact_visit')} v
-          ON v.outlet_sk = o.outlet_sk
-          AND v.salesman_sk = @sk
-          AND v.visit_date = @vdate
+          TRUE AS is_call,
+          CASE WHEN v.effective_call = 'YES' THEN TRUE ELSE FALSE END AS is_effective,
+          CASE WHEN v.effective_call = 'YES' THEN 'OK' ELSE 'Low Conversion' END AS status
+        FROM {settings.table('fact_visit')} v
+        JOIN {SFA_WEB}.dim_outlet o USING (outlet_sk)
+        LEFT JOIN {SFA_WEB}.fact_route_plan_pjp p
+          ON p.outlet_sk = v.outlet_sk AND p.salesman_sk = @sk AND p.is_deleted = FALSE
+        WHERE v.salesman_sk = @sk
+          AND v.visit_date BETWEEN @dfrom AND @dto
           AND v.is_deleted = FALSE
-        WHERE p.salesman_sk = @sk AND p.visit_date = @vdate
-        ORDER BY p.sequence_order
+
+        UNION ALL
+
+        -- Planned outlets that were not visited this week
+        SELECT
+          o.outlet_sk,
+          o.store_name,
+          o.store_grade,
+          TRUE AS planned,
+          FALSE AS is_call,
+          NULL AS is_effective,
+          'Belum Terlaksana' AS status
+        FROM {SFA_WEB}.fact_route_plan_pjp p
+        JOIN {SFA_WEB}.dim_outlet o USING (outlet_sk)
+        WHERE p.salesman_sk = @sk
+          AND p.is_deleted = FALSE
+          AND NOT EXISTS (
+            SELECT 1 FROM {settings.table('fact_visit')} fv
+            WHERE fv.outlet_sk = p.outlet_sk
+              AND fv.salesman_sk = @sk
+              AND fv.visit_date BETWEEN @dfrom AND @dto
+              AND fv.is_deleted = FALSE
+          )
+        ORDER BY planned DESC, store_name
+        LIMIT 200
         """,
-        [bq.p("sk", "STRING", salesman_sk), bq.p("vdate", "DATE", d)],
+        [bq.p("sk", "STRING", salesman_sk), bq.p("dfrom", "DATE", date_from), bq.p("dto", "DATE", date_to)],
     )
-    return {"salesman_sk": salesman_sk, "date": d, "stores": rows}
+    return {"salesman_sk": salesman_sk, "date_from": date_from, "date_to": date_to, "stores": rows}

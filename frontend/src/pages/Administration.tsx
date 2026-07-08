@@ -7,9 +7,10 @@ import type { User, Role } from "@/types";
 const fetchUsers = (search: string, role: string) =>
   api.get("/admin/users", { params: { search, role: role || undefined } }).then((r) => r.data);
 
-const ROLES: Role[] = ["spv", "asm", "dm", "rsm", "ho_admin"];
+const ROLES: Role[] = ["spv", "asm", "ddm", "dm", "rsm", "ho_admin", "distributor_admin"];
 const ROLE_LABELS: Record<Role, string> = {
-  se: "SE", spv: "SPV", asm: "ASM", dm: "DM", rsm: "RSM", ho_admin: "HO Admin",
+  se: "SE", spv: "SPV", asm: "ASM", ddm: "DDM", dm: "DM", rsm: "RSM",
+  ho_admin: "HO Admin", distributor_admin: "Distributor Admin",
 };
 
 const EMPTY_FORM = { username: "", full_name: "", role: "spv" as Role, email: "", brand_group: "", salesman_sk: "", password: "" };

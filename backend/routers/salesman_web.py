@@ -100,7 +100,7 @@ def salesman_360(
         f"""
         SELECT salesman_sk, source_salesman_code, salesman_name, salesman_type,
                distributor_code, region, spv_name, asm_name, is_active
-        FROM {SFA_STEP}.dim_salesman
+        FROM {SFA_WEB}.dim_salesman
         WHERE salesman_sk = @sk
         """,
         [bq.p("sk", "STRING", salesman_sk)],
@@ -132,13 +132,18 @@ def salesman_360(
         [bq.p("sk", "STRING", salesman_sk), bq.p("today", "DATE", today)],
     ) or {}
 
+    # Route compliance MTD: visited outlets vs planned (all PJP outlets)
     rc_row = bq.query_one(
         f"""
         SELECT
-          COUNTIF(is_visited) AS visited,
-          COUNT(*) AS planned
-        FROM {SFA_STEP}.vw_route_compliance
-        WHERE salesman_sk = @sk AND visit_date BETWEEN @ms AND @today
+          (SELECT COUNT(DISTINCT outlet_sk)
+           FROM {settings.table('fact_visit')}
+           WHERE salesman_sk = @sk AND visit_date BETWEEN @ms AND @today AND is_deleted = FALSE
+          ) AS visited,
+          (SELECT COUNT(DISTINCT outlet_sk)
+           FROM {SFA_WEB}.fact_route_plan_pjp
+           WHERE salesman_sk = @sk AND is_deleted = FALSE AND outlet_sk IS NOT NULL
+          ) AS planned
         """,
         [bq.p("sk", "STRING", salesman_sk), bq.p("ms", "DATE", month_start), bq.p("today", "DATE", today)],
     ) or {}
@@ -147,19 +152,21 @@ def salesman_360(
     planned = rc_row.get("planned", 0) or 0
     rc_pct  = round((visited / planned * 100) if planned > 0 else 0.0, 1)
 
+    # Today's schedule: all PJP outlets, mark which were visited today
     today_schedule = bq.query(
         f"""
         SELECT
           o.outlet_sk, o.store_name, o.source_outlet_code,
-          p.sequence_order,
+          ROW_NUMBER() OVER (ORDER BY o.store_name) AS sequence_order,
           v.checkin_time, v.total_demand,
           CASE WHEN v.visit_id IS NOT NULL THEN 'visited' ELSE 'pending' END AS status
-        FROM {SFA_STEP}.vw_route_compliance p
-        JOIN {SFA_STEP}.dim_outlet o USING (outlet_sk)
+        FROM {SFA_WEB}.fact_route_plan_pjp p
+        JOIN {SFA_WEB}.dim_outlet o USING (outlet_sk)
         LEFT JOIN {settings.table('fact_visit')} v
           ON v.outlet_sk = o.outlet_sk AND v.salesman_sk = @sk AND v.visit_date = @today AND v.is_deleted = FALSE
-        WHERE p.salesman_sk = @sk AND p.visit_date = @today
-        ORDER BY p.sequence_order
+        WHERE p.salesman_sk = @sk AND p.is_deleted = FALSE
+        ORDER BY status DESC, o.store_name
+        LIMIT 50
         """,
         [bq.p("sk", "STRING", salesman_sk), bq.p("today", "DATE", today)],
     )
@@ -173,8 +180,8 @@ def salesman_360(
           o.outlet_sk, o.source_outlet_code, o.store_name, o.kecamatan, o.store_grade AS tier,
           COUNT(DISTINCT v.visit_id) AS visit_mtd,
           COUNTIF(v.effective_call='YES') AS ec_mtd
-        FROM {SFA_STEP}.fact_route_plan_pjp p
-        JOIN {SFA_STEP}.dim_outlet o USING (outlet_sk)
+        FROM {SFA_WEB}.fact_route_plan_pjp p
+        JOIN {SFA_WEB}.dim_outlet o USING (outlet_sk)
         LEFT JOIN {settings.table('fact_visit')} v
           ON v.outlet_sk = o.outlet_sk AND v.salesman_sk = @sk
           AND v.visit_date BETWEEN @ms AND @today AND v.is_deleted = FALSE

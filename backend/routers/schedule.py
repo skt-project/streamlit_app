@@ -47,9 +47,10 @@ def _week_stores(bq: BQClient, salesman_sk: str, target_date: date) -> list[dict
         f"""
         SELECT {_STORE_COLS}
         FROM {settings.table('fact_route_plan_pjp')} p
-        LEFT JOIN {settings.table('vw_outlet_active')} o USING (outlet_sk)
+        LEFT JOIN {settings.table('dim_outlet')} o USING (outlet_sk)
         WHERE p.salesman_sk = @sk
           AND p.is_deleted = FALSE
+          AND (o.is_deleted = FALSE OR o.is_deleted IS NULL)
           AND p.visit_day_of_week = @day
           AND (
             p.visit_week_pattern IS NULL OR p.visit_week_pattern = ''
@@ -120,9 +121,10 @@ def download_week_schedule(
         f"""
         SELECT {_STORE_COLS}
         FROM {settings.table('fact_route_plan_pjp')} p
-        LEFT JOIN {settings.table('vw_outlet_active')} o USING (outlet_sk)
+        LEFT JOIN {settings.table('dim_outlet')} o USING (outlet_sk)
         WHERE p.salesman_sk = @sk
           AND p.is_deleted = FALSE
+          AND (o.is_deleted = FALSE OR o.is_deleted IS NULL)
           AND (
             p.visit_week_pattern IS NULL OR p.visit_week_pattern = ''
             OR p.visit_frequency_code IN ('F4', 'F4+')

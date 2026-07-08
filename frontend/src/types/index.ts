@@ -12,7 +12,7 @@ export interface User {
   is_active: boolean;
 }
 
-export type Role = "se" | "spv" | "asm" | "dm" | "rsm" | "ho_admin";
+export type Role = "se" | "spv" | "asm" | "ddm" | "dm" | "rsm" | "ho_admin" | "distributor_admin";
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export interface DashboardKpi {
@@ -199,9 +199,12 @@ export interface VisitItem {
   sku_name: string | null;
   brand: string | null;
   category: string | null;
+  sku_size: string | null;       // product size label, e.g. "20ml"
   stp: number | null;
-  qty: number | null;
-  demand: number | null;
+  qty: number | null;            // original quantity from SE
+  final_qty: number | null;      // SPV-adjusted quantity (null = use qty)
+  demand: number | null;         // reflects final_qty * stp when final_qty is set
+  warehouse_stock_qty: number | null;  // from dist_stock (may be null)
 }
 
 export interface Visit {
@@ -210,6 +213,7 @@ export interface Visit {
   salesman_name: string | null;
   outlet_sk: string | null;
   store_name: string | null;
+  distributor_code: string | null;
   schedule_id: string | null;
   visit_date: string;
   visit_type: string;
@@ -225,6 +229,7 @@ export interface Visit {
   checkout_longitude: number | null;
   checkout_photo_url: string | null;
   total_demand: number | null;
+  final_demand: number | null;   // recalculated from final_qty (null until SPV edits)
   effective_call: "YES" | "NO" | null;
   notes: string | null;
   duration_minutes: number | null;
@@ -238,6 +243,7 @@ export interface Visit {
   ddm_approved_at: string | null;
   rejection_notes: string | null;
   revision_count: number | null;
+  download_count: number;
   created_at: string | null;
   updated_at: string | null;
   items: VisitItem[];
@@ -249,6 +255,30 @@ export interface VisitListResponse {
   page: number;
   page_size: number;
   has_next: boolean;
+}
+
+// ── Skipped Store ─────────────────────────────────────────────────────────────
+export type SkippedStoreStatus =
+  | "PENDING_SPV"
+  | "RETURNED_TO_SALESMAN"
+  | "EXECUTED_BY_SPV"
+  | "EXPIRED";
+
+export interface SkippedStore {
+  skipped_store_id: string;
+  salesman_sk: string;
+  outlet_sk: string;
+  outlet_name: string | null;
+  distributor_code: string | null;
+  brand_group: string | null;
+  week_iso: string;
+  visit_date: string;
+  skipped_at: string;
+  status: SkippedStoreStatus;
+  spv_action_by: string | null;
+  spv_action_at: string | null;
+  spv_notes: string | null;
+  executed_visit_id: string | null;
 }
 
 // ── Notification ──────────────────────────────────────────────────────────────

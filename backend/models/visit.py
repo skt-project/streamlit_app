@@ -49,6 +49,9 @@ class CheckoutRequest(BaseModel):
 
 class SubmitRequest(BaseModel):
     offline_mode: bool = False
+    total_demand: float = 0.0
+    effective_call: Literal["YES", "NO"] = "NO"
+    items: list[VisitItemIn] = Field(default_factory=list)
 
 
 class ApproveRequest(BaseModel):
@@ -72,15 +75,36 @@ class VisitItemOut(BaseModel):
     sku_name: str | None = None
     brand: str | None = None
     category: str | None = None
+    sku_size: str | None = None        # product size label, e.g. "20ml"
     stp: float | None = None
-    qty: int | None = None
-    demand: float | None = None
+    qty: int | None = None             # original quantity from SE
+    final_qty: int | None = None       # SPV-adjusted quantity (None = use qty)
+    demand: float | None = None        # based on final_qty if set, else qty
+    warehouse_stock_qty: int | None = None  # joined from dist_stock (when available)
+
+
+class FinalQtyItem(BaseModel):
+    sku_id: str
+    final_qty: int
+
+
+class UpdateFinalQtyRequest(BaseModel):
+    items: list[FinalQtyItem]
+
+
+class DownloadLogOut(BaseModel):
+    download_id: str
+    visit_id: str
+    downloaded_by: str
+    user_role: str | None = None
+    downloaded_at: datetime
 
 
 class VisitOut(BaseModel):
     visit_id: str
     salesman_sk: str
     outlet_sk: str | None = None
+    distributor_code: str | None = None  # outlet's distributor (used by distributor_admin)
     schedule_id: str | None = None
     visit_date: date
     visit_type: str
@@ -99,6 +123,7 @@ class VisitOut(BaseModel):
     checkout_photo_url: str | None = None
 
     total_demand: float | None = None
+    final_demand: float | None = None   # recalculated demand from final_qty
     effective_call: str | None = None
     notes: str | None = None
     duration_minutes: int | None = None
@@ -115,6 +140,8 @@ class VisitOut(BaseModel):
 
     rejection_notes: str | None = None
     revision_count: int | None = None
+
+    download_count: int = 0             # number of times PDF has been downloaded
 
     created_at: datetime | None = None
     updated_at: datetime | None = None

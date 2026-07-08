@@ -14,10 +14,15 @@ _bearer = HTTPBearer()
 # Business group → brand mapping.
 # Group A (SKT): Skintific, Timephoria, Facerinna
 # Group B (G2G): G2G, Bodibreze, Nextprime
+# DEMO: unrestricted — sees all brands and all salesmen (for demo/testing accounts)
 BRAND_GROUPS: dict[str, list[str]] = {
     "SKT": ["Skintific", "Timephoria", "Facerinna"],
     "G2G": ["G2G", "Bodibreze", "Nextprime"],
+    "DEMO": ["Skintific", "Timephoria", "Facerinna", "G2G", "Bodibreze", "Nextprime"],
 }
+
+# brand_groups that bypass all SQL row-level filters (see all routes, all salesmen)
+_UNRESTRICTED_GROUPS = {"DEMO"}
 
 
 def require_auth(
@@ -59,11 +64,11 @@ def brand_group_filter(
 ) -> tuple[str, list]:
     """
     Returns (SQL fragment, BQ params) to filter by brand_group column on dim_salesman.
-    ho_admin or users without a brand_group get no filter — they see all groups.
+    ho_admin, distributor_admin, or users without a brand_group get no filter.
     Pass table_alias (e.g. "sm") when the query joins multiple tables.
     """
     from services.bq import BQClient
-    if user.role == "ho_admin" or not user.brand_group:
+    if user.role in ("ho_admin", "distributor_admin") or not user.brand_group or user.brand_group in _UNRESTRICTED_GROUPS:
         return "", []
     col = f"{table_alias}.brand_group" if table_alias else "brand_group"
     return f"AND {col} = @{param_name}", [BQClient.p(param_name, "STRING", user.brand_group)]
@@ -83,7 +88,7 @@ def brand_list_filter(
     Unknown brand_group       → restrict to nothing (AND 1=0).
     """
     from services.bq import BQClient
-    if user.role == "ho_admin" or not user.brand_group:
+    if user.role == "ho_admin" or not user.brand_group or user.brand_group in _UNRESTRICTED_GROUPS:
         return "", []
     brands = BRAND_GROUPS.get(user.brand_group, [])
     if not brands:
