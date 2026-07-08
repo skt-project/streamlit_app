@@ -41,8 +41,7 @@ export default function Login() {
 
         {/* STEP heading */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">STEP</h1>
-          <p className="text-slate-500 text-sm mt-1">Territory &amp; Execution Platform</p>
+          <p className="text-slate-500 text-sm">Territory &amp; Execution Platform</p>
           <p className="text-slate-400 text-xs mt-1">Hanya untuk Penggunaan Internal</p>
         </div>
 
@@ -89,7 +88,7 @@ export default function Login() {
           </p>
         </div>
 
-        <p className="text-slate-400 text-xs text-center mt-4">STEP v1.0</p>
+        <p className="text-slate-400 text-xs text-center mt-4">v1.0</p>
       </div>
     </div>
   );
