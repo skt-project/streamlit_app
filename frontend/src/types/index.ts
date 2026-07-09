@@ -204,6 +204,7 @@ export interface VisitItem {
   qty: number | null;            // original quantity from SE
   final_qty: number | null;      // SPV-adjusted quantity (null = use qty)
   demand: number | null;         // reflects final_qty * stp when final_qty is set
+  price_for_store: number | null;  // distributor admin sets selling price to store
   warehouse_stock_qty: number | null;  // from dist_stock (may be null)
 }
 

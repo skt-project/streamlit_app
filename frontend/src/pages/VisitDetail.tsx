@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
-import { getVisit, approveVisit, rejectVisit, updateFinalQty, downloadVisitPdf } from "@/api/visit";
+import { getVisit, approveVisit, rejectVisit, updateFinalQty, updateStorePrice, downloadVisitPdf } from "@/api/visit";
 import { useAuthStore } from "@/store/authStore";
 import type { Visit, VisitApprovalStatus, VisitItem } from "@/types";
 
@@ -73,10 +73,14 @@ export default function VisitDetail() {
   const [rejectNotes, setRejectNotes] = useState("");
   const [pdfLoading,  setPdfLoading]  = useState(false);
 
-  // Final Qty state — keyed by sku_id
+  // Qty & Price edit state — keyed by sku_id
   const [finalQtyMap,  setFinalQtyMap]  = useState<Record<string, number>>({});
+  const [priceMap,     setPriceMap]     = useState<Record<string, number>>({});
   const [fqtyEditing,  setFqtyEditing]  = useState(false);
   const [fqtyDirty,    setFqtyDirty]    = useState(false);
+  const [priceDirty,   setPriceDirty]   = useState(false);
+  const [isSaving,     setIsSaving]     = useState(false);
+  const [saveError,    setSaveError]    = useState(false);
 
   const { data: visit, isLoading, error } = useQuery<Visit>({
     queryKey: ["visit", visitId],
@@ -84,15 +88,18 @@ export default function VisitDetail() {
     enabled:  !!visitId,
   });
 
-  // Reseed finalQtyMap when server data changes (updated_at changes after any mutation).
-  // Guard with !fqtyDirty so in-progress edits are never overwritten by a background refetch.
+  // Reseed maps when server data changes (updated_at changes after any mutation).
+  // Guard with dirty flags so in-progress edits are never overwritten by a background refetch.
   useEffect(() => {
-    if (visit && !fqtyDirty && visit.items.length > 0) {
-      const init: Record<string, number> = {};
+    if (visit && !fqtyDirty && !priceDirty && visit.items.length > 0) {
+      const fqInit: Record<string, number> = {};
+      const prInit: Record<string, number> = {};
       for (const it of visit.items) {
-        init[it.sku_id] = it.final_qty ?? it.qty ?? 0;
+        fqInit[it.sku_id] = it.final_qty ?? it.qty ?? 0;
+        prInit[it.sku_id] = it.price_for_store ?? 0;
       }
-      setFinalQtyMap(init);
+      setFinalQtyMap(fqInit);
+      setPriceMap(prInit);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visit?.updated_at]);
@@ -112,14 +119,49 @@ export default function VisitDetail() {
     onSuccess:  () => { invalidate(); setRejectOpen(false); setRejectNotes(""); },
   });
 
-  const finalQtyMut = useMutation({
-    mutationFn: () =>
-      updateFinalQty(
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveError(false);
+    try {
+      await updateFinalQty(
         visitId!,
         Object.entries(finalQtyMap).map(([sku_id, final_qty]) => ({ sku_id, final_qty })),
-      ),
-    onSuccess: () => { setFqtyDirty(false); setFqtyEditing(false); invalidate(); },
-  });
+      );
+      if (isDistAdm) {
+        const priceItems = Object.entries(priceMap)
+          .filter(([, p]) => p > 0)
+          .map(([sku_id, price_for_store]) => ({ sku_id, price_for_store }));
+        if (priceItems.length > 0) {
+          await updateStorePrice(visitId!, priceItems);
+        }
+      }
+      setFqtyDirty(false);
+      setPriceDirty(false);
+      setFqtyEditing(false);
+      invalidate();
+    } catch {
+      setSaveError(true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setFqtyEditing(false);
+    setFqtyDirty(false);
+    setPriceDirty(false);
+    setSaveError(false);
+    if (visit) {
+      const fqReset: Record<string, number> = {};
+      const prReset: Record<string, number> = {};
+      for (const it of visit.items) {
+        fqReset[it.sku_id] = it.final_qty ?? it.qty ?? 0;
+        prReset[it.sku_id] = it.price_for_store ?? 0;
+      }
+      setFinalQtyMap(fqReset);
+      setPriceMap(prReset);
+    }
+  };
 
   const handlePdfDownload = async () => {
     setPdfLoading(true);
@@ -156,9 +198,16 @@ export default function VisitDetail() {
     (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0),
     0,
   );
-  const brandGroups    = [...new Set(visit.items.map((i) => i.brand).filter(Boolean))];
+  const grandTotal = visit.items.reduce((s, i) => {
+    const qty   = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
+    const price = priceMap[i.sku_id] ?? i.price_for_store ?? 0;
+    return s + qty * price;
+  }, 0);
+  const brandGroups     = [...new Set(visit.items.map((i) => i.brand).filter(Boolean))];
   const showFinalQtyCol = canEditFinalQty(visit.approval_status, role) || visit.items.some((i) => i.final_qty != null);
+  const showPriceCol    = isDistAdm || visit.items.some((i) => (i.price_for_store ?? 0) > 0);
   const canDownloadPdf  = ["spv", "asm", "ddm", "ho_admin", "distributor_admin"].includes(role);
+  const isDirty         = fqtyDirty || priceDirty;
 
   // Count rows where final qty exceeds warehouse stock — for summary warning
   const stockWarningCount = visit.items.filter((i) => {
@@ -317,27 +366,21 @@ export default function VisitDetail() {
                         className="btn-secondary text-xs px-3 py-1.5"
                         onClick={() => setFqtyEditing(true)}
                       >
-                        ✎ Edit Qty Final
+                        ✎ {isDistAdm ? "Edit Qty & Harga" : "Edit Qty Final"}
                       </button>
                     )}
                     {fqtyEditing && (
                       <div className="flex gap-2">
                         <button
                           className="btn-primary text-xs px-3 py-1.5"
-                          disabled={finalQtyMut.isPending || !fqtyDirty}
-                          onClick={() => finalQtyMut.mutate()}
+                          disabled={isSaving || !isDirty}
+                          onClick={handleSave}
                         >
-                          {finalQtyMut.isPending ? "Menyimpan..." : "Simpan"}
+                          {isSaving ? "Menyimpan..." : "Simpan"}
                         </button>
                         <button
                           className="btn-secondary text-xs px-3 py-1.5"
-                          onClick={() => {
-                            setFqtyEditing(false);
-                            setFqtyDirty(false);
-                            const reset: Record<string, number> = {};
-                            for (const it of visit.items) reset[it.sku_id] = it.final_qty ?? it.qty ?? 0;
-                            setFinalQtyMap(reset);
-                          }}
+                          onClick={handleCancelEdit}
                         >
                           Batal
                         </button>
@@ -364,7 +407,7 @@ export default function VisitDetail() {
                   <p className="text-sm text-slate-400 text-center py-8">Tidak ada item demand.</p>
                 ) : (
                   <div className="overflow-x-auto -mx-1">
-                    <table className="w-full text-sm min-w-[600px]">
+                    <table className={`w-full text-sm ${showPriceCol ? "min-w-[920px]" : "min-w-[600px]"}`}>
                       <thead>
                         <tr className="border-b-2 border-slate-200 bg-slate-50/70">
                           <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 rounded-tl">Kode SKU</th>
@@ -377,14 +420,24 @@ export default function VisitDetail() {
                             </th>
                           )}
                           <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">Stok Gudang</th>
-                          <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500 rounded-tr">Demand</th>
+                          <th className={`text-right py-3 px-3 text-xs font-semibold text-slate-500 ${!showPriceCol ? "rounded-tr" : ""}`}>Demand</th>
+                          {showPriceCol && (
+                            <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">
+                              Harga per Toko {fqtyEditing && isDistAdm && <span className="text-green-500">✎</span>}
+                            </th>
+                          )}
+                          {showPriceCol && (
+                            <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500 rounded-tr">Total Harga</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
                         {visit.items.map((item: VisitItem) => {
-                          const effQty      = finalQtyMap[item.sku_id] ?? item.final_qty ?? item.qty ?? 0;
-                          const effDemand   = effQty * (item.stp ?? 0);
-                          const changed     = fqtyEditing && (finalQtyMap[item.sku_id] ?? item.qty ?? 0) !== (item.qty ?? 0);
+                          const effQty       = finalQtyMap[item.sku_id] ?? item.final_qty ?? item.qty ?? 0;
+                          const effDemand    = effQty * (item.stp ?? 0);
+                          const priceVal     = priceMap[item.sku_id] ?? item.price_for_store ?? 0;
+                          const totalPrice   = effQty * priceVal;
+                          const changed      = fqtyEditing && (finalQtyMap[item.sku_id] ?? item.qty ?? 0) !== (item.qty ?? 0);
                           const hasStockWarn = item.warehouse_stock_qty != null && effQty > item.warehouse_stock_qty;
 
                           return (
@@ -430,7 +483,6 @@ export default function VisitDetail() {
                                       {effQty}
                                     </span>
                                   )}
-                                  {/* Stock warning indicator */}
                                   {hasStockWarn && (
                                     <span
                                       className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-xs bg-amber-500 text-white rounded-full cursor-help font-bold leading-none"
@@ -450,6 +502,36 @@ export default function VisitDetail() {
                               <td className="py-3 px-3 text-right font-semibold text-primary-700 tabular-nums">
                                 {fmtRp(effDemand)}
                               </td>
+
+                              {showPriceCol && (
+                                <td className="py-3 px-3 text-right">
+                                  {fqtyEditing && isDistAdm ? (
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="1"
+                                      className="w-28 text-right border border-slate-300 rounded px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-green-300"
+                                      value={priceMap[item.sku_id] || ""}
+                                      placeholder="0"
+                                      onChange={(e) => {
+                                        const v = Math.max(0, parseFloat(e.target.value) || 0);
+                                        setPriceMap((m) => ({ ...m, [item.sku_id]: v }));
+                                        setPriceDirty(true);
+                                      }}
+                                    />
+                                  ) : (
+                                    <span className="tabular-nums font-semibold text-green-700">
+                                      {priceVal > 0 ? fmtRp(priceVal) : "—"}
+                                    </span>
+                                  )}
+                                </td>
+                              )}
+
+                              {showPriceCol && (
+                                <td className="py-3 px-3 text-right font-bold tabular-nums text-green-700">
+                                  {priceVal > 0 ? fmtRp(totalPrice) : "—"}
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
@@ -467,15 +549,21 @@ export default function VisitDetail() {
                           <td className="py-3 px-3 text-right font-bold text-primary-700 tabular-nums">
                             {fmtRp(liveFinalDemand)}
                           </td>
+                          {showPriceCol && <td className="py-3 px-3 text-right text-slate-400">—</td>}
+                          {showPriceCol && (
+                            <td className="py-3 px-3 text-right font-bold text-green-700 tabular-nums">
+                              {grandTotal > 0 ? fmtRp(grandTotal) : "—"}
+                            </td>
+                          )}
                         </tr>
                       </tbody>
                     </table>
                   </div>
                 )}
 
-                {finalQtyMut.isError && (
+                {saveError && (
                   <p className="text-xs text-red-600 mt-3 flex items-center gap-1">
-                    <span>⚠</span> Gagal menyimpan Qty Final. Coba lagi.
+                    <span>⚠</span> Gagal menyimpan. Coba lagi.
                   </p>
                 )}
 

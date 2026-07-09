@@ -28,7 +28,8 @@ from models.auth import UserContext
 from models.visit import (
     ApproveRequest, CheckinRequest, CheckinResponse,
     CheckoutRequest, RejectRequest, ResubmitRequest,
-    SubmitRequest, UpdateFinalQtyRequest, VisitItemOut, VisitListResponse, VisitOut,
+    SubmitRequest, UpdateFinalQtyRequest, UpdateStorePriceRequest,
+    VisitItemOut, VisitListResponse, VisitOut,
 )
 from services.bq import BQClient
 from services.geo import distance_or_none
@@ -775,6 +776,62 @@ def update_final_qty(
 
 
 # ------------------------------------------------------------------
+# PUT /visit/{visit_id}/store-price  — Distributor admin sets store price
+# ------------------------------------------------------------------
+@router.put("/{visit_id}/store-price", response_model=VisitOut)
+def update_store_price(
+    visit_id: str,
+    body: UpdateStorePriceRequest,
+    current_user: UserContext = Depends(require_auth),
+):
+    if current_user.role not in ("distributor_admin", "ho_admin"):
+        raise HTTPException(status_code=403, detail="Only distributor admin can set store prices")
+
+    bq = BQClient.get()
+    now = datetime.now(timezone.utc)
+
+    visit = bq.query_one(
+        f"SELECT visit_id, approval_status FROM {settings.table('fact_visit')} WHERE visit_id = @vid AND is_deleted = FALSE",
+        [bq.p("vid", "STRING", visit_id)],
+    )
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    if not body.items:
+        return _get_visit_detail(visit_id, bq)
+
+    case_clauses = "\n      ".join(
+        f"WHEN @sku_{i} THEN @price_{i}" for i in range(len(body.items))
+    )
+    params: list = [
+        bq.p("vid", "STRING", visit_id),
+        bq.p("now", "TIMESTAMP", now.isoformat()),
+    ]
+    for i, si in enumerate(body.items):
+        params.append(bq.p(f"sku_{i}",   "STRING",  si.sku_id))
+        params.append(bq.p(f"price_{i}", "FLOAT64", si.price_for_store))
+
+    bq.execute(
+        f"""
+        UPDATE {settings.table('fact_visit_item')}
+        SET price_for_store = CASE sku_id
+          {case_clauses}
+          ELSE price_for_store
+        END
+        WHERE visit_id = @vid
+        """,
+        params,
+    )
+
+    bq.execute(
+        f"UPDATE {settings.table('fact_visit')} SET updated_at = @now WHERE visit_id = @vid",
+        [bq.p("now", "TIMESTAMP", now.isoformat()), bq.p("vid", "STRING", visit_id)],
+    )
+
+    return _get_visit_detail(visit_id, bq)
+
+
+# ------------------------------------------------------------------
 # GET /visit/{visit_id}/pdf  — Generate offering letter PDF
 # ------------------------------------------------------------------
 @router.get("/{visit_id}/pdf")
@@ -845,19 +902,15 @@ def download_pdf(
         st_color     = STATUS_COLORS.get(status, C_MUTED)
 
         # Pre-compute totals
-        total_qty_se    = sum(i.qty or 0 for i in visit_out.items)
         total_qty_final = sum(
             (i.final_qty if i.final_qty is not None else (i.qty or 0))
             for i in visit_out.items
         )
-        total_demand_val = sum(
-            round((i.final_qty if i.final_qty is not None else (i.qty or 0)) * (i.stp or 0), 2)
+        has_prices = any(i.price_for_store is not None and i.price_for_store > 0 for i in visit_out.items)
+        grand_total_price = sum(
+            (i.final_qty if i.final_qty is not None else (i.qty or 0)) * (i.price_for_store or 0)
             for i in visit_out.items
-        )
-        has_any_stock_warn = any(
-            i.warehouse_stock_qty is not None and
-            (i.final_qty if i.final_qty is not None else (i.qty or 0)) > i.warehouse_stock_qty
-            for i in visit_out.items
+            if i.price_for_store is not None
         )
 
         # ── Document setup ───────────────────────────────────────────
@@ -943,10 +996,10 @@ def download_pdf(
         # ── SUMMARY STATS ROW ────────────────────────────────────────
         stat_y = card_y + 45
         stats = [
-            ("TOTAL SKU",    str(len(visit_out.items)),          "produk"),
-            ("QTY SE",       str(total_qty_se),                  "pcs"),
-            ("QTY FINAL",    str(total_qty_final),               "pcs"),
-            ("TOTAL DEMAND", f"Rp {total_demand_val:,.0f}",      ""),
+            ("TOTAL SKU",    str(len(visit_out.items)),                              "produk"),
+            ("QTY FINAL",    str(total_qty_final),                                   "pcs"),
+            ("TOTAL HARGA",  f"Rp {grand_total_price:,.0f}" if has_prices else "-",  ""),
+            ("STATUS",       status_label,                                            ""),
         ]
         box_w = 43
         for si, (lbl, val, unit) in enumerate(stats):
@@ -982,10 +1035,10 @@ def download_pdf(
         pdf.set_text_color(*C_TEXT)
         pdf.cell(0, 7, "DETAIL PRODUK DEMAND", new_x="LMARGIN", new_y="NEXT")
 
-        # col widths: No, Nama Produk, Brand, Qty SE, Qty Final, Demand, Stok Gudang = 180 total
-        cw = [9, 61, 26, 16, 16, 32, 20]
-        col_headers  = ["No", "Nama Produk", "Brand", "Qty SE", "Qty Final", "Demand (Rp)", "Stok Gudang"]
-        col_aligns   = ["C",  "L",           "L",     "R",      "R",         "R",           "R"]
+        # col widths: No, Nama Produk, Brand, Qty Final, Harga/Toko, Total Harga = 180 total
+        cw = [9, 65, 25, 18, 33, 30]
+        col_headers = ["No", "Nama Produk", "Brand", "Qty Final", "Harga/Toko (Rp)", "Total Harga (Rp)"]
+        col_aligns  = ["C",  "L",           "L",     "R",         "R",               "R"]
 
         # Header row
         pdf.set_fill_color(*C_BLUE)
@@ -1000,40 +1053,32 @@ def download_pdf(
 
         for idx, item in enumerate(visit_out.items, 1):
             eff_qty    = item.final_qty if item.final_qty is not None else (item.qty or 0)
-            eff_demand = round(eff_qty * (item.stp or 0), 2)
-            has_warn   = (
-                item.warehouse_stock_qty is not None and
-                eff_qty > item.warehouse_stock_qty
-            )
+            price      = item.price_for_store or 0
+            total_price = eff_qty * price
             fq_modified = item.final_qty is not None and item.final_qty != item.qty
 
-            if has_warn:
-                pdf.set_fill_color(255, 251, 235)   # amber-50
-            elif idx % 2 == 0:
+            if idx % 2 == 0:
                 pdf.set_fill_color(*C_BG2)
             else:
                 pdf.set_fill_color(*C_WHITE)
 
             pdf.cell(cw[0], 6, str(idx), fill=True, align="C", border="B")
-            # Truncate name to fit
-            name = _safe(item.sku_name or item.sku_id, 36)
+            name = _safe(item.sku_name or item.sku_id, 40)
             pdf.cell(cw[1], 6, name, fill=True, border="B")
-            pdf.cell(cw[2], 6, _safe(item.brand or "-", 16), fill=True, border="B")
-            pdf.cell(cw[3], 6, str(item.qty or 0), fill=True, align="R", border="B")
+            pdf.cell(cw[2], 6, _safe(item.brand or "-", 14), fill=True, border="B")
 
-            # Qty Final — blue if modified, amber+warning if over stock
             if fq_modified:
                 pdf.set_text_color(*C_BLUE)
-            fq_str = f"!{eff_qty}" if has_warn else str(eff_qty)
-            pdf.cell(cw[4], 6, fq_str, fill=True, align="R", border="B")
+            pdf.cell(cw[3], 6, str(eff_qty), fill=True, align="R", border="B")
             pdf.set_text_color(*C_TEXT)
 
-            pdf.cell(cw[5], 6, f"{eff_demand:,.0f}", fill=True, align="R", border="B")
+            price_str = f"{price:,.0f}" if price > 0 else "-"
+            pdf.cell(cw[4], 6, price_str, fill=True, align="R", border="B")
 
-            stk_str = str(item.warehouse_stock_qty) if item.warehouse_stock_qty is not None else "-"
-            if has_warn:
-                pdf.set_text_color(*C_AMBER)
-            pdf.cell(cw[6], 6, stk_str, fill=True, align="R", border="B")
+            total_str = f"{total_price:,.0f}" if price > 0 else "-"
+            if price > 0:
+                pdf.set_text_color(*C_GREEN)
+            pdf.cell(cw[5], 6, total_str, fill=True, align="R", border="B")
             pdf.set_text_color(*C_TEXT)
             pdf.ln()
 
@@ -1041,20 +1086,25 @@ def download_pdf(
         pdf.set_fill_color(*C_BG2)
         pdf.set_font("Helvetica", "B", 7)
         pdf.cell(sum(cw[:3]), 7, "TOTAL", fill=True, border="T")
-        pdf.cell(cw[3], 7, str(total_qty_se),    fill=True, align="R", border="T")
-        pdf.cell(cw[4], 7, str(total_qty_final), fill=True, align="R", border="T")
-        pdf.set_text_color(*C_BLUE)
-        pdf.cell(cw[5], 7, f"{total_demand_val:,.0f}", fill=True, align="R", border="T")
-        pdf.set_text_color(*C_TEXT)
-        pdf.cell(cw[6], 7, "", fill=True, border="T")
+        pdf.cell(cw[3], 7, str(total_qty_final), fill=True, align="R", border="T")
+        pdf.cell(cw[4], 7, "", fill=True, border="T")
+        if has_prices:
+            pdf.set_text_color(*C_GREEN)
+            pdf.cell(cw[5], 7, f"{grand_total_price:,.0f}", fill=True, align="R", border="T")
+            pdf.set_text_color(*C_TEXT)
+        else:
+            pdf.cell(cw[5], 7, "-", fill=True, align="R", border="T")
         pdf.ln(4)
 
-        if has_any_stock_warn:
-            pdf.set_font("Helvetica", "I", 6)
-            pdf.set_text_color(*C_AMBER)
-            pdf.cell(0, 4, "! Tanda '!' pada Qty Final menunjukkan jumlah melebihi stok gudang distributor.", new_x="LMARGIN", new_y="NEXT")
+        if has_prices:
+            pdf.set_font("Helvetica", "B", 8)
             pdf.set_text_color(*C_TEXT)
-        pdf.ln(3)
+            pdf.cell(sum(cw[:4]), 7, "")
+            pdf.set_text_color(*C_GREEN)
+            pdf.cell(cw[4] + cw[5], 7, f"Grand Total: Rp {grand_total_price:,.0f}", align="R")
+            pdf.ln(10)
+        else:
+            pdf.ln(3)
 
         # ── APPROVAL INFORMATION ─────────────────────────────────────
         pdf.set_font("Helvetica", "B", 8.5)
@@ -1223,6 +1273,7 @@ def _get_visit_detail(visit_id: str, bq: BQClient) -> VisitOut:
         SELECT vi.visit_item_id, vi.sku_id, vi.sku_name, vi.brand, vi.category,
                NULL AS sku_size,
                vi.stp, vi.qty, vi.final_qty, vi.demand,
+               vi.price_for_store,
                s.current_stock_qty AS warehouse_stock_qty
         FROM {settings.table('fact_visit_item')} vi
         CROSS JOIN store_dist d

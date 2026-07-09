@@ -24,6 +24,11 @@ export const updateFinalQty = (
   items: { sku_id: string; final_qty: number }[],
 ) => api.put<Visit>(`/visit/${visitId}/final-qty`, { items }).then((r) => r.data);
 
+export const updateStorePrice = (
+  visitId: string,
+  items: { sku_id: string; price_for_store: number }[],
+) => api.put<Visit>(`/visit/${visitId}/store-price`, { items }).then((r) => r.data);
+
 export const downloadVisitPdf = async (visitId: string): Promise<void> => {
   const response = await api.get(`/visit/${visitId}/pdf`, {
     responseType: "blob",

@@ -80,6 +80,7 @@ class VisitItemOut(BaseModel):
     qty: int | None = None             # original quantity from SE
     final_qty: int | None = None       # SPV-adjusted quantity (None = use qty)
     demand: float | None = None        # based on final_qty if set, else qty
+    price_for_store: float | None = None  # distributor admin sets selling price to store
     warehouse_stock_qty: int | None = None  # joined from dist_stock (when available)
 
 
@@ -90,6 +91,15 @@ class FinalQtyItem(BaseModel):
 
 class UpdateFinalQtyRequest(BaseModel):
     items: list[FinalQtyItem]
+
+
+class StorePriceItem(BaseModel):
+    sku_id: str
+    price_for_store: float
+
+
+class UpdateStorePriceRequest(BaseModel):
+    items: list[StorePriceItem]
 
 
 class DownloadLogOut(BaseModel):
