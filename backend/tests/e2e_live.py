@@ -60,8 +60,8 @@ def run(base: str) -> None:
     print(f"  Base: {base}")
     print(f"{'='*60}")
 
-    # ─── 1. Login all roles ─────────────────────────────────────────
-    print("\n── 1. Login All Roles ──────────────────────────────────────")
+    # --- 1. Login all roles -----------------------------------------
+    print("\n-- 1. Login All Roles --------------------------------------")
     se_token,    se_user    = _login(base, "se")
     spv_token,   _          = _login(base, "spv")
     dist_token,  dist_user  = _login(base, "dist_admin")
@@ -76,12 +76,12 @@ def run(base: str) -> None:
     H_DIST  = {"Authorization": f"Bearer {dist_token}"} if dist_token else {}
     H_ADMIN = {"Authorization": f"Bearer {admin_token}"}
 
-    # ─── 2. Health check ────────────────────────────────────────────
-    print("\n── 2. Health ───────────────────────────────────────────────")
+    # --- 2. Health check --------------------------------------------
+    print("\n-- 2. Health -----------------------------------------------")
     _result("GET /health", requests.get(f"{base.replace('/api/v1','')}/health", timeout=10))
 
-    # ─── 3. Schedule download ───────────────────────────────────────
-    print("\n── 3. Schedule Download (SE) ───────────────────────────────")
+    # --- 3. Schedule download ---------------------------------------
+    print("\n-- 3. Schedule Download (SE) -------------------------------")
     r = _result("GET /schedule/download", requests.get(f"{base}/schedule/download", headers=H_SE, timeout=30))
     stores = []
     if r.ok:
@@ -97,8 +97,8 @@ def run(base: str) -> None:
     store = stores[0]
     print(f"         Using: outlet_sk={store['outlet_sk']}  name={store.get('outlet_name','?')[:40]}")
 
-    # ─── 4. Product list ────────────────────────────────────────────
-    print("\n── 4. Product List (SE) ────────────────────────────────────")
+    # --- 4. Product list --------------------------------------------
+    print("\n-- 4. Product List (SE) ------------------------------------")
     r = _result("GET /product", requests.get(f"{base}/product", headers=H_SE, timeout=30))
     products = []
     if r.ok:
@@ -112,8 +112,8 @@ def run(base: str) -> None:
         ]
         print(f"         sample SKUs: {[s['sku_id'] for s in sample]}")
 
-    # ─── 5. Check-in ────────────────────────────────────────────────
-    print("\n── 5. Check-In (SE) ────────────────────────────────────────")
+    # --- 5. Check-in ------------------------------------------------
+    print("\n-- 5. Check-In (SE) ----------------------------------------")
     checkin_payload = {
         "salesman_sk":       se_user.get("salesman_sk") or se_user["user_id"],
         "outlet_sk":         store["outlet_sk"],
@@ -135,8 +135,8 @@ def run(base: str) -> None:
         _finish()
         return
 
-    # ─── 6. Checkout ────────────────────────────────────────────────
-    print("\n── 6. Checkout (SE fills survey) ───────────────────────────")
+    # --- 6. Checkout ------------------------------------------------
+    print("\n-- 6. Checkout (SE fills survey) ---------------------------")
     total = sum(s["qty"] * s["stp"] for s in sample)
     checkout_payload = {
         "total_demand":       total,
@@ -152,8 +152,8 @@ def run(base: str) -> None:
         items_back = d.get("items", [])
         print(f"         items_returned={len(items_back)}")
 
-    # ─── 7. Submit ──────────────────────────────────────────────────
-    print("\n── 7. Submit to SPV (SE) ───────────────────────────────────")
+    # --- 7. Submit --------------------------------------------------
+    print("\n-- 7. Submit to SPV (SE) -----------------------------------")
     submit_payload = {
         "total_demand":   total,
         "effective_call": "YES",
@@ -164,8 +164,8 @@ def run(base: str) -> None:
         d = r.json()
         print(f"         visit_status={d.get('visit_status')}  approval_status={d.get('approval_status')}")
 
-    # ─── 8. Visit detail (SE view, check warehouse_stock_qty) ───────
-    print("\n── 8. Visit Detail — warehouse_stock_qty (SPV) ─────────────")
+    # --- 8. Visit detail (SE view, check warehouse_stock_qty) -------
+    print("\n-- 8. Visit Detail — warehouse_stock_qty (SPV) -------------")
     r = _result("GET /visit/{id}", requests.get(f"{base}/visit/{visit_id}", headers=H_SPV, timeout=30))
     if r.ok:
         detail_items = r.json().get("items", [])
@@ -177,14 +177,14 @@ def run(base: str) -> None:
         note = "populated (real store)" if has_stock else "None (test store — expected)"
         print(f"         warehouse_stock_qty: {note}")
 
-    # ─── 9. SPV approves ────────────────────────────────────────────
-    print("\n── 9. SPV Approve ──────────────────────────────────────────")
+    # --- 9. SPV approves --------------------------------------------
+    print("\n-- 9. SPV Approve ------------------------------------------")
     r = _result("PUT /visit/{id}/approve (SPV)", requests.put(f"{base}/visit/{visit_id}/approve", json={"notes": "E2E approved"}, headers=H_SPV, timeout=30))
     if r.ok:
         print(f"         approval_status={r.json().get('approval_status')}")
 
-    # ─── 10. Dist admin approves ────────────────────────────────────
-    print("\n── 10. Distributor Admin Approve ───────────────────────────")
+    # --- 10. Dist admin approves ------------------------------------
+    print("\n-- 10. Distributor Admin Approve ---------------------------")
     if not H_DIST:
         print(f"{SKIP_MARK} dist_admin login failed — skipping")
     else:
@@ -192,26 +192,26 @@ def run(base: str) -> None:
         if r.ok:
             print(f"         approval_status={r.json().get('approval_status')}")
 
-    # ─── 11. PDF ────────────────────────────────────────────────────
-    print("\n── 11. PDF Download (SPV) ──────────────────────────────────")
+    # --- 11. PDF ----------------------------------------------------
+    print("\n-- 11. PDF Download (SPV) ----------------------------------")
     r = _result("GET /visit/{id}/pdf", requests.get(f"{base}/visit/{visit_id}/pdf", headers=H_SPV, timeout=60))
     if r.ok:
         ct = r.headers.get("Content-Type", "")
         print(f"         {len(r.content):,} bytes  content-type={ct}")
 
-    # ─── 12. Notifications ──────────────────────────────────────────
-    print("\n── 12. Notifications ───────────────────────────────────────")
+    # --- 12. Notifications ------------------------------------------
+    print("\n-- 12. Notifications ---------------------------------------")
     _result("GET /notifications (SPV)",  requests.get(f"{base}/notifications",  headers=H_SPV,  timeout=15))
     _result("GET /notifications (dist)", requests.get(f"{base}/notifications",  headers=H_DIST, timeout=15)) if H_DIST else None
 
-    # ─── 13. Announcements ──────────────────────────────────────────
-    print("\n── 13. Announcements (SE) ──────────────────────────────────")
+    # --- 13. Announcements ------------------------------------------
+    print("\n-- 13. Announcements (SE) ----------------------------------")
     r = _result("GET /announcements", requests.get(f"{base}/announcements", headers=H_SE, timeout=15))
     if r.ok:
         print(f"         {len(r.json())} announcements")
 
-    # ─── 14. Approvals queue ────────────────────────────────────────
-    print("\n── 14. Approvals Queue (SPV) ───────────────────────────────")
+    # --- 14. Approvals queue ----------------------------------------
+    print("\n-- 14. Approvals Queue (SPV) -------------------------------")
     r = _result("GET /approvals", requests.get(f"{base}/approvals", headers=H_SPV, timeout=30))
     if r.ok:
         print(f"         {len(r.json())} items in approval queue")
