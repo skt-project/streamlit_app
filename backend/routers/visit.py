@@ -724,33 +724,47 @@ def update_final_qty(
     now = datetime.now(timezone.utc)
 
     visit = bq.query_one(
-        f"SELECT visit_id, approval_status, total_demand FROM {settings.table('fact_visit')} WHERE visit_id = @vid AND is_deleted = FALSE",
+        f"SELECT visit_id, approval_status FROM {settings.table('fact_visit')} WHERE visit_id = @vid AND is_deleted = FALSE",
         [bq.p("vid", "STRING", visit_id)],
     )
     if not visit:
         raise HTTPException(status_code=404, detail="Visit not found")
 
-    # Update each item's final_qty
-    for fi in body.items:
-        bq.execute(
-            f"""
-            UPDATE {settings.table('fact_visit_item')}
-            SET final_qty = @fqty
-            WHERE visit_id = @vid AND sku_id = @sku_id
-            """,
-            [
-                bq.p("fqty",   "INT64",  fi.final_qty),
-                bq.p("vid",    "STRING", visit_id),
-                bq.p("sku_id", "STRING", fi.sku_id),
-            ],
-        )
+    # Role-based status guard — ensures SPV acts before dist_admin, not after
+    approval_status = visit.get("approval_status", "")
+    role = current_user.role
+    if role == "spv" and approval_status not in ("PENDING_SPV", "SUBMITTED"):
+        raise HTTPException(status_code=403, detail="SPV can only edit final qty for visits pending SPV approval")
+    if role == "distributor_admin" and approval_status not in ("SPV_APPROVED", "COMPLETED"):
+        raise HTTPException(status_code=403, detail="Distributor admin can only edit final qty for SPV-approved visits")
 
-    # Recompute final_demand on the visit row for quick reference
-    items_rows = bq.query(
-        f"SELECT stp, COALESCE(qty, 0) AS eff_qty FROM {settings.table('fact_visit_item')} WHERE visit_id = @vid",
-        [bq.p("vid", "STRING", visit_id)],
+    if not body.items:
+        return _get_visit_detail(visit_id, bq)
+
+    # Single-statement batch UPDATE using CASE expression.
+    # Replaces N sequential DML calls (each ~1-3s BQ latency) with one call.
+    case_clauses = "\n      ".join(
+        f"WHEN @sku_{i} THEN @fqty_{i}" for i in range(len(body.items))
     )
-    final_demand = sum(round((r.get("eff_qty") or 0) * (r.get("stp") or 0), 2) for r in items_rows)
+    params: list = [
+        bq.p("vid", "STRING", visit_id),
+        bq.p("now", "TIMESTAMP", now.isoformat()),
+    ]
+    for i, fi in enumerate(body.items):
+        params.append(bq.p(f"sku_{i}", "STRING", fi.sku_id))
+        params.append(bq.p(f"fqty_{i}", "INT64",  fi.final_qty))
+
+    bq.execute(
+        f"""
+        UPDATE {settings.table('fact_visit_item')}
+        SET final_qty = CASE sku_id
+          {case_clauses}
+          ELSE final_qty
+        END
+        WHERE visit_id = @vid
+        """,
+        params,
+    )
 
     bq.execute(
         f"UPDATE {settings.table('fact_visit')} SET updated_at = @now WHERE visit_id = @vid",
@@ -777,105 +791,358 @@ def download_pdf(
     try:
         from fpdf import FPDF
 
-        def _safe(text) -> str:
+        def _safe(text, maxlen: int = 0) -> str:
             if not text:
                 return "-"
-            return str(text).encode("latin-1", errors="replace").decode("latin-1")
+            s = str(text).encode("latin-1", errors="replace").decode("latin-1")
+            return s[:maxlen] if maxlen else s
 
-        pdf = FPDF()
+        def _fmt_date_id(d) -> str:
+            if not d:
+                return "-"
+            months = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                      "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+            try:
+                return f"{d.day} {months[d.month]} {d.year}"
+            except Exception:
+                return str(d)
+
+        # ── Palette ─────────────────────────────────────────────────
+        C_BLUE   = (37,  99,  235)
+        C_DBLUE  = (30,  58,  138)
+        C_LBLUE  = (191, 219, 254)   # blue-200
+        C_WHITE  = (255, 255, 255)
+        C_BG     = (248, 250, 252)   # slate-50
+        C_BG2    = (241, 245, 249)   # slate-100
+        C_BORDER = (226, 232, 240)   # slate-200
+        C_TEXT   = (15,  23,  42)    # slate-900
+        C_MUTED  = (100, 116, 139)   # slate-500
+        C_GREEN  = (5,   150, 105)
+        C_AMBER  = (217, 119, 6)
+        C_RED    = (220, 38,  38)
+
+        STATUS_LABELS = {
+            "COMPLETED":         "SELESAI",
+            "SPV_APPROVED":      "DISETUJUI SPV",
+            "PENDING_SPV":       "MENUNGGU SPV",
+            "SUBMITTED":         "MENUNGGU SPV",
+            "REVISION_REQUIRED": "PERLU REVISI",
+            "REJECTED":          "DITOLAK",
+            "DRAFT":             "DRAFT",
+        }
+        STATUS_COLORS = {
+            "COMPLETED":         C_GREEN,
+            "SPV_APPROVED":      C_BLUE,
+            "PENDING_SPV":       C_AMBER,
+            "SUBMITTED":         C_AMBER,
+            "REVISION_REQUIRED": C_RED,
+            "REJECTED":          C_RED,
+            "DRAFT":             C_MUTED,
+        }
+
+        status       = visit_out.approval_status or "DRAFT"
+        status_label = STATUS_LABELS.get(status, status)
+        st_color     = STATUS_COLORS.get(status, C_MUTED)
+
+        # Pre-compute totals
+        total_qty_se    = sum(i.qty or 0 for i in visit_out.items)
+        total_qty_final = sum(
+            (i.final_qty if i.final_qty is not None else (i.qty or 0))
+            for i in visit_out.items
+        )
+        total_demand_val = sum(
+            round((i.final_qty if i.final_qty is not None else (i.qty or 0)) * (i.stp or 0), 2)
+            for i in visit_out.items
+        )
+        has_any_stock_warn = any(
+            i.warehouse_stock_qty is not None and
+            (i.final_qty if i.final_qty is not None else (i.qty or 0)) > i.warehouse_stock_qty
+            for i in visit_out.items
+        )
+
+        # ── Document setup ───────────────────────────────────────────
+        pdf = FPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_margins(15, 15, 15)
         pdf.add_page()
-        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_auto_page_break(auto=True, margin=22)
 
-        # ── Header ──────────────────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 10, "SKINTIFIC - SURAT PENAWARAN DEMAND", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", "", 9)
-        pdf.cell(0, 5, f"Dokumen ini digenerate otomatis  |  Visit ID: {visit_id}", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(4)
-        pdf.set_draw_color(200, 200, 200)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(6)
+        # ── HEADER BAND ──────────────────────────────────────────────
+        pdf.set_fill_color(*C_BLUE)
+        pdf.rect(0, 0, 210, 28, "F")
+        pdf.set_fill_color(*C_DBLUE)
+        pdf.rect(0, 0, 6, 28, "F")
 
-        # ── Visit metadata ───────────────────────────────────────────
-        def row2(label: str, value: str) -> None:
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.cell(50, 6, label, new_x="RIGHT")
-            pdf.set_font("Helvetica", "", 9)
-            pdf.cell(0, 6, str(value or "-"), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_xy(9, 6)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_text_color(*C_WHITE)
+        pdf.cell(100, 7, "SKINTIFIC")
 
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 8, "Informasi Kunjungan", new_x="LMARGIN", new_y="NEXT")
-        row2("Tanggal Kunjungan :", visit_out.visit_date.strftime("%d %B %Y") if visit_out.visit_date else "-")
-        row2("Salesman          :", _safe(visit_out.salesman_name or visit_out.salesman_sk))
-        row2("Toko              :", _safe(visit_out.store_name or visit_out.outlet_sk or "-"))
-        row2("Distributor       :", _safe(visit_out.distributor_code or "-"))
-        row2("Efektif Call      :", "Ya" if visit_out.effective_call == "YES" else "Tidak")
-        row2("Status Approval   :", visit_out.approval_status or "-")
-        pdf.ln(4)
-
-        # ── Items table ──────────────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 8, "Detail Produk", new_x="LMARGIN", new_y="NEXT")
-
-        # Table header
-        col_w = [15, 60, 30, 20, 20, 20, 25]
-        headers = ["No", "Nama Produk", "Brand", "Ukuran", "Qty SE", "Qty Final", "Demand (Rp)"]
-        pdf.set_fill_color(37, 99, 235)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 8)
-        for w, h in zip(col_w, headers):
-            pdf.cell(w, 7, h, border=1, fill=True)
-        pdf.ln()
-        pdf.set_text_color(0, 0, 0)
-
-        total_qty_se = 0
-        total_qty_final = 0
-        total_demand_val = 0.0
+        pdf.set_xy(9, 14)
         pdf.set_font("Helvetica", "", 8)
-        for idx, item in enumerate(visit_out.items, start=1):
-            eff_qty = item.final_qty if item.final_qty is not None else (item.qty or 0)
+        pdf.set_text_color(*C_LBLUE)
+        pdf.cell(100, 5, "SURAT PENAWARAN DEMAND")
+
+        # Right — visit ID + date
+        pdf.set_xy(105, 6)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*C_WHITE)
+        pdf.cell(90, 5, _safe(visit_out.visit_id), align="R")
+
+        pdf.set_xy(105, 12)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(*C_LBLUE)
+        pdf.cell(90, 5, _fmt_date_id(visit_out.visit_date), align="R")
+
+        # Status pill on header
+        pdf.set_xy(105, 19)
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_text_color(*st_color)
+        pdf.cell(90, 5, f"[ {status_label} ]", align="R")
+
+        pdf.set_text_color(*C_TEXT)
+
+        # ── INFO CARD ────────────────────────────────────────────────
+        card_y = 32
+        pdf.set_fill_color(*C_BG)
+        pdf.set_draw_color(*C_BORDER)
+        pdf.rect(15, card_y, 180, 40, "FD")
+
+        # Column divider
+        pdf.set_draw_color(*C_BORDER)
+        pdf.line(100, card_y + 1, 100, card_y + 39)
+
+        def _section_label(x: float, y: float, text: str) -> None:
+            pdf.set_xy(x, y)
+            pdf.set_font("Helvetica", "B", 6)
+            pdf.set_text_color(*C_MUTED)
+            pdf.cell(80, 4, text.upper())
+            pdf.set_draw_color(*C_BORDER)
+
+        def _info_row(x: float, y: float, label: str, value: str) -> None:
+            pdf.set_xy(x, y)
+            pdf.set_font("Helvetica", "B", 7.5)
+            pdf.set_text_color(*C_MUTED)
+            pdf.cell(30, 5, label)
+            pdf.set_font("Helvetica", "", 7.5)
+            pdf.set_text_color(*C_TEXT)
+            pdf.cell(50, 5, value)
+
+        _section_label(18, card_y + 3, "Informasi Kunjungan")
+        _section_label(103, card_y + 3, "Toko & Distributor")
+
+        r = card_y + 9
+        _info_row(18,  r,     "Tanggal",      _fmt_date_id(visit_out.visit_date))
+        _info_row(103, r,     "Toko",         _safe(visit_out.store_name or visit_out.outlet_sk, 28))
+        _info_row(18,  r + 7, "Salesman",     _safe(visit_out.salesman_name or visit_out.salesman_sk, 28))
+        _info_row(103, r + 7, "Distributor",  _safe(visit_out.distributor_code, 28))
+        _info_row(18,  r + 14,"Efektif Call", "YA" if visit_out.effective_call == "YES" else "TIDAK")
+        _info_row(103, r + 14,"Grup Brand",   _safe(visit_out.brand_group, 20))
+        _info_row(18,  r + 21,"Durasi",       f"{visit_out.duration_minutes} menit" if visit_out.duration_minutes else "-")
+        _info_row(103, r + 21,"No. Revisi",   str(visit_out.revision_count or 0))
+
+        # ── SUMMARY STATS ROW ────────────────────────────────────────
+        stat_y = card_y + 45
+        stats = [
+            ("TOTAL SKU",    str(len(visit_out.items)),          "produk"),
+            ("QTY SE",       str(total_qty_se),                  "pcs"),
+            ("QTY FINAL",    str(total_qty_final),               "pcs"),
+            ("TOTAL DEMAND", f"Rp {total_demand_val:,.0f}",      ""),
+        ]
+        box_w = 43
+        for si, (lbl, val, unit) in enumerate(stats):
+            bx = 15 + si * (box_w + 0.33)
+            # Blue accent top stripe
+            pdf.set_fill_color(*C_BLUE)
+            pdf.rect(bx, stat_y, box_w, 2.5, "F")
+            # Box body
+            pdf.set_fill_color(*C_BG)
+            pdf.set_draw_color(*C_BORDER)
+            pdf.rect(bx, stat_y + 2.5, box_w, 15, "FD")
+            # Label
+            pdf.set_xy(bx + 2, stat_y + 4)
+            pdf.set_font("Helvetica", "B", 5.5)
+            pdf.set_text_color(*C_MUTED)
+            pdf.cell(box_w - 4, 3.5, lbl)
+            # Value
+            pdf.set_xy(bx + 2, stat_y + 8)
+            fs = 9 if si < 3 else 7
+            pdf.set_font("Helvetica", "B", fs)
+            pdf.set_text_color(*C_TEXT)
+            pdf.cell(box_w - 4, 6, _safe(val))
+            if unit:
+                pdf.set_xy(bx + 2, stat_y + 14)
+                pdf.set_font("Helvetica", "", 5.5)
+                pdf.set_text_color(*C_MUTED)
+                pdf.cell(box_w - 4, 3, unit)
+
+        pdf.set_xy(15, stat_y + 21)
+
+        # ── PRODUCTS TABLE ───────────────────────────────────────────
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(*C_TEXT)
+        pdf.cell(0, 7, "DETAIL PRODUK DEMAND", new_x="LMARGIN", new_y="NEXT")
+
+        # col widths: No, Nama Produk, Brand, Qty SE, Qty Final, Demand, Stok Gudang = 180 total
+        cw = [9, 61, 26, 16, 16, 32, 20]
+        col_headers  = ["No", "Nama Produk", "Brand", "Qty SE", "Qty Final", "Demand (Rp)", "Stok Gudang"]
+        col_aligns   = ["C",  "L",           "L",     "R",      "R",         "R",           "R"]
+
+        # Header row
+        pdf.set_fill_color(*C_BLUE)
+        pdf.set_text_color(*C_WHITE)
+        pdf.set_font("Helvetica", "B", 6.5)
+        for w, h, a in zip(cw, col_headers, col_aligns):
+            pdf.cell(w, 6.5, h, fill=True, align=a)
+        pdf.ln()
+
+        pdf.set_text_color(*C_TEXT)
+        pdf.set_font("Helvetica", "", 7)
+
+        for idx, item in enumerate(visit_out.items, 1):
+            eff_qty    = item.final_qty if item.final_qty is not None else (item.qty or 0)
             eff_demand = round(eff_qty * (item.stp or 0), 2)
-            total_qty_se    += item.qty or 0
-            total_qty_final += eff_qty
-            total_demand_val += eff_demand
-            fill = idx % 2 == 0
-            pdf.set_fill_color(248, 250, 252)
-            pdf.cell(col_w[0], 6, str(idx), border=1, fill=fill)
-            pdf.cell(col_w[1], 6, _safe(item.sku_name or item.sku_id)[:30], border=1, fill=fill)
-            pdf.cell(col_w[2], 6, _safe(item.brand or "-")[:18], border=1, fill=fill)
-            pdf.cell(col_w[3], 6, _safe(item.sku_size or "-"), border=1, fill=fill)
-            pdf.cell(col_w[4], 6, str(item.qty or 0), border=1, fill=fill, align="R")
-            pdf.cell(col_w[5], 6, str(eff_qty), border=1, fill=fill, align="R")
-            pdf.cell(col_w[6], 6, f"{eff_demand:,.0f}", border=1, fill=fill, align="R")
+            has_warn   = (
+                item.warehouse_stock_qty is not None and
+                eff_qty > item.warehouse_stock_qty
+            )
+            fq_modified = item.final_qty is not None and item.final_qty != item.qty
+
+            if has_warn:
+                pdf.set_fill_color(255, 251, 235)   # amber-50
+            elif idx % 2 == 0:
+                pdf.set_fill_color(*C_BG2)
+            else:
+                pdf.set_fill_color(*C_WHITE)
+
+            pdf.cell(cw[0], 6, str(idx), fill=True, align="C", border="B")
+            # Truncate name to fit
+            name = _safe(item.sku_name or item.sku_id, 36)
+            pdf.cell(cw[1], 6, name, fill=True, border="B")
+            pdf.cell(cw[2], 6, _safe(item.brand or "-", 16), fill=True, border="B")
+            pdf.cell(cw[3], 6, str(item.qty or 0), fill=True, align="R", border="B")
+
+            # Qty Final — blue if modified, amber+warning if over stock
+            if fq_modified:
+                pdf.set_text_color(*C_BLUE)
+            fq_str = f"!{eff_qty}" if has_warn else str(eff_qty)
+            pdf.cell(cw[4], 6, fq_str, fill=True, align="R", border="B")
+            pdf.set_text_color(*C_TEXT)
+
+            pdf.cell(cw[5], 6, f"{eff_demand:,.0f}", fill=True, align="R", border="B")
+
+            stk_str = str(item.warehouse_stock_qty) if item.warehouse_stock_qty is not None else "-"
+            if has_warn:
+                pdf.set_text_color(*C_AMBER)
+            pdf.cell(cw[6], 6, stk_str, fill=True, align="R", border="B")
+            pdf.set_text_color(*C_TEXT)
             pdf.ln()
 
-        # Total row
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_fill_color(226, 232, 240)
-        pdf.cell(sum(col_w[:4]), 7, "TOTAL", border=1, fill=True)
-        pdf.cell(col_w[4], 7, str(total_qty_se),    border=1, fill=True, align="R")
-        pdf.cell(col_w[5], 7, str(total_qty_final), border=1, fill=True, align="R")
-        pdf.cell(col_w[6], 7, f"{total_demand_val:,.0f}", border=1, fill=True, align="R")
-        pdf.ln(10)
+        # Totals row
+        pdf.set_fill_color(*C_BG2)
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.cell(sum(cw[:3]), 7, "TOTAL", fill=True, border="T")
+        pdf.cell(cw[3], 7, str(total_qty_se),    fill=True, align="R", border="T")
+        pdf.cell(cw[4], 7, str(total_qty_final), fill=True, align="R", border="T")
+        pdf.set_text_color(*C_BLUE)
+        pdf.cell(cw[5], 7, f"{total_demand_val:,.0f}", fill=True, align="R", border="T")
+        pdf.set_text_color(*C_TEXT)
+        pdf.cell(cw[6], 7, "", fill=True, border="T")
+        pdf.ln(4)
 
-        # ── Signatures ───────────────────────────────────────────────
-        pdf.set_font("Helvetica", "", 9)
-        sig_w = 60
-        pdf.cell(sig_w, 6, "Salesman,",   align="C")
-        pdf.cell(10)
-        pdf.cell(sig_w, 6, "SPV,",        align="C")
-        pdf.cell(10)
-        pdf.cell(sig_w, 6, "Distributor,", align="C")
-        pdf.ln(20)
-        pdf.cell(sig_w, 6, "(" + _safe(visit_out.salesman_name or "___________") + ")", align="C")
-        pdf.cell(10)
-        pdf.cell(sig_w, 6, "(" + _safe(visit_out.spv_username or "___________") + ")", align="C")
-        pdf.cell(10)
-        pdf.cell(sig_w, 6, "(_________________)", align="C")
-        pdf.ln(8)
-        pdf.set_font("Helvetica", "I", 7)
-        pdf.set_text_color(150, 150, 150)
-        pdf.cell(0, 5, f"Digenerate oleh: {current_user.username}  |  {datetime.now(timezone.utc).strftime('%d-%m-%Y %H:%M')} UTC", align="C")
+        if has_any_stock_warn:
+            pdf.set_font("Helvetica", "I", 6)
+            pdf.set_text_color(*C_AMBER)
+            pdf.cell(0, 4, "! Tanda '!' pada Qty Final menunjukkan jumlah melebihi stok gudang distributor.", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(*C_TEXT)
+        pdf.ln(3)
+
+        # ── APPROVAL INFORMATION ─────────────────────────────────────
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(*C_TEXT)
+        pdf.cell(0, 7, "INFORMASI PERSETUJUAN", new_x="LMARGIN", new_y="NEXT")
+
+        appr_rows = []
+        if visit_out.spv_username:
+            appr_rows.append(("SPV", visit_out.spv_username, visit_out.spv_approved_at, True))
+        if visit_out.ddm_username:
+            appr_rows.append(("Distributor Admin", visit_out.ddm_username, visit_out.ddm_approved_at, True))
+
+        if appr_rows:
+            ay = pdf.get_y()
+            row_h = 6.5
+            card_h = row_h * len(appr_rows) + 6
+            pdf.set_fill_color(*C_BG)
+            pdf.set_draw_color(*C_BORDER)
+            pdf.rect(15, ay, 180, card_h, "FD")
+            for ai, (role_lbl, approver, appr_ts, done) in enumerate(appr_rows):
+                ry = ay + 3 + ai * row_h
+                pdf.set_xy(18, ry)
+                pdf.set_font("Helvetica", "B", 7.5)
+                pdf.set_text_color(*C_GREEN)
+                pdf.cell(6, 5, "[OK]")
+                pdf.set_text_color(*C_TEXT)
+                pdf.cell(30, 5, role_lbl)
+                pdf.set_font("Helvetica", "", 7.5)
+                pdf.cell(50, 5, _safe(approver))
+                if appr_ts:
+                    pdf.set_font("Helvetica", "I", 6.5)
+                    pdf.set_text_color(*C_MUTED)
+                    ts_str = str(appr_ts)[:16]
+                    pdf.cell(60, 5, ts_str)
+                    pdf.set_text_color(*C_TEXT)
+            pdf.ln(card_h + 5)
+        else:
+            pdf.set_font("Helvetica", "I", 7.5)
+            pdf.set_text_color(*C_AMBER)
+            stage = "SPV" if status in ("PENDING_SPV", "SUBMITTED") else "Distributor Admin"
+            pdf.cell(0, 5, f"Menunggu persetujuan {stage}", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(*C_TEXT)
+            pdf.ln(5)
+
+        # ── SIGNATURE SECTION ────────────────────────────────────────
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.cell(0, 7, "TANDA TANGAN", new_x="LMARGIN", new_y="NEXT")
+
+        sig_y = pdf.get_y()
+        sw = 55
+        sg = 7.5
+        sig_entries = [
+            ("Salesman",          visit_out.salesman_name),
+            ("Supervisor (SPV)",  visit_out.spv_username),
+            ("Distributor Admin", visit_out.ddm_username),
+        ]
+        for si2, (s_role, s_name) in enumerate(sig_entries):
+            bx2 = 15 + si2 * (sw + sg)
+            pdf.set_fill_color(*C_BG)
+            pdf.set_draw_color(*C_BORDER)
+            pdf.rect(bx2, sig_y, sw, 28, "FD")
+            # Role label at top
+            pdf.set_xy(bx2 + 2, sig_y + 2)
+            pdf.set_font("Helvetica", "B", 6.5)
+            pdf.set_text_color(*C_MUTED)
+            pdf.cell(sw - 4, 4, s_role, align="C")
+            # Name at bottom
+            pdf.set_xy(bx2 + 2, sig_y + 22)
+            pdf.set_font("Helvetica", "", 7)
+            pdf.set_text_color(*C_TEXT)
+            n_display = f"({_safe(s_name, 24)})" if s_name else "(__________________)"
+            pdf.cell(sw - 4, 4, n_display, align="C")
+
+        pdf.ln(32)
+
+        # ── FOOTER ──────────────────────────────────────────────────
+        # Positioned near bottom regardless of content length
+        footer_y = 275
+        if pdf.get_y() < footer_y:
+            pdf.set_y(footer_y)
+        pdf.set_draw_color(*C_BORDER)
+        pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "I", 6)
+        pdf.set_text_color(*C_MUTED)
+        now_str = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+        pdf.cell(90, 4, f"Digenerate oleh: {_safe(current_user.username)}  |  {now_str}")
+        pdf.cell(90, 4, f"Halaman {pdf.page_no()}", align="R")
 
         pdf_bytes = pdf.output()
     except ImportError:

@@ -54,8 +54,9 @@ function canReject(approvalStatus: string | null, role: string): boolean {
 }
 
 function canEditFinalQty(approvalStatus: string | null, role: string): boolean {
-  return role === "spv" &&
-    ["PENDING_SPV", "SUBMITTED"].includes(approvalStatus ?? "");
+  if (role === "spv") return ["PENDING_SPV", "SUBMITTED"].includes(approvalStatus ?? "");
+  if (role === "distributor_admin") return approvalStatus === "SPV_APPROVED";
+  return false;
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -66,7 +67,7 @@ export default function VisitDetail() {
   const qc          = useQueryClient();
   const user        = useAuthStore((s) => s.user);
   const role        = user?.role ?? "";
-  const isDistAdm   = false; // distributor_admin is now a full approver, not read-only
+  const isDistAdm   = role === "distributor_admin";
 
   const [rejectOpen,  setRejectOpen]  = useState(false);
   const [rejectNotes, setRejectNotes] = useState("");
@@ -83,7 +84,8 @@ export default function VisitDetail() {
     enabled:  !!visitId,
   });
 
-  // Seed finalQtyMap once visit data arrives (only when not actively editing)
+  // Reseed finalQtyMap when server data changes (updated_at changes after any mutation).
+  // Guard with !fqtyDirty so in-progress edits are never overwritten by a background refetch.
   useEffect(() => {
     if (visit && !fqtyDirty && visit.items.length > 0) {
       const init: Record<string, number> = {};
@@ -93,7 +95,7 @@ export default function VisitDetail() {
       setFinalQtyMap(init);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visit?.visit_id]);
+  }, [visit?.updated_at]);
 
   const invalidate = useCallback(
     () => qc.invalidateQueries({ queryKey: ["visit", visitId] }),
@@ -148,15 +150,21 @@ export default function VisitDetail() {
 
   // ── Derived values ─────────────────────────────────────────────────────────
 
-  const totalQty = visit.items.reduce((s, i) => s + (i.qty ?? 0), 0);
-  const totalFinalQty = visit.items.reduce((s, i) => s + (finalQtyMap[i.sku_id] ?? i.qty ?? 0), 0);
+  const totalQty       = visit.items.reduce((s, i) => s + (i.qty ?? 0), 0);
+  const totalFinalQty  = visit.items.reduce((s, i) => s + (finalQtyMap[i.sku_id] ?? i.qty ?? 0), 0);
   const liveFinalDemand = visit.items.reduce(
     (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0),
     0,
   );
-  const brandGroups = [...new Set(visit.items.map((i) => i.brand).filter(Boolean))];
+  const brandGroups    = [...new Set(visit.items.map((i) => i.brand).filter(Boolean))];
   const showFinalQtyCol = canEditFinalQty(visit.approval_status, role) || visit.items.some((i) => i.final_qty != null);
   const canDownloadPdf  = ["spv", "asm", "ddm", "ho_admin", "distributor_admin"].includes(role);
+
+  // Count rows where final qty exceeds warehouse stock — for summary warning
+  const stockWarningCount = visit.items.filter((i) => {
+    const effQty = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
+    return i.warehouse_stock_qty != null && effQty > i.warehouse_stock_qty;
+  }).length;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -185,7 +193,7 @@ export default function VisitDetail() {
         }
       />
 
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-4 lg:p-8">
         <div className="max-w-5xl mx-auto space-y-6">
 
           {/* ── Visit header ──────────────────────────────────── */}
@@ -195,7 +203,7 @@ export default function VisitDetail() {
               <h2 className="text-xl font-bold text-slate-800">
                 {visit.store_name ?? visit.outlet_sk ?? "Toko Tidak Diketahui"}
               </h2>
-              <p className="text-slate-500 mt-0.5">
+              <p className="text-slate-500 mt-1">
                 <span className="font-medium">{visit.salesman_name ?? visit.salesman_sk}</span>
                 {visit.distributor_code && (
                   <span className="text-slate-400"> · {visit.distributor_code}</span>
@@ -213,32 +221,32 @@ export default function VisitDetail() {
 
               {/* Visit metadata */}
               <div className="card">
-                <h3 className="text-sm font-semibold text-slate-700 mb-4">Info Kunjungan</h3>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <h3 className="text-sm font-semibold text-slate-700 mb-5">Info Kunjungan</h3>
+                <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
                   <div>
-                    <dt className="text-slate-400 text-xs">Salesman</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Salesman</dt>
                     <dd className="font-medium text-slate-700">{visit.salesman_name ?? visit.salesman_sk}</dd>
                   </div>
                   <div>
-                    <dt className="text-slate-400 text-xs">Toko</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Toko</dt>
                     <dd className="font-medium text-slate-700">{visit.store_name ?? visit.outlet_sk ?? "—"}</dd>
                   </div>
                   <div>
-                    <dt className="text-slate-400 text-xs">Check-in</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Check-in</dt>
                     <dd className="font-medium text-slate-700">{fmt(visit.checkin_time)}</dd>
                   </div>
                   <div>
-                    <dt className="text-slate-400 text-xs">Check-out</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Check-out</dt>
                     <dd className="font-medium text-slate-700">{fmt(visit.checkout_time)}</dd>
                   </div>
                   <div>
-                    <dt className="text-slate-400 text-xs">Durasi</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Durasi</dt>
                     <dd className="font-medium text-slate-700">
                       {visit.duration_minutes != null ? `${visit.duration_minutes} menit` : "—"}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-400 text-xs">Jarak GPS (check-in)</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Jarak GPS (check-in)</dt>
                     <dd className={`font-medium ${visit.gps_warning ? "text-amber-600" : "text-slate-700"}`}>
                       {visit.checkin_distance_m != null
                         ? `${Math.round(visit.checkin_distance_m)} m${visit.gps_warning ? " ⚠" : ""}`
@@ -246,17 +254,17 @@ export default function VisitDetail() {
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-400 text-xs">Total Demand (SE)</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Total Demand (SE)</dt>
                     <dd className="font-semibold text-primary-700 text-base">{fmtRp(visit.total_demand)}</dd>
                   </div>
                   {(visit.final_demand != null || fqtyDirty) && (
                     <div>
-                      <dt className="text-slate-400 text-xs">Total Demand (Final)</dt>
+                      <dt className="text-slate-400 text-xs mb-0.5">Total Demand (Final)</dt>
                       <dd className="font-semibold text-green-700 text-base">{fmtRp(liveFinalDemand)}</dd>
                     </div>
                   )}
                   <div>
-                    <dt className="text-slate-400 text-xs">Efektif Call</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Efektif Call</dt>
                     <dd>
                       {visit.effective_call === "YES" ? (
                         <span className="badge-green">YA</span>
@@ -267,26 +275,26 @@ export default function VisitDetail() {
                   </div>
                   {visit.brand_group && (
                     <div>
-                      <dt className="text-slate-400 text-xs">Grup Bisnis</dt>
+                      <dt className="text-slate-400 text-xs mb-0.5">Grup Bisnis</dt>
                       <dd><span className="badge-blue">{visit.brand_group}</span></dd>
                     </div>
                   )}
                   {visit.revision_count != null && visit.revision_count > 0 && (
                     <div>
-                      <dt className="text-slate-400 text-xs">Revisi ke-</dt>
+                      <dt className="text-slate-400 text-xs mb-0.5">Revisi ke-</dt>
                       <dd className="font-medium text-amber-600">{visit.revision_count}</dd>
                     </div>
                   )}
                 </dl>
 
                 {visit.notes && (
-                  <div className="mt-4 pt-4 border-t border-slate-100">
+                  <div className="mt-5 pt-4 border-t border-slate-100">
                     <p className="text-xs text-slate-400 mb-1">Catatan Salesman</p>
                     <p className="text-sm text-slate-700 leading-relaxed">{visit.notes}</p>
                   </div>
                 )}
                 {visit.rejection_notes && (
-                  <div className="mt-4 pt-4 border-t border-slate-100">
+                  <div className="mt-5 pt-4 border-t border-slate-100">
                     <p className="text-xs text-red-500 mb-1">Catatan Revisi</p>
                     <p className="text-sm text-red-700 leading-relaxed">{visit.rejection_notes}</p>
                   </div>
@@ -295,16 +303,18 @@ export default function VisitDetail() {
 
               {/* Demand items */}
               <div className="card">
-                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                  <h3 className="text-sm font-semibold text-slate-700">Detail Demand</h3>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-400">
+                <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-700">Detail Demand</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
                       {visit.items.length} SKU · {totalQty} pcs SE
                       {showFinalQtyCol && ` · ${totalFinalQty} pcs Final`}
-                    </span>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
                     {canEditFinalQty(visit.approval_status, role) && !fqtyEditing && (
                       <button
-                        className="btn-secondary text-xs px-2 py-1"
+                        className="btn-secondary text-xs px-3 py-1.5"
                         onClick={() => setFqtyEditing(true)}
                       >
                         ✎ Edit Qty Final
@@ -313,18 +323,17 @@ export default function VisitDetail() {
                     {fqtyEditing && (
                       <div className="flex gap-2">
                         <button
-                          className="btn-primary text-xs px-2 py-1"
+                          className="btn-primary text-xs px-3 py-1.5"
                           disabled={finalQtyMut.isPending || !fqtyDirty}
                           onClick={() => finalQtyMut.mutate()}
                         >
                           {finalQtyMut.isPending ? "Menyimpan..." : "Simpan"}
                         </button>
                         <button
-                          className="btn-secondary text-xs px-2 py-1"
+                          className="btn-secondary text-xs px-3 py-1.5"
                           onClick={() => {
                             setFqtyEditing(false);
                             setFqtyDirty(false);
-                            // Reset to saved values
                             const reset: Record<string, number> = {};
                             for (const it of visit.items) reset[it.sku_id] = it.final_qty ?? it.qty ?? 0;
                             setFinalQtyMap(reset);
@@ -337,50 +346,74 @@ export default function VisitDetail() {
                   </div>
                 </div>
 
+                {/* Non-blocking stock warning banner */}
+                {stockWarningCount > 0 && (
+                  <div className="mb-4 flex items-start gap-2.5 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+                    <span className="text-amber-600 text-sm mt-0.5 flex-shrink-0">⚠</span>
+                    <div>
+                      <p className="text-sm font-medium text-amber-800">Peringatan Stok Gudang</p>
+                      <p className="text-xs text-amber-700 mt-0.5">
+                        {stockWarningCount} produk memiliki Qty Final melebihi stok gudang distributor.
+                        Persetujuan tetap dapat dilanjutkan — ini hanya peringatan informasi.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {visit.items.length === 0 ? (
-                  <p className="text-sm text-slate-400 text-center py-6">Tidak ada item demand.</p>
+                  <p className="text-sm text-slate-400 text-center py-8">Tidak ada item demand.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                  <div className="overflow-x-auto -mx-1">
+                    <table className="w-full text-sm min-w-[600px]">
                       <thead>
-                        <tr className="border-b border-slate-100">
-                          <th className="text-left py-2 text-xs font-medium text-slate-400">Kode SKU</th>
-                          <th className="text-left py-2 text-xs font-medium text-slate-400">Nama Produk</th>
-                          <th className="text-left py-2 text-xs font-medium text-slate-400">Brand</th>
-                          <th className="text-left py-2 text-xs font-medium text-slate-400">Ukuran</th>
-                          <th className="text-right py-2 text-xs font-medium text-slate-400">Qty SE</th>
+                        <tr className="border-b-2 border-slate-200 bg-slate-50/70">
+                          <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 rounded-tl">Kode SKU</th>
+                          <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500">Nama Produk</th>
+                          <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500">Brand</th>
+                          <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">Qty SE</th>
                           {showFinalQtyCol && (
-                            <th className="text-right py-2 text-xs font-medium text-slate-400">
-                              Qty Final {fqtyEditing && <span className="text-yellow-600">✎</span>}
+                            <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">
+                              Qty Final {fqtyEditing && <span className="text-primary-500">✎</span>}
                             </th>
                           )}
-                          <th className="text-right py-2 text-xs font-medium text-slate-400">Stok Gudang Dist.</th>
-                          <th className="text-right py-2 text-xs font-medium text-slate-400">Demand</th>
+                          <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">Stok Gudang</th>
+                          <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500 rounded-tr">Demand</th>
                         </tr>
                       </thead>
                       <tbody>
                         {visit.items.map((item: VisitItem) => {
-                          const effQty   = finalQtyMap[item.sku_id] ?? item.final_qty ?? item.qty ?? 0;
-                          const effDemand = effQty * (item.stp ?? 0);
-                          const changed  = fqtyEditing && (finalQtyMap[item.sku_id] ?? item.qty ?? 0) !== (item.qty ?? 0);
+                          const effQty      = finalQtyMap[item.sku_id] ?? item.final_qty ?? item.qty ?? 0;
+                          const effDemand   = effQty * (item.stp ?? 0);
+                          const changed     = fqtyEditing && (finalQtyMap[item.sku_id] ?? item.qty ?? 0) !== (item.qty ?? 0);
+                          const hasStockWarn = item.warehouse_stock_qty != null && effQty > item.warehouse_stock_qty;
 
                           return (
                             <tr
                               key={item.visit_item_id}
-                              className={`border-b border-slate-50 ${changed ? "bg-yellow-50" : ""}`}
+                              className={`border-b border-slate-100 transition-colors ${
+                                hasStockWarn
+                                  ? "bg-amber-50 hover:bg-amber-100/70"
+                                  : changed
+                                  ? "bg-primary-50 hover:bg-primary-50"
+                                  : "hover:bg-slate-50"
+                              }`}
                             >
-                              <td className="py-2.5 font-mono text-xs text-slate-500 pr-3">{item.sku_id}</td>
-                              <td className="py-2.5 font-medium text-slate-700 pr-3">{item.sku_name ?? "—"}</td>
-                              <td className="py-2.5 text-slate-500 pr-3">{item.brand ?? "—"}</td>
-                              <td className="py-2.5 text-slate-500 pr-3">{item.sku_size ?? "—"}</td>
-                              <td className="py-2.5 text-right font-semibold text-slate-600">{item.qty ?? 0}</td>
+                              <td className="py-3 px-3 font-mono text-xs text-slate-500">{item.sku_id}</td>
+                              <td className="py-3 px-3 font-medium text-slate-700">{item.sku_name ?? "—"}</td>
+                              <td className="py-3 px-3 text-slate-500">{item.brand ?? "—"}</td>
+                              <td className="py-3 px-3 text-right font-semibold text-slate-600 tabular-nums">{item.qty ?? 0}</td>
+
                               {showFinalQtyCol && (
-                                <td className="py-2.5 text-right">
+                                <td className="py-3 px-3 text-right">
                                   {fqtyEditing ? (
                                     <input
                                       type="number"
                                       min={0}
-                                      className="w-20 text-right border border-slate-300 rounded px-1 py-0.5 text-sm font-semibold"
+                                      className={`w-20 text-right border rounded px-2 py-1 text-sm font-semibold tabular-nums ${
+                                        hasStockWarn
+                                          ? "border-amber-400 bg-amber-50 focus:ring-amber-300"
+                                          : "border-slate-300 focus:ring-primary-300"
+                                      } focus:outline-none focus:ring-2`}
                                       value={finalQtyMap[item.sku_id] ?? item.final_qty ?? item.qty ?? 0}
                                       onChange={(e) => {
                                         const v = Math.max(0, parseInt(e.target.value) || 0);
@@ -389,16 +422,32 @@ export default function VisitDetail() {
                                       }}
                                     />
                                   ) : (
-                                    <span className={`font-semibold ${item.final_qty != null && item.final_qty !== item.qty ? "text-green-700" : "text-slate-700"}`}>
+                                    <span className={`font-semibold tabular-nums ${
+                                      item.final_qty != null && item.final_qty !== item.qty
+                                        ? "text-primary-600"
+                                        : "text-slate-700"
+                                    }`}>
                                       {effQty}
+                                    </span>
+                                  )}
+                                  {/* Stock warning indicator */}
+                                  {hasStockWarn && (
+                                    <span
+                                      className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-xs bg-amber-500 text-white rounded-full cursor-help font-bold leading-none"
+                                      title={`Qty Final (${effQty}) melebihi stok gudang distributor (${item.warehouse_stock_qty} pcs). Persetujuan tetap dapat dilanjutkan.`}
+                                    >
+                                      !
                                     </span>
                                   )}
                                 </td>
                               )}
-                              <td className="py-2.5 text-right text-slate-600">
+
+                              <td className={`py-3 px-3 text-right tabular-nums ${
+                                hasStockWarn ? "text-amber-700 font-medium" : "text-slate-600"
+                              }`}>
                                 {item.warehouse_stock_qty != null ? item.warehouse_stock_qty : "—"}
                               </td>
-                              <td className="py-2.5 text-right font-semibold text-primary-700">
+                              <td className="py-3 px-3 text-right font-semibold text-primary-700 tabular-nums">
                                 {fmtRp(effDemand)}
                               </td>
                             </tr>
@@ -406,16 +455,16 @@ export default function VisitDetail() {
                         })}
 
                         {/* Total row */}
-                        <tr className="border-t-2 border-slate-200">
-                          <td colSpan={4} className="py-2.5 text-xs font-semibold text-slate-500">
-                            TOTAL
+                        <tr className="border-t-2 border-slate-200 bg-slate-50/50">
+                          <td colSpan={3} className="py-3 px-3 text-xs font-bold text-slate-500 uppercase tracking-wide">
+                            Total
                           </td>
-                          <td className="py-2.5 text-right font-bold text-slate-800">{totalQty}</td>
+                          <td className="py-3 px-3 text-right font-bold text-slate-800 tabular-nums">{totalQty}</td>
                           {showFinalQtyCol && (
-                            <td className="py-2.5 text-right font-bold text-green-700">{totalFinalQty}</td>
+                            <td className="py-3 px-3 text-right font-bold text-primary-600 tabular-nums">{totalFinalQty}</td>
                           )}
-                          <td className="py-2.5 text-right text-slate-400">—</td>
-                          <td className="py-2.5 text-right font-bold text-primary-700">
+                          <td className="py-3 px-3 text-right text-slate-400">—</td>
+                          <td className="py-3 px-3 text-right font-bold text-primary-700 tabular-nums">
                             {fmtRp(liveFinalDemand)}
                           </td>
                         </tr>
@@ -425,13 +474,15 @@ export default function VisitDetail() {
                 )}
 
                 {finalQtyMut.isError && (
-                  <p className="text-xs text-red-600 mt-2">Gagal menyimpan Qty Final. Coba lagi.</p>
+                  <p className="text-xs text-red-600 mt-3 flex items-center gap-1">
+                    <span>⚠</span> Gagal menyimpan Qty Final. Coba lagi.
+                  </p>
                 )}
 
                 {/* Brand summary */}
                 {brandGroups.length > 1 && (
-                  <div className="mt-4 pt-4 border-t border-slate-100">
-                    <p className="text-xs text-slate-400 mb-2">Ringkasan per Brand</p>
+                  <div className="mt-5 pt-4 border-t border-slate-100">
+                    <p className="text-xs font-medium text-slate-500 mb-3">Ringkasan per Brand</p>
                     <div className="flex flex-wrap gap-3">
                       {brandGroups.map((brand) => {
                         const brandItems  = visit.items.filter((i) => i.brand === brand);
@@ -439,9 +490,9 @@ export default function VisitDetail() {
                           (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0), 0,
                         );
                         return (
-                          <div key={brand} className="bg-slate-50 rounded-lg px-4 py-2 text-sm">
+                          <div key={brand} className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-2.5 text-sm">
                             <p className="font-semibold text-slate-700">{brand}</p>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-xs text-slate-500 mt-0.5">
                               {brandItems.length} SKU · {fmtRp(brandDemand)}
                             </p>
                           </div>
@@ -454,12 +505,12 @@ export default function VisitDetail() {
             </div>
 
             {/* ── Right: approval panel ─────────────────────── */}
-            <div className="space-y-6">
+            <div className="space-y-5">
 
               {/* Approval timeline */}
               <div className="card">
-                <h3 className="text-sm font-semibold text-slate-700 mb-4">Alur Approval</h3>
-                <ol className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-700 mb-5">Alur Approval</h3>
+                <ol className="space-y-5">
                   {[
                     {
                       stage: "SPV",
@@ -486,24 +537,24 @@ export default function VisitDetail() {
                         <p className={`text-sm font-medium ${done ? "text-green-700" : active ? "text-yellow-700" : "text-slate-400"}`}>
                           {stage}
                         </p>
-                        {approver && <p className="text-xs text-slate-500">{approver}</p>}
-                        {approvedAt && <p className="text-xs text-slate-400">{fmt(approvedAt)}</p>}
-                        {active && !approver && <p className="text-xs text-yellow-600">Menunggu persetujuan</p>}
+                        {approver && <p className="text-xs text-slate-600 mt-0.5">{approver}</p>}
+                        {approvedAt && <p className="text-xs text-slate-400 mt-0.5">{fmt(approvedAt)}</p>}
+                        {active && !approver && <p className="text-xs text-yellow-600 mt-0.5">Menunggu persetujuan</p>}
                       </div>
                     </li>
                   ))}
                 </ol>
 
                 {visit.approval_status === "REVISION_REQUIRED" && (
-                  <div className="mt-4 pt-4 border-t border-slate-100 bg-red-50 rounded-lg p-3">
+                  <div className="mt-5 pt-4 border-t border-slate-100 bg-red-50 rounded-lg p-3">
                     <p className="text-xs font-semibold text-red-600 mb-1">Diminta Revisi</p>
                     <p className="text-xs text-red-700">{visit.rejection_notes}</p>
                   </div>
                 )}
               </div>
 
-              {/* Approve / Reject actions — hidden for distributor_admin */}
-              {!isDistAdm && (canApprove(visit.approval_status, role) || canReject(visit.approval_status, role)) && (
+              {/* Approve / Reject actions */}
+              {(canApprove(visit.approval_status, role) || canReject(visit.approval_status, role)) && (
                 <div className="card space-y-3">
                   <h3 className="text-sm font-semibold text-slate-700">Tindakan</h3>
 
@@ -559,12 +610,22 @@ export default function VisitDetail() {
                 </div>
               )}
 
-              {/* Distributor Admin — read-only notice */}
-              {isDistAdm && (
-                <div className="card bg-blue-50 border border-blue-100">
-                  <p className="text-sm text-blue-700 font-medium mb-1">Mode Distributor</p>
-                  <p className="text-xs text-blue-600">
-                    Anda dapat melihat detail demand yang telah disetujui SPV dan mengunduh PDF untuk proses distribusi.
+              {/* Distributor Admin — informational notice when no further action available */}
+              {isDistAdm && visit.approval_status === "COMPLETED" && (
+                <div className="card bg-green-50 border border-green-100">
+                  <p className="text-sm text-green-700 font-medium mb-1">Kunjungan Selesai</p>
+                  <p className="text-xs text-green-600">
+                    Kunjungan ini telah disetujui penuh. Anda dapat mengunduh PDF untuk keperluan distribusi.
+                  </p>
+                </div>
+              )}
+
+              {/* Distributor Admin — awaiting SPV notice */}
+              {isDistAdm && !["SPV_APPROVED", "COMPLETED"].includes(visit.approval_status ?? "") && (
+                <div className="card bg-slate-50 border border-slate-100">
+                  <p className="text-sm text-slate-600 font-medium mb-1">Menunggu Persetujuan SPV</p>
+                  <p className="text-xs text-slate-500">
+                    Kunjungan ini belum disetujui SPV. Anda dapat melakukan tindakan setelah status menjadi Disetujui SPV.
                   </p>
                 </div>
               )}
