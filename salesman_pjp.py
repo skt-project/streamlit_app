@@ -2318,10 +2318,11 @@ elif PAGES[selected_page] == "pjp_template":
     st.title("🗓️ PJP Template")
     st.caption(f"Distributor: **{selected_dist_name}** ({selected_dist_code})")
 
-    tab_download, tab_update = st.tabs(
+    tab_download, tab_update, tab_view = st.tabs(
         [
             "📥 Download Template",
             "🔄 Update PJP",
+            "📋 Lihat PJP",
         ]
     )
 
@@ -2631,3 +2632,49 @@ elif PAGES[selected_page] == "pjp_template":
                                 f"memasukkan data baru: {msg_ins}\n\n"
                                 "Segera hubungi administrator untuk memulihkan data."
                             )
+
+    # ── Tab 3: Lihat PJP ─────────────────────────────────────────────────────
+    with tab_view:
+        st.subheader("📋 Lihat Data PJP")
+
+        col_month, col_refresh = st.columns([3, 1])
+        with col_month:
+            current_ym = datetime.now().strftime("%Y-%m")
+            # Build last 6 months as options
+            month_options = [
+                (datetime.now().replace(day=1) - pd.DateOffset(months=i)).strftime("%Y-%m")
+                for i in range(6)
+            ]
+            selected_view_month = st.selectbox(
+                "Snapshot Bulan",
+                month_options,
+                index=0,
+                key="pjp_view_month",
+            )
+        with col_refresh:
+            st.markdown("<br>", unsafe_allow_html=True)
+            refresh_view = st.button("🔄 Refresh", key="pjp_view_refresh", use_container_width=True)
+
+        pjp_view_df = get_pjp_list(distributor_code=selected_dist_code)
+
+        if not pjp_view_df.empty and "snapshot_month" in pjp_view_df.columns:
+            pjp_view_df = pjp_view_df[pjp_view_df["snapshot_month"] == selected_view_month]
+
+        if pjp_view_df.empty:
+            st.info(f"Tidak ada data PJP untuk distributor **{selected_dist_name}** pada bulan **{selected_view_month}**.")
+        else:
+            st.caption(f"Menampilkan **{len(pjp_view_df)} baris** PJP · {selected_dist_name} · {selected_view_month}")
+
+            display_cols = [c for c in [
+                "salesman_id", "nama_salesman", "kode_toko", "nama_toko",
+                "hari", "minggu", "frekuensi", "kode_distributor", "snapshot_month"
+            ] if c in pjp_view_df.columns]
+            st.dataframe(pjp_view_df[display_cols], use_container_width=True, hide_index=True)
+
+            csv_bytes = pjp_view_df[display_cols].to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇️ Download CSV",
+                data=csv_bytes,
+                file_name=f"PJP_{selected_dist_code}_{selected_view_month}.csv",
+                mime="text/csv",
+            )
