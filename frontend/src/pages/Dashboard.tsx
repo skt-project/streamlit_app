@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import TopNav from "@/components/layout/TopNav";
+import { Icon, SkeletonStatCards, Skeleton, EmptyState } from "@/components/ui";
 import { api } from "@/api/client";
 import { format } from "date-fns";
 import type { ComplyBrand, LeaderboardRow } from "@/types";
@@ -144,17 +145,25 @@ export default function Dashboard() {
         actions={
           <button
             onClick={() => window.location.reload()}
-            className="btn-secondary text-sm px-3 py-1.5"
+            className="btn-secondary btn-sm"
           >
-            ↻ Muat Ulang
+            <Icon name="arrow-path" className="w-4 h-4" />
+            Muat Ulang
           </button>
         }
       />
 
       <main className="flex-1 overflow-y-auto p-6 space-y-6">
         {isLoading ? (
-          <div className="flex items-center justify-center h-48 text-slate-400 text-sm">
-            Memuat data...
+          <div className="space-y-6">
+            <SkeletonStatCards count={4} />
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <div className="card space-y-3">
+                <Skeleton className="h-5 w-32" />
+                {[1,2,3].map(i => <div key={i} className="flex gap-3"><Skeleton className="w-14 h-14 rounded-full" /><div className="flex-1 space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-3 w-32" /></div></div>)}
+              </div>
+              <div className="card xl:col-span-2"><Skeleton className="h-5 w-40 mb-4" /><Skeleton className="h-52 w-full" /></div>
+            </div>
           </div>
         ) : (
           <>
@@ -178,9 +187,7 @@ export default function Dashboard() {
                 </div>
                 <div className="space-y-4">
                   {complyBrands.length === 0 && (
-                    <p className="text-sm text-slate-400 text-center py-4">
-                      Belum ada data target bulan ini.
-                    </p>
+                    <EmptyState icon="chart-bar" title="Belum ada data target" description="Tidak ada data target brand bulan ini." />
                   )}
                   {complyBrands.map((c) => (
                     <div key={c.brand} className="flex items-center gap-3">
@@ -212,9 +219,7 @@ export default function Dashboard() {
                   </a>
                 </div>
                 {leaderboard.length === 0 ? (
-                  <div className="empty-state">
-                    <p className="empty-state-text">Belum ada data kunjungan bulan ini.</p>
-                  </div>
+                  <EmptyState icon="users" title="Belum ada data" description="Belum ada data kunjungan bulan ini." />
                 ) : (
                   <ResponsiveContainer width="100%" height={220}>
                     <BarChart

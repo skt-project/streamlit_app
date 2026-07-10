@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
+import { Icon } from "@/components/ui";
+import type { IconName } from "@/components/ui";
 import type { Role } from "@/types";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -15,7 +17,7 @@ interface NavGroup {
   kind: "group";
   id: string;
   label: string;
-  icon: string;
+  icon: IconName;
   children: NavLeaf[];
 }
 
@@ -23,29 +25,26 @@ interface NavSingle {
   kind: "single";
   to: string;
   label: string;
-  icon: string;
+  icon: IconName;
   roles: Role[];
 }
 
 type NavItem = NavGroup | NavSingle;
 
 // ── Navigation tree ───────────────────────────────────────────────────────────
-// RBAC source of truth: roles[] on each leaf/single item.
-// Parent groups appear only when ≥1 child is visible for the current role.
-// URLs are 1-to-1 with existing routes in App.tsx — nothing renamed.
 const NAV_TREE: NavItem[] = [
   {
     kind: "single",
     to: "/dashboard",
     label: "Dashboard",
-    icon: "📊",
+    icon: "chart-bar",
     roles: ["spv", "asm", "dm", "rsm", "ho_admin"],
   },
   {
     kind: "group",
     id: "master-data",
     label: "Master Data",
-    icon: "🗂️",
+    icon: "rectangle-stack",
     children: [
       { to: "/route-planner",        label: "Route Planner",     roles: ["spv", "asm", "dm", "ho_admin"] },
       { to: "/master-data-pjp",      label: "Master Data PJP",   roles: ["asm", "dm", "ho_admin"] },
@@ -58,7 +57,7 @@ const NAV_TREE: NavItem[] = [
     kind: "group",
     id: "reports",
     label: "Reports",
-    icon: "📈",
+    icon: "chart-pie",
     children: [
       { to: "/route-evaluate",    label: "Route Evaluate",    roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
       { to: "/visits",            label: "Visit & Demand",    roles: ["spv", "asm", "dm", "rsm", "ho_admin", "distributor_admin"] },
@@ -71,35 +70,35 @@ const NAV_TREE: NavItem[] = [
     kind: "single",
     to: "/approvals",
     label: "Approvals",
-    icon: "✅",
+    icon: "check-circle",
     roles: ["spv", "asm", "dm", "rsm", "ho_admin"],
   },
   {
     kind: "single",
     to: "/import-export",
     label: "Import & Export",
-    icon: "⇅",
+    icon: "arrow-up-down",
     roles: ["dm", "ho_admin"],
   },
   {
     kind: "single",
     to: "/announcements",
     label: "Announcements",
-    icon: "📢",
+    icon: "megaphone",
     roles: ["spv", "asm", "dm", "rsm", "ho_admin"],
   },
   {
     kind: "single",
     to: "/administration",
     label: "Administration",
-    icon: "⚙️",
+    icon: "cog",
     roles: ["ho_admin"],
   },
   {
     kind: "single",
     to: "/notifications",
     label: "Notifikasi",
-    icon: "🔔",
+    icon: "bell",
     roles: ["spv", "asm", "dm", "rsm", "ho_admin", "distributor_admin"],
   },
 ];
@@ -120,24 +119,6 @@ function groupIsActive(group: NavGroup, pathname: string): boolean {
   );
 }
 
-// ── Chevron SVG ───────────────────────────────────────────────────────────────
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
-    >
-      <path
-        fillRule="evenodd"
-        d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1
-           0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
-
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
@@ -146,9 +127,7 @@ export default function Sidebar() {
   const qc = useQueryClient();
   const role = user?.role as Role;
 
-  // Set of group IDs that are currently expanded
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
-    // Pre-expand whichever group contains the initial route
     const initial = new Set<string>();
     for (const item of NAV_TREE) {
       if (isGroup(item) && groupIsActive(item, location.pathname)) {
@@ -158,8 +137,6 @@ export default function Sidebar() {
     return initial;
   });
 
-  // When the route changes, ensure the owning group is expanded (back/forward,
-  // direct URL access, programmatic navigation).
   useEffect(() => {
     for (const item of NAV_TREE) {
       if (isGroup(item) && groupIsActive(item, location.pathname)) {
@@ -179,13 +156,15 @@ export default function Sidebar() {
       return next;
     });
 
+  const initials = user?.username?.[0]?.toUpperCase() ?? "?";
+
   return (
     <aside className="w-60 min-h-screen bg-slate-900 flex flex-col shrink-0">
       {/* ── Brand ── */}
       <div className="px-5 py-5 border-b border-white/10 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
-            <span className="text-sm leading-none">🗺️</span>
+            <Icon name="map" className="w-4 h-4 text-white" />
           </div>
           <div>
             <p className="text-white font-bold text-sm leading-tight tracking-wide">STEP</p>
@@ -195,7 +174,7 @@ export default function Sidebar() {
       </div>
 
       {/* ── Navigation ── */}
-      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
+      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5" aria-label="Main navigation">
         {NAV_TREE.filter((item) => canSee(item, role)).map((item) => {
           if (isGroup(item)) {
             const open    = openGroups.has(item.id);
@@ -204,25 +183,27 @@ export default function Sidebar() {
 
             return (
               <div key={item.id}>
-                {/* Parent button */}
                 <button
                   onClick={() => toggleGroup(item.id)}
+                  aria-expanded={open}
                   className={`
-                    w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm
+                    w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
                     font-medium transition-all duration-150 select-none
                     ${active
                       ? "bg-white/10 text-white"
                       : "text-slate-400 hover:bg-white/[0.07] hover:text-slate-100"}
                   `}
                 >
-                  <span className="text-base leading-none shrink-0">{item.icon}</span>
+                  <Icon name={item.icon} className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-left truncate">{item.label}</span>
-                  <Chevron open={open} />
+                  <Icon
+                    name="chevron-right"
+                    className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+                  />
                 </button>
 
-                {/* Children — max-height animation; no JS animation library needed */}
                 <div
-                  style={{ maxHeight: open ? `${visible.length * 48}px` : "0px" }}
+                  style={{ maxHeight: open ? `${visible.length * 40}px` : "0px" }}
                   className="overflow-hidden transition-[max-height] duration-200 ease-in-out"
                 >
                   <div className="mt-0.5 ml-3 pl-3 border-l border-white/10 space-y-0.5 pb-1">
@@ -231,16 +212,15 @@ export default function Sidebar() {
                         key={child.to}
                         to={child.to}
                         className={({ isActive }) =>
-                          `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+                          `flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm
                            transition-all duration-150
                            ${isActive
-                             ? "bg-primary-600 text-white font-semibold shadow-sm"
+                             ? "bg-primary-600 text-white font-semibold"
                              : "text-slate-400 hover:bg-white/[0.07] hover:text-slate-100 font-normal"
                            }`
                         }
                       >
-                        {/* Bullet — small filled circle, visually lighter than an icon */}
-                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-50 shrink-0 mt-px" />
+                        <span className="w-1 h-1 rounded-full bg-current opacity-60 shrink-0" />
                         <span className="truncate">{child.label}</span>
                       </NavLink>
                     ))}
@@ -250,13 +230,12 @@ export default function Sidebar() {
             );
           }
 
-          // ── Single leaf item ──────────────────────────────────────────────
           return (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium
                  transition-all duration-150
                  ${isActive
                    ? "bg-primary-600 text-white shadow-sm"
@@ -264,7 +243,7 @@ export default function Sidebar() {
                  }`
               }
             >
-              <span className="text-base leading-none shrink-0">{item.icon}</span>
+              <Icon name={item.icon} className="w-4 h-4 shrink-0" />
               <span className="truncate">{item.label}</span>
             </NavLink>
           );
@@ -275,12 +254,12 @@ export default function Sidebar() {
       <div className="px-4 py-4 border-t border-white/10 shrink-0">
         <div className="flex items-center gap-3 mb-3">
           <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
-            {user?.username?.[0]?.toUpperCase()}
+            {initials}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-white text-sm font-medium truncate">{user?.username}</p>
-            <p className="text-slate-500 text-xs uppercase tracking-wide mt-0.5">
-              {user?.role}
+            <p className="text-slate-500 text-2xs uppercase tracking-wide mt-0.5">
+              {user?.role?.replace(/_/g, " ")}
             </p>
           </div>
         </div>
@@ -290,10 +269,10 @@ export default function Sidebar() {
             logout();
             navigate("/login", { replace: true });
           }}
-          className="w-full text-left text-slate-500 hover:text-slate-200 text-xs py-1.5
-                     transition-colors duration-150 flex items-center gap-1.5 group"
+          className="w-full text-slate-500 hover:text-slate-200 text-xs py-1.5
+                     transition-colors duration-150 flex items-center gap-2 group"
         >
-          <span className="group-hover:translate-x-0.5 transition-transform duration-150">→</span>
+          <Icon name="arrow-right-on-rectangle" className="w-4 h-4 shrink-0" />
           <span>Keluar</span>
         </button>
       </div>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import TopNav from "@/components/layout/TopNav";
+import { Icon, SkeletonTable, EmptyState } from "@/components/ui";
 import { listVisits } from "@/api/visit";
 import { useAuthStore } from "@/store/authStore";
 import type { Visit, VisitApprovalStatus } from "@/types";
@@ -10,10 +11,10 @@ const APPROVAL_STATUS_MAP: Record<VisitApprovalStatus, { label: string; cls: str
   DRAFT:             { label: "Draft",         cls: "badge-gray"   },
   SUBMITTED:         { label: "Submitted",     cls: "badge-yellow" },
   PENDING_SPV:       { label: "Menunggu SPV",  cls: "badge-yellow" },
-  SPV_APPROVED:      { label: "SPV ✓",         cls: "badge-blue"   },
-  ASM_APPROVED:      { label: "ASM ✓",         cls: "badge-blue"   },
-  DDM_APPROVED:      { label: "DDM ✓",         cls: "badge-blue"   },
-  REVISION_REQUIRED: { label: "Revisi",        cls: "badge-red"    },
+  SPV_APPROVED:      { label: "SPV Approved",  cls: "badge-blue"   },
+  ASM_APPROVED:      { label: "ASM Approved",  cls: "badge-blue"   },
+  DDM_APPROVED:      { label: "DDM Approved",  cls: "badge-blue"   },
+  REVISION_REQUIRED: { label: "Perlu Revisi",  cls: "badge-red"    },
   COMPLETED:         { label: "Selesai",       cls: "badge-green"  },
   REJECTED:          { label: "Ditolak",       cls: "badge-red"    },
 };
@@ -26,8 +27,8 @@ function ApprovalBadge({ status }: { status: string | null }) {
 
 type TabKey = "waiting" | "all";
 
-const TAB_CONFIG: { key: TabKey; label: string; status?: string }[] = [
-  { key: "waiting", label: "Menunggu SPV", status: "PENDING_SPV" },
+const TAB_CONFIG: { key: TabKey; label: string }[] = [
+  { key: "waiting", label: "Menunggu SPV" },
   { key: "all",     label: "Semua Kunjungan" },
 ];
 
@@ -36,13 +37,12 @@ export default function Visits() {
   const user      = useAuthStore((s) => s.user);
   const isDistAdm = user?.role === "distributor_admin";
 
-  const [tab,         setTab]         = useState<TabKey>(isDistAdm ? "all" : "waiting");
-  const [dateFilter,  setDateFilter]  = useState("");
+  const [tab,          setTab]          = useState<TabKey>(isDistAdm ? "all" : "waiting");
+  const [dateFilter,   setDateFilter]   = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [storeSearch, setStoreSearch] = useState("");
-  const [page,        setPage]        = useState(1);
+  const [storeSearch,  setStoreSearch]  = useState("");
+  const [page,         setPage]         = useState(1);
 
-  // Resolve active status filter: tab preset wins, unless user picked a specific status
   const activeStatus = tab === "waiting" && !statusFilter
     ? "PENDING_SPV"
     : statusFilter || undefined;
@@ -65,36 +65,27 @@ export default function Visits() {
   const totalPages = data ? Math.ceil(data.total / 50) : 1;
 
   const resetFilters = () => {
-    setDateFilter("");
-    setStatusFilter("");
-    setStoreSearch("");
-    setPage(1);
+    setDateFilter(""); setStatusFilter(""); setStoreSearch(""); setPage(1);
   };
-
   const hasFilters = dateFilter || statusFilter || storeSearch;
 
   return (
     <div className="flex flex-col h-full">
       <TopNav title="Visit & Demand" />
 
-      <main className="flex-1 overflow-y-auto p-6 space-y-4">
-
-        {/* ── Tabs ───────────────────────────────────────────────── */}
+      <main className="flex-1 overflow-y-auto">
+        {/* ── Tabs ── */}
         {!isDistAdm && (
-          <div className="flex border-b border-slate-200">
+          <div className="tabs px-6">
             {TAB_CONFIG.map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => { setTab(key); setStatusFilter(""); setPage(1); }}
-                className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  tab === key
-                    ? "border-primary-600 text-primary-600"
-                    : "border-transparent text-slate-500 hover:text-slate-700"
-                }`}
+                className={`tab ${tab === key ? "tab-active" : ""}`}
               >
                 {label}
                 {key === "waiting" && data && tab === "waiting" && data.total > 0 && (
-                  <span className="ml-2 bg-yellow-100 text-yellow-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                  <span className="ml-2 badge-yellow text-2xs">
                     {data.total}
                   </span>
                 )}
@@ -103,30 +94,32 @@ export default function Visits() {
           </div>
         )}
 
-        {/* ── Filters ────────────────────────────────────────────── */}
-        <div className="flex gap-3 flex-wrap items-center">
+        {/* ── Filters ── */}
+        <div className="filter-bar">
+          <div className="search-bar w-52">
+            <Icon name="search" />
+            <input
+              type="text"
+              placeholder="Cari nama toko..."
+              value={storeSearch}
+              onChange={(e) => { setStoreSearch(e.target.value); setPage(1); }}
+            />
+          </div>
+
           <input
             type="date"
-            className="input w-44 text-sm"
+            className="input w-44"
             value={dateFilter}
             onChange={(e) => { setDateFilter(e.target.value); setPage(1); }}
           />
 
-          <input
-            type="text"
-            className="input w-52 text-sm"
-            placeholder="Cari nama toko..."
-            value={storeSearch}
-            onChange={(e) => { setStoreSearch(e.target.value); setPage(1); }}
-          />
-
           {tab === "all" && (
             <select
-              className="input w-52 text-sm"
+              className="input w-52"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             >
-              <option value="">Semua Status Approval</option>
+              <option value="">Semua Status</option>
               <option value="PENDING_SPV">Menunggu SPV</option>
               <option value="SPV_APPROVED">SPV Approved</option>
               <option value="ASM_APPROVED">ASM Approved</option>
@@ -139,115 +132,127 @@ export default function Visits() {
 
           {hasFilters && (
             <button
-              className="text-xs text-slate-400 hover:text-slate-600 underline"
+              className="btn-ghost btn-sm text-slate-400"
               onClick={resetFilters}
             >
-              Reset filter
+              <Icon name="x-mark" className="w-3.5 h-3.5" />
+              Reset
             </button>
           )}
 
           <div className="ml-auto flex items-center gap-2">
             {isFetching && (
-              <span className="text-slate-400 text-xs animate-pulse">●</span>
+              <Icon name="arrow-path" className="w-4 h-4 text-slate-400 animate-spin" />
             )}
-            <span className="text-xs text-slate-400">
-              {data ? `${data.total} kunjungan` : ""}
+            <span className="text-xs text-slate-400 tabular-nums">
+              {data ? `${data.total.toLocaleString()} kunjungan` : ""}
             </span>
           </div>
         </div>
 
-        {/* ── Table ──────────────────────────────────────────────── */}
-        <div className="card overflow-x-auto">
+        {/* ── Table ── */}
+        <div className="p-6 space-y-4">
           {isLoading ? (
-            <p className="text-sm text-slate-400 p-4">Memuat data...</p>
+            <SkeletonTable rows={8} cols={7} />
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  <th className="text-left py-2 text-xs font-medium text-slate-400 pr-4">Tanggal</th>
-                  <th className="text-left py-2 text-xs font-medium text-slate-400 pr-4">Salesman</th>
-                  <th className="text-left py-2 text-xs font-medium text-slate-400 pr-4">Toko</th>
-                  <th className="text-right py-2 text-xs font-medium text-slate-400 pr-4">Total Demand</th>
-                  <th className="text-left py-2 text-xs font-medium text-slate-400 pr-4">EC</th>
-                  <th className="text-left py-2 text-xs font-medium text-slate-400 pr-4">Durasi</th>
-                  <th className="text-left py-2 text-xs font-medium text-slate-400">Status Approval</th>
-                  <th className="py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {visits.length === 0 ? (
+            <div className="table-container">
+              <table className="table">
+                <thead>
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">
-                      {tab === "waiting"
-                        ? "Tidak ada kunjungan menunggu persetujuan."
-                        : "Tidak ada data kunjungan."}
-                    </td>
+                    <th>Tanggal</th>
+                    <th>Salesman</th>
+                    <th>Toko</th>
+                    <th className="text-right">Total Demand</th>
+                    <th>EC</th>
+                    <th>Durasi</th>
+                    <th>Status</th>
+                    <th />
                   </tr>
-                ) : (
-                  visits.map((v: Visit) => (
-                    <tr
-                      key={v.visit_id}
-                      className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer"
-                      onClick={() => navigate(`/visits/${v.visit_id}`)}
-                    >
-                      <td className="py-3 text-slate-600 pr-4">{v.visit_date}</td>
-                      <td className="py-3 font-medium text-slate-700 pr-4">
-                        {v.salesman_name ?? v.salesman_sk}
-                      </td>
-                      <td className="py-3 text-slate-600 pr-4">
-                        {v.store_name ?? v.outlet_sk ?? "—"}
-                      </td>
-                      <td className="py-3 text-right font-medium text-slate-700 pr-4">
-                        {v.total_demand != null
-                          ? `Rp ${v.total_demand.toLocaleString("id-ID")}`
-                          : "—"}
-                      </td>
-                      <td className="py-3 pr-4">
-                        {v.effective_call === "YES" ? (
-                          <span className="badge-green">Efektif</span>
-                        ) : v.effective_call === "NO" ? (
-                          <span className="badge-gray">Tidak</span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-slate-500 pr-4">
-                        {v.duration_minutes != null ? `${v.duration_minutes} mnt` : "—"}
-                      </td>
-                      <td className="py-3">
-                        <ApprovalBadge status={v.approval_status} />
-                      </td>
-                      <td className="py-3 pl-4">
-                        <span className="text-xs text-primary-600 hover:underline">Detail →</span>
+                </thead>
+                <tbody>
+                  {visits.length === 0 ? (
+                    <tr>
+                      <td colSpan={8}>
+                        <EmptyState
+                          icon={tab === "waiting" ? "check-circle" : "list-bullet"}
+                          title={tab === "waiting" ? "Tidak ada kunjungan menunggu persetujuan" : "Tidak ada data kunjungan"}
+                          description={hasFilters ? "Coba ubah atau hapus filter yang aktif." : undefined}
+                        />
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    visits.map((v: Visit) => (
+                      <tr
+                        key={v.visit_id}
+                        className="cursor-pointer"
+                        onClick={() => navigate(`/visits/${v.visit_id}`)}
+                      >
+                        <td className="text-slate-500 tabular-nums">{v.visit_date}</td>
+                        <td className="font-medium text-slate-800">
+                          {v.salesman_name ?? v.salesman_sk}
+                        </td>
+                        <td className="text-slate-600 max-w-[200px] truncate">
+                          {v.store_name ?? v.outlet_sk ?? "—"}
+                        </td>
+                        <td className="text-right font-medium text-slate-700 tabular-nums">
+                          {v.total_demand != null
+                            ? `Rp ${v.total_demand.toLocaleString("id-ID")}`
+                            : "—"}
+                        </td>
+                        <td>
+                          {v.effective_call === "YES" ? (
+                            <span className="badge-green">Efektif</span>
+                          ) : v.effective_call === "NO" ? (
+                            <span className="badge-gray">Tidak</span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="text-slate-500 tabular-nums">
+                          {v.duration_minutes != null ? `${v.duration_minutes} mnt` : "—"}
+                        </td>
+                        <td>
+                          <ApprovalBadge status={v.approval_status} />
+                        </td>
+                        <td>
+                          <Icon name="chevron-right" className="w-4 h-4 text-slate-300 group-hover:text-primary-600" />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ── Pagination ── */}
+          {data && data.total > 50 && (
+            <div className="pagination">
+              <span>{data.total.toLocaleString()} kunjungan total</span>
+              <div className="flex items-center gap-2">
+                <button
+                  className="pagination-btn"
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  <Icon name="chevron-left" className="w-4 h-4" />
+                  Sebelumnya
+                </button>
+                <span className="text-xs text-slate-500 tabular-nums">
+                  Hal. {page} / {totalPages}
+                </span>
+                <button
+                  className="pagination-btn"
+                  disabled={!data.has_next}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Berikutnya
+                  <Icon name="chevron-right" className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           )}
         </div>
-
-        {/* ── Pagination ─────────────────────────────────────────── */}
-        {data && data.total > 50 && (
-          <div className="flex justify-center items-center gap-3">
-            <button
-              className="btn-secondary text-sm"
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              ← Sebelumnya
-            </button>
-            <span className="text-sm text-slate-500">Hal. {page} / {totalPages}</span>
-            <button
-              className="btn-secondary text-sm"
-              disabled={!data.has_next}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Berikutnya →
-            </button>
-          </div>
-        )}
       </main>
     </div>
   );
