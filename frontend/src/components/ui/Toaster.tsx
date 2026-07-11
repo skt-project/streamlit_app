@@ -27,23 +27,29 @@ const ICON_CLS_MAP: Record<ToastType, string> = {
 export default function Toaster() {
   const { toasts, dismiss } = useToastStore();
 
-  if (toasts.length === 0) return null;
-
+  // Always render the container so aria-live region is in the DOM before toasts appear.
+  // Screen readers only announce additions to live regions they've already seen.
   return (
-    <div className="toast-container" role="region" aria-label="Notifikasi">
+    <div
+      className="toast-container"
+      aria-live="polite"
+      aria-atomic="false"
+      aria-label="Notifikasi sistem"
+    >
       {toasts.map((t) => (
-        <div key={t.id} className={CLS_MAP[t.type]}>
+        <div key={t.id} className={CLS_MAP[t.type]} role={t.type === "error" ? "alert" : "status"}>
           <Icon
             name={ICON_MAP[t.type]}
             className={`toast-icon ${ICON_CLS_MAP[t.type]}`}
+            aria-hidden={true}
           />
           <p className="flex-1 text-sm leading-snug">{t.message}</p>
           <button
             onClick={() => dismiss(t.id)}
             className="shrink-0 text-current opacity-50 hover:opacity-100 transition-opacity"
-            aria-label="Tutup"
+            aria-label="Tutup notifikasi"
           >
-            <Icon name="x-mark" className="w-4 h-4" />
+            <Icon name="x-mark" className="w-4 h-4" aria-hidden={true} />
           </button>
         </div>
       ))}
