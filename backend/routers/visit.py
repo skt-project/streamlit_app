@@ -1161,7 +1161,7 @@ def download_pdf(
         sig_entries = [
             ("Salesman",          visit_out.salesman_name),
             ("Supervisor (SPV)",  visit_out.spv_username),
-            ("Distributor Admin", visit_out.ddm_username),
+            ("Distributor Manager", visit_out.ddm_username),
         ]
         for si2, (s_role, s_name) in enumerate(sig_entries):
             bx2 = 15 + si2 * (sw + sg)
