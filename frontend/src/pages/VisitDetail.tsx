@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
+import { Icon, Skeleton, EmptyState } from "@/components/ui";
+import { toast } from "@/store/toastStore";
 import { getVisit, approveVisit, rejectVisit, updateFinalQty, updateStorePrice, downloadVisitPdf } from "@/api/visit";
 import { useAuthStore } from "@/store/authStore";
 import type { Visit, VisitApprovalStatus, VisitItem } from "@/types";
@@ -59,6 +61,56 @@ function canEditFinalQty(approvalStatus: string | null, role: string): boolean {
   return false;
 }
 
+// ── Loading skeleton ──────────────────────────────────────────────────────────
+
+function VisitDetailSkeleton() {
+  return (
+    <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-7 w-64" />
+            <Skeleton className="h-4 w-48" />
+          </div>
+          <Skeleton className="h-6 w-28 rounded-full" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="card space-y-4">
+              <Skeleton className="h-4 w-32" />
+              <div className="grid grid-cols-2 gap-4">
+                {[1,2,3,4,5,6].map(i => (
+                  <div key={i} className="space-y-1.5">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-4 w-32" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="card space-y-3">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-48 w-full" />
+            </div>
+          </div>
+          <div className="card space-y-4">
+            <Skeleton className="h-4 w-28" />
+            {[1,2].map(i => (
+              <div key={i} className="flex gap-3">
+                <Skeleton className="w-6 h-6 rounded-full shrink-0" />
+                <div className="space-y-1.5 flex-1">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function VisitDetail() {
@@ -73,14 +125,12 @@ export default function VisitDetail() {
   const [rejectNotes, setRejectNotes] = useState("");
   const [pdfLoading,  setPdfLoading]  = useState(false);
 
-  // Qty & Price edit state — keyed by sku_id
   const [finalQtyMap,  setFinalQtyMap]  = useState<Record<string, number>>({});
   const [priceMap,     setPriceMap]     = useState<Record<string, number>>({});
   const [fqtyEditing,  setFqtyEditing]  = useState(false);
   const [fqtyDirty,    setFqtyDirty]    = useState(false);
   const [priceDirty,   setPriceDirty]   = useState(false);
   const [isSaving,     setIsSaving]     = useState(false);
-  const [saveError,    setSaveError]    = useState(false);
 
   const { data: visit, isLoading, error } = useQuery<Visit>({
     queryKey: ["visit", visitId],
@@ -88,8 +138,6 @@ export default function VisitDetail() {
     enabled:  !!visitId,
   });
 
-  // Reseed maps when server data changes (updated_at changes after any mutation).
-  // Guard with dirty flags so in-progress edits are never overwritten by a background refetch.
   useEffect(() => {
     if (visit && !fqtyDirty && !priceDirty && visit.items.length > 0) {
       const fqInit: Record<string, number> = {};
@@ -111,17 +159,23 @@ export default function VisitDetail() {
 
   const approveMut = useMutation({
     mutationFn: () => approveVisit(visitId!),
-    onSuccess:  invalidate,
+    onSuccess:  () => { invalidate(); toast.success("Kunjungan berhasil disetujui."); },
+    onError:    () => toast.error("Gagal menyetujui. Coba lagi."),
   });
 
   const rejectMut = useMutation({
     mutationFn: () => rejectVisit(visitId!, rejectNotes),
-    onSuccess:  () => { invalidate(); setRejectOpen(false); setRejectNotes(""); },
+    onSuccess:  () => {
+      invalidate();
+      setRejectOpen(false);
+      setRejectNotes("");
+      toast.success("Permintaan revisi dikirim.");
+    },
+    onError: () => toast.error("Gagal mengirim revisi."),
   });
 
   const handleSave = async () => {
     setIsSaving(true);
-    setSaveError(false);
     try {
       await updateFinalQty(
         visitId!,
@@ -131,16 +185,15 @@ export default function VisitDetail() {
         const priceItems = Object.entries(priceMap)
           .filter(([, p]) => p > 0)
           .map(([sku_id, price_for_store]) => ({ sku_id, price_for_store }));
-        if (priceItems.length > 0) {
-          await updateStorePrice(visitId!, priceItems);
-        }
+        if (priceItems.length > 0) await updateStorePrice(visitId!, priceItems);
       }
       setFqtyDirty(false);
       setPriceDirty(false);
       setFqtyEditing(false);
       invalidate();
+      toast.success("Perubahan berhasil disimpan.");
     } catch {
-      setSaveError(true);
+      toast.error("Gagal menyimpan. Coba lagi.");
     } finally {
       setIsSaving(false);
     }
@@ -150,7 +203,6 @@ export default function VisitDetail() {
     setFqtyEditing(false);
     setFqtyDirty(false);
     setPriceDirty(false);
-    setSaveError(false);
     if (visit) {
       const fqReset: Record<string, number> = {};
       const prReset: Record<string, number> = {};
@@ -165,9 +217,14 @@ export default function VisitDetail() {
 
   const handlePdfDownload = async () => {
     setPdfLoading(true);
-    try { await downloadVisitPdf(visitId!); }
-    catch { alert("Gagal mengunduh PDF. Coba lagi."); }
-    finally { setPdfLoading(false); }
+    try {
+      await downloadVisitPdf(visitId!);
+      toast.success("PDF berhasil diunduh.");
+    } catch {
+      toast.error("Gagal mengunduh PDF. Coba lagi.");
+    } finally {
+      setPdfLoading(false);
+    }
   };
 
   // ── Loading / Error ────────────────────────────────────────────────────────
@@ -176,7 +233,7 @@ export default function VisitDetail() {
     return (
       <div className="flex flex-col h-full">
         <TopNav title="Detail Kunjungan" />
-        <div className="flex-1 flex items-center justify-center text-slate-400">Memuat data...</div>
+        <VisitDetailSkeleton />
       </div>
     );
   }
@@ -185,7 +242,18 @@ export default function VisitDetail() {
     return (
       <div className="flex flex-col h-full">
         <TopNav title="Detail Kunjungan" />
-        <div className="flex-1 flex items-center justify-center text-red-500">Kunjungan tidak ditemukan.</div>
+        <div className="flex-1 flex items-center justify-center">
+          <EmptyState
+            icon="exclamation-circle"
+            title="Kunjungan tidak ditemukan"
+            description="Data kunjungan tidak dapat dimuat."
+            action={
+              <button className="btn-secondary btn-sm" onClick={() => navigate("/visits")}>
+                Kembali ke Daftar
+              </button>
+            }
+          />
+        </div>
       </div>
     );
   }
@@ -209,11 +277,29 @@ export default function VisitDetail() {
   const canDownloadPdf  = ["spv", "asm", "ddm", "ho_admin", "distributor_admin"].includes(role);
   const isDirty         = fqtyDirty || priceDirty;
 
-  // Count rows where final qty exceeds warehouse stock — for summary warning
   const stockWarningCount = visit.items.filter((i) => {
     const effQty = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
     return i.warehouse_stock_qty != null && effQty > i.warehouse_stock_qty;
   }).length;
+
+  // ── Approval timeline steps ────────────────────────────────────────────────
+
+  const timelineSteps = [
+    {
+      stage: "SPV",
+      approver: visit.spv_username,
+      approvedAt: visit.spv_approved_at,
+      active: ["PENDING_SPV", "SUBMITTED"].includes(visit.approval_status ?? ""),
+      done:   ["SPV_APPROVED", "COMPLETED"].includes(visit.approval_status ?? ""),
+    },
+    {
+      stage: "Distributor Admin",
+      approver: visit.ddm_username,
+      approvedAt: visit.ddm_approved_at,
+      active: visit.approval_status === "SPV_APPROVED",
+      done:   visit.approval_status === "COMPLETED",
+    },
+  ];
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -221,22 +307,27 @@ export default function VisitDetail() {
     <div className="flex flex-col h-full">
       <TopNav
         title="Detail Kunjungan"
+        subtitle={visit.store_name ?? visit.outlet_sk ?? undefined}
         actions={
           <div className="flex items-center gap-2">
             {canDownloadPdf && (
               <button
-                className="btn-secondary text-sm flex items-center gap-1.5"
+                className="btn-secondary btn-sm"
                 onClick={handlePdfDownload}
                 disabled={pdfLoading}
               >
-                {pdfLoading ? "Mengunduh..." : "⬇ Unduh PDF"}
+                {pdfLoading
+                  ? <Icon name="arrow-path" className="w-4 h-4 animate-spin" />
+                  : <Icon name="arrow-down-tray" className="w-4 h-4" />}
+                {pdfLoading ? "Mengunduh…" : "Unduh PDF"}
                 {visit.download_count > 0 && (
-                  <span className="text-xs text-slate-400">({visit.download_count}×)</span>
+                  <span className="text-2xs text-slate-400 ml-0.5">({visit.download_count}×)</span>
                 )}
               </button>
             )}
-            <button className="btn-secondary text-sm" onClick={() => navigate("/visits")}>
-              ← Kembali
+            <button className="btn-secondary btn-sm" onClick={() => navigate("/visits")}>
+              <Icon name="arrow-left" className="w-4 h-4" />
+              Kembali
             </button>
           </div>
         }
@@ -246,31 +337,38 @@ export default function VisitDetail() {
         <div className="max-w-5xl mx-auto space-y-6">
 
           {/* ── Visit header ──────────────────────────────────── */}
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-xs text-slate-400 font-mono mb-1">{visit.visit_id}</p>
-              <h2 className="text-xl font-bold text-slate-800">
-                {visit.store_name ?? visit.outlet_sk ?? "Toko Tidak Diketahui"}
-              </h2>
-              <p className="text-slate-500 mt-1">
-                <span className="font-medium">{visit.salesman_name ?? visit.salesman_sk}</span>
-                {visit.distributor_code && (
-                  <span className="text-slate-400"> · {visit.distributor_code}</span>
-                )}
-                {" · "}{visit.visit_date}
-              </p>
+          <div className="card">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="flex items-start gap-4">
+                <div className="icon-badge icon-badge-blue icon-badge-lg shrink-0">
+                  <Icon name="building-storefront" className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-2xs text-slate-400 font-mono mb-1">{visit.visit_id}</p>
+                  <h2 className="text-xl font-bold text-slate-900 leading-tight">
+                    {visit.store_name ?? visit.outlet_sk ?? "Toko Tidak Diketahui"}
+                  </h2>
+                  <p className="text-sm text-slate-500 mt-1">
+                    <span className="font-medium text-slate-700">{visit.salesman_name ?? visit.salesman_sk}</span>
+                    {visit.distributor_code && <span className="text-slate-400"> · {visit.distributor_code}</span>}
+                    <span className="text-slate-400"> · {visit.visit_date}</span>
+                  </p>
+                </div>
+              </div>
+              <ApprovalBadge status={visit.approval_status} />
             </div>
-            <ApprovalBadge status={visit.approval_status} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-            {/* ── Left: visit info + items ───────────────────── */}
+            {/* ── Left: info + items ─────────────────────────── */}
             <div className="lg:col-span-2 space-y-6">
 
-              {/* Visit metadata */}
+              {/* Metadata */}
               <div className="card">
-                <h3 className="text-sm font-semibold text-slate-700 mb-5">Info Kunjungan</h3>
+                <div className="section-heading mb-5">
+                  <p className="section-heading-title">Info Kunjungan</p>
+                </div>
                 <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
                   <div>
                     <dt className="text-slate-400 text-xs mb-0.5">Salesman</dt>
@@ -296,20 +394,19 @@ export default function VisitDetail() {
                   </div>
                   <div>
                     <dt className="text-slate-400 text-xs mb-0.5">Jarak GPS (check-in)</dt>
-                    <dd className={`font-medium ${visit.gps_warning ? "text-amber-600" : "text-slate-700"}`}>
-                      {visit.checkin_distance_m != null
-                        ? `${Math.round(visit.checkin_distance_m)} m${visit.gps_warning ? " ⚠" : ""}`
-                        : "—"}
+                    <dd className={`font-medium flex items-center gap-1 ${visit.gps_warning ? "text-amber-600" : "text-slate-700"}`}>
+                      {visit.checkin_distance_m != null ? `${Math.round(visit.checkin_distance_m)} m` : "—"}
+                      {visit.gps_warning && <Icon name="exclamation-triangle" className="w-3.5 h-3.5 text-amber-500" />}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-slate-400 text-xs mb-0.5">Total Demand (SE)</dt>
-                    <dd className="font-semibold text-primary-700 text-base">{fmtRp(visit.total_demand)}</dd>
+                    <dd className="font-semibold text-primary-700 text-base tabular-nums">{fmtRp(visit.total_demand)}</dd>
                   </div>
                   {(visit.final_demand != null || fqtyDirty) && (
                     <div>
                       <dt className="text-slate-400 text-xs mb-0.5">Total Demand (Final)</dt>
-                      <dd className="font-semibold text-green-700 text-base">{fmtRp(liveFinalDemand)}</dd>
+                      <dd className="font-semibold text-emerald-700 text-base tabular-nums">{fmtRp(liveFinalDemand)}</dd>
                     </div>
                   )}
                   <div>
@@ -319,7 +416,7 @@ export default function VisitDetail() {
                         <span className="badge-green">YA</span>
                       ) : visit.effective_call === "NO" ? (
                         <span className="badge-gray">TIDAK</span>
-                      ) : <span className="text-slate-400">—</span>}
+                      ) : <span className="text-slate-400 text-sm">—</span>}
                     </dd>
                   </div>
                   {visit.brand_group && (
@@ -344,18 +441,20 @@ export default function VisitDetail() {
                 )}
                 {visit.rejection_notes && (
                   <div className="mt-5 pt-4 border-t border-slate-100">
-                    <p className="text-xs text-red-500 mb-1">Catatan Revisi</p>
-                    <p className="text-sm text-red-700 leading-relaxed">{visit.rejection_notes}</p>
+                    <div className="rail-red p-3 rounded-lg">
+                      <p className="text-xs font-semibold text-red-600 mb-1">Catatan Revisi</p>
+                      <p className="text-sm text-red-700 leading-relaxed">{visit.rejection_notes}</p>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Demand items */}
+              {/* Demand items table */}
               <div className="card">
-                <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <div className="section-heading mb-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-700">Detail Demand</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                    <p className="section-heading-title">Detail Demand</p>
+                    <p className="section-heading-sub">
                       {visit.items.length} SKU · {totalQty} pcs SE
                       {showFinalQtyCol && ` · ${totalFinalQty} pcs Final`}
                     </p>
@@ -363,25 +462,27 @@ export default function VisitDetail() {
                   <div className="flex items-center gap-2">
                     {canEditFinalQty(visit.approval_status, role) && !fqtyEditing && (
                       <button
-                        className="btn-secondary text-xs px-3 py-1.5"
+                        className="btn-secondary btn-sm"
                         onClick={() => setFqtyEditing(true)}
                       >
-                        ✎ {isDistAdm ? "Edit Qty & Harga" : "Edit Qty Final"}
+                        <Icon name="pencil" className="w-3.5 h-3.5" />
+                        {isDistAdm ? "Edit Qty & Harga" : "Edit Qty Final"}
                       </button>
                     )}
                     {fqtyEditing && (
                       <div className="flex gap-2">
                         <button
-                          className="btn-primary text-xs px-3 py-1.5"
+                          className="btn-primary btn-sm"
                           disabled={isSaving || !isDirty}
                           onClick={handleSave}
                         >
-                          {isSaving ? "Menyimpan..." : "Simpan"}
+                          {isSaving
+                            ? <Icon name="arrow-path" className="w-3.5 h-3.5 animate-spin" />
+                            : <Icon name="check" className="w-3.5 h-3.5" />}
+                          {isSaving ? "Menyimpan…" : "Simpan"}
                         </button>
-                        <button
-                          className="btn-secondary text-xs px-3 py-1.5"
-                          onClick={handleCancelEdit}
-                        >
+                        <button className="btn-secondary btn-sm" onClick={handleCancelEdit}>
+                          <Icon name="x-mark" className="w-3.5 h-3.5" />
                           Batal
                         </button>
                       </div>
@@ -389,46 +490,44 @@ export default function VisitDetail() {
                   </div>
                 </div>
 
-                {/* Non-blocking stock warning banner */}
+                {/* Stock warning banner */}
                 {stockWarningCount > 0 && (
-                  <div className="mb-4 flex items-start gap-2.5 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
-                    <span className="text-amber-600 text-sm mt-0.5 flex-shrink-0">⚠</span>
+                  <div className="mb-4 flex items-start gap-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                    <Icon name="exclamation-triangle" className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm font-medium text-amber-800">Peringatan Stok Gudang</p>
-                      <p className="text-xs text-amber-700 mt-0.5">
+                      <p className="text-sm font-semibold text-amber-800">Peringatan Stok Gudang</p>
+                      <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
                         {stockWarningCount} produk memiliki Qty Final melebihi stok gudang distributor.
-                        Persetujuan tetap dapat dilanjutkan — ini hanya peringatan informasi.
+                        Persetujuan tetap dapat dilanjutkan.
                       </p>
                     </div>
                   </div>
                 )}
 
                 {visit.items.length === 0 ? (
-                  <p className="text-sm text-slate-400 text-center py-8">Tidak ada item demand.</p>
+                  <EmptyState icon="inbox" title="Tidak ada item" description="Tidak ada item demand untuk kunjungan ini." />
                 ) : (
-                  <div className="overflow-x-auto -mx-1">
-                    <table className={`w-full text-sm ${showPriceCol ? "min-w-[920px]" : "min-w-[600px]"}`}>
+                  <div className="table-container -mx-1">
+                    <table className={`table ${showPriceCol ? "min-w-[920px]" : "min-w-[600px]"}`}>
                       <thead>
-                        <tr className="border-b-2 border-slate-200 bg-slate-50/70">
-                          <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 rounded-tl">Kode SKU</th>
-                          <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500">Nama Produk</th>
-                          <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500">Brand</th>
-                          <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">Qty SE</th>
+                        <tr>
+                          <th>Kode SKU</th>
+                          <th>Produk</th>
+                          <th>Brand</th>
+                          <th className="text-right">Qty SE</th>
                           {showFinalQtyCol && (
-                            <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">
-                              Qty Final {fqtyEditing && <span className="text-primary-500">✎</span>}
+                            <th className="text-right">
+                              Qty Final{fqtyEditing && <Icon name="pencil" className="inline w-3 h-3 ml-1 text-primary-400" />}
                             </th>
                           )}
-                          <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">Stok Gudang</th>
-                          <th className={`text-right py-3 px-3 text-xs font-semibold text-slate-500 ${!showPriceCol ? "rounded-tr" : ""}`}>Demand</th>
+                          <th className="text-right">Stok Gudang</th>
+                          <th className="text-right">Demand</th>
                           {showPriceCol && (
-                            <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500">
-                              Harga per Toko {fqtyEditing && isDistAdm && <span className="text-green-500">✎</span>}
+                            <th className="text-right">
+                              Harga/Toko{fqtyEditing && isDistAdm && <Icon name="pencil" className="inline w-3 h-3 ml-1 text-emerald-400" />}
                             </th>
                           )}
-                          {showPriceCol && (
-                            <th className="text-right py-3 px-3 text-xs font-semibold text-slate-500 rounded-tr">Total Harga</th>
-                          )}
+                          {showPriceCol && <th className="text-right">Total Harga</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -443,84 +542,68 @@ export default function VisitDetail() {
                           return (
                             <tr
                               key={item.visit_item_id}
-                              className={`border-b border-slate-100 transition-colors ${
-                                hasStockWarn
-                                  ? "bg-amber-50 hover:bg-amber-100/70"
-                                  : changed
-                                  ? "bg-primary-50 hover:bg-primary-50"
-                                  : "hover:bg-slate-50"
+                              className={`transition-colors ${
+                                hasStockWarn  ? "bg-amber-50 hover:bg-amber-100/60" :
+                                changed       ? "bg-primary-50 hover:bg-primary-50" :
+                                "hover:bg-slate-50"
                               }`}
                             >
-                              <td className="py-3 px-3 font-mono text-xs text-slate-500">{item.sku_id}</td>
-                              <td className="py-3 px-3 font-medium text-slate-700">{item.sku_name ?? "—"}</td>
-                              <td className="py-3 px-3 text-slate-500">{item.brand ?? "—"}</td>
-                              <td className="py-3 px-3 text-right font-semibold text-slate-600 tabular-nums">{item.qty ?? 0}</td>
+                              <td className="font-mono text-xs text-slate-500">{item.sku_id}</td>
+                              <td className="font-medium text-slate-800">{item.sku_name ?? "—"}</td>
+                              <td className="text-slate-500">{item.brand ?? "—"}</td>
+                              <td className="text-right font-semibold text-slate-600 tabular-nums">{item.qty ?? 0}</td>
 
                               {showFinalQtyCol && (
-                                <td className="py-3 px-3 text-right">
+                                <td className="text-right">
                                   {fqtyEditing ? (
                                     <input
-                                      type="number"
-                                      min={0}
-                                      className={`w-20 text-right border rounded px-2 py-1 text-sm font-semibold tabular-nums ${
+                                      type="number" min={0}
+                                      className={`w-20 text-right border rounded px-2 py-1 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 ${
                                         hasStockWarn
                                           ? "border-amber-400 bg-amber-50 focus:ring-amber-300"
                                           : "border-slate-300 focus:ring-primary-300"
-                                      } focus:outline-none focus:ring-2`}
+                                      }`}
                                       value={finalQtyMap[item.sku_id] ?? item.final_qty ?? item.qty ?? 0}
                                       onChange={(e) => {
-                                        const v = Math.max(0, parseInt(e.target.value) || 0);
-                                        setFinalQtyMap((m) => ({ ...m, [item.sku_id]: v }));
+                                        setFinalQtyMap((m) => ({ ...m, [item.sku_id]: Math.max(0, parseInt(e.target.value) || 0) }));
                                         setFqtyDirty(true);
                                       }}
                                     />
                                   ) : (
                                     <span className={`font-semibold tabular-nums ${
                                       item.final_qty != null && item.final_qty !== item.qty
-                                        ? "text-primary-600"
-                                        : "text-slate-700"
-                                    }`}>
-                                      {effQty}
-                                    </span>
+                                        ? "text-primary-600" : "text-slate-700"
+                                    }`}>{effQty}</span>
                                   )}
                                   {hasStockWarn && (
                                     <span
-                                      className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-xs bg-amber-500 text-white rounded-full cursor-help font-bold leading-none"
-                                      title={`Qty Final (${effQty}) melebihi stok gudang distributor (${item.warehouse_stock_qty} pcs). Persetujuan tetap dapat dilanjutkan.`}
-                                    >
-                                      !
-                                    </span>
+                                      className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-2xs bg-amber-500 text-white rounded-full cursor-help font-bold leading-none"
+                                      title={`Qty Final (${effQty}) melebihi stok gudang (${item.warehouse_stock_qty} pcs).`}
+                                    >!</span>
                                   )}
                                 </td>
                               )}
 
-                              <td className={`py-3 px-3 text-right tabular-nums ${
-                                hasStockWarn ? "text-amber-700 font-medium" : "text-slate-600"
-                              }`}>
+                              <td className={`text-right tabular-nums ${hasStockWarn ? "text-amber-700 font-medium" : "text-slate-600"}`}>
                                 {item.warehouse_stock_qty != null ? item.warehouse_stock_qty : "—"}
                               </td>
-                              <td className="py-3 px-3 text-right font-semibold text-primary-700 tabular-nums">
-                                {fmtRp(effDemand)}
-                              </td>
+                              <td className="text-right font-semibold text-primary-700 tabular-nums">{fmtRp(effDemand)}</td>
 
                               {showPriceCol && (
-                                <td className="py-3 px-3 text-right">
+                                <td className="text-right">
                                   {fqtyEditing && isDistAdm ? (
                                     <input
-                                      type="number"
-                                      min={0}
-                                      step="1"
-                                      className="w-28 text-right border border-slate-300 rounded px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-green-300"
+                                      type="number" min={0} step="1"
+                                      className="w-28 text-right border border-slate-300 rounded px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-300"
                                       value={priceMap[item.sku_id] || ""}
                                       placeholder="0"
                                       onChange={(e) => {
-                                        const v = Math.max(0, parseFloat(e.target.value) || 0);
-                                        setPriceMap((m) => ({ ...m, [item.sku_id]: v }));
+                                        setPriceMap((m) => ({ ...m, [item.sku_id]: Math.max(0, parseFloat(e.target.value) || 0) }));
                                         setPriceDirty(true);
                                       }}
                                     />
                                   ) : (
-                                    <span className="tabular-nums font-semibold text-green-700">
+                                    <span className="tabular-nums font-semibold text-emerald-700">
                                       {priceVal > 0 ? fmtRp(priceVal) : "—"}
                                     </span>
                                   )}
@@ -528,7 +611,7 @@ export default function VisitDetail() {
                               )}
 
                               {showPriceCol && (
-                                <td className="py-3 px-3 text-right font-bold tabular-nums text-green-700">
+                                <td className="text-right font-bold tabular-nums text-emerald-700">
                                   {priceVal > 0 ? fmtRp(totalPrice) : "—"}
                                 </td>
                               )}
@@ -537,21 +620,15 @@ export default function VisitDetail() {
                         })}
 
                         {/* Total row */}
-                        <tr className="border-t-2 border-slate-200 bg-slate-50/50">
-                          <td colSpan={3} className="py-3 px-3 text-xs font-bold text-slate-500 uppercase tracking-wide">
-                            Total
-                          </td>
-                          <td className="py-3 px-3 text-right font-bold text-slate-800 tabular-nums">{totalQty}</td>
-                          {showFinalQtyCol && (
-                            <td className="py-3 px-3 text-right font-bold text-primary-600 tabular-nums">{totalFinalQty}</td>
-                          )}
-                          <td className="py-3 px-3 text-right text-slate-400">—</td>
-                          <td className="py-3 px-3 text-right font-bold text-primary-700 tabular-nums">
-                            {fmtRp(liveFinalDemand)}
-                          </td>
-                          {showPriceCol && <td className="py-3 px-3 text-right text-slate-400">—</td>}
+                        <tr className="border-t-2 border-slate-200 bg-slate-50/50 font-bold">
+                          <td colSpan={3} className="text-xs text-slate-500 uppercase tracking-wide">Total</td>
+                          <td className="text-right text-slate-800 tabular-nums">{totalQty}</td>
+                          {showFinalQtyCol && <td className="text-right text-primary-600 tabular-nums">{totalFinalQty}</td>}
+                          <td className="text-right text-slate-400">—</td>
+                          <td className="text-right text-primary-700 tabular-nums">{fmtRp(liveFinalDemand)}</td>
+                          {showPriceCol && <td className="text-right text-slate-400">—</td>}
                           {showPriceCol && (
-                            <td className="py-3 px-3 text-right font-bold text-green-700 tabular-nums">
+                            <td className="text-right text-emerald-700 tabular-nums">
                               {grandTotal > 0 ? fmtRp(grandTotal) : "—"}
                             </td>
                           )}
@@ -561,16 +638,10 @@ export default function VisitDetail() {
                   </div>
                 )}
 
-                {saveError && (
-                  <p className="text-xs text-red-600 mt-3 flex items-center gap-1">
-                    <span>⚠</span> Gagal menyimpan. Coba lagi.
-                  </p>
-                )}
-
                 {/* Brand summary */}
                 {brandGroups.length > 1 && (
                   <div className="mt-5 pt-4 border-t border-slate-100">
-                    <p className="text-xs font-medium text-slate-500 mb-3">Ringkasan per Brand</p>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Ringkasan per Brand</p>
                     <div className="flex flex-wrap gap-3">
                       {brandGroups.map((brand) => {
                         const brandItems  = visit.items.filter((i) => i.brand === brand);
@@ -578,11 +649,9 @@ export default function VisitDetail() {
                           (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0), 0,
                         );
                         return (
-                          <div key={brand} className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-2.5 text-sm">
-                            <p className="font-semibold text-slate-700">{brand}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {brandItems.length} SKU · {fmtRp(brandDemand)}
-                            </p>
+                          <div key={brand} className="rail-blue p-3 rounded-xl min-w-[120px]">
+                            <p className="font-semibold text-slate-800 text-sm">{brand}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">{brandItems.length} SKU · {fmtRp(brandDemand)}</p>
                           </div>
                         );
                       })}
@@ -595,56 +664,51 @@ export default function VisitDetail() {
             {/* ── Right: approval panel ─────────────────────── */}
             <div className="space-y-5">
 
-              {/* Approval timeline */}
+              {/* Timeline */}
               <div className="card">
-                <h3 className="text-sm font-semibold text-slate-700 mb-5">Alur Approval</h3>
+                <div className="section-heading mb-5">
+                  <p className="section-heading-title">Alur Approval</p>
+                </div>
                 <ol className="space-y-5">
-                  {[
-                    {
-                      stage: "SPV",
-                      approver: visit.spv_username,
-                      approvedAt: visit.spv_approved_at,
-                      active: ["PENDING_SPV", "SUBMITTED"].includes(visit.approval_status ?? ""),
-                      done:   ["SPV_APPROVED", "COMPLETED"].includes(visit.approval_status ?? ""),
-                    },
-                    {
-                      stage: "Distributor Admin",
-                      approver: visit.ddm_username,
-                      approvedAt: visit.ddm_approved_at,
-                      active: visit.approval_status === "SPV_APPROVED",
-                      done:   visit.approval_status === "COMPLETED",
-                    },
-                  ].map(({ stage, approver, approvedAt, active, done }) => (
+                  {timelineSteps.map(({ stage, approver, approvedAt, active, done }) => (
                     <li key={stage} className="flex items-start gap-3">
-                      <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold mt-0.5 ${
-                        done ? "bg-green-100 text-green-700" : active ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-400"
+                      <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 ${
+                        done ? "bg-emerald-100 text-emerald-700" :
+                        active ? "bg-amber-100 text-amber-700" :
+                        "bg-slate-100 text-slate-400"
                       }`}>
-                        {done ? "✓" : active ? "●" : "○"}
+                        {done
+                          ? <Icon name="check" className="w-3.5 h-3.5" />
+                          : active
+                          ? <Icon name="clock" className="w-3.5 h-3.5" />
+                          : <Icon name="minus" className="w-3.5 h-3.5" />}
                       </div>
                       <div>
-                        <p className={`text-sm font-medium ${done ? "text-green-700" : active ? "text-yellow-700" : "text-slate-400"}`}>
-                          {stage}
-                        </p>
-                        {approver && <p className="text-xs text-slate-600 mt-0.5">{approver}</p>}
-                        {approvedAt && <p className="text-xs text-slate-400 mt-0.5">{fmt(approvedAt)}</p>}
-                        {active && !approver && <p className="text-xs text-yellow-600 mt-0.5">Menunggu persetujuan</p>}
+                        <p className={`text-sm font-semibold ${
+                          done ? "text-emerald-700" : active ? "text-amber-700" : "text-slate-400"
+                        }`}>{stage}</p>
+                        {approver    && <p className="text-xs text-slate-600 mt-0.5">{approver}</p>}
+                        {approvedAt  && <p className="text-xs text-slate-400 mt-0.5">{fmt(approvedAt)}</p>}
+                        {active && !approver && <p className="text-xs text-amber-600 mt-0.5">Menunggu persetujuan</p>}
                       </div>
                     </li>
                   ))}
                 </ol>
 
                 {visit.approval_status === "REVISION_REQUIRED" && (
-                  <div className="mt-5 pt-4 border-t border-slate-100 bg-red-50 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-red-600 mb-1">Diminta Revisi</p>
-                    <p className="text-xs text-red-700">{visit.rejection_notes}</p>
+                  <div className="mt-5 pt-4 border-t border-slate-100">
+                    <div className="rail-red p-3 rounded-xl">
+                      <p className="text-xs font-semibold text-red-600 mb-1">Diminta Revisi</p>
+                      <p className="text-xs text-red-700 leading-relaxed">{visit.rejection_notes}</p>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Approve / Reject actions */}
+              {/* Action buttons */}
               {(canApprove(visit.approval_status, role) || canReject(visit.approval_status, role)) && (
                 <div className="card space-y-3">
-                  <h3 className="text-sm font-semibold text-slate-700">Tindakan</h3>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tindakan</p>
 
                   {canApprove(visit.approval_status, role) && (
                     <button
@@ -652,11 +716,11 @@ export default function VisitDetail() {
                       disabled={approveMut.isPending}
                       onClick={() => approveMut.mutate()}
                     >
-                      {approveMut.isPending ? "Menyetujui..." : "✓ Setujui Kunjungan"}
+                      {approveMut.isPending
+                        ? <Icon name="arrow-path" className="w-4 h-4 animate-spin" />
+                        : <Icon name="check-circle" className="w-4 h-4" />}
+                      {approveMut.isPending ? "Menyetujui…" : "Setujui Kunjungan"}
                     </button>
-                  )}
-                  {approveMut.isError && (
-                    <p className="text-xs text-red-600">Gagal menyetujui. Coba lagi.</p>
                   )}
 
                   {canReject(visit.approval_status, role) && !rejectOpen && (
@@ -664,7 +728,8 @@ export default function VisitDetail() {
                       className="btn-secondary w-full text-red-600 border-red-200 hover:bg-red-50"
                       onClick={() => setRejectOpen(true)}
                     >
-                      ✗ Minta Revisi
+                      <Icon name="arrow-uturn-left" className="w-4 h-4" />
+                      Minta Revisi
                     </button>
                   )}
 
@@ -673,7 +738,7 @@ export default function VisitDetail() {
                       <textarea
                         className="input text-sm resize-none"
                         rows={3}
-                        placeholder="Tulis alasan revisi..."
+                        placeholder="Tulis alasan revisi…"
                         value={rejectNotes}
                         onChange={(e) => setRejectNotes(e.target.value)}
                         autoFocus
@@ -684,7 +749,7 @@ export default function VisitDetail() {
                           disabled={!rejectNotes.trim() || rejectMut.isPending}
                           onClick={() => rejectMut.mutate()}
                         >
-                          {rejectMut.isPending ? "Mengirim..." : "Kirim Revisi"}
+                          {rejectMut.isPending ? "Mengirim…" : "Kirim Revisi"}
                         </button>
                         <button
                           className="btn-secondary flex-1 text-sm"
@@ -698,22 +763,28 @@ export default function VisitDetail() {
                 </div>
               )}
 
-              {/* Distributor Admin — informational notice when no further action available */}
+              {/* Dist admin: completed notice */}
               {isDistAdm && visit.approval_status === "COMPLETED" && (
-                <div className="card bg-green-50 border border-green-100">
-                  <p className="text-sm text-green-700 font-medium mb-1">Kunjungan Selesai</p>
-                  <p className="text-xs text-green-600">
-                    Kunjungan ini telah disetujui penuh. Anda dapat mengunduh PDF untuk keperluan distribusi.
+                <div className="card rail-green p-4 rounded-xl">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon name="check-circle" className="w-4 h-4 text-emerald-600" />
+                    <p className="text-sm font-semibold text-emerald-700">Kunjungan Selesai</p>
+                  </div>
+                  <p className="text-xs text-emerald-600 leading-relaxed">
+                    Kunjungan telah disetujui penuh. Unduh PDF untuk keperluan distribusi.
                   </p>
                 </div>
               )}
 
-              {/* Distributor Admin — awaiting SPV notice */}
+              {/* Dist admin: awaiting SPV */}
               {isDistAdm && !["SPV_APPROVED", "COMPLETED"].includes(visit.approval_status ?? "") && (
                 <div className="card bg-slate-50 border border-slate-100">
-                  <p className="text-sm text-slate-600 font-medium mb-1">Menunggu Persetujuan SPV</p>
-                  <p className="text-xs text-slate-500">
-                    Kunjungan ini belum disetujui SPV. Anda dapat melakukan tindakan setelah status menjadi Disetujui SPV.
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon name="clock" className="w-4 h-4 text-slate-400" />
+                    <p className="text-sm font-semibold text-slate-600">Menunggu SPV</p>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Kunjungan ini belum disetujui SPV. Tindakan tersedia setelah status menjadi Disetujui SPV.
                   </p>
                 </div>
               )}

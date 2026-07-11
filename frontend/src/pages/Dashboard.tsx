@@ -5,12 +5,12 @@ import TopNav from "@/components/layout/TopNav";
 import { Icon, SkeletonStatCards, Skeleton, EmptyState } from "@/components/ui";
 import { api } from "@/api/client";
 import { format } from "date-fns";
+import { id as idLocale } from "date-fns/locale";
 import type { ComplyBrand, LeaderboardRow } from "@/types";
 
 // ── API ───────────────────────────────────────────────────────────────────────
 const fetchDashboard = () => api.get("/dashboard/web").then((r) => r.data);
 
-// ── Derive comply status from pct ──────────────────────────────────────────────
 function complyStatus(pct: number): ComplyBrand["comply_status"] {
   if (pct >= 100) return "Over Target";
   if (pct >= 80)  return "Comply";
@@ -18,43 +18,49 @@ function complyStatus(pct: number): ComplyBrand["comply_status"] {
   return "No Data";
 }
 
-// ── KPI Card ─────────────────────────────────────────────────────────────────
-const ACCENT: Record<string, { border: string; value: string }> = {
-  blue:   { border: "border-l-blue-500",    value: "text-blue-600"    },
-  green:  { border: "border-l-emerald-500", value: "text-emerald-600" },
-  yellow: { border: "border-l-amber-500",   value: "text-amber-600"   },
-  red:    { border: "border-l-red-500",     value: "text-red-600"     },
-};
-
-function KpiCard({
-  label,
-  value,
-  sub,
-  color = "blue",
-}: {
+// ── KPI Tile (Gojek service-icon style) ───────────────────────────────────────
+interface KpiTileProps {
   label: string;
   value: string | number;
   sub?: string;
-  color?: string;
-}) {
-  const a = ACCENT[color] ?? ACCENT.blue;
+  icon: React.ReactNode;
+  iconCls?: string;
+  trend?: { value: number; label?: string };
+}
+
+function KpiTile({ label, value, sub, icon, iconCls = "icon-badge-blue", trend }: KpiTileProps) {
   return (
-    <div className={`card border-l-4 ${a.border} flex flex-col gap-1`}>
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
-      <p className={`text-3xl font-bold ${a.value} leading-tight`}>{value}</p>
-      {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+    <div className="kpi-tile hover-lift">
+      <div className={`${iconCls} icon-badge icon-badge-lg shrink-0`}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="kpi-tile-label">{label}</p>
+        <p className="kpi-tile-value">{value}</p>
+        {trend != null && (
+          <p className={trend.value >= 0 ? "kpi-tile-delta-up" : "kpi-tile-delta-down"}>
+            <Icon
+              name={trend.value >= 0 ? "arrow-trending-up" : "arrow-trending-down"}
+              className="w-3.5 h-3.5"
+            />
+            {Math.abs(trend.value)}%
+            {trend.label && <span className="font-normal ml-1 text-slate-400">{trend.label}</span>}
+          </p>
+        )}
+        {sub && !trend && <p className="kpi-tile-delta text-slate-400">{sub}</p>}
+      </div>
     </div>
   );
 }
 
-// ── Comply Gauge ──────────────────────────────────────────────────────────────
+// ── Comply Gauge ───────────────────────────────────────────────────────────────
 function ComplyGauge({ pct, status }: { pct: number; status: string }) {
   const color =
-    status === "Comply"      ? "#10b981" :
-    status === "Over Target" ? "#2563eb" : "#ef4444";
+    status === "Over Target" ? "#2563eb" :
+    status === "Comply"      ? "#10b981" : "#ef4444";
   return (
-    <div className="relative w-14 h-14 shrink-0">
-      <svg viewBox="0 0 36 36" className="w-14 h-14 -rotate-90">
+    <div className="relative w-12 h-12 shrink-0">
+      <svg viewBox="0 0 36 36" className="w-12 h-12 -rotate-90">
         <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="3" />
         <circle
           cx="18" cy="18" r="15.9" fill="none"
@@ -63,14 +69,13 @@ function ComplyGauge({ pct, status }: { pct: number; status: string }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-slate-700">
+      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-slate-700 tabular-nums">
         {pct.toFixed(0)}%
       </span>
     </div>
   );
 }
 
-// ── Status Badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   if (status === "Comply")       return <span className="badge-green">{status}</span>;
   if (status === "Over Target")  return <span className="badge-blue">{status}</span>;
@@ -78,19 +83,14 @@ function StatusBadge({ status }: { status: string }) {
   return <span className="badge-gray">{status}</span>;
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-base font-semibold text-slate-900">{children}</h2>;
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Main ───────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["dashboard-web"],
     queryFn: fetchDashboard,
     staleTime: 5 * 60 * 1000,
   });
 
-  // Map API response fields → typed values
   const complyBrands: ComplyBrand[] = useMemo(
     () =>
       (data?.comply_brands ?? []).map((r: any) => ({
@@ -103,7 +103,6 @@ export default function Dashboard() {
     [data],
   );
 
-  // Leaderboard — API returns visit_mtd + ec_rate; map ec_rate → achievement_pct
   const leaderboard: (LeaderboardRow & { visit_mtd: number; ec_rate: number })[] = useMemo(
     () =>
       (data?.leaderboard ?? []).map((r: any, i: number) => ({
@@ -119,35 +118,29 @@ export default function Dashboard() {
     [data],
   );
 
-  const routeCompliancePct: number  = data?.route_comply_pct ?? 0;
-  const visitToday: number          = data?.visit_today ?? 0;
-  const ecToday: number             = data?.ec_today ?? 0;
-  const overallComplyPct: number    = data?.comply_pct ?? 0;
+  const routeCompliancePct: number = data?.route_comply_pct ?? 0;
+  const visitToday: number         = data?.visit_today ?? 0;
+  const ecToday: number            = data?.ec_today ?? 0;
+  const overallComplyPct: number   = data?.comply_pct ?? 0;
 
-  const announcements: {
-    type: string; title: string; body: string; created_at: string;
-  }[] = data?.announcements ?? [];
+  const announcements: { type: string; title: string; body: string; created_at: string }[] =
+    data?.announcements ?? [];
 
-  const kpis = [
-    { label: "Kunjungan Hari Ini",  value: visitToday,                         sub: "total visit",          color: "blue"   },
-    { label: "EC Hari Ini",         value: ecToday,                             sub: "effective call",       color: "green"  },
-    { label: "Comply MTD",          value: `${overallComplyPct.toFixed(1)}%`,   sub: "vs management target", color: overallComplyPct >= 80 ? "green" : "red" },
-    { label: "Route Compliance",    value: `${routeCompliancePct.toFixed(1)}%`, sub: "planned vs actual",    color: routeCompliancePct >= 80 ? "green" : "yellow" },
-  ];
-
-  const today = format(new Date(), "EEEE, d MMMM yyyy");
+  const today = format(new Date(), "EEEE, d MMMM yyyy", { locale: idLocale });
 
   return (
     <div className="flex flex-col h-full">
+      {/* ── Top Nav ── */}
       <TopNav
         title="Dashboard"
         subtitle={today}
         actions={
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => refetch()}
             className="btn-secondary btn-sm"
+            disabled={isFetching}
           >
-            <Icon name="arrow-path" className="w-4 h-4" />
+            <Icon name="arrow-path" className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
             Muat Ulang
           </button>
         }
@@ -160,73 +153,107 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               <div className="card space-y-3">
                 <Skeleton className="h-5 w-32" />
-                {[1,2,3].map(i => <div key={i} className="flex gap-3"><Skeleton className="w-14 h-14 rounded-full" /><div className="flex-1 space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-3 w-32" /></div></div>)}
+                {[1,2,3].map(i => (
+                  <div key={i} className="flex gap-3">
+                    <Skeleton className="w-12 h-12 rounded-full" />
+                    <div className="flex-1 space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-3 w-32" /></div>
+                  </div>
+                ))}
               </div>
               <div className="card xl:col-span-2"><Skeleton className="h-5 w-40 mb-4" /><Skeleton className="h-52 w-full" /></div>
             </div>
           </div>
         ) : (
           <>
-            {/* ── KPI Row ── */}
+            {/* ── KPI Tiles (Gojek-style) ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {kpis.map((k, i) => <KpiCard key={i} {...k} />)}
+              <KpiTile
+                label="Kunjungan Hari Ini"
+                value={visitToday}
+                sub="total visit"
+                icon={<Icon name="building-storefront" className="w-5 h-5" />}
+                iconCls="icon-badge-blue"
+              />
+              <KpiTile
+                label="EC Hari Ini"
+                value={ecToday}
+                sub="effective call"
+                icon={<Icon name="check-circle" className="w-5 h-5" />}
+                iconCls="icon-badge-green"
+              />
+              <KpiTile
+                label="Comply MTD"
+                value={`${overallComplyPct.toFixed(1)}%`}
+                sub="vs management target"
+                icon={<Icon name="chart-pie" className="w-5 h-5" />}
+                iconCls={overallComplyPct >= 80 ? "icon-badge-green" : "icon-badge-red"}
+              />
+              <KpiTile
+                label="Route Compliance"
+                value={`${routeCompliancePct.toFixed(1)}%`}
+                sub="planned vs actual"
+                icon={<Icon name="map" className="w-5 h-5" />}
+                iconCls={routeCompliancePct >= 80 ? "icon-badge-green" : "icon-badge-amber"}
+              />
             </div>
 
+            {/* ── Comply + Chart row ── */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              {/* Comply Target */}
-              <div className="card xl:col-span-1">
-                <div className="flex items-start justify-between mb-5">
+              {/* Comply Target Card */}
+              <div className="card">
+                <div className="section-heading mb-5">
                   <div>
-                    <SectionTitle>Comply Target</SectionTitle>
-                    <p className="text-xs text-slate-500 mt-0.5">Bulan berjalan per brand</p>
+                    <p className="section-heading-title">Comply Target</p>
+                    <p className="section-heading-sub">Bulan berjalan per brand</p>
                   </div>
-                  <a href="/target-management"
-                    className="text-xs text-primary-600 hover:underline font-medium shrink-0">
+                  <a href="/target-management" className="section-heading-action">
                     Kelola →
                   </a>
                 </div>
-                <div className="space-y-4">
-                  {complyBrands.length === 0 && (
-                    <EmptyState icon="chart-bar" title="Belum ada data target" description="Tidak ada data target brand bulan ini." />
-                  )}
-                  {complyBrands.map((c) => (
-                    <div key={c.brand} className="flex items-center gap-3">
-                      <ComplyGauge pct={c.comply_pct} status={c.comply_status} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-slate-800 truncate">{c.brand}</p>
-                          <StatusBadge status={c.comply_status} />
+
+                {complyBrands.length === 0 ? (
+                  <EmptyState icon="chart-bar" title="Belum ada target" description="Tidak ada data target brand bulan ini." />
+                ) : (
+                  <div className="space-y-4">
+                    {complyBrands.map((c) => (
+                      <div key={c.brand} className="flex items-center gap-3">
+                        <ComplyGauge pct={c.comply_pct} status={c.comply_status} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-slate-800 truncate">{c.brand}</p>
+                            <StatusBadge status={c.comply_status} />
+                          </div>
+                          <div className="progress-track mt-2">
+                            <div
+                              className={`progress-fill ${c.comply_pct >= 80 ? "progress-fill-green" : c.comply_pct >= 50 ? "progress-fill-amber" : "progress-fill-red"}`}
+                              style={{ width: `${Math.min(c.comply_pct, 100)}%` }}
+                            />
+                          </div>
+                          <p className="text-2xs text-slate-400 mt-1">
+                            Mgmt: Rp {(c.management_target / 1e6).toFixed(1)}M · SPV: Rp {(c.spv_target / 1e6).toFixed(1)}M
+                          </p>
                         </div>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Mgmt: Rp {(c.management_target / 1e6).toFixed(1)}M &middot; SPV: Rp {(c.spv_target / 1e6).toFixed(1)}M
-                        </p>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* EC Rate chart — leaderboard data, top 8 */}
+              {/* EC Rate Chart */}
               <div className="card xl:col-span-2">
-                <div className="flex items-start justify-between mb-5">
+                <div className="section-heading mb-5">
                   <div>
-                    <SectionTitle>EC Rate per Salesman</SectionTitle>
-                    <p className="text-xs text-slate-500 mt-0.5">MTD, diurutkan by kunjungan terbanyak</p>
+                    <p className="section-heading-title">EC Rate per Salesman</p>
+                    <p className="section-heading-sub">MTD, diurutkan by kunjungan terbanyak</p>
                   </div>
-                  <a href="/route-evaluate"
-                    className="text-xs text-primary-600 hover:underline font-medium shrink-0">
-                    Evaluate →
-                  </a>
+                  <a href="/route-evaluate" className="section-heading-action">Evaluate →</a>
                 </div>
+
                 {leaderboard.length === 0 ? (
                   <EmptyState icon="users" title="Belum ada data" description="Belum ada data kunjungan bulan ini." />
                 ) : (
                   <ResponsiveContainer width="100%" height={220}>
-                    <BarChart
-                      data={leaderboard.slice(0, 8)}
-                      layout="vertical"
-                      margin={{ left: 100, right: 40 }}
-                    >
+                    <BarChart data={leaderboard.slice(0, 8)} layout="vertical" margin={{ left: 100, right: 48 }}>
                       <XAxis
                         type="number" domain={[0, 100]}
                         tickFormatter={(v) => `${v}%`}
@@ -240,12 +267,12 @@ export default function Dashboard() {
                       />
                       <Tooltip
                         formatter={(v: number, _: string, props: any) => [
-                          `${v.toFixed(1)}% EC rate (${props.payload.visit_mtd} kunjungan)`,
+                          `${v.toFixed(1)}% EC (${props.payload.visit_mtd} kunjungan)`,
                           props.payload.salesman_name,
                         ]}
-                        contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                        contentStyle={{ fontSize: 12, borderRadius: 10, border: "1px solid #e2e8f0", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}
                       />
-                      <Bar dataKey="ec_rate" radius={[0, 4, 4, 0]} maxBarSize={20}>
+                      <Bar dataKey="ec_rate" radius={[0, 6, 6, 0]} maxBarSize={18}>
                         {leaderboard.slice(0, 8).map((r, i) => (
                           <Cell key={i}
                             fill={r.ec_rate >= 80 ? "#10b981" : r.ec_rate >= 60 ? "#2563eb" : "#ef4444"}
@@ -258,112 +285,109 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* ── Route + Leaderboard row ── */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              {/* Route Compliance gauge */}
-              <div className="card flex flex-col gap-3 py-6">
+              {/* Route Compliance Gauge */}
+              <div className="card flex flex-col items-center gap-4 py-8">
                 <div>
-                  <SectionTitle>Route Compliance</SectionTitle>
-                  <p className="text-xs text-slate-500 mt-0.5">MTD — planned vs. actual</p>
+                  <p className="section-heading-title text-center">Route Compliance</p>
+                  <p className="section-heading-sub text-center mt-0.5">MTD — planned vs. actual</p>
                 </div>
-                <div className="flex flex-col items-center gap-2">
-                  <div className="relative w-28 h-28">
-                    <svg viewBox="0 0 36 36" className="w-28 h-28 -rotate-90">
-                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="2.5" />
-                      <circle
-                        cx="18" cy="18" r="15.9" fill="none"
-                        stroke={routeCompliancePct >= 80 ? "#10b981" : routeCompliancePct >= 60 ? "#f59e0b" : "#ef4444"}
-                        strokeWidth="2.5"
-                        strokeDasharray={`${Math.min(routeCompliancePct, 100)} 100`}
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-2xl font-bold text-slate-900">{routeCompliancePct.toFixed(0)}%</span>
-                      <span className="text-xs text-slate-400">Compliance</span>
-                    </div>
+                <div className="relative w-32 h-32">
+                  <svg viewBox="0 0 36 36" className="w-32 h-32 -rotate-90">
+                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="2.5" />
+                    <circle
+                      cx="18" cy="18" r="15.9" fill="none"
+                      stroke={routeCompliancePct >= 80 ? "#10b981" : routeCompliancePct >= 60 ? "#f59e0b" : "#ef4444"}
+                      strokeWidth="2.5"
+                      strokeDasharray={`${Math.min(routeCompliancePct, 100)} 100`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-3xl font-bold text-slate-900 tabular-nums">{routeCompliancePct.toFixed(0)}%</span>
+                    <span className="text-2xs text-slate-400 uppercase tracking-wide">Compliance</span>
                   </div>
-                  <p className="text-xs text-slate-400 text-center max-w-[180px]">
-                    Kunjungan terlaksana dibanding rencana kunjungan bulan ini
-                  </p>
                 </div>
+                <p className="text-xs text-slate-400 text-center max-w-[180px] leading-relaxed">
+                  Kunjungan terlaksana dibanding rencana kunjungan bulan ini
+                </p>
               </div>
 
               {/* Leaderboard */}
-              <div className="card xl:col-span-2 overflow-x-auto">
-                <div className="mb-5">
-                  <SectionTitle>Leaderboard Tim</SectionTitle>
-                  <p className="text-xs text-slate-500 mt-0.5">Top 10 MTD by jumlah kunjungan</p>
+              <div className="card xl:col-span-2">
+                <div className="section-heading mb-4">
+                  <div>
+                    <p className="section-heading-title">Leaderboard Tim</p>
+                    <p className="section-heading-sub">Top MTD by jumlah kunjungan</p>
+                  </div>
                 </div>
                 {leaderboard.length === 0 ? (
-                  <div className="empty-state">
-                    <p className="empty-state-text">Belum ada data kunjungan.</p>
-                  </div>
+                  <EmptyState icon="trophy" title="Belum ada data" description="Belum ada data kunjungan." />
                 ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th className="text-left pb-3 w-8">#</th>
-                        <th className="text-left pb-3">Salesman</th>
-                        <th className="text-right pb-3">Kunjungan</th>
-                        <th className="text-right pb-3">EC</th>
-                        <th className="text-right pb-3">EC Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {leaderboard.map((row, i) => (
-                        <tr key={row.salesman_sk}>
-                          <td className="py-2.5">
-                            <span className={`text-xs font-bold ${
-                              i === 0 ? "text-amber-500" :
-                              i === 1 ? "text-slate-400" :
-                              i === 2 ? "text-amber-700" : "text-slate-300"
-                            }`}>{row.rank}</span>
-                          </td>
-                          <td className="py-2.5 font-medium text-slate-800">{row.salesman_name}</td>
-                          <td className="py-2.5 text-right text-slate-600">{row.visit_mtd}</td>
-                          <td className="py-2.5 text-right text-slate-600">{(row as any).ec_mtd ?? "—"}</td>
-                          <td className="py-2.5 text-right">
-                            <span className={
-                              row.ec_rate >= 80 ? "text-emerald-600 font-semibold" :
-                              row.ec_rate >= 60 ? "text-primary-600 font-medium" : "text-red-500"
-                            }>
-                              {row.ec_rate.toFixed(1)}%
-                            </span>
-                          </td>
+                  <div className="table-container">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th className="w-8">#</th>
+                          <th>Salesman</th>
+                          <th className="text-right">Kunjungan</th>
+                          <th className="text-right">EC Rate</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {leaderboard.slice(0, 8).map((row, i) => (
+                          <tr key={row.salesman_sk}>
+                            <td>
+                              <span className={`text-xs font-bold tabular-nums ${
+                                i === 0 ? "text-amber-500" :
+                                i === 1 ? "text-slate-400" :
+                                i === 2 ? "text-amber-700" : "text-slate-300"
+                              }`}>{row.rank}</span>
+                            </td>
+                            <td className="font-medium text-slate-800">{row.salesman_name}</td>
+                            <td className="text-right text-slate-600 tabular-nums">{row.visit_mtd}</td>
+                            <td className="text-right">
+                              <span className={
+                                row.ec_rate >= 80 ? "text-emerald-600 font-semibold" :
+                                row.ec_rate >= 60 ? "text-primary-600 font-medium" : "text-red-500"
+                              }>
+                                {row.ec_rate.toFixed(1)}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>
 
             {/* ── Announcements ── */}
             <div className="card">
-              <div className="flex items-center justify-between mb-5">
-                <SectionTitle>Feed Pengumuman</SectionTitle>
-                <a href="/announcements"
-                  className="text-xs text-primary-600 hover:underline font-medium">
-                  Lihat semua →
-                </a>
-              </div>
-              {announcements.length === 0 ? (
-                <div className="empty-state py-8">
-                  <p className="empty-state-text">Belum ada pengumuman.</p>
+              <div className="section-heading mb-4">
+                <div>
+                  <p className="section-heading-title">Feed Pengumuman</p>
                 </div>
+                <a href="/announcements" className="section-heading-action">Lihat semua →</a>
+              </div>
+
+              {announcements.length === 0 ? (
+                <EmptyState icon="megaphone" title="Belum ada pengumuman" description="Pengumuman terbaru akan muncul di sini." className="py-8" />
               ) : (
                 <div className="space-y-3">
                   {announcements.slice(0, 3).map((a, i) => (
-                    <div key={i}
-                      className="flex gap-3 p-3.5 bg-slate-50 rounded-lg border border-slate-100
-                                 hover:border-slate-200 transition-colors duration-150">
-                      <span className="badge-blue shrink-0 self-start mt-0.5">{a.type}</span>
-                      <div className="min-w-0 flex-1">
+                    <div key={i} className="rail-blue hover-lift p-4 rounded-xl">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="badge-blue">{a.type}</span>
+                          <span className="text-2xs text-slate-400">
+                            {format(new Date(a.created_at), "d MMM yyyy")}
+                          </span>
+                        </div>
                         <p className="text-sm font-semibold text-slate-800">{a.title}</p>
                         <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">{a.body}</p>
-                        <p className="text-xs text-slate-400 mt-1.5">
-                          {format(new Date(a.created_at), "d MMM yyyy")}
-                        </p>
                       </div>
                     </div>
                   ))}

@@ -468,3 +468,298 @@
   z-index: 1;
   box-shadow: 0 1px 0 0 #e2e8f0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GOJEK-INSPIRED ADDITIONS
+   All classes below are NET NEW — no existing classes are modified.
+═══════════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+
+  /* ── Chips (pill filters, like Gojek service categories) ───────────────── */
+
+  .chip {
+    @apply inline-flex items-center gap-1.5
+           px-3.5 py-1.5
+           rounded-full text-sm font-medium
+           bg-white text-slate-600
+           border border-slate-200
+           cursor-pointer select-none
+           transition-all duration-150
+           hover:border-primary-300 hover:text-primary-600 hover:bg-primary-50;
+  }
+
+  .chip-active {
+    @apply bg-primary-600 text-white border-primary-600
+           hover:bg-primary-700 hover:text-white hover:border-primary-700;
+  }
+
+  .chip-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+
+  .chip-group {
+    @apply flex flex-wrap gap-2;
+  }
+
+  /* ── Page Hero header (Gojek-style page top) ───────────────────────────── */
+
+  .page-hero {
+    @apply bg-white border-b border-slate-200 px-6 py-5;
+  }
+
+  .page-hero-title {
+    @apply text-xl font-bold text-slate-900 leading-tight;
+  }
+
+  .page-hero-subtitle {
+    @apply text-sm text-slate-500 mt-0.5;
+  }
+
+  /* ── Icon Badge (colored circle icon — Gojek service icon style) ───────── */
+
+  .icon-badge {
+    @apply w-10 h-10 rounded-xl flex items-center justify-center shrink-0;
+  }
+
+  .icon-badge-blue   { @apply icon-badge bg-blue-100   text-blue-600;   }
+  .icon-badge-green  { @apply icon-badge bg-emerald-100 text-emerald-600; }
+  .icon-badge-amber  { @apply icon-badge bg-amber-100  text-amber-600;  }
+  .icon-badge-red    { @apply icon-badge bg-red-100    text-red-600;    }
+  .icon-badge-purple { @apply icon-badge bg-purple-100 text-purple-600; }
+  .icon-badge-slate  { @apply icon-badge bg-slate-100  text-slate-600;  }
+
+  .icon-badge-lg {
+    @apply w-12 h-12 rounded-2xl;
+  }
+
+  /* ── KPI Tile (Gojek metric card with icon) ────────────────────────────── */
+
+  .kpi-tile {
+    @apply card flex items-center gap-4 p-4;
+  }
+
+  .kpi-tile-value {
+    @apply text-2xl font-bold text-slate-900 leading-none tabular-nums;
+  }
+
+  .kpi-tile-label {
+    @apply text-xs font-medium text-slate-500 uppercase tracking-wide mt-1;
+  }
+
+  .kpi-tile-delta {
+    @apply text-xs font-semibold flex items-center gap-0.5 mt-1;
+  }
+
+  .kpi-tile-delta-up   { @apply kpi-tile-delta text-emerald-600; }
+  .kpi-tile-delta-down { @apply kpi-tile-delta text-red-500; }
+
+  /* ── Section Heading (title + optional right action) ───────────────────── */
+
+  .section-heading {
+    @apply flex items-center justify-between gap-4 mb-4;
+  }
+
+  .section-heading-title {
+    @apply text-base font-semibold text-slate-800;
+  }
+
+  .section-heading-sub {
+    @apply text-xs text-slate-500 mt-0.5;
+  }
+
+  .section-heading-action {
+    @apply text-sm text-primary-600 font-medium hover:underline shrink-0;
+  }
+
+  /* ── Data Row (detail view — label above, value below) ─────────────────── */
+
+  .data-row {
+    @apply flex flex-col gap-0.5;
+  }
+
+  .data-label {
+    @apply text-2xs font-semibold text-slate-400 uppercase tracking-wide;
+  }
+
+  .data-value {
+    @apply text-sm font-medium text-slate-800;
+  }
+
+  /* ── Progress Bar ───────────────────────────────────────────────────────── */
+
+  .progress-track {
+    @apply w-full h-2 bg-slate-200 rounded-full overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full bg-primary-600 transition-all duration-500;
+  }
+
+  .progress-fill-green  { @apply bg-emerald-500; }
+  .progress-fill-amber  { @apply bg-amber-500;   }
+  .progress-fill-red    { @apply bg-red-500;      }
+
+  /* ── Toast ──────────────────────────────────────────────────────────────── */
+
+  .toast-container {
+    @apply fixed bottom-5 right-5 z-[9999] flex flex-col gap-2 pointer-events-none;
+    max-width: 360px;
+  }
+
+  .toast {
+    @apply flex items-start gap-3
+           px-4 py-3.5 rounded-xl
+           text-sm font-medium
+           shadow-card-lg
+           pointer-events-auto
+           animate-slide-up;
+    min-width: 280px;
+  }
+
+  .toast-success { @apply toast bg-white border border-emerald-200 text-emerald-800; }
+  .toast-error   { @apply toast bg-white border border-red-200    text-red-800;      }
+  .toast-warning { @apply toast bg-white border border-amber-200  text-amber-800;    }
+  .toast-info    { @apply toast bg-white border border-blue-200   text-blue-800;     }
+
+  .toast-icon {
+    @apply w-5 h-5 shrink-0 mt-0.5;
+  }
+
+  /* ── FAB (Floating Action Button) ──────────────────────────────────────── */
+
+  .fab {
+    @apply fixed bottom-6 right-6 z-40
+           w-14 h-14 rounded-full
+           bg-primary-600 text-white
+           flex items-center justify-center
+           shadow-lg hover:shadow-primary
+           hover:bg-primary-700
+           transition-all duration-200 active:scale-95
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2;
+  }
+
+  .fab-extended {
+    @apply fab
+           w-auto h-auto px-5 py-3.5 rounded-xl
+           gap-2 text-sm font-semibold;
+  }
+
+  /* ── Hover-lift card ────────────────────────────────────────────────────── */
+
+  .hover-lift {
+    @apply transition-all duration-200
+           hover:-translate-y-0.5 hover:shadow-card-md;
+  }
+
+  /* ── Status rail card (colored left border + icon) ──────────────────────── */
+
+  .rail-card {
+    @apply card border-l-4 flex gap-4 items-start;
+  }
+
+  .rail-blue   { @apply rail-card border-l-blue-500;    }
+  .rail-green  { @apply rail-card border-l-emerald-500; }
+  .rail-amber  { @apply rail-card border-l-amber-500;   }
+  .rail-red    { @apply rail-card border-l-red-500;     }
+  .rail-purple { @apply rail-card border-l-purple-500;  }
+
+  /* ── List item (Gojek-style clickable row) ──────────────────────────────── */
+
+  .list-item {
+    @apply flex items-center gap-3 px-4 py-3.5
+           bg-white border-b border-slate-100
+           cursor-pointer select-none
+           transition-colors duration-100
+           hover:bg-slate-50 active:bg-slate-100;
+  }
+
+  .list-item:first-child { @apply rounded-t-xl; }
+  .list-item:last-child  { @apply rounded-b-xl border-b-0; }
+
+  .list-item-title  { @apply text-sm font-semibold text-slate-800; }
+  .list-item-sub    { @apply text-xs text-slate-500 mt-0.5; }
+
+  /* ── Detail header block (visit/store top info) ──────────────────────────── */
+
+  .detail-hero {
+    @apply bg-white border-b border-slate-200 px-6 py-5;
+  }
+
+  .detail-hero-title {
+    @apply text-xl font-bold text-slate-900;
+  }
+
+  .detail-hero-meta {
+    @apply text-sm text-slate-500 mt-1 flex items-center gap-2 flex-wrap;
+  }
+
+  /* ── Upload zone (drag & drop area) ────────────────────────────────────── */
+
+  .upload-zone {
+    @apply relative flex flex-col items-center justify-center gap-2
+           rounded-xl border-2 border-dashed border-slate-200
+           bg-slate-50 px-6 py-8
+           text-sm text-slate-400
+           cursor-pointer select-none
+           transition-all duration-200
+           hover:border-primary-400 hover:bg-primary-50 hover:text-primary-600;
+  }
+
+  .upload-zone-active {
+    @apply border-primary-500 bg-primary-50 text-primary-600 scale-[1.01];
+  }
+
+  .upload-zone-done {
+    @apply border-emerald-400 bg-emerald-50 text-emerald-700;
+  }
+
+  .upload-zone-error {
+    @apply border-red-400 bg-red-50 text-red-700;
+  }
+
+  /* ── Approval list item ─────────────────────────────────────────────────── */
+
+  .approval-item {
+    @apply w-full text-left px-4 py-4
+           border-b border-slate-50
+           cursor-pointer select-none
+           transition-all duration-100
+           hover:bg-slate-50;
+  }
+
+  .approval-item-active {
+    @apply bg-primary-50 border-l-2 border-l-primary-500;
+  }
+
+  /* ── Info grid (2-col detail info) ─────────────────────────────────────── */
+
+  .info-grid {
+    @apply grid grid-cols-2 gap-x-8 gap-y-4;
+  }
+
+  .info-grid-wide {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4;
+  }
+
+  /* ── Quick action card (Gojek main screen service icons) ────────────────── */
+
+  .quick-action {
+    @apply card hover-lift flex flex-col items-center gap-3 py-5 px-4
+           cursor-pointer select-none text-center;
+  }
+
+  .quick-action-icon {
+    @apply icon-badge icon-badge-lg;
+  }
+
+  .quick-action-label {
+    @apply text-sm font-semibold text-slate-700;
+  }
+
+  /* ── Line-clamp utilities ────────────────────────────────────────────────── */
+  .line-clamp-1 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+  .line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .line-clamp-3 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+
+}
