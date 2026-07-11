@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import { Icon } from "@/components/ui";
 import type { IconName } from "@/components/ui";
-import type { Role } from "@/types";
+import type { Notification, Role } from "@/types";
+import { api } from "@/api/client";
+
+const fetchNotifications = () => api.get("/notifications").then((r) => r.data);
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface NavLeaf {
@@ -127,6 +130,14 @@ export default function Sidebar() {
   const qc = useQueryClient();
   const role = user?.role as Role;
 
+  const { data: notifications } = useQuery<Notification[]>({
+    queryKey: ["notifications"],
+    queryFn:  fetchNotifications,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+  const unreadCount = (notifications ?? []).filter((n) => !n.is_read).length;
+
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     for (const item of NAV_TREE) {
@@ -230,6 +241,10 @@ export default function Sidebar() {
             );
           }
 
+          const badge = item.to === "/notifications" && unreadCount > 0
+            ? unreadCount
+            : null;
+
           return (
             <NavLink
               key={item.to}
@@ -244,7 +259,12 @@ export default function Sidebar() {
               }
             >
               <Icon name={item.icon} className="w-4 h-4 shrink-0" />
-              <span className="truncate">{item.label}</span>
+              <span className="flex-1 truncate">{item.label}</span>
+              {badge !== null && (
+                <span className="ml-auto text-xs bg-red-500 text-white rounded-full px-1.5 min-w-[18px] text-center font-bold leading-5">
+                  {badge > 99 ? "99+" : badge}
+                </span>
+              )}
             </NavLink>
           );
         })}
