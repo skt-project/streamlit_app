@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, EmptyState, SkeletonTable } from "@/components/ui";
 import { api } from "@/api/client";
+import { toast } from "@/store/toastStore";
 import type { Salesman } from "@/types";
 import { useDebounce } from "@/hooks/useDebounce";
 
@@ -25,8 +26,25 @@ export default function MasterDataSalesman() {
   const [typeFilter,    setTypeFilter]    = useState("");
   const [statusFilter,  setStatusFilter]  = useState("");
   const [selected,      setSelected]      = useState<Salesman | null>(null);
+  const [exporting,     setExporting]     = useState(false);
 
   const debouncedSearch = useDebounce(searchInput, 350);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get("/export/salesman", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a   = document.createElement("a");
+      a.href = url; a.download = "master-salesman.csv"; a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Export berhasil diunduh.");
+    } catch {
+      toast.error("Export gagal. Coba lagi.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     if (!selected) return;
@@ -53,8 +71,10 @@ export default function MasterDataSalesman() {
         title="Master Data Salesman"
         actions={
           <div className="flex gap-2">
-            <button className="btn-secondary text-sm">
-              <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />
+            <button className="btn-secondary text-sm" onClick={handleExport} disabled={exporting}>
+              {exporting
+                ? <Icon name="arrow-path" className="w-3.5 h-3.5 animate-spin" />
+                : <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />}
               Export CSV
             </button>
             <button className="btn-primary text-sm">

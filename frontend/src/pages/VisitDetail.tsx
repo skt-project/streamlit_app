@@ -43,21 +43,23 @@ function fmtRp(val: number | null | undefined) {
 
 function canApprove(approvalStatus: string | null, role: string): boolean {
   const map: Record<string, string[]> = {
-    spv:               ["PENDING_SPV", "SUBMITTED"],
-    distributor_admin: ["SPV_APPROVED"],
+    spv:      ["PENDING_SPV", "SUBMITTED"],
+    asm:      ["SPV_APPROVED"],
+    dm:       ["SPV_APPROVED", "ASM_APPROVED"],
+    ho_admin: ["PENDING_SPV", "SUBMITTED", "SPV_APPROVED", "ASM_APPROVED"],
   };
   return map[role]?.includes(approvalStatus ?? "") ?? false;
 }
 
 function canReject(approvalStatus: string | null, role: string): boolean {
-  const rejectableStatuses = ["PENDING_SPV", "SUBMITTED", "SPV_APPROVED"];
-  return ["spv", "distributor_admin"].includes(role) &&
+  const rejectableStatuses = ["PENDING_SPV", "SUBMITTED", "SPV_APPROVED", "ASM_APPROVED"];
+  return ["spv", "asm", "dm", "ho_admin"].includes(role) &&
     rejectableStatuses.includes(approvalStatus ?? "");
 }
 
 function canEditFinalQty(approvalStatus: string | null, role: string): boolean {
   if (role === "spv") return ["PENDING_SPV", "SUBMITTED"].includes(approvalStatus ?? "");
-  if (role === "distributor_admin") return approvalStatus === "SPV_APPROVED";
+  if (role === "dm" || role === "asm") return approvalStatus === "SPV_APPROVED";
   return false;
 }
 
@@ -119,7 +121,7 @@ export default function VisitDetail() {
   const qc          = useQueryClient();
   const user        = useAuthStore((s) => s.user);
   const role        = user?.role ?? "";
-  const isDistAdm   = role === "distributor_admin";
+  const isDistAdm   = role === "dm" || role === "ho_admin";
 
   const [rejectOpen,  setRejectOpen]  = useState(false);
   const [rejectNotes, setRejectNotes] = useState("");
@@ -276,7 +278,7 @@ export default function VisitDetail() {
   const brandGroups     = [...new Set(visit.items.map((i) => i.brand).filter(Boolean))];
   const showFinalQtyCol = canEditFinalQty(visit.approval_status, role) || visit.items.some((i) => i.final_qty != null);
   const showPriceCol    = isDistAdm || visit.items.some((i) => (i.price_for_store ?? 0) > 0);
-  const canDownloadPdf  = ["spv", "asm", "ddm", "ho_admin", "distributor_admin"].includes(role);
+  const canDownloadPdf  = ["spv", "asm", "dm", "ho_admin"].includes(role);
   const isDirty         = fqtyDirty || priceDirty;
 
   const stockWarningCount = visit.items.filter((i) => {
@@ -295,10 +297,10 @@ export default function VisitDetail() {
       done:   ["SPV_APPROVED", "COMPLETED"].includes(visit.approval_status ?? ""),
     },
     {
-      stage: "Distributor Admin",
+      stage: "Distributor Manager",
       approver: visit.ddm_username,
       approvedAt: visit.ddm_approved_at,
-      active: visit.approval_status === "SPV_APPROVED",
+      active: ["SPV_APPROVED", "ASM_APPROVED"].includes(visit.approval_status ?? ""),
       done:   visit.approval_status === "COMPLETED",
     },
   ];

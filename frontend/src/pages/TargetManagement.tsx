@@ -50,11 +50,19 @@ export default function TargetManagement() {
     queryFn: () => fetchSpvRows(selectedBrand!, period),
     enabled: !!selectedBrand,
     staleTime: 2 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const saveMutation = useMutation({
     mutationFn: (rows: { salesman_sk: string; amount: number }[]) =>
-      api.post("/target/spv/bulk", { brand: selectedBrand, period_month: period, rows }),
+      api.post("/target/spv/bulk", {
+        rows: rows.map((r) => ({
+          salesman_sk:       Number(r.salesman_sk),
+          brand:             selectedBrand,
+          period_month:      period,
+          spv_target_amount: r.amount,
+        })),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["target-comply"] });
       qc.invalidateQueries({ queryKey: ["spv-target"] });

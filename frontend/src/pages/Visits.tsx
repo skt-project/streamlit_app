@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, SkeletonTable, EmptyState } from "@/components/ui";
 import { listVisits } from "@/api/visit";
-import { useAuthStore } from "@/store/authStore";
 import type { Visit, VisitApprovalStatus } from "@/types";
 
 const APPROVAL_STATUS_MAP: Record<VisitApprovalStatus, { label: string; cls: string }> = {
@@ -34,10 +33,7 @@ const TAB_CONFIG: { key: TabKey; label: string }[] = [
 
 export default function Visits() {
   const navigate  = useNavigate();
-  const user      = useAuthStore((s) => s.user);
-  const isDistAdm = user?.role === "distributor_admin";
-
-  const [tab,          setTab]          = useState<TabKey>(isDistAdm ? "all" : "waiting");
+  const [tab,          setTab]          = useState<TabKey>("waiting");
   const [dateFilter,   setDateFilter]   = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [storeSearch,  setStoreSearch]  = useState("");
@@ -75,26 +71,24 @@ export default function Visits() {
 
       <main className="flex-1 overflow-y-auto">
         {/* ── Tabs ── */}
-        {!isDistAdm && (
-          <div className="tabs px-6" role="tablist" aria-label="Filter kunjungan">
-            {TAB_CONFIG.map(({ key, label }) => (
-              <button
-                key={key}
-                role="tab"
-                aria-selected={tab === key}
-                onClick={() => { setTab(key); setStatusFilter(""); setPage(1); }}
-                className={`tab ${tab === key ? "tab-active" : ""}`}
-              >
-                {label}
-                {key === "waiting" && data && tab === "waiting" && data.total > 0 && (
-                  <span className="ml-2 badge-yellow text-2xs">
-                    {data.total}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="tabs px-6" role="tablist" aria-label="Filter kunjungan">
+          {TAB_CONFIG.map(({ key, label }) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => { setTab(key); setStatusFilter(""); setPage(1); }}
+              className={`tab ${tab === key ? "tab-active" : ""}`}
+            >
+              {label}
+              {key === "waiting" && data && tab === "waiting" && data.total > 0 && (
+                <span className="ml-2 badge-yellow text-2xs">
+                  {data.total}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
 
         {/* ── Filters ── */}
         <div className="filter-bar">
