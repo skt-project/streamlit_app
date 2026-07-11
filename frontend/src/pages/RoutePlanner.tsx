@@ -210,12 +210,16 @@ export default function RoutePlanner() {
           </div>
 
           {/* Day tabs */}
-          <div className="bg-white border-b border-slate-200 flex">
+          <div role="tablist" className="bg-white border-b border-slate-200 flex">
             {DAYS.map((day) => {
               const count = selected?.stores_per_day?.[day]?.length ?? 0;
               return (
                 <button
                   key={day}
+                  id={`tab-day-${day}`}
+                  role="tab"
+                  aria-selected={selectedDay === day}
+                  aria-controls="panel-day-stores"
                   onClick={() => setSelectedDay(day)}
                   className={`flex-1 py-3 text-sm font-medium transition-colors border-b-2 ${
                     selectedDay === day
@@ -237,7 +241,7 @@ export default function RoutePlanner() {
           </div>
 
           {/* Store list */}
-          <div className="flex-1 overflow-y-auto p-5">
+          <div id="panel-day-stores" role="tabpanel" aria-labelledby={`tab-day-${selectedDay}`} className="flex-1 overflow-y-auto p-5">
             {!selected ? (
               <EmptyState
                 icon="map"

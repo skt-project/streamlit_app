@@ -87,7 +87,7 @@ export default function MasterDataPjp() {
         )}
 
         {/* ── Tabs ── */}
-        <div className="flex border-b border-slate-200">
+        <div role="tablist" className="flex border-b border-slate-200">
           {(
             [
               ["list",   "PJP Efektif"],
@@ -97,6 +97,10 @@ export default function MasterDataPjp() {
           ).map(([t, label]) => (
             <button
               key={t}
+              id={`tab-pjp-${t}`}
+              role="tab"
+              aria-selected={activeTab === t}
+              aria-controls={`panel-pjp-${t}`}
               onClick={() => setActiveTab(t)}
               className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === t
@@ -111,7 +115,7 @@ export default function MasterDataPjp() {
 
         {/* ── List tab ── */}
         {activeTab === "list" && (
-          <div className="card space-y-4">
+          <div id="panel-pjp-list" role="tabpanel" aria-labelledby="tab-pjp-list" className="card space-y-4">
             <div className="flex gap-3 items-center">
               <div className="relative">
                 <Icon
@@ -169,7 +173,7 @@ export default function MasterDataPjp() {
 
         {/* ── Upload tab ── */}
         {activeTab === "upload" && (
-          <div className="card max-w-lg space-y-4">
+          <div id="panel-pjp-upload" role="tabpanel" aria-labelledby="tab-pjp-upload" className="card max-w-lg space-y-4">
             <p className="text-sm text-slate-600">
               Upload file Excel PJP sesuai template. Data hanya di-<em>commit</em> setelah konfirmasi eksplisit.
             </p>
@@ -246,7 +250,7 @@ export default function MasterDataPjp() {
 
         {/* ── Config tab ── */}
         {activeTab === "config" && (
-          <div className="card max-w-sm space-y-4">
+          <div id="panel-pjp-config" role="tabpanel" aria-labelledby="tab-pjp-config" className="card max-w-sm space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Deadline Input PJP
