@@ -31,6 +31,11 @@ def list_approvals(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
+    cache_key = f"approvals:{status}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     if status == "pending":
         status_clause = "AND ar.status = 'pending'"
     else:
@@ -78,6 +83,7 @@ def list_approvals(
             "sla_hours":      48,
             "comments":       comments,
         })
+    bq.cache.set(cache_key, result, ttl=30)  # 30s — workflow queue, near real-time
     return result
 
 
@@ -122,6 +128,8 @@ def _update_approval(approval_id: str, decision: str, comment: str, user: UserCo
             bq.p("id",      "STRING",    approval_id),
         ],
     )
+    bq.cache.invalidate("approvals:")
+
     # Push notification to the original submitter
     submitter_row = bq.query_one(
         f"SELECT push_token FROM {SFA_WEB}.users WHERE username = @uname AND push_token IS NOT NULL",

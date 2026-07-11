@@ -28,6 +28,10 @@ def get_stock(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
+    cache_key = f"stock:{salesman_sk}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
     rows = bq.query(
         f"""
         SELECT stock_id, salesman_sk, sku_id, sku_name, brand, brand_group,
@@ -38,7 +42,9 @@ def get_stock(
         """,
         [bq.p("sk", "STRING", salesman_sk)],
     )
-    return [StockOut(**r) for r in rows]
+    result = [StockOut(**r) for r in rows]
+    bq.cache.set(cache_key, result, ttl=60)  # 1 min — stock changes on SPV approval only
+    return result
 
 
 @router.post("/request", status_code=201, response_model=StockRequestOut)
@@ -165,6 +171,8 @@ def approve_stock_request(
         ],
     )
 
+    bq.cache.invalidate("stock:")
+
     updated = bq.query_one(
         f"SELECT * FROM {settings.table('fact_stock_request')} WHERE request_id = @rid",
         [bq.p("rid", "STRING", request_id)],
@@ -200,6 +208,7 @@ def reject_stock_request(
             bq.p("rid",   "STRING",    request_id),
         ],
     )
+    bq.cache.invalidate("stock:")
     updated = bq.query_one(
         f"SELECT * FROM {settings.table('fact_stock_request')} WHERE request_id = @rid",
         [bq.p("rid", "STRING", request_id)],
@@ -215,6 +224,11 @@ def list_stock_requests(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
+    cache_key = f"stock:requests:{salesman_sk or ''}:{spv_sk or ''}:{status or ''}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     conditions = ["TRUE"]
     params: list = []
 
@@ -237,4 +251,6 @@ def list_stock_requests(
         """,
         params,
     )
-    return [StockRequestOut(**r) for r in rows]
+    result = [StockRequestOut(**r) for r in rows]
+    bq.cache.set(cache_key, result, ttl=60)
+    return result

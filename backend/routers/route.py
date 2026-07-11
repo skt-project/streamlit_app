@@ -207,6 +207,11 @@ def search_outlets(
     where = " ".join(conditions)
     offset = (page - 1) * page_size
 
+    cache_key = f"route:outlets:{distributor_code or ''}:{brand or ''}:{q or ''}:{page}:{page_size}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     rows = bq.query(
         f"""
         SELECT outlet_sk, source_outlet_code, store_name, brand, store_grade,
@@ -219,4 +224,6 @@ def search_outlets(
         params + [bq.p("lim", "INT64", page_size), bq.p("off", "INT64", offset)],
     )
 
-    return {"items": rows, "page": page, "page_size": page_size}
+    result = {"items": rows, "page": page, "page_size": page_size}
+    bq.cache.set(cache_key, result, ttl=300)  # 5 min — outlet dim stable between imports
+    return result
