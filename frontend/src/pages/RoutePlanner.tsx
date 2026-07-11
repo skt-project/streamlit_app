@@ -9,6 +9,17 @@ import { format, startOfISOWeek, addDays } from "date-fns";
 import { id } from "date-fns/locale";
 import { useDebounce } from "@/hooks/useDebounce";
 
+interface StoreResult {
+  outlet_sk: number;
+  source_outlet_code: string;
+  store_name: string;
+  store_grade: string | null;
+  region: string | null;
+}
+
+const searchRoutePlannerStores = (q: string): Promise<StoreResult[]> =>
+  api.get("/route-planner/stores", { params: { q } }).then((r) => r.data);
+
 const DAYS: DayId[] = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 
 const fetchSalesmenRoutes = (week: string) =>
@@ -71,7 +82,8 @@ export default function RoutePlanner() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [salesmanSearch, setSalesmanSearch] = useState("");
   const [searchStore, setSearchStore]   = useState("");
-  const debouncedSearch = useDebounce(salesmanSearch, 250);
+  const debouncedSearch      = useDebounce(salesmanSearch, 250);
+  const debouncedSearchStore = useDebounce(searchStore, 300);
 
   const weekLabel = format(weekStart, "'Minggu' w, d MMM", { locale: id });
   const weekKey   = format(weekStart, "yyyy-'W'II");
@@ -99,6 +111,13 @@ export default function RoutePlanner() {
   const prevWeek = () => setWeekStart((d) => addDays(d, -7));
   const nextWeek = () => setWeekStart((d) => addDays(d, 7));
 
+  const { data: storeResults = [], isFetching: searchingStores } = useQuery<StoreResult[]>({
+    queryKey: ["route-planner-store-search", debouncedSearchStore],
+    queryFn:  () => searchRoutePlannerStores(debouncedSearchStore),
+    enabled:  debouncedSearchStore.length >= 2,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const removeStoreMutation = useMutation({
     mutationFn: ({ salesmanSk, routePlanSk }: { salesmanSk: string; routePlanSk: string }) =>
       api.delete(`/route-planner/assignment/${routePlanSk}`, { params: { salesman_sk: salesmanSk } }),
@@ -107,6 +126,23 @@ export default function RoutePlanner() {
       toast.success("Toko berhasil dihapus dari rute.");
     },
     onError: () => toast.error("Gagal menghapus toko dari rute."),
+  });
+
+  const addStoreMutation = useMutation({
+    mutationFn: (store: StoreResult) =>
+      api.post("/route-planner/assignment", {
+        salesman_sk:     parseInt(selected!.salesman_sk),
+        outlet_sk:       store.outlet_sk,
+        day_of_week:     selectedDay,
+        sequence_order:  (dayStores.length + 1),
+      }),
+    onSuccess: (_data, store) => {
+      qc.invalidateQueries({ queryKey: ["route-planner"] });
+      toast.success(`${store.store_name} ditambahkan ke rute ${selectedDay}.`);
+      setShowAddModal(false);
+      setSearchStore("");
+    },
+    onError: () => toast.error("Gagal menambahkan toko ke rute."),
   });
 
   return (
@@ -297,13 +333,13 @@ export default function RoutePlanner() {
       {showAddModal && (
         <div
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-          onClick={(e) => e.target === e.currentTarget && setShowAddModal(false)}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowAddModal(false); setSearchStore(""); } }}
         >
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h3 className="font-semibold text-slate-800">Tambah Store ke Rute</h3>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => { setShowAddModal(false); setSearchStore(""); }}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
                 aria-label="Tutup"
               >
@@ -314,24 +350,70 @@ export default function RoutePlanner() {
               <div className="relative">
                 <Icon
                   name="magnifying-glass"
+                  aria-hidden={true}
                   className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                 />
                 <input
                   className="input pl-8"
                   placeholder="Cari nama atau kode toko..."
+                  aria-label="Cari toko"
                   value={searchStore}
                   onChange={(e) => setSearchStore(e.target.value)}
                   autoFocus
                 />
               </div>
-              <EmptyState
-                icon="building-storefront"
-                title="Ketik nama toko"
-                description="Hasil pencarian akan muncul di sini"
-              />
+
+              <div className="max-h-64 overflow-y-auto -mx-5 px-5">
+                {debouncedSearchStore.length < 2 ? (
+                  <EmptyState
+                    icon="building-storefront"
+                    title="Ketik nama toko"
+                    description="Minimal 2 karakter untuk mencari"
+                  />
+                ) : searchingStores ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 animate-pulse">
+                        <div className="w-8 h-8 rounded-full bg-slate-200 shrink-0" />
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-3.5 bg-slate-200 rounded w-32" />
+                          <div className="h-3 bg-slate-200 rounded w-20" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : storeResults.length === 0 ? (
+                  <EmptyState
+                    icon="building-storefront"
+                    title="Tidak ada hasil"
+                    description={`Tidak ada toko untuk "${debouncedSearchStore}"`}
+                  />
+                ) : (
+                  <div className="space-y-1">
+                    {storeResults.map((store) => (
+                      <button
+                        key={store.outlet_sk}
+                        onClick={() => addStoreMutation.mutate(store)}
+                        disabled={addStoreMutation.isPending}
+                        className="w-full text-left flex items-center gap-3 p-3 rounded-lg hover:bg-primary-50 transition-colors group"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+                          <Icon name="building-storefront" className="w-4 h-4" aria-hidden={true} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-700 truncate">{store.store_name}</p>
+                          <p className="text-xs text-slate-400">{store.source_outlet_code} · {store.region ?? "—"}</p>
+                        </div>
+                        {store.store_grade && gradeBadge(store.store_grade)}
+                        <Icon name="plus" className="w-4 h-4 text-primary-500 opacity-0 group-hover:opacity-100 shrink-0" aria-hidden={true} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
-              <button onClick={() => setShowAddModal(false)} className="btn-secondary">
+              <button onClick={() => { setShowAddModal(false); setSearchStore(""); }} className="btn-secondary">
                 Batal
               </button>
             </div>

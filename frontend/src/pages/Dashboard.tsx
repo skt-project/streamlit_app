@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import TopNav from "@/components/layout/TopNav";
@@ -207,9 +208,9 @@ export default function Dashboard() {
                     <p className="section-heading-title">Comply Target</p>
                     <p className="section-heading-sub">Bulan berjalan per brand</p>
                   </div>
-                  <a href="/target-management" className="section-heading-action">
+                  <Link to="/target-management" className="section-heading-action">
                     Kelola →
-                  </a>
+                  </Link>
                 </div>
 
                 {complyBrands.length === 0 ? (
@@ -247,7 +248,7 @@ export default function Dashboard() {
                     <p className="section-heading-title">EC Rate per Salesman</p>
                     <p className="section-heading-sub">MTD, diurutkan by kunjungan terbanyak</p>
                   </div>
-                  <a href="/route-evaluate" className="section-heading-action">Evaluate →</a>
+                  <Link to="/route-evaluate" className="section-heading-action">Evaluate →</Link>
                 </div>
 
                 {leaderboard.length === 0 ? (
@@ -371,7 +372,7 @@ export default function Dashboard() {
                 <div>
                   <p className="section-heading-title">Feed Pengumuman</p>
                 </div>
-                <a href="/announcements" className="section-heading-action">Lihat semua →</a>
+                <Link to="/announcements" className="section-heading-action">Lihat semua →</Link>
               </div>
 
               {announcements.length === 0 ? (
