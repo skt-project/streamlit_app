@@ -64,11 +64,11 @@ def brand_group_filter(
 ) -> tuple[str, list]:
     """
     Returns (SQL fragment, BQ params) to filter by brand_group column on dim_salesman.
-    ho_admin, distributor_admin, or users without a brand_group get no filter.
+    ho_admin and dm see all brands; users without a brand_group get no filter.
     Pass table_alias (e.g. "sm") when the query joins multiple tables.
     """
     from services.bq import BQClient
-    if user.role in ("ho_admin", "distributor_admin") or not user.brand_group or user.brand_group in _UNRESTRICTED_GROUPS:
+    if user.role in ("ho_admin", "dm") or not user.brand_group or user.brand_group in _UNRESTRICTED_GROUPS:
         return "", []
     col = f"{table_alias}.brand_group" if table_alias else "brand_group"
     return f"AND {col} = @{param_name}", [BQClient.p(param_name, "STRING", user.brand_group)]

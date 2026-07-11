@@ -4,7 +4,7 @@ and clone real outlet routes into test_se's salesman_sk.
 
   test_se    / STEP@2026  — SE  (has 70 real stores across all days)
   test_spv   / STEP@2026  — SPV
-  test_dist  / STEP@2026  — distributor_admin (final approver)
+  test_dist  / STEP@2026  — dm (final approver)
 
 Run from D:\\GitHub\\skintific-step\\backend:
   python create_test_users.py
@@ -105,9 +105,9 @@ else:
 print("\nCreating user accounts...")
 
 TEST_USERS = [
-    dict(username="test_se",   full_name="Test SE",                role="se",               salesman_sk=TEST_SE_SK),
-    dict(username="test_spv",  full_name="Test SPV",               role="spv",              salesman_sk=None),
-    dict(username="test_dist", full_name="Test Distributor Admin",  role="distributor_admin", salesman_sk=None),
+    dict(username="test_se",   full_name="Test SE",                role="salesman", salesman_sk=TEST_SE_SK),
+    dict(username="test_spv",  full_name="Test SPV",               role="spv",      salesman_sk=None),
+    dict(username="test_dist", full_name="Test Distributor Manager",role="dm",       salesman_sk=None),
 ]
 
 existing = {r["username"] for r in bq.query(f"SELECT username FROM `{p}.{d}.users`")}
