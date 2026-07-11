@@ -30,6 +30,11 @@ def get_kpi(
     bq = BQClient.get()
     d = visit_date or date.today().isoformat()
 
+    cache_key = f"kpi:{sk}:{d}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     row = bq.query_one(
         f"""
         SELECT
@@ -59,7 +64,7 @@ def get_kpi(
     strike_rate = round((effective / total * 100) if total > 0 else 0.0, 1)
     route_pct = round((total / scheduled * 100) if scheduled > 0 else 0.0, 1)
 
-    return KpiOut(
+    result = KpiOut(
         total_visits=total,
         effective_calls=effective,
         strike_rate=strike_rate,
@@ -69,6 +74,8 @@ def get_kpi(
         route_completion_pct=route_pct,
         date=d,
     )
+    bq.cache.set(cache_key, result, ttl=120)  # 2 min — live day KPIs, acceptable lag
+    return result
 
 
 @router.get("/team", response_model=TeamKpiResponse)
@@ -79,6 +86,11 @@ def get_team_kpi(
     bq = BQClient.get()
     d = visit_date or date.today().isoformat()
     bg_clause, bg_params = brand_group_filter(current_user, table_alias="v")
+
+    cache_key = f"team-kpi:{current_user.salesman_sk or current_user.user_id}:{d}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     rows = bq.query(
         f"""
@@ -113,4 +125,6 @@ def get_team_kpi(
             pending_approvals=int(r.get("pending_approvals", 0) or 0),
         ))
 
-    return TeamKpiResponse(members=members, total_members=len(members))
+    result = TeamKpiResponse(members=members, total_members=len(members))
+    bq.cache.set(cache_key, result, ttl=120)  # 2 min — live team KPIs
+    return result

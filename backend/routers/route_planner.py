@@ -38,6 +38,11 @@ def list_salesmen_routes(
     bq = BQClient.get()
     bg_clause, bg_params = brand_group_filter(current_user, "bg", "sm")
 
+    cache_key = f"route-planner:salesmen:{current_user.brand_group or 'all'}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     # Single query: join salesman + PJP + outlet to avoid unquoted IN clause
     rows = bq.query(
         f"""
@@ -97,6 +102,7 @@ def list_salesmen_routes(
     for sm in salesmen_map.values():
         total = sum(len(v) for v in sm["stores_per_day"].values())
         result.append({**sm, "total_stores": total, "achievement_pct": None, "compliance_pct": None})
+    bq.cache.set(cache_key, result, ttl=600)  # 10 min — PJP changes only on import
     return result
 
 
@@ -106,6 +112,10 @@ def search_stores(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
+    cache_key = f"route-planner:stores:{q.lower()}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
     rows = bq.query(
         f"""
         SELECT outlet_sk, source_outlet_code, store_name, store_grade, region
@@ -118,6 +128,7 @@ def search_stores(
         """,
         [bq.p("q", "STRING", q)],
     )
+    bq.cache.set(cache_key, rows, ttl=300)  # 5 min — dim_outlet stable between master imports
     return rows
 
 

@@ -120,6 +120,7 @@ def upload_pjp(
 
     bq.cache.invalidate("pjp:")
     bq.cache.invalidate("schedule:")
+    bq.cache.invalidate("route-planner:")
 
     log_event(
         "pjp.upload",
