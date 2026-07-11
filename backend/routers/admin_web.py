@@ -22,6 +22,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 
+VALID_ROLES = {"salesman", "spv", "asm", "dm", "ho_admin", "demo"}
+
+
 class UserCreate(BaseModel):
     username: str
     full_name: str
@@ -85,9 +88,14 @@ def create_user(
     body: UserCreate,
     current_user: UserContext = Depends(require_role("ho_admin")),
 ):
+    if len(body.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=422, detail=f"Invalid role. Must be one of: {sorted(VALID_ROLES)}")
+
     bq = BQClient.get()
     existing = bq.query_one(
-        f"SELECT user_id FROM {SFA_WEB}.users WHERE username = @u AND is_active = TRUE",
+        f"SELECT user_id FROM {SFA_WEB}.users WHERE username = @u",
         [bq.p("u", "STRING", body.username)],
     )
     if existing:
@@ -127,6 +135,11 @@ def update_user(
     body: UserUpdate,
     current_user: UserContext = Depends(require_role("ho_admin")),
 ):
+    if body.password is not None and len(body.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    if body.role is not None and body.role not in VALID_ROLES:
+        raise HTTPException(status_code=422, detail=f"Invalid role. Must be one of: {sorted(VALID_ROLES)}")
+
     bq = BQClient.get()
     sets, params = [], []
     if body.full_name:
@@ -164,7 +177,7 @@ def toggle_active(
     bq = BQClient.get()
     now = datetime.now(timezone.utc).isoformat()
     bq.execute(
-        f"UPDATE {SFA_WEB}.users SET is_active = @active, updated_at = @now WHERE user_id = @id AND is_active = TRUE",
+        f"UPDATE {SFA_WEB}.users SET is_active = @active, updated_at = @now WHERE user_id = @id",
         [bq.p("active", "BOOL", body.is_active), bq.p("now", "TIMESTAMP", now), bq.p("id", "STRING", user_id)],
     )
     log_event("user.toggle_active", "user", user_id, current_user.username,
