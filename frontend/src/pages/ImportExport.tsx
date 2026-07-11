@@ -282,7 +282,7 @@ export default function ImportExport() {
           <div className="section-heading mb-5">
             <div>
               <p className="section-heading-title">Export Data</p>
-              <p className="section-heading-sub">Unduh laporan dan data master dalam format Excel</p>
+              <p className="section-heading-sub">Unduh laporan dan data master dalam format CSV</p>
             </div>
           </div>
 
@@ -306,7 +306,7 @@ export default function ImportExport() {
                     {isLoading
                       ? <Icon name="arrow-path" className="w-3.5 h-3.5 animate-spin" />
                       : <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />}
-                    {isLoading ? "Mengunduh…" : "Download Excel"}
+                    {isLoading ? "Mengunduh…" : "Download CSV"}
                   </button>
                 </div>
               );

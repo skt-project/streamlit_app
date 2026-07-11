@@ -44,6 +44,10 @@ app.add_middleware(
 
 # Mobile app routers
 app.include_router(auth.router,      prefix="/api/v1")
+# salesman_web must be included BEFORE salesman so that static segments
+# (/salesman/list, /salesman/search, /salesman/360/...) take priority
+# over the dynamic /salesman/{sk} route in FastAPI's route list.
+app.include_router(salesman_web.router,   prefix="/api/v1")
 app.include_router(salesman.router,  prefix="/api/v1")
 app.include_router(route.router,     prefix="/api/v1")
 app.include_router(visit.router,     prefix="/api/v1")
@@ -62,7 +66,6 @@ app.include_router(target_web.router,     prefix="/api/v1")
 app.include_router(evaluate_web.router,   prefix="/api/v1")
 app.include_router(route_planner.router,  prefix="/api/v1")
 app.include_router(report_web.router,     prefix="/api/v1")
-app.include_router(salesman_web.router,   prefix="/api/v1")
 app.include_router(outlet_web.router,     prefix="/api/v1")
 app.include_router(notification.router,   prefix="/api/v1")
 app.include_router(admin_web.router,      prefix="/api/v1")
