@@ -1,9 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { Toaster } from "@/components/ui";
 import Layout from "@/components/layout/Layout";
 import Login from "@/pages/Login";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 // ── Lazy-loaded pages (code-split per route) ───────────────────────────────
 const Dashboard         = lazy(() => import("@/pages/Dashboard"));
@@ -43,6 +44,15 @@ function PageFallback() {
   );
 }
 
+// ── Route wrapper: error isolation + lazy-load skeleton ───────────────────
+function RoutedPage({ children }: { children: ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<PageFallback />}>{children}</Suspense>
+    </ErrorBoundary>
+  );
+}
+
 // ── Auth guard ─────────────────────────────────────────────────────────────
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -78,86 +88,32 @@ function AppRoutes() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
 
-        <Route
-          path="dashboard"
-          element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>}
-        />
-        <Route
-          path="route-planner"
-          element={<Suspense fallback={<PageFallback />}><RoutePlanner /></Suspense>}
-        />
-        <Route
-          path="route-evaluate"
-          element={<Suspense fallback={<PageFallback />}><RouteEvaluate /></Suspense>}
-        />
-        <Route
-          path="target-management"
-          element={<Suspense fallback={<PageFallback />}><TargetManagement /></Suspense>}
-        />
-        <Route
-          path="approvals"
-          element={<Suspense fallback={<PageFallback />}><Approvals /></Suspense>}
-        />
-        <Route
-          path="announcements"
-          element={<Suspense fallback={<PageFallback />}><Announcements /></Suspense>}
-        />
-        <Route
-          path="reports"
-          element={<Suspense fallback={<PageFallback />}><Reports /></Suspense>}
-        />
+        <Route path="dashboard"          element={<RoutedPage><Dashboard /></RoutedPage>} />
+        <Route path="route-planner"      element={<RoutedPage><RoutePlanner /></RoutedPage>} />
+        <Route path="route-evaluate"     element={<RoutedPage><RouteEvaluate /></RoutedPage>} />
+        <Route path="target-management"  element={<RoutedPage><TargetManagement /></RoutedPage>} />
+        <Route path="approvals"          element={<RoutedPage><Approvals /></RoutedPage>} />
+        <Route path="announcements"      element={<RoutedPage><Announcements /></RoutedPage>} />
+        <Route path="reports"            element={<RoutedPage><Reports /></RoutedPage>} />
 
         {/* Master Data */}
-        <Route
-          path="master-data-pjp"
-          element={<Suspense fallback={<PageFallback />}><MasterDataPjp /></Suspense>}
-        />
-        <Route
-          path="master-data-salesman"
-          element={<Suspense fallback={<PageFallback />}><MasterDataSalesman /></Suspense>}
-        />
-        <Route
-          path="outlet-salesman"
-          element={<Suspense fallback={<PageFallback />}><OutletSalesman /></Suspense>}
-        />
+        <Route path="master-data-pjp"     element={<RoutedPage><MasterDataPjp /></RoutedPage>} />
+        <Route path="master-data-salesman" element={<RoutedPage><MasterDataSalesman /></RoutedPage>} />
+        <Route path="outlet-salesman"     element={<RoutedPage><OutletSalesman /></RoutedPage>} />
 
         {/* 360° Views */}
-        <Route
-          path="store360"
-          element={<Suspense fallback={<PageFallback />}><Store360 /></Suspense>}
-        />
-        <Route
-          path="salesman360"
-          element={<Suspense fallback={<PageFallback />}><Salesman360 /></Suspense>}
-        />
-        <Route
-          path="store-opportunity"
-          element={<Suspense fallback={<PageFallback />}><StoreOpportunity /></Suspense>}
-        />
+        <Route path="store360"          element={<RoutedPage><Store360 /></RoutedPage>} />
+        <Route path="salesman360"       element={<RoutedPage><Salesman360 /></RoutedPage>} />
+        <Route path="store-opportunity" element={<RoutedPage><StoreOpportunity /></RoutedPage>} />
 
         {/* Visits & Demand */}
-        <Route
-          path="visits"
-          element={<Suspense fallback={<PageFallback />}><Visits /></Suspense>}
-        />
-        <Route
-          path="visits/:visitId"
-          element={<Suspense fallback={<PageFallback />}><VisitDetail /></Suspense>}
-        />
+        <Route path="visits"            element={<RoutedPage><Visits /></RoutedPage>} />
+        <Route path="visits/:visitId"   element={<RoutedPage><VisitDetail /></RoutedPage>} />
 
         {/* Admin */}
-        <Route
-          path="administration"
-          element={<Suspense fallback={<PageFallback />}><Administration /></Suspense>}
-        />
-        <Route
-          path="import-export"
-          element={<Suspense fallback={<PageFallback />}><ImportExport /></Suspense>}
-        />
-        <Route
-          path="notifications"
-          element={<Suspense fallback={<PageFallback />}><Notifications /></Suspense>}
-        />
+        <Route path="administration"    element={<RoutedPage><Administration /></RoutedPage>} />
+        <Route path="import-export"     element={<RoutedPage><ImportExport /></RoutedPage>} />
+        <Route path="notifications"     element={<RoutedPage><Notifications /></RoutedPage>} />
       </Route>
 
       {/* Fallback */}
