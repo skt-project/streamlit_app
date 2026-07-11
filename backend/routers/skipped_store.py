@@ -164,6 +164,8 @@ def submit_skipped_stores(
         except Exception:
             pass
 
+    if inserted > 0:
+        bq.cache.invalidate("skipped:")
     return {"inserted": inserted, "total": len(body.stores)}
 
 
@@ -196,6 +198,11 @@ def list_skipped_stores(
     where = " ".join(conditions)
     offset = (page - 1) * page_size
 
+    cache_key = f"skipped:list:{current_user.brand_group or 'all'}:{week_iso or ''}:{status or 'PENDING_SPV'}:{brand_group or ''}:{page}:{page_size}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     rows = bq.query(
         f"""
         SELECT skipped_store_id, salesman_sk, outlet_sk, outlet_name,
@@ -209,7 +216,9 @@ def list_skipped_stores(
         params + [bq.p("lim", "INT64", page_size), bq.p("off", "INT64", offset)],
     )
 
-    return [SkippedStoreOut(**r) for r in rows]
+    result = [SkippedStoreOut(**r) for r in rows]
+    bq.cache.set(cache_key, result, ttl=30)  # 30s — SPV workflow data, short TTL to stay near real-time
+    return result
 
 
 @router.get("/summary")
@@ -218,6 +227,10 @@ def skipped_store_summary(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
+    cache_key = f"skipped:summary:{week_iso or 'all'}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
     params: list = [bq.p("wfilt", "STRING", week_iso or "")]
     row = bq.query_one(
         f"""
@@ -233,7 +246,9 @@ def skipped_store_summary(
         """,
         params,
     )
-    return row or {}
+    result = row or {}
+    bq.cache.set(cache_key, result, ttl=30)
+    return result
 
 
 @router.put("/{skipped_store_id}/return", response_model=SkippedStoreOut)
@@ -269,6 +284,7 @@ def return_to_salesman(
             bq.p("sid",   "STRING",    skipped_store_id),
         ],
     )
+    bq.cache.invalidate("skipped:")
 
     # Notify original SE
     if se_uid := _find_se_user_id(bq, rec["salesman_sk"]):
@@ -320,6 +336,7 @@ def execute_by_spv(
             bq.p("sid",   "STRING",    skipped_store_id),
         ],
     )
+    bq.cache.invalidate("skipped:")
 
     updated = bq.query_one(
         f"SELECT * FROM {_TABLE} WHERE skipped_store_id = @sid",

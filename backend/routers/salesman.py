@@ -80,6 +80,15 @@ def list_salesman(
     where = " ".join(conditions)
     offset = (page - 1) * page_size
 
+    cache_key = (
+        f"salesman:list:{current_user.brand_group or 'all'}:{current_user.role}:"
+        f"{distributor_code or ''}:{region or ''}:{salesman_type or ''}:"
+        f"{is_active}:{q or ''}:{page}:{page_size}"
+    )
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     count_row = bq.query_one(
         f"SELECT COUNT(*) AS n FROM {settings.table('vw_salesman_active')} WHERE {where}",
         params,
@@ -97,13 +106,15 @@ def list_salesman(
         params + [bq.p("lim", "INT64", page_size), bq.p("off", "INT64", offset)],
     )
 
-    return SalesmanListResponse(
+    result = SalesmanListResponse(
         items=[SalesmanOut(**r) for r in rows],
         total=total,
         page=page,
         page_size=page_size,
         has_next=(offset + page_size) < total,
     )
+    bq.cache.set(cache_key, result, ttl=120)
+    return result
 
 
 @router.get("/{salesman_sk}", response_model=SalesmanOut)
@@ -112,6 +123,10 @@ def get_salesman(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
+    cache_key = f"salesman:{salesman_sk}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
     row = bq.query_one(
         f"""
         SELECT {_SALESMAN_COLS}
@@ -122,7 +137,9 @@ def get_salesman(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Salesman not found")
-    return SalesmanOut(**row)
+    result = SalesmanOut(**row)
+    bq.cache.set(cache_key, result, ttl=120)
+    return result
 
 
 @router.post("", status_code=201, response_model=SalesmanOut)

@@ -40,6 +40,11 @@ def list_products(current_user: UserContext = Depends(require_auth)):
         current_user, col="brand", param_prefix="pb"
     )
 
+    cache_key = f"product:{current_user.brand_group or 'all'}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     rows = bq.query(
         f"""
         SELECT
@@ -62,4 +67,6 @@ def list_products(current_user: UserContext = Depends(require_auth)):
         d["is_active"] = True
         items.append(d)
 
-    return {"items": items, "total": len(items)}
+    result = {"items": items, "total": len(items)}
+    bq.cache.set(cache_key, result, ttl=300)  # 5 min — read-only GT table, stable between imports
+    return result
