@@ -114,7 +114,7 @@ class VisitOut(BaseModel):
     visit_id: str
     salesman_sk: str
     outlet_sk: str | None = None
-    distributor_code: str | None = None  # outlet's distributor (used by distributor_admin)
+    distributor_code: str | None = None  # outlet's distributor (used by dm role for scoping)
     schedule_id: str | None = None
     visit_date: date
     visit_type: str

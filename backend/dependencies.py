@@ -49,7 +49,7 @@ def require_auth(
 
 
 def require_role(*roles: str):
-    """Factory: Depends(require_role('ho_admin', 'area_manager'))"""
+    """Factory: Depends(require_role('ho_admin', 'dm'))"""
     def _check(user: UserContext = Depends(require_auth)) -> UserContext:
         if user.role not in roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
