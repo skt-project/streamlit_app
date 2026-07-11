@@ -57,6 +57,7 @@ export default function Approvals() {
   const { data: approvals = [], isLoading } = useQuery<ApprovalRequest[]>({
     queryKey: ["approvals", tab],
     queryFn: () => fetchApprovals(tab),
+    staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
 

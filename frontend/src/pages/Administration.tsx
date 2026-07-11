@@ -29,6 +29,7 @@ export default function Administration() {
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ["admin-users", search, roleFilter],
     queryFn: () => fetchUsers(search, roleFilter),
+    staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
 

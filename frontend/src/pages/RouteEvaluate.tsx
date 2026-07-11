@@ -33,6 +33,7 @@ export default function RouteEvaluate() {
   const { data: team = [], isLoading } = useQuery<EvaluateTeamRow[]>({
     queryKey: ["evaluate-team", weekKey],
     queryFn: () => fetchTeam(weekKey),
+    staleTime: 5 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
@@ -40,6 +41,8 @@ export default function RouteEvaluate() {
     queryKey: ["evaluate-detail", drillSalesman?.salesman_sk, weekKey],
     queryFn: () => fetchDetail(drillSalesman!.salesman_sk, weekKey),
     enabled: !!drillSalesman,
+    staleTime: 2 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const teamKpis = {
@@ -56,9 +59,9 @@ export default function RouteEvaluate() {
       <main className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Week nav */}
         <div className="flex items-center gap-3">
-          <button onClick={() => setWeekStart((d) => addDays(d, -7))} className="btn-secondary p-1.5"><Icon name="chevron-left" className="w-4 h-4" /></button>
-          <span className="text-sm font-semibold text-slate-700">{weekLabel}</span>
-          <button onClick={() => setWeekStart((d) => addDays(d, 7))} className="btn-secondary p-1.5"><Icon name="chevron-right" className="w-4 h-4" /></button>
+          <button onClick={() => setWeekStart((d) => addDays(d, -7))} className="btn-secondary p-1.5" aria-label="Minggu sebelumnya"><Icon name="chevron-left" className="w-4 h-4" aria-hidden={true} /></button>
+          <span className="text-sm font-semibold text-slate-700" aria-live="polite">{weekLabel}</span>
+          <button onClick={() => setWeekStart((d) => addDays(d, 7))} className="btn-secondary p-1.5" aria-label="Minggu berikutnya"><Icon name="chevron-right" className="w-4 h-4" aria-hidden={true} /></button>
         </div>
 
         {/* Drill-down view */}

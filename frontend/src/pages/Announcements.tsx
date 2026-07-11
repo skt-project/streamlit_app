@@ -22,6 +22,7 @@ export default function Announcements() {
   const { data: items = [], isLoading } = useQuery<Announcement[]>({
     queryKey: ["announcements", activeType],
     queryFn: () => fetchAnnouncements(activeType),
+    staleTime: 5 * 60 * 1000,  // matches backend 300s cache
     placeholderData: (prev) => prev,
   });
 

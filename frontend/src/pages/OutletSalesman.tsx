@@ -22,9 +22,10 @@ export default function OutletSalesman() {
   const { data: outletsData, isLoading } = useQuery({
     queryKey: ["outlets", search, unassigned],
     queryFn: () => fetchOutlets(search, unassigned),
+    staleTime: 2 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
-  const { data: salesmen = [] } = useQuery({ queryKey: ["salesmen-simple"], queryFn: fetchSalesmenSimple });
+  const { data: salesmen = [] } = useQuery({ queryKey: ["salesmen-simple"], queryFn: fetchSalesmenSimple, staleTime: 5 * 60 * 1000 });
 
   const outlets: Outlet[] = outletsData?.items ?? [];
 

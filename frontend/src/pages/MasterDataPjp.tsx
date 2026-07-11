@@ -22,12 +22,15 @@ export default function MasterDataPjp() {
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ["pjp-summary"],
     queryFn:  fetchPjpSummary,
+    staleTime: 10 * 60 * 1000,  // matches backend 600s cache
+    placeholderData: (prev) => prev,
   });
 
   const { data: pjpList = [], isLoading } = useQuery({
     queryKey: ["pjp-list", debouncedSearch],
     queryFn:  () => fetchPjpList(debouncedSearch),
     enabled:  activeTab === "list",
+    staleTime: 5 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
