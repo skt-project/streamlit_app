@@ -109,6 +109,7 @@ export default function Reports() {
                   key={p}
                   onClick={() => setPeriod(p)}
                   className={`chip ${period === p ? "chip-active" : ""}`}
+                  aria-pressed={period === p}
                 >
                   {p}
                 </button>
@@ -121,6 +122,7 @@ export default function Reports() {
                   key={t}
                   onClick={() => setTier(t)}
                   className={`chip ${tier === t ? "chip-active" : ""}`}
+                  aria-pressed={tier === t}
                 >
                   {t}
                 </button>

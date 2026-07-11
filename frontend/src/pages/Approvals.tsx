@@ -87,6 +87,7 @@ export default function Approvals() {
               <button
                 className={`chip ${tab === "pending" ? "chip-active" : ""}`}
                 onClick={() => { setTab("pending"); setSelected(null); }}
+                aria-pressed={tab === "pending"}
               >
                 <Icon name="clock" className="w-3.5 h-3.5" />
                 Menunggu
@@ -99,6 +100,7 @@ export default function Approvals() {
               <button
                 className={`chip ${tab === "history" ? "chip-active" : ""}`}
                 onClick={() => { setTab("history"); setSelected(null); }}
+                aria-pressed={tab === "history"}
               >
                 <Icon name="document-text" className="w-3.5 h-3.5" />
                 Riwayat

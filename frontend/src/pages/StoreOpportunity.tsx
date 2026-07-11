@@ -79,6 +79,7 @@ export default function StoreOpportunity() {
                 key={t || "semua"}
                 onClick={() => setTier(t)}
                 className={`chip ${tier === t ? "chip-active" : ""}`}
+                aria-pressed={tier === t}
               >
                 {t || "Semua Tier"}
               </button>
@@ -90,6 +91,7 @@ export default function StoreOpportunity() {
                 key={b || "semua"}
                 onClick={() => setBrand(b)}
                 className={`chip ${brand === b ? "chip-active" : ""}`}
+                aria-pressed={brand === b}
               >
                 {b || "Semua Brand"}
               </button>

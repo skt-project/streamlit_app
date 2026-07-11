@@ -51,6 +51,7 @@ export default function Announcements() {
               key={t}
               onClick={() => setActiveType(t)}
               className={`chip ${activeType === t ? "chip-active" : ""}`}
+              aria-pressed={activeType === t}
             >
               {t}
             </button>
