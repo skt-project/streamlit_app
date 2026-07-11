@@ -92,7 +92,9 @@ def get_spv_targets(
         params.extend(bg_params)
 
     extra = " ".join(clauses)
-    rows = bq.query(
+    cache_key = f"target:spv:{pm}:{brand or 'all'}:{current_user.brand_group or 'all'}"
+    rows = bq.query_cached(
+        cache_key,
         f"""
         SELECT
           t.spv_target_id,
@@ -111,12 +113,14 @@ def get_spv_targets(
         ORDER BY sm.salesman_name, t.brand
         """,
         params,
+        ttl=120,  # 2 min — invalidated on upsert/submit via _bust_target_cache
     )
     return {"rows": rows, "period_month": pm}
 
 
 def _bust_target_cache(bq: BQClient) -> None:
     bq.cache.invalidate("target:comply:")
+    bq.cache.invalidate("target:spv:")
     bq.cache.invalidate("dashboard:comply:")
 
 
