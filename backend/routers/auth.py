@@ -52,6 +52,18 @@ def login(request: Request, body: LoginRequest):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     bq = BQClient.get()
+
+    # Silently upgrade legacy SHA-256 hashes to bcrypt on successful login.
+    # This migrates old accounts incrementally without admin intervention.
+    if not user["password_hash"].startswith(("$2b$", "$2a$")):
+        try:
+            bq.execute(
+                f"UPDATE {settings.table('users')} SET password_hash = @pw WHERE user_id = @uid",
+                [bq.p("pw", "STRING", hash_password(body.password)), bq.p("uid", "STRING", user["user_id"])],
+            )
+        except Exception:
+            pass  # hash upgrade must never block login
+
     bq.execute(
         f"UPDATE {settings.table('users')} SET last_login = CURRENT_TIMESTAMP() WHERE user_id = @user_id",
         [bq.p("user_id", "STRING", user["user_id"])],

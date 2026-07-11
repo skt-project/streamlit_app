@@ -2,6 +2,7 @@
 GET  /reports              — dynamic report data (JSON)
 GET  /reports/export.csv   — same data as CSV download
 """
+import calendar
 import csv
 import io
 from datetime import date
@@ -25,7 +26,6 @@ def _period_dates(period: str) -> tuple[str, str]:
     if period == "Bulan Ini":
         return today.replace(day=1).isoformat(), today.isoformat()
     if period == "Bulan Lalu":
-        import calendar
         y, m = today.year, today.month
         if m == 1:
             y, m = y - 1, 12
@@ -45,8 +45,18 @@ def _build_rows(
     period: str,
     tier: str,
     current_user: UserContext,
+    use_cache: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     bq = BQClient.get()
+
+    # Cache key includes all filter dimensions — different users with same brand_group share cache
+    bg_key = current_user.brand_group or "all"
+    cache_key = f"report:{report_type}:{period}:{tier}:{bg_key}"
+    if use_cache:
+        hit = bq.cache.get(cache_key)
+        if hit is not None:
+            return hit
+
     bg_clause, bg_params = brand_group_filter(current_user, "bg", "v")
     tier_clause = "AND o.store_grade = @tier" if tier != "Semua Tier" else ""
     params = list(bg_params)
@@ -146,7 +156,10 @@ def _build_rows(
         )
         kpis = []
 
-    return rows, kpis
+    result = (rows, kpis)
+    if use_cache:
+        bq.cache.set(cache_key, result, ttl=120)  # 2-minute TTL — aggregate data, not real-time
+    return result
 
 
 @router.get("")
@@ -167,7 +180,7 @@ def export_report_csv(
     tier: str = Query("Semua Tier"),
     current_user: UserContext = Depends(require_auth),
 ):
-    rows, _ = _build_rows(type, period, tier, current_user)
+    rows, _ = _build_rows(type, period, tier, current_user, use_cache=False)  # always fresh for downloads
 
     if not rows:
         return StreamingResponse(
