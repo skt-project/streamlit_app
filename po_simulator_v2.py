@@ -913,6 +913,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         excel_dfs[dist_name] = res_df.copy()
 
     prog.progress(1.0, "Selesai")
+    missing_dist = [d for d in distributors if d not in excel_dfs]
+    if missing_dist:
+        st.error(f"⚠️ **{len(missing_dist)} distributor TIDAK diproses** (tidak ada data SKU/Stock di BigQuery): {', '.join(missing_dist)}")
     return excel_dfs, all_npd
 
 PO_TEMPLATE_COLS = [
@@ -967,7 +970,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 ].copy()
     prev_df[woi_col] = pd.to_numeric(prev_df[woi_col], errors="coerce")
     top10 = prev_df.nlargest(10, woi_col)[PO_IMG_COLS].reset_index(drop=True)
-    st.dataframe(top10.style.set_properties(**{"background-color":"#D6EAF8","color":"#1a1a2e","border":"1px solid #AED6F1"}).format(na_rep="-"), use_container_width=True, hide_index=True)
+    num_cols_top10 = top10.select_dtypes(include=['number']).columns
+    st.dataframe(top10.style.set_properties(**{"background-color":"#D6EAF8","color":"#1a1a2e","border":"1px solid #AED6F1"}).format({c: "{:.2f}" for c in num_cols_top10}, na_rep="-"), use_container_width=True, hide_index=True)
+    
 
     alloc_col = next((c for c in final_disp.columns if "allocation" in c.lower()), None)
     if alloc_col:
@@ -981,7 +986,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         else:
             for dist_alloc, grp in alloc_df.groupby("Distributor"):
                 with st.expander(f"📦 {dist_alloc} — {len(grp)} baris", expanded=True):
-                    st.dataframe(grp[show_cols].reset_index(drop=True), use_container_width=True, hide_index=True)
+                    grp_disp = grp[show_cols].reset_index(drop=True)
+                    num_cols_alloc = grp_disp.select_dtypes(include=['number']).columns
+                    st.dataframe(grp_disp.style.format({c: "{:.2f}" for c in num_cols_alloc}, na_rep="-"), use_container_width=True, hide_index=True)
 
     final_step = 3 + (1 if alloc_col else 0)
 
@@ -996,8 +1003,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         st.error("❌ Library matplotlib tidak tersedia."); st.stop()
 
     img_df = final_disp[PO_COLS_copy].copy()
-    for nc in img_df.select_dtypes(include=['float','float64','float32']).columns:
-        img_df[nc] = img_df[nc].round(2)
+    num_cols_img = img_df.select_dtypes(include=['number']).columns
+    for nc in num_cols_img:
+        img_df[nc] = img_df[nc].apply(lambda v: f"{v:.2f}" if pd.notna(v) else "")
     sc_col = next((c for c in img_df.columns if "supply" in c.lower() and "control" in c.lower()), None)
     stop_mask = img_df[sc_col].str.strip().str.upper().isin(["STOP PO","OOS","DISCONTINUED","UNAVAILABLE"])
     stop_df = img_df[stop_mask].reset_index(drop=True)
@@ -1362,7 +1370,7 @@ def _modify_qty_section(raw_entries, page_key: str):
                 st.dataframe(tpl_df, use_container_width=True, hide_index=True)
 
             qty_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['qty','quantity'])), None)
-            sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code'])), None)
+            sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code', 'sku code'])), None)
             if not qty_col_t or not sku_col_t:
                 st.info("ℹ️ Kolom SKU / QTY tidak terdeteksi."); continue
 
