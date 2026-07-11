@@ -48,7 +48,9 @@ def get_comply(
     # ho_admin sees all brands; group users see only their group's brands.
     bl_clause, bl_params = brand_list_filter(current_user, col="brand", param_prefix="bgb")
 
-    rows = bq.query(
+    cache_key = f"target:comply:{pm}:{current_user.brand_group or 'all'}"
+    rows = bq.query_cached(
+        cache_key,
         f"""
         SELECT
           brand,
@@ -63,6 +65,7 @@ def get_comply(
         ORDER BY brand
         """,
         [bq.p("pm", "DATE", pm)] + bl_params,
+        ttl=300,  # 5 min — target data changes only on spv upsert or submit
     )
     return rows
 
@@ -112,6 +115,11 @@ def get_spv_targets(
     return {"rows": rows, "period_month": pm}
 
 
+def _bust_target_cache(bq: BQClient) -> None:
+    bq.cache.invalidate("target:comply:")
+    bq.cache.invalidate("dashboard:comply:")
+
+
 @router.post("/spv", status_code=201)
 def upsert_spv_target(
     body: SpvTargetUpsert,
@@ -121,6 +129,7 @@ def upsert_spv_target(
         raise HTTPException(status_code=403, detail="Not allowed")
     bq = BQClient.get()
     _upsert_one(bq, body, current_user.username)
+    _bust_target_cache(bq)
     return {"message": "Target saved."}
 
 
@@ -144,6 +153,7 @@ def bulk_upsert(
                 )
     for row in body.rows:
         _upsert_one(bq, row, current_user.username)
+    _bust_target_cache(bq)
     return {"message": f"{len(body.rows)} rows saved."}
 
 
@@ -170,6 +180,7 @@ def submit_targets(
         """,
         params,
     )
+    _bust_target_cache(bq)
     return {"message": "Targets submitted for approval."}
 
 

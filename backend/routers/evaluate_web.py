@@ -38,7 +38,9 @@ def evaluate_team(
     date_from, date_to = _parse_week(week)
     bg_clause, bg_params = brand_group_filter(current_user, "bg", "v")
 
-    rows = bq.query(
+    cache_key = f"evaluate:team:{week or 'current'}:{current_user.brand_group or 'all'}"
+    rows = bq.query_cached(
+        cache_key,
         f"""
         SELECT
           v.salesman_sk,
@@ -53,6 +55,7 @@ def evaluate_team(
         ORDER BY call_count DESC
         """,
         [bq.p("dfrom", "DATE", date_from), bq.p("dto", "DATE", date_to)] + bg_params,
+        ttl=300,  # 5 min — team weekly aggregates, acceptable lag
     )
     return rows  # plain array — frontend expects EvaluateTeamRow[]
 
@@ -68,7 +71,9 @@ def evaluate_salesman(
 
     # Show visited outlets + planned-but-not-visited outlets for the week.
     # Uses fact_route_plan_pjp directly (no vw_route_compliance needed).
-    rows = bq.query(
+    cache_key = f"evaluate:salesman:{salesman_sk}:{week or 'current'}"
+    rows = bq.query_cached(
+        cache_key,
         f"""
         -- Visited outlets (may or may not be in the PJP route plan)
         SELECT
@@ -113,5 +118,6 @@ def evaluate_salesman(
         LIMIT 200
         """,
         [bq.p("sk", "STRING", salesman_sk), bq.p("dfrom", "DATE", date_from), bq.p("dto", "DATE", date_to)],
+        ttl=120,  # 2 min — more granular, bust sooner
     )
     return {"salesman_sk": salesman_sk, "date_from": date_from, "date_to": date_to, "stores": rows}
