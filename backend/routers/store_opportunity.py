@@ -13,6 +13,8 @@ from services.bq import BQClient
 
 router = APIRouter(prefix="/store-opportunity", tags=["store-opportunity"])
 
+SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
+
 # Tier benchmarks: monthly potential demand (IDR) by store_grade
 _TIER_BENCHMARK: dict[str, float] = {
     "A": 5_000_000,
@@ -32,21 +34,20 @@ def get_store_opportunity(
     bq = BQClient.get()
     today = date.today()
     year_month = today.strftime("%Y-%m")
-    # Working days elapsed so far this month (Mon–Sat = 6 days/week)
-    days_elapsed = today.day  # simplified; good enough for ranking
 
-    tier_filter = "AND o.store_grade = @tier" if tier else ""
-    brand_filter = "AND o.brand = @brand" if brand else ""
+    cache_key = f"store-opp:{year_month}:{tier or 'all'}:{brand or 'all'}:{limit}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-    params = [
-        bq.p("year_month_prefix", "STRING", year_month),
-    ]
+    tier_filter  = "AND o.store_grade = @tier" if tier else ""
+    brand_filter = "AND o.brand = @brand"      if brand else ""
+    params = [bq.p("year_month_prefix", "STRING", year_month)]
     if tier:
         params.append(bq.p("tier", "STRING", tier))
     if brand:
         params.append(bq.p("brand", "STRING", brand))
 
-    SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
     rows = bq.query(
         f"""
         WITH mtd_demand AS (
@@ -93,23 +94,23 @@ def get_store_opportunity(
         actual = float(r.get("actual_demand_mtd") or 0)
         gap = max(0.0, benchmark - actual)
         results.append({
-            "outlet_sk":         r.get("outlet_sk"),
+            "outlet_sk":          r.get("outlet_sk"),
             "source_outlet_code": r.get("source_outlet_code"),
-            "store_name":        r.get("store_name"),
-            "store_grade":       grade,
-            "brand":             r.get("brand"),
-            "channel":           r.get("channel"),
-            "city":              r.get("city"),
-            "region":            r.get("region"),
-            "salesman_name":     r.get("salesman_name"),
-            "salesman_sk":       r.get("salesman_sk"),
-            "actual_demand_mtd": actual,
-            "potential_demand":  benchmark,
-            "gap":               gap,
-            "last_visit_date":   str(r["last_visit_date"]) if r.get("last_visit_date") else None,
-            "visit_count_mtd":   int(r.get("visit_count_mtd") or 0),
+            "store_name":         r.get("store_name"),
+            "store_grade":        grade,
+            "brand":              r.get("brand"),
+            "channel":            r.get("channel"),
+            "city":               r.get("city"),
+            "region":             r.get("region"),
+            "salesman_name":      r.get("salesman_name"),
+            "salesman_sk":        r.get("salesman_sk"),
+            "actual_demand_mtd":  actual,
+            "potential_demand":   benchmark,
+            "gap":                gap,
+            "last_visit_date":    str(r["last_visit_date"]) if r.get("last_visit_date") else None,
+            "visit_count_mtd":    int(r.get("visit_count_mtd") or 0),
         })
 
-    # Sort by gap descending (highest opportunity first)
     results.sort(key=lambda x: x["gap"], reverse=True)
+    bq.cache.set(cache_key, results, ttl=300)  # 5-min TTL — MTD data, acceptable lag
     return results

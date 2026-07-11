@@ -63,8 +63,8 @@ def upload_pjp(
     bq = BQClient.get()
     now = datetime.now(timezone.utc).isoformat()
 
-    errors = []
-    insert_rows = []
+    errors: list[str] = []
+    insert_rows: list[dict] = []
     for i, row in enumerate(rows, start=2):  # row 1 = header
         day = row.get("visit_day_of_week", "").strip().lower().capitalize()
         if day.lower() not in VALID_DAYS:
@@ -76,43 +76,49 @@ def upload_pjp(
         except (ValueError, AssertionError):
             errors.append(f"Row {i}: week_number must be 1-53")
             continue
+        try:
+            s_sk = int(row["salesman_sk"].strip())
+            o_sk = int(row["outlet_sk"].strip())
+        except (ValueError, KeyError):
+            errors.append(f"Row {i}: salesman_sk and outlet_sk must be integers")
+            continue
 
         insert_rows.append({
-            "id": str(uuid.uuid4()),
-            "salesman_sk": row["salesman_sk"].strip(),
-            "outlet_sk": row["outlet_sk"].strip(),
-            "day": day,
+            "id":   str(uuid.uuid4()),
+            "s_sk": s_sk,
+            "o_sk": o_sk,
+            "day":  day,
             "week": week,
             "freq": int(row.get("visit_frequency", 1) or 1),
-            "bg": row.get("brand_group", "").strip() or None,
+            "bg":   row.get("brand_group", "").strip() or None,
         })
 
     if errors:
         raise HTTPException(status_code=422, detail={"errors": errors[:20]})
 
-    # Batch insert in chunks of 500
+    # Use streaming insert (insert_rows_json) to avoid SQL injection from CSV values.
     CHUNK = 500
     inserted = 0
     for i in range(0, len(insert_rows), CHUNK):
         chunk = insert_rows[i:i + CHUNK]
-        values = ", ".join(
-            f"('{r['id']}', '{r['salesman_sk']}', '{r['outlet_sk']}', "
-            f"'{r['day']}', {r['week']}, {r['freq']}, "
-            f"{'NULL' if r['bg'] is None else repr(r['bg'])}, "
-            f"FALSE, TIMESTAMP '{now}', TIMESTAMP '{now}')"
+        bq.insert_rows("fact_route_plan_pjp", [
+            {
+                "route_plan_id":     r["id"],
+                "salesman_sk":       r["s_sk"],
+                "outlet_sk":         r["o_sk"],
+                "visit_day_of_week": r["day"],
+                "week_number":       r["week"],
+                "visit_frequency":   r["freq"],
+                "brand_group":       r["bg"],
+                "is_deleted":        False,
+                "created_at":        now,
+                "updated_at":        now,
+            }
             for r in chunk
-        )
-        bq.execute(
-            f"""
-            INSERT INTO {SFA_WEB}.fact_route_plan_pjp
-              (route_plan_id, salesman_sk, outlet_sk, visit_day_of_week,
-               week_number, visit_frequency, brand_group,
-               is_deleted, created_at, updated_at)
-            VALUES {values}
-            """,
-            [],
-        )
+        ])
         inserted += len(chunk)
+
+    bq.cache.invalidate("pjp:")
 
     log_event(
         "pjp.upload",

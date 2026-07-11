@@ -211,7 +211,8 @@ def store_360(outlet_id: str, current_user: UserContext = Depends(require_auth))
 @router.get("/pjp/summary")
 def pjp_summary(current_user: UserContext = Depends(require_auth)):
     bq = BQClient.get()
-    row = bq.query_one(
+    return bq.query_one_cached(
+        "pjp:summary",
         f"""
         SELECT
           COUNT(DISTINCT o.outlet_sk) AS total_stores,
@@ -223,8 +224,8 @@ def pjp_summary(current_user: UserContext = Depends(require_auth)):
         WHERE o.is_active = TRUE
         """,
         [],
-    )
-    return row or {}
+        ttl=600,  # 10 min — only changes on PJP upload
+    ) or {}
 
 
 @router.get("/pjp/list")

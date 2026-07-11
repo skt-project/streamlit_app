@@ -5,7 +5,7 @@ GET /salesman/360/{sk}      — full 360° profile for one salesman
 """
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import settings
 from dependencies import brand_group_filter, require_auth
@@ -107,7 +107,6 @@ def salesman_360(
     )
 
     if not profile:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Salesman not found")
 
     mtd_row = bq.query_one(
