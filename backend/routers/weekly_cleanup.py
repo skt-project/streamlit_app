@@ -97,7 +97,7 @@ def run_weekly_cleanup(
 @router.get("/status")
 def cleanup_status(
     week_iso: str | None = Query(None),
-    current_user: UserContext = Depends(require_role("ho_admin", "spv", "asm", "ddm")),
+    current_user: UserContext = Depends(require_role("ho_admin", "spv", "asm", "dm")),
 ):
     """Summary of skipped/expired stores grouped by status for a given week."""
     bq = BQClient.get()

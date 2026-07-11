@@ -255,7 +255,7 @@ def skipped_store_summary(
 def return_to_salesman(
     skipped_store_id: str,
     body: SpvActionRequest,
-    current_user: UserContext = Depends(require_role("spv", "asm", "ddm", "ho_admin")),
+    current_user: UserContext = Depends(require_role("spv", "asm", "dm", "ho_admin")),
 ):
     """SPV sends the skipped store back to the assigned salesman to visit."""
     bq = BQClient.get()
@@ -307,7 +307,7 @@ def return_to_salesman(
 def execute_by_spv(
     skipped_store_id: str,
     body: SpvActionRequest,
-    current_user: UserContext = Depends(require_role("spv", "asm", "ddm", "ho_admin")),
+    current_user: UserContext = Depends(require_role("spv", "asm", "dm", "ho_admin")),
 ):
     """SPV takes over and will personally execute the visit for the skipped store."""
     bq = BQClient.get()

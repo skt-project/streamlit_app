@@ -101,9 +101,10 @@ def _next_approval_status(current: str, role: str) -> str:
     Flow: SE submits → PENDING_SPV → (SPV) SPV_APPROVED → (distributor_admin) COMPLETED
     """
     transitions = {
-        ("SUBMITTED",    "spv"):               "SPV_APPROVED",
-        ("PENDING_SPV",  "spv"):               "SPV_APPROVED",
-        ("SPV_APPROVED", "distributor_admin"): "COMPLETED",
+        ("SUBMITTED",    "spv"):      "SPV_APPROVED",
+        ("PENDING_SPV",  "spv"):      "SPV_APPROVED",
+        ("SPV_APPROVED", "dm"):       "COMPLETED",
+        ("SPV_APPROVED", "ho_admin"): "COMPLETED",
     }
     key = (current, role)
     if key not in transitions:
@@ -429,8 +430,9 @@ def approve_visit(
     new_status = _next_approval_status(visit["approval_status"], effective_role)
 
     role_col_map = {
-        "spv":               ("spv_username", "spv_approved_at"),
-        "distributor_admin": ("ddm_username", "ddm_approved_at"),  # reuse ddm col for dist admin final step
+        "spv":      ("spv_username", "spv_approved_at"),
+        "dm":       ("ddm_username", "ddm_approved_at"),
+        "ho_admin": ("ddm_username", "ddm_approved_at"),
     }
     user_col, ts_col = role_col_map.get(effective_role, ("spv_username", "spv_approved_at"))
 
@@ -718,7 +720,7 @@ def update_final_qty(
     body: UpdateFinalQtyRequest,
     current_user: UserContext = Depends(require_auth),
 ):
-    if current_user.role not in ("spv", "asm", "ddm", "ho_admin", "distributor_admin"):
+    if current_user.role not in ("spv", "asm", "dm", "ho_admin"):
         raise HTTPException(status_code=403, detail="Only SPV and above can adjust final quantities")
 
     bq = BQClient.get()
@@ -839,7 +841,7 @@ def download_pdf(
     visit_id: str,
     current_user: UserContext = Depends(require_auth),
 ):
-    if current_user.role not in ("spv", "asm", "ddm", "ho_admin", "distributor_admin"):
+    if current_user.role not in ("spv", "asm", "dm", "ho_admin"):
         raise HTTPException(status_code=403, detail="Insufficient permissions to download PDF")
 
     bq = BQClient.get()
@@ -1115,7 +1117,7 @@ def download_pdf(
         if visit_out.spv_username:
             appr_rows.append(("SPV", visit_out.spv_username, visit_out.spv_approved_at, True))
         if visit_out.ddm_username:
-            appr_rows.append(("Distributor Admin", visit_out.ddm_username, visit_out.ddm_approved_at, True))
+            appr_rows.append(("Distributor Manager", visit_out.ddm_username, visit_out.ddm_approved_at, True))
 
         if appr_rows:
             ay = pdf.get_y()
