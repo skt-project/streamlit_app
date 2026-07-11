@@ -86,6 +86,21 @@ class BQClient:
         rows = self._client.query(sql, job_config=job_config).result()
         return [dict(row) for row in rows]
 
+    def query_cached(
+        self,
+        cache_key: str,
+        sql: str,
+        params: list[bigquery.ScalarQueryParameter] | None = None,
+        ttl: int = 300,
+    ) -> list[dict]:
+        """query() with in-process TTL cache. Use for stable aggregate/reference data."""
+        hit = self.cache.get(cache_key)
+        if hit is not None:
+            return hit
+        result = self.query(sql, params)
+        self.cache.set(cache_key, result, ttl)
+        return result
+
     def query_one(
         self,
         sql: str,
@@ -93,6 +108,21 @@ class BQClient:
     ) -> dict | None:
         results = self.query(sql, params)
         return results[0] if results else None
+
+    def query_one_cached(
+        self,
+        cache_key: str,
+        sql: str,
+        params: list[bigquery.ScalarQueryParameter] | None = None,
+        ttl: int = 300,
+    ) -> dict | None:
+        """query_one() with in-process TTL cache."""
+        hit = self.cache.get(cache_key)
+        if hit is not None:
+            return hit  # type: ignore[return-value]
+        result = self.query_one(sql, params)
+        self.cache.set(cache_key, result, ttl)
+        return result
 
     def execute(
         self,

@@ -38,7 +38,9 @@ def list_announcements(
     if type:
         params.append(bq.p("atype", "STRING", type))
 
-    rows = bq.query(
+    cache_key = f"announcements:{type or 'all'}:{limit}"
+    rows = bq.query_cached(
+        cache_key,
         f"""
         SELECT announcement_id, type, title, body, audience, created_by, created_at
         FROM {SFA_WEB}.announcement
@@ -47,6 +49,7 @@ def list_announcements(
         LIMIT @lim
         """,
         params,
+        ttl=300,  # 5 minutes — announcements change infrequently
     )
     return [
         {**r, "created_at": str(r["created_at"])} for r in rows
@@ -78,6 +81,7 @@ def create_announcement(
             bq.p("now",      "TIMESTAMP", now),
         ],
     )
+    bq.cache.invalidate("announcements:")  # bust list cache after write
     # Push to all users who have registered a device token
     role_clause = "AND role = @role" if body.audience != "Semua" else ""
     token_params = []

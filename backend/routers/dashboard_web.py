@@ -38,8 +38,10 @@ def get_web_dashboard(
         extra_visit_clause += " AND sm.region = @filter_region"
         extra_params.append(bq.p("filter_region", "STRING", region))
 
-    # ── Comply summary ──────────────────────────────────────────────────────────
-    comply_rows = bq.query(
+    # ── Comply summary — cached 2 min (changes only when target rows are updated) ─
+    comply_cache_key = f"dashboard:comply:{current_user.brand_group or 'all'}"
+    comply_rows = bq.query_cached(
+        comply_cache_key,
         f"""
         SELECT
           brand,
@@ -53,6 +55,7 @@ def get_web_dashboard(
         ORDER BY t.brand
         """,
         [],
+        ttl=120,
     )
 
     total_mgmt  = sum(r.get("management_target", 0) or 0 for r in comply_rows)
@@ -79,8 +82,10 @@ def get_web_dashboard(
     planned = rc_row.get("planned", 0) or 0
     rc_pct  = round((visited / planned * 100) if planned > 0 else 0.0, 1)
 
-    # ── Achievement leaderboard (top 10 by visit MTD) ──────────────────────────
-    leaderboard = bq.query(
+    # ── Achievement leaderboard — cached 2 min (aggregate, not real-time critical) ─
+    lb_cache_key = f"dashboard:leaderboard:{current_user.brand_group or 'all'}:{today}:{region or ''}"
+    leaderboard = bq.query_cached(
+        lb_cache_key,
         f"""
         SELECT
           v.salesman_sk,
@@ -98,6 +103,7 @@ def get_web_dashboard(
         LIMIT 10
         """,
         [bq.p("ms", "DATE", month_start), bq.p("today", "DATE", today)] + bg_params + extra_params,
+        ttl=120,
     )
 
     # ── Recent announcements ────────────────────────────────────────────────────
