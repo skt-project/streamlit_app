@@ -41,6 +41,7 @@ export default function TargetManagement() {
   const { data: comply = [], isLoading } = useQuery<TargetComply[]>({
     queryKey: ["target-comply"],
     queryFn: fetchComply,
+    staleTime: 2 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
@@ -48,6 +49,7 @@ export default function TargetManagement() {
     queryKey: ["spv-target", selectedBrand, period],
     queryFn: () => fetchSpvRows(selectedBrand!, period),
     enabled: !!selectedBrand,
+    staleTime: 2 * 60 * 1000,
   });
 
   const saveMutation = useMutation({
@@ -79,9 +81,15 @@ export default function TargetManagement() {
         title="Target Management"
         actions={
           <div className="flex gap-2">
-            <button className="btn-secondary text-sm" onClick={() => saveMutation.mutate(
-              spvRows.map((r) => ({ salesman_sk: r.salesman_sk, amount: Number(editValues[r.salesman_sk] ?? r.spv_target_amount) }))
-            )}>Simpan Draft</button>
+            <button
+              className="btn-secondary text-sm"
+              disabled={!selectedBrand || spvRows.length === 0 || saveMutation.isPending}
+              onClick={() => saveMutation.mutate(
+                spvRows.map((r) => ({ salesman_sk: r.salesman_sk, amount: Number(editValues[r.salesman_sk] ?? r.spv_target_amount) }))
+              )}
+            >
+              {saveMutation.isPending ? "Menyimpan..." : "Simpan Draft"}
+            </button>
             <button className="btn-primary text-sm" onClick={() => setShowSubmitModal(true)} disabled={!selectedBrand}>Submit</button>
           </div>
         }
@@ -127,6 +135,7 @@ export default function TargetManagement() {
                 <button
                   key={c.brand}
                   onClick={() => setSelectedBrand(c.brand === selectedBrand ? null : c.brand)}
+                  aria-pressed={selectedBrand === c.brand}
                   className={`w-full text-left p-4 rounded-xl border transition-all ${
                     selectedBrand === c.brand ? "border-primary-300 bg-primary-50" : "border-slate-100 bg-slate-50 hover:border-slate-200"
                   }`}

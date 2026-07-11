@@ -76,10 +76,12 @@ export default function Visits() {
       <main className="flex-1 overflow-y-auto">
         {/* ── Tabs ── */}
         {!isDistAdm && (
-          <div className="tabs px-6">
+          <div className="tabs px-6" role="tablist" aria-label="Filter kunjungan">
             {TAB_CONFIG.map(({ key, label }) => (
               <button
                 key={key}
+                role="tab"
+                aria-selected={tab === key}
                 onClick={() => { setTab(key); setStatusFilter(""); setPage(1); }}
                 className={`tab ${tab === key ? "tab-active" : ""}`}
               >
@@ -185,7 +187,11 @@ export default function Visits() {
                       <tr
                         key={v.visit_id}
                         className="cursor-pointer"
+                        tabIndex={0}
+                        role="link"
+                        aria-label={`Detail kunjungan ${v.store_name ?? v.outlet_sk ?? ""} — ${v.visit_date}`}
                         onClick={() => navigate(`/visits/${v.visit_id}`)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") navigate(`/visits/${v.visit_id}`); }}
                       >
                         <td className="text-slate-500 tabular-nums">{v.visit_date}</td>
                         <td className="font-medium text-slate-800">
