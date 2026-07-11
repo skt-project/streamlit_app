@@ -119,6 +119,7 @@ def upload_pjp(
         inserted += len(chunk)
 
     bq.cache.invalidate("pjp:")
+    bq.cache.invalidate("schedule:")
 
     log_event(
         "pjp.upload",

@@ -86,14 +86,22 @@ def get_today_schedule(
         raise HTTPException(status_code=400, detail="salesman_sk required — link this user to a salesman in Administration")
     bq = BQClient.get()
     today = date.today()
-    rows = _week_stores(bq, sk, today)
     iso_year, iso_week, _ = today.isocalendar()
-    return ScheduleDownloadResponse(
+
+    cache_key = f"schedule:today:{sk}:{today.isoformat()}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    rows = _week_stores(bq, sk, today)
+    result = ScheduleDownloadResponse(
         salesman_sk=sk,
         week=f"{iso_year}-W{iso_week:02d}",
         stores=[ScheduleStoreOut(**r) for r in rows],
         total=len(rows),
     )
+    bq.cache.set(cache_key, result, ttl=600)  # 10 min — PJP changes only on import
+    return result
 
 
 @router.get("/download", response_model=ScheduleDownloadResponse)
@@ -121,6 +129,12 @@ def download_week_schedule(
 
     iso_year, iso_week, _ = monday.isocalendar()
     is_odd = _is_odd_week(monday)
+    week_str = f"{iso_year}-W{iso_week:02d}"
+
+    cache_key = f"schedule:week:{sk}:{week_str}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     rows = bq.query(
         f"""
@@ -149,9 +163,11 @@ def download_week_schedule(
         ],
     )
 
-    return ScheduleDownloadResponse(
+    result = ScheduleDownloadResponse(
         salesman_sk=sk,
-        week=f"{iso_year}-W{iso_week:02d}",
+        week=week_str,
         stores=[ScheduleStoreOut(**r) for r in rows],
         total=len(rows),
     )
+    bq.cache.set(cache_key, result, ttl=1800)  # 30 min — offline sync bundle, PJP rarely changes
+    return result
