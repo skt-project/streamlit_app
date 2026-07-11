@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
+import { Icon, SkeletonTable } from "@/components/ui";
 import { api } from "@/api/client";
+import { useDebounce } from "@/hooks/useDebounce";
 import type { User, Role } from "@/types";
 
 const fetchUsers = (search: string, role: string) =>
@@ -17,8 +19,9 @@ const EMPTY_FORM = { username: "", full_name: "", role: "spv" as Role, email: ""
 
 export default function Administration() {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [roleFilter, setRoleFilter]   = useState("");
+  const search = useDebounce(searchInput, 350);
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<User | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -26,6 +29,7 @@ export default function Administration() {
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ["admin-users", search, roleFilter],
     queryFn: () => fetchUsers(search, roleFilter),
+    placeholderData: (prev) => prev,
   });
 
   const createMutation = useMutation({
@@ -61,20 +65,24 @@ export default function Administration() {
 
       <main className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="flex gap-3 flex-wrap">
-          <input className="input w-64 text-sm" placeholder="Cari nama atau username..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="input w-64 text-sm" placeholder="Cari nama atau username..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
           <select className="input w-36 text-sm" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
             <option value="">Semua Role</option>
             {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
           </select>
         </div>
 
-        <div className="card overflow-x-auto">
-          {isLoading ? <p className="text-sm text-slate-400 p-4">Memuat...</p> : (
-            <table className="w-full text-sm">
+        {isLoading ? (
+          <div className="card">
+            <SkeletonTable rows={5} cols={7} />
+          </div>
+        ) : (
+          <div className="table-container">
+            <table className="table">
               <thead>
-                <tr className="border-b border-slate-100">
+                <tr>
                   {["Username", "Nama", "Role", "Brand Group", "SE Linked", "Status", ""].map((h) => (
-                    <th key={h} className="text-left py-2 text-xs font-medium text-slate-400">{h}</th>
+                    <th key={h}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -82,16 +90,14 @@ export default function Administration() {
                 {users.length === 0 ? (
                   <tr><td colSpan={7} className="py-8 text-center text-slate-400">Tidak ada pengguna.</td></tr>
                 ) : users.map((u) => (
-                  <tr key={u.user_id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className="py-3 font-mono text-xs text-slate-500">{u.username}</td>
-                    <td className="py-3 font-medium text-slate-700">{u.full_name}</td>
-                    <td className="py-3"><span className="badge-blue text-xs">{ROLE_LABELS[u.role]}</span></td>
-                    <td className="py-3 text-slate-500">{u.brand_group ?? "—"}</td>
-                    <td className="py-3 text-slate-500">{u.salesman_sk ? "Ya" : <span className="text-slate-300">Tidak</span>}</td>
-                    <td className="py-3">
-                      <span className={u.is_active ? "badge-green" : "badge-gray"}>{u.is_active ? "Aktif" : "Non-Aktif"}</span>
-                    </td>
-                    <td className="py-3">
+                  <tr key={u.user_id}>
+                    <td className="font-mono text-xs text-slate-500">{u.username}</td>
+                    <td>{u.full_name}</td>
+                    <td><span className="badge-blue text-xs">{ROLE_LABELS[u.role]}</span></td>
+                    <td>{u.brand_group ?? "—"}</td>
+                    <td>{u.salesman_sk ? "Ya" : <span className="text-slate-300">Tidak</span>}</td>
+                    <td><span className={u.is_active ? "badge-green" : "badge-gray"}>{u.is_active ? "Aktif" : "Non-Aktif"}</span></td>
+                    <td>
                       <div className="flex items-center gap-3">
                         <button onClick={() => openEdit(u)} className="text-xs text-primary-600 hover:underline">Edit</button>
                         <button
@@ -106,8 +112,8 @@ export default function Administration() {
                 ))}
               </tbody>
             </table>
-          )}
-        </div>
+          </div>
+        )}
       </main>
 
       {showModal && (
@@ -115,7 +121,9 @@ export default function Administration() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h3 className="font-semibold text-slate-800">{editTarget ? "Edit Pengguna" : "Tambah Pengguna Baru"}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 text-xl">×</button>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
+                <Icon name="x-mark" className="w-5 h-5" />
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {[
