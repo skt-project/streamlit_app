@@ -72,7 +72,9 @@ def search_salesmen(
     bq = BQClient.get()
     bg_clause, bg_params = brand_group_filter(current_user, "bg")
     bg_where = bg_clause if not bg_clause else f" {bg_clause}"
-    return bq.query(
+    cache_key = f"salesman-search:{q.lower()}:{current_user.brand_group or 'all'}"
+    return bq.query_cached(
+        cache_key,
         f"""
         SELECT salesman_sk, source_salesman_code, salesman_name, brand_group
         FROM {SFA_WEB}.dim_salesman
@@ -84,6 +86,7 @@ def search_salesmen(
         LIMIT 20
         """,
         [bq.p("q", "STRING", q)] + bg_params,
+        ttl=300,  # 5 min — dim_salesman changes only on master import
     )
 
 

@@ -82,7 +82,8 @@ def search_outlets(
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
-    rows = bq.query(
+    return bq.query_cached(
+        f"outlet-search:{q.lower()}",
         f"""
         SELECT CAST(outlet_sk AS STRING) AS outlet_id, outlet_sk, source_outlet_code, store_name
         FROM {SFA_WEB}.dim_outlet
@@ -93,8 +94,8 @@ def search_outlets(
         LIMIT 20
         """,
         [bq.p("q", "STRING", q)],
+        ttl=300,  # 5 min — dim_outlet changes only on master import
     )
-    return rows
 
 
 @router.post("/outlet/assign")

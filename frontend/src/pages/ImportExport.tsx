@@ -114,12 +114,12 @@ function uploadZoneCls(status: JobStatus, dragOver: boolean): string {
 
 function JobStatusIcon({ status }: { status: JobStatus }) {
   if (status === "uploading" || status === "processing")
-    return <Icon name="arrow-path" className="w-5 h-5 text-primary-500 animate-spin" />;
+    return <Icon name="arrow-path" className="w-5 h-5 text-primary-500 animate-spin" aria-hidden={true} />;
   if (status === "done")
-    return <Icon name="check-circle" className="w-5 h-5 text-emerald-500" />;
+    return <Icon name="check-circle" className="w-5 h-5 text-emerald-500" aria-hidden={true} />;
   if (status === "error")
-    return <Icon name="exclamation-circle" className="w-5 h-5 text-red-500" />;
-  return <Icon name="arrow-up-tray" className="w-5 h-5 text-slate-400" />;
+    return <Icon name="exclamation-circle" className="w-5 h-5 text-red-500" aria-hidden={true} />;
+  return <Icon name="arrow-up-tray" className="w-5 h-5 text-slate-400" aria-hidden={true} />;
 }
 
 export default function ImportExport() {
@@ -200,6 +200,7 @@ export default function ImportExport() {
                   {/* Drop zone */}
                   <div
                     className={uploadZoneCls(status, isOver)}
+                    aria-label={`Upload zona untuk ${label}`}
                     onDragOver={(e) => { e.preventDefault(); setDragOver(key); }}
                     onDragLeave={() => setDragOver(null)}
                     onDrop={(e) => {
@@ -211,15 +212,15 @@ export default function ImportExport() {
                   >
                     {status === "uploading" || status === "processing" ? (
                       <>
-                        <Icon name="arrow-path" className="w-6 h-6 text-primary-400 animate-spin mb-2" />
-                        <p className="text-xs font-medium text-primary-600">
+                        <Icon name="arrow-path" className="w-6 h-6 text-primary-400 animate-spin mb-2" aria-hidden={true} />
+                        <p className="text-xs font-medium text-primary-600" role="status">
                           {status === "uploading" ? "Mengunggah…" : "Memproses…"}
                         </p>
                         <p className="text-2xs text-slate-400 mt-1 truncate max-w-full">{job?.name}</p>
                       </>
                     ) : status === "done" ? (
                       <>
-                        <Icon name="check-circle" className="w-6 h-6 text-emerald-500 mb-2" />
+                        <Icon name="check-circle" className="w-6 h-6 text-emerald-500 mb-2" aria-hidden={true} />
                         <p className="text-xs font-medium text-emerald-700">{job?.message}</p>
                         <p className="text-2xs text-slate-400 mt-1 truncate max-w-full">{job?.name}</p>
                         <button
@@ -231,7 +232,7 @@ export default function ImportExport() {
                       </>
                     ) : status === "error" ? (
                       <>
-                        <Icon name="exclamation-circle" className="w-6 h-6 text-red-400 mb-2" />
+                        <Icon name="exclamation-circle" className="w-6 h-6 text-red-400 mb-2" aria-hidden={true} />
                         <p className="text-xs font-medium text-red-600">{job?.message ?? "Upload gagal"}</p>
                         <button
                           className="mt-2 text-2xs text-primary-500 hover:underline"
@@ -242,7 +243,7 @@ export default function ImportExport() {
                       </>
                     ) : (
                       <>
-                        <Icon name="arrow-up-tray" className={`w-6 h-6 mb-2 ${isOver ? "text-primary-500" : "text-slate-300"}`} />
+                        <Icon name="arrow-up-tray" className={`w-6 h-6 mb-2 ${isOver ? "text-primary-500" : "text-slate-300"}`} aria-hidden={true} />
                         <p className={`text-xs font-medium ${isOver ? "text-primary-600" : "text-slate-500"}`}>
                           {isOver ? "Lepaskan file di sini" : "Drag & drop .xlsx / .csv"}
                         </p>

@@ -136,6 +136,7 @@ export default function VisitDetail() {
     queryKey: ["visit", visitId],
     queryFn:  () => getVisit(visitId!),
     enabled:  !!visitId,
+    staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
 
