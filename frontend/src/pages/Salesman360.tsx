@@ -45,6 +45,7 @@ export default function Salesman360() {
     queryKey: ["salesman360", selectedSk],
     queryFn:  () => fetchSalesman360(selectedSk!),
     enabled:  !!selectedSk,
+    placeholderData: (prev) => prev,
   });
 
   return (

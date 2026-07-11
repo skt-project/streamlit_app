@@ -57,6 +57,7 @@ export default function Approvals() {
   const { data: approvals = [], isLoading } = useQuery<ApprovalRequest[]>({
     queryKey: ["approvals", tab],
     queryFn: () => fetchApprovals(tab),
+    placeholderData: (prev) => prev,
   });
 
   const decideMutation = useMutation({

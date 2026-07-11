@@ -53,6 +53,7 @@ export default function Store360() {
     queryKey: ["store360", selectedId],
     queryFn:  () => fetchStore360(selectedId!),
     enabled:  !!selectedId,
+    placeholderData: (prev) => prev,
   });
 
   const s = storeData;

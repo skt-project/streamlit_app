@@ -136,6 +136,7 @@ export default function VisitDetail() {
     queryKey: ["visit", visitId],
     queryFn:  () => getVisit(visitId!),
     enabled:  !!visitId,
+    placeholderData: (prev) => prev,
   });
 
   useEffect(() => {

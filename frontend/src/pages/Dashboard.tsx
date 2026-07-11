@@ -89,6 +89,7 @@ export default function Dashboard() {
     queryKey: ["dashboard-web"],
     queryFn: fetchDashboard,
     staleTime: 5 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const complyBrands: ComplyBrand[] = useMemo(
