@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
-import { Icon, SkeletonTable } from "@/components/ui";
+import { Icon, SkeletonTable, EmptyState } from "@/components/ui";
 import { api } from "@/api/client";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { User, Role } from "@/types";
@@ -59,61 +59,79 @@ export default function Administration() {
       <TopNav
         title="Administrasi Pengguna"
         actions={
-          <button onClick={openCreate} className="btn-primary text-sm">+ Tambah Pengguna</button>
+          <button onClick={openCreate} className="btn-primary text-sm">
+            <Icon name="plus" className="w-3.5 h-3.5" />
+            Tambah Pengguna
+          </button>
         }
       />
 
       <main className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="flex gap-3 flex-wrap">
-          <input className="input w-64 text-sm" placeholder="Cari nama atau username..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+          <div className="relative">
+            <Icon
+              name="magnifying-glass"
+              className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            />
+            <input
+              className="input w-64 text-sm pl-8"
+              placeholder="Cari nama atau username..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+          </div>
           <select className="input w-36 text-sm" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
             <option value="">Semua Role</option>
             {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
           </select>
         </div>
 
-        {isLoading ? (
-          <div className="card">
+        <div className="card">
+          {isLoading ? (
             <SkeletonTable rows={5} cols={7} />
-          </div>
-        ) : (
-          <div className="table-container">
-            <table className="table">
-              <thead>
-                <tr>
-                  {["Username", "Nama", "Role", "Brand Group", "SE Linked", "Status", ""].map((h) => (
-                    <th key={h}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {users.length === 0 ? (
-                  <tr><td colSpan={7} className="py-8 text-center text-slate-400">Tidak ada pengguna.</td></tr>
-                ) : users.map((u) => (
-                  <tr key={u.user_id}>
-                    <td className="font-mono text-xs text-slate-500">{u.username}</td>
-                    <td>{u.full_name}</td>
-                    <td><span className="badge-blue text-xs">{ROLE_LABELS[u.role]}</span></td>
-                    <td>{u.brand_group ?? "—"}</td>
-                    <td>{u.salesman_sk ? "Ya" : <span className="text-slate-300">Tidak</span>}</td>
-                    <td><span className={u.is_active ? "badge-green" : "badge-gray"}>{u.is_active ? "Aktif" : "Non-Aktif"}</span></td>
-                    <td>
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => openEdit(u)} className="text-xs text-primary-600 hover:underline">Edit</button>
-                        <button
-                          onClick={() => toggleActiveMutation.mutate({ id: u.user_id, active: !u.is_active })}
-                          className="text-xs text-slate-400 hover:text-slate-600"
-                        >
-                          {u.is_active ? "Nonaktifkan" : "Aktifkan"}
-                        </button>
-                      </div>
-                    </td>
+          ) : users.length === 0 ? (
+            <EmptyState
+              icon="users"
+              title="Tidak ada pengguna"
+              description="Tidak ada pengguna yang cocok dengan filter ini."
+            />
+          ) : (
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    {["Username", "Nama", "Role", "Brand Group", "SE Linked", "Status", ""].map((h) => (
+                      <th key={h}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.user_id}>
+                      <td className="font-mono text-xs text-slate-500">{u.username}</td>
+                      <td>{u.full_name}</td>
+                      <td><span className="badge-blue text-xs">{ROLE_LABELS[u.role]}</span></td>
+                      <td>{u.brand_group ?? "—"}</td>
+                      <td>{u.salesman_sk ? "Ya" : <span className="text-slate-300">Tidak</span>}</td>
+                      <td><span className={u.is_active ? "badge-green" : "badge-gray"}>{u.is_active ? "Aktif" : "Non-Aktif"}</span></td>
+                      <td>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => openEdit(u)} className="text-xs text-primary-600 hover:underline">Edit</button>
+                          <button
+                            onClick={() => toggleActiveMutation.mutate({ id: u.user_id, active: !u.is_active })}
+                            className="text-xs text-slate-400 hover:text-slate-600"
+                          >
+                            {u.is_active ? "Nonaktifkan" : "Aktifkan"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </main>
 
       {showModal && (

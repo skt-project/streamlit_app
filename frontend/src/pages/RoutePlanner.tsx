@@ -79,6 +79,8 @@ export default function RoutePlanner() {
   const { data: salesmen = [], isLoading } = useQuery<SalesmanRoute[]>({
     queryKey: ["route-planner", weekKey],
     queryFn:  () => fetchSalesmenRoutes(weekKey),
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const filteredSalessmen = useMemo(
