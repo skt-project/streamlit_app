@@ -21,6 +21,7 @@ export default function Reports() {
   const { data, isLoading } = useQuery({
     queryKey: ["reports", activeReport, period, tier],
     queryFn:  () => fetchReport(activeReport, period, tier),
+    staleTime: 2 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 

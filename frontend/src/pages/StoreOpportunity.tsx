@@ -14,6 +14,7 @@ export default function StoreOpportunity() {
   const { data, isLoading } = useQuery({
     queryKey: ["store-opportunity", tier, brand],
     queryFn: () => fetchOpportunity(tier, brand),
+    staleTime: 5 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
