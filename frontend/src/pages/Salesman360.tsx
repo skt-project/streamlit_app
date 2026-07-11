@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, EmptyState, Skeleton, SkeletonStatCards } from "@/components/ui";
@@ -31,20 +31,34 @@ function Salesman360Skeleton() {
 }
 
 export default function Salesman360() {
-  const [query, setQuery]         = useState("");
+  const [query, setQuery]           = useState("");
   const [selectedSk, setSelectedSk] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const debouncedQuery = useDebounce(query, 300);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const { data: suggestions = [], isFetching: searching } = useQuery({
     queryKey: ["salesman-search", debouncedQuery],
     queryFn:  () => searchSalesman(debouncedQuery),
     enabled:  debouncedQuery.length >= 2,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: d, isLoading } = useQuery({
     queryKey: ["salesman360", selectedSk],
     queryFn:  () => fetchSalesman360(selectedSk!),
     enabled:  !!selectedSk,
+    staleTime: 2 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
@@ -54,25 +68,37 @@ export default function Salesman360() {
 
       <main className="flex-1 overflow-y-auto p-6 space-y-5">
         {/* ── Search ── */}
-        <div className="relative max-w-sm">
+        <div className="relative max-w-sm" ref={containerRef}>
           <Icon
             name="magnifying-glass"
             className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            aria-hidden={true}
           />
           <input
             className="input w-full text-sm pl-8"
             placeholder="Cari nama atau ID salesman..."
+            aria-label="Cari salesman"
             value={query}
-            onChange={(e) => { setQuery(e.target.value); setSelectedSk(null); }}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedSk(null);
+              setDropdownOpen(true);
+            }}
+            onFocus={() => { if (debouncedQuery.length >= 2) setDropdownOpen(true); }}
           />
           {searching && (
             <Icon
               name="arrow-path"
               className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin"
+              aria-hidden={true}
             />
           )}
-          {debouncedQuery.length >= 2 && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20 max-h-48 overflow-y-auto">
+          {dropdownOpen && debouncedQuery.length >= 2 && suggestions.length > 0 && (
+            <div
+              className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20 max-h-48 overflow-y-auto"
+              role="listbox"
+              aria-label="Hasil pencarian salesman"
+            >
               {(
                 suggestions as {
                   salesman_sk: string;
@@ -82,8 +108,14 @@ export default function Salesman360() {
               ).map((s) => (
                 <button
                   key={s.salesman_sk}
+                  role="option"
+                  aria-selected={selectedSk === s.salesman_sk}
                   className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 border-b border-slate-50 last:border-none"
-                  onClick={() => { setSelectedSk(s.salesman_sk); setQuery(s.salesman_name); }}
+                  onClick={() => {
+                    setSelectedSk(s.salesman_sk);
+                    setQuery(s.salesman_name);
+                    setDropdownOpen(false);
+                  }}
                 >
                   <p className="font-medium text-slate-700">{s.salesman_name}</p>
                   <p className="text-xs text-slate-400">{s.source_salesman_code}</p>
@@ -134,10 +166,10 @@ export default function Salesman360() {
             {/* ── KPI row ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: "Visit Today",    value: d.visit_today ?? 0,                         icon: "map-pin"          as const, cls: "icon-badge-blue"   },
-                { label: "EC Today",       value: d.ec_today ?? 0,                            icon: "check-circle"     as const, cls: "icon-badge-green"  },
-                { label: "Visit MTD",      value: d.visit_mtd ?? 0,                           icon: "calendar-days"    as const, cls: "icon-badge-indigo" },
-                { label: "Route Comply %", value: `${(d.route_comply_pct ?? 0).toFixed(1)}%`, icon: "chart-pie"        as const, cls: "icon-badge-purple" },
+                { label: "Visit Today",    value: d.visit_today ?? 0,                         icon: "map-pin"       as const, cls: "icon-badge-blue"   },
+                { label: "EC Today",       value: d.ec_today ?? 0,                            icon: "check-circle"  as const, cls: "icon-badge-green"  },
+                { label: "Visit MTD",      value: d.visit_mtd ?? 0,                           icon: "calendar-days" as const, cls: "icon-badge-indigo" },
+                { label: "Route Comply %", value: `${(d.route_comply_pct ?? 0).toFixed(1)}%`, icon: "chart-pie"     as const, cls: "icon-badge-purple" },
               ].map((k) => (
                 <div key={k.label} className="kpi-tile">
                   <span className={`icon-badge ${k.cls} shrink-0`}>
@@ -153,10 +185,7 @@ export default function Salesman360() {
             <div className="card">
               <h3 className="font-semibold text-slate-800 mb-4">Jadwal Hari Ini</h3>
               {!d.today_schedule?.length ? (
-                <EmptyState
-                  icon="calendar"
-                  title="Tidak ada jadwal hari ini"
-                />
+                <EmptyState icon="calendar" title="Tidak ada jadwal hari ini" />
               ) : (
                 <div className="space-y-2">
                   {(d.today_schedule as Record<string, string>[]).map((r, i) => (
@@ -188,16 +217,12 @@ export default function Salesman360() {
                         <span
                           className={
                             r.status === "visited"
-                              ? Number(r.total_demand) > 0
-                                ? "badge-green"
-                                : "badge-gray"
+                              ? Number(r.total_demand) > 0 ? "badge-green" : "badge-gray"
                               : "badge-yellow"
                           }
                         >
                           {r.status === "visited"
-                            ? Number(r.total_demand) > 0
-                              ? "EC"
-                              : "Kunjungan"
+                            ? Number(r.total_demand) > 0 ? "EC" : "Kunjungan"
                             : "Belum dikunjungi"}
                         </span>
                       </div>
@@ -216,10 +241,7 @@ export default function Salesman360() {
                 Semua toko yang ditugaskan ke salesman ini
               </p>
               {!d.outlets?.length ? (
-                <EmptyState
-                  icon="building-storefront"
-                  title="Belum ada toko terdaftar"
-                />
+                <EmptyState icon="building-storefront" title="Belum ada toko terdaftar" />
               ) : (
                 <div className="table-container">
                   <table className="table">

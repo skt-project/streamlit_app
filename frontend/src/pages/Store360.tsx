@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, EmptyState, Skeleton, SkeletonStatCards } from "@/components/ui";
@@ -39,20 +39,35 @@ function Store360Skeleton() {
 }
 
 export default function Store360() {
-  const [query, setQuery]         = useState("");
+  const [query, setQuery]           = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const debouncedQuery = useDebounce(query, 300);
+
+  // Close dropdown when clicking outside the search container
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const { data: suggestions = [], isFetching: searching } = useQuery({
     queryKey: ["outlet-search", debouncedQuery],
     queryFn:  () => searchOutlet(debouncedQuery),
     enabled:  debouncedQuery.length >= 2,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: storeData, isLoading } = useQuery({
     queryKey: ["store360", selectedId],
     queryFn:  () => fetchStore360(selectedId!),
     enabled:  !!selectedId,
+    staleTime: 2 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
@@ -64,25 +79,37 @@ export default function Store360() {
 
       <main className="flex-1 overflow-y-auto p-6 space-y-5">
         {/* ── Search ── */}
-        <div className="relative max-w-sm">
+        <div className="relative max-w-sm" ref={containerRef}>
           <Icon
             name="magnifying-glass"
             className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            aria-hidden={true}
           />
           <input
             className="input w-full text-sm pl-8"
             placeholder="Cari toko (min 2 huruf)..."
+            aria-label="Cari toko"
             value={query}
-            onChange={(e) => { setQuery(e.target.value); setSelectedId(null); }}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedId(null);
+              setDropdownOpen(true);
+            }}
+            onFocus={() => { if (debouncedQuery.length >= 2) setDropdownOpen(true); }}
           />
           {searching && (
             <Icon
               name="arrow-path"
               className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin"
+              aria-hidden={true}
             />
           )}
-          {debouncedQuery.length >= 2 && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20 max-h-48 overflow-y-auto">
+          {dropdownOpen && debouncedQuery.length >= 2 && suggestions.length > 0 && (
+            <div
+              className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20 max-h-48 overflow-y-auto"
+              role="listbox"
+              aria-label="Hasil pencarian toko"
+            >
               {(
                 suggestions as {
                   outlet_id: string;
@@ -92,8 +119,14 @@ export default function Store360() {
               ).map((s) => (
                 <button
                   key={s.outlet_id}
+                  role="option"
+                  aria-selected={selectedId === s.outlet_id}
                   className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 border-b border-slate-50 last:border-none"
-                  onClick={() => { setSelectedId(s.outlet_id); setQuery(s.store_name); }}
+                  onClick={() => {
+                    setSelectedId(s.outlet_id);
+                    setQuery(s.store_name);
+                    setDropdownOpen(false);
+                  }}
                 >
                   <p className="font-medium text-slate-700">{s.store_name}</p>
                   <p className="text-xs text-slate-400">{s.source_outlet_code}</p>
@@ -145,14 +178,14 @@ export default function Store360() {
             {/* KPI row */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: "Visit MTD",           value: s.visit_mtd ?? 0,                          icon: "map-pin",         cls: "icon-badge-blue"   },
-                { label: "Effective Call MTD",   value: s.effective_call_mtd ?? 0,                 icon: "check-circle",    cls: "icon-badge-green"  },
-                { label: "Sell-In MTD (pcs)",   value: (s.sellin_mtd ?? 0).toLocaleString("id"),  icon: "truck",           cls: "icon-badge-indigo" },
-                { label: "Sell-In YTD (pcs)",   value: (s.sellin_ytd ?? 0).toLocaleString("id"),  icon: "chart-bar",       cls: "icon-badge-purple" },
+                { label: "Visit MTD",          value: s.visit_mtd ?? 0,                         icon: "map-pin"      as const, cls: "icon-badge-blue"   },
+                { label: "Effective Call MTD",  value: s.effective_call_mtd ?? 0,                icon: "check-circle" as const, cls: "icon-badge-green"  },
+                { label: "Sell-In MTD (pcs)",  value: (s.sellin_mtd ?? 0).toLocaleString("id"), icon: "truck"        as const, cls: "icon-badge-indigo" },
+                { label: "Sell-In YTD (pcs)",  value: (s.sellin_ytd ?? 0).toLocaleString("id"), icon: "chart-bar"    as const, cls: "icon-badge-purple" },
               ].map((k) => (
                 <div key={k.label} className="kpi-tile">
                   <span className={`icon-badge ${k.cls} shrink-0`}>
-                    <Icon name={k.icon as "map-pin" | "check-circle" | "truck" | "chart-bar"} className="w-4 h-4" />
+                    <Icon name={k.icon} className="w-4 h-4" />
                   </span>
                   <p className="kpi-tile-value mt-2">{k.value}</p>
                   <p className="kpi-tile-label">{k.label}</p>

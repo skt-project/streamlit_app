@@ -96,6 +96,11 @@ def salesman_360(
     today = date.today().isoformat()
     month_start = date.today().replace(day=1).isoformat()
 
+    cache_key = f"salesman360:{salesman_sk}:{today}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     profile = bq.query_one(
         f"""
         SELECT salesman_sk, source_salesman_code, salesman_name, salesman_type,
@@ -192,7 +197,7 @@ def salesman_360(
         [bq.p("sk", "STRING", salesman_sk), bq.p("ms", "DATE", month_start), bq.p("today", "DATE", today)],
     )
 
-    return {
+    result = {
         **profile,
         "visit_today":      int(today_row.get("visit_today", 0) or 0),
         "ec_today":         int(today_row.get("ec_today", 0) or 0),
@@ -203,3 +208,5 @@ def salesman_360(
         "total_outlets":    len(outlets),
         "outlets":          outlets,
     }
+    bq.cache.set(cache_key, result, ttl=120)  # 2-min TTL — daily KPIs, today's schedule
+    return result

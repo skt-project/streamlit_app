@@ -128,6 +128,11 @@ def store_360(outlet_id: str, current_user: UserContext = Depends(require_auth))
     month_start = date.today().replace(day=1).isoformat()
     ytd_start = date.today().replace(month=1, day=1).isoformat()
 
+    cache_key = f"store360:{outlet_id}:{today}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     profile = bq.query_one(
         f"""
         SELECT
@@ -195,15 +200,17 @@ def store_360(outlet_id: str, current_user: UserContext = Depends(require_auth))
         [bq.p("oid", "STRING", outlet_id)],
     )
 
-    return {
+    result = {
         **profile,
-        "visit_mtd":        int(kpi.get("visit_mtd", 0) or 0),
+        "visit_mtd":          int(kpi.get("visit_mtd", 0) or 0),
         "effective_call_mtd": int(kpi.get("effective_call_mtd", 0) or 0),
-        "sellin_mtd":       float(kpi.get("sellin_mtd", 0) or 0),
-        "sellin_ytd":       float(ytd.get("sellin_ytd", 0) or 0),
-        "visits":           visits,
-        "pjp_schedule":     pjp,
+        "sellin_mtd":         float(kpi.get("sellin_mtd", 0) or 0),
+        "sellin_ytd":         float(ytd.get("sellin_ytd", 0) or 0),
+        "visits":             visits,
+        "pjp_schedule":       pjp,
     }
+    bq.cache.set(cache_key, result, ttl=120)  # 2-min TTL — daily KPIs, acceptable lag
+    return result
 
 
 # ── PJP endpoints ───────────────────────────────────────────────────────────────
