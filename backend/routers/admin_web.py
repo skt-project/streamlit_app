@@ -71,7 +71,13 @@ def list_users(
         params.append(bq.p("active", "BOOL", is_active))
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    return bq.query(
+
+    cache_key = f"admin:users:{search or ''}:{role or ''}:{is_active}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    rows = bq.query(
         f"""
         SELECT user_id, username, full_name, role, email, brand_group, salesman_sk, is_active
         FROM {SFA_WEB}.users
@@ -81,6 +87,8 @@ def list_users(
         """,
         params,
     )
+    bq.cache.set(cache_key, rows, ttl=30)
+    return rows
 
 
 @router.post("/users", status_code=201)
@@ -126,6 +134,7 @@ def create_user(
             bq.p("now",   "TIMESTAMP", now),
         ],
     )
+    bq.cache.invalidate("admin:users:")
     return {"user_id": new_id, "message": "User created."}
 
 
@@ -165,6 +174,7 @@ def update_user(
         f"UPDATE {SFA_WEB}.users SET {', '.join(sets)} WHERE user_id = @id AND is_active = TRUE",
         params,
     )
+    bq.cache.invalidate("admin:users:")
     return {"message": "User updated."}
 
 
@@ -180,6 +190,7 @@ def toggle_active(
         f"UPDATE {SFA_WEB}.users SET is_active = @active, updated_at = @now WHERE user_id = @id",
         [bq.p("active", "BOOL", body.is_active), bq.p("now", "TIMESTAMP", now), bq.p("id", "STRING", user_id)],
     )
+    bq.cache.invalidate("admin:users:")
     log_event("user.toggle_active", "user", user_id, current_user.username,
               payload={"is_active": body.is_active})
     return {"message": "User status updated."}
