@@ -183,8 +183,22 @@ def run(base: str) -> None:
     if r.ok:
         print(f"         approval_status={r.json().get('approval_status')}")
 
-    # --- 10. Dist admin approves ------------------------------------
-    print("\n-- 10. Distributor Admin Approve ---------------------------")
+    # --- 10. Dist admin sets store prices ---------------------------
+    print("\n-- 10. Set Store Prices (dist_admin) -----------------------")
+    if not H_DIST:
+        print(f"{SKIP_MARK} dist_admin login failed — skipping")
+    elif not sample:
+        print(f"{SKIP_MARK} No sample SKUs — skipping")
+    else:
+        price_items = [{"sku_id": s["sku_id"], "price_for_store": 50000.0} for s in sample]
+        r = _result("PUT /visit/{id}/store-price", requests.put(f"{base}/visit/{visit_id}/store-price", json={"items": price_items}, headers=H_DIST, timeout=30))
+        if r.ok:
+            items_back = r.json().get("items", [])
+            priced = [i for i in items_back if i.get("price_for_store") is not None]
+            print(f"         items_with_price={len(priced)}  sample={priced[0].get('price_for_store') if priced else None}")
+
+    # --- 11. Dist admin approves ------------------------------------
+    print("\n-- 11. Distributor Admin Approve ---------------------------")
     if not H_DIST:
         print(f"{SKIP_MARK} dist_admin login failed — skipping")
     else:
@@ -192,26 +206,31 @@ def run(base: str) -> None:
         if r.ok:
             print(f"         approval_status={r.json().get('approval_status')}")
 
-    # --- 11. PDF ----------------------------------------------------
-    print("\n-- 11. PDF Download (SPV) ----------------------------------")
-    r = _result("GET /visit/{id}/pdf", requests.get(f"{base}/visit/{visit_id}/pdf", headers=H_SPV, timeout=60))
-    if r.ok:
-        ct = r.headers.get("Content-Type", "")
-        print(f"         {len(r.content):,} bytes  content-type={ct}")
+    # --- 12. PDF ----------------------------------------------------
+    print("\n-- 12. PDF Download (dist_admin) ---------------------------")
+    if H_DIST:
+        r = _result("GET /visit/{id}/pdf", requests.get(f"{base}/visit/{visit_id}/pdf", headers=H_DIST, timeout=60))
+        if r.ok:
+            ct = r.headers.get("Content-Type", "")
+            print(f"         {len(r.content):,} bytes  content-type={ct}")
+    else:
+        r = _result("GET /visit/{id}/pdf", requests.get(f"{base}/visit/{visit_id}/pdf", headers=H_SPV, timeout=60))
+        if r.ok:
+            print(f"         {len(r.content):,} bytes")
 
-    # --- 12. Notifications ------------------------------------------
-    print("\n-- 12. Notifications ---------------------------------------")
+    # --- 13. Notifications ------------------------------------------
+    print("\n-- 13. Notifications ---------------------------------------")
     _result("GET /notifications (SPV)",  requests.get(f"{base}/notifications",  headers=H_SPV,  timeout=15))
     _result("GET /notifications (dist)", requests.get(f"{base}/notifications",  headers=H_DIST, timeout=15)) if H_DIST else None
 
-    # --- 13. Announcements ------------------------------------------
-    print("\n-- 13. Announcements (SE) ----------------------------------")
+    # --- 14. Announcements ------------------------------------------
+    print("\n-- 14. Announcements (SE) ----------------------------------")
     r = _result("GET /announcements", requests.get(f"{base}/announcements", headers=H_SE, timeout=15))
     if r.ok:
         print(f"         {len(r.json())} announcements")
 
-    # --- 14. Approvals queue ----------------------------------------
-    print("\n-- 14. Approvals Queue (SPV) -------------------------------")
+    # --- 15. Approvals queue ----------------------------------------
+    print("\n-- 15. Approvals Queue (SPV) -------------------------------")
     r = _result("GET /approvals", requests.get(f"{base}/approvals", headers=H_SPV, timeout=30))
     if r.ok:
         print(f"         {len(r.json())} items in approval queue")
