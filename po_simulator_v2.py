@@ -1679,6 +1679,7 @@ if st.session_state.get('page') == 'po_spv':
                 all_npd_sku_list = []
                 excel_dfs = {}
                 display_dfs = []
+                zero_price_skus = get_zero_price_skus()
 
                 uploaded_distributors = po_df["Distributor"].unique().tolist()
 
@@ -1849,12 +1850,14 @@ if st.session_state.get('page') == 'po_spv':
                     )
 
                     conditions = [
+                        result_df["Customer SKU Code"].isin(zero_price_skus),
                         result_df["Customer SKU Code"].isin(skus_not_in_bq),
                         (result_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > ___MAX_QTY_LIMIT),
                         (result_df["remaining_allocation_qty_region"] < 0),
                         (result_df["is_po_sku"] == False),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
+                        result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False),
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
@@ -1869,6 +1872,7 @@ if st.session_state.get('page') == 'po_spv':
                     ]
 
                     choices = [
+                        "Price Not Available Yet",
                         "Reject (SKU Not Found in System)",
                         f"Reject (Exceeds Qty Limit of {___MAX_QTY_LIMIT})",
                         "Reject (Negative Allocation)",
