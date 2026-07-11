@@ -463,8 +463,8 @@ def approve_visit(
             deep_link=f"visits/{visit_id}",
         )
 
-    # When distributor_admin completes the visit, also notify the SPV who approved it
-    if effective_role == "distributor_admin":
+    # When DM/HO completes the visit (COMPLETED status), also notify the SPV who approved it
+    if effective_role in ("dm", "ho_admin"):
         spv_username = visit.get("spv_username")
         if spv_username:
             spv_row = bq.query_one(
