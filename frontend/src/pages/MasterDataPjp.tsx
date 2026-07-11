@@ -47,7 +47,7 @@ export default function MasterDataPjp() {
     const fd = new FormData();
     fd.append("file", file);
     try {
-      const res = await api.post("/import/pjp", fd, {
+      const res = await api.post("/pjp/upload", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setDragStatus("done");

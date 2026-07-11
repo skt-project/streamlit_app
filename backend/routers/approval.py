@@ -25,21 +25,31 @@ class DecisionBody(BaseModel):
     comment: str = ""
 
 
+APPROVER_ROLES = {"asm", "dm", "ho_admin"}
+
+
 @router.get("")
 def list_approvals(
     status: str = Query("pending"),
     current_user: UserContext = Depends(require_auth),
 ):
     bq = BQClient.get()
-    cache_key = f"approvals:{status}"
+
+    # Non-approvers (salesman, spv, demo) see only their own submissions.
+    is_approver = current_user.role in APPROVER_ROLES
+    scope_suffix = "all" if is_approver else current_user.username
+    cache_key = f"approvals:{status}:{scope_suffix}"
     cached = bq.cache.get(cache_key)
     if cached is not None:
         return cached
 
-    if status == "pending":
-        status_clause = "AND ar.status = 'pending'"
-    else:
-        status_clause = "AND ar.status IN ('approved','rejected','revision')"
+    status_clause = (
+        "AND ar.status = 'pending'"
+        if status == "pending"
+        else "AND ar.status IN ('approved','rejected','revision')"
+    )
+    submitter_clause = "" if is_approver else "AND ar.submitted_by = @submitter"
+    params = [] if is_approver else [bq.p("submitter", "STRING", current_user.username)]
 
     rows = bq.query(
         f"""
@@ -55,11 +65,11 @@ def list_approvals(
           ar.status,
           ar.comments_json
         FROM {SFA_WEB}.approval_request ar
-        WHERE ar.is_deleted = FALSE {status_clause}
+        WHERE ar.is_deleted = FALSE {status_clause} {submitter_clause}
         ORDER BY ar.submitted_at DESC
         LIMIT 100
         """,
-        [],
+        params,
     )
 
     result = []

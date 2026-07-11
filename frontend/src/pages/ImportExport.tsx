@@ -29,8 +29,8 @@ const IMPORT_ZONES: ImportZone[] = [
   {
     key:      "pjp",
     label:    "PJP / Jadwal Kunjungan",
-    endpoint: "/import/pjp",
-    hint:     "outlet_code, salesman_code, day, frequency, week_pattern",
+    endpoint: "/pjp/upload",
+    hint:     "salesman_sk, outlet_sk, visit_day_of_week, week_number",
     icon:     "calendar-days",
     iconCls:  "icon-badge-blue",
   },
@@ -64,42 +64,42 @@ const EXPORT_ITEMS: ExportItem[] = [
   {
     label:       "Route Compliance (MTD)",
     endpoint:    "/export/route-compliance",
-    filename:    "route-compliance.xlsx",
+    filename:    "route-compliance.csv",
     icon:        "map",
     description: "Kepatuhan rute kunjungan bulan berjalan",
   },
   {
     label:       "Achievement vs Target",
     endpoint:    "/export/achievement",
-    filename:    "achievement.xlsx",
+    filename:    "achievement.csv",
     icon:        "chart-pie",
     description: "Pencapaian sales vs target per brand",
   },
   {
     label:       "Master Outlet (lengkap)",
     endpoint:    "/export/outlet",
-    filename:    "master-outlet.xlsx",
+    filename:    "master-outlet.csv",
     icon:        "building-storefront",
     description: "Seluruh data outlet aktif di sistem",
   },
   {
     label:       "Master Salesman (lengkap)",
     endpoint:    "/export/salesman",
-    filename:    "master-salesman.xlsx",
+    filename:    "master-salesman.csv",
     icon:        "users",
     description: "Seluruh data salesman dan mapping tim",
   },
   {
     label:       "PJP Efektif (semua)",
     endpoint:    "/export/pjp",
-    filename:    "pjp-efektif.xlsx",
+    filename:    "pjp-efektif.csv",
     icon:        "calendar-days",
     description: "Jadwal kunjungan efektif seluruh salesman",
   },
   {
     label:       "Visit Log MTD",
     endpoint:    "/export/visits",
-    filename:    "visit-log.xlsx",
+    filename:    "visit-log.csv",
     icon:        "clipboard-document-list",
     description: "Log seluruh kunjungan bulan berjalan",
   },
@@ -266,7 +266,7 @@ export default function ImportExport() {
                   {/* Template download */}
                   <button
                     className="w-full flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-primary-600 transition-colors py-1.5 border border-slate-100 rounded-lg hover:border-primary-200 hover:bg-primary-50"
-                    onClick={() => handleExport(`/template/${key}`, `template-${key}.xlsx`, `Template ${label}`)}
+                    onClick={() => handleExport(`/template/${key}`, `template-${key}.csv`, `Template ${label}`)}
                   >
                     <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />
                     Download Template
