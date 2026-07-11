@@ -573,15 +573,16 @@ def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
         raise RuntimeError("matplotlib tidak tersedia.")
     n_rows, n_cols = df.shape
     fig_w = max(16, n_cols * 2.0)
-    fig_h = max(2.5, n_rows * 0.38 + 1.6)
+    fig_h = max(1.2, n_rows * 0.38 + 0.6)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis('off')
     if title:
         ax.set_title(title, fontsize=11, fontweight='bold', color='#1a1a2e', pad=10)
     cell_text = [[str(v) if pd.notna(v) else '' for v in row] for row in df.values]
     tbl = ax.table(cellText=cell_text, colLabels=df.columns.tolist(), loc='center', cellLoc='left')
-    tbl.auto_set_font_size(False); tbl.set_fontsize(7.5)
+    tbl.auto_set_font_size(False); tbl.set_fontsize(9)
     tbl.auto_set_column_width(col=list(range(n_cols)))
+    tbl.scale(1, 1.6)
     for j in range(n_cols):
         tbl[0, j].set_facecolor('#1a1a2e')
         tbl[0, j].set_text_props(color='white', fontweight='bold')
@@ -1005,7 +1006,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     img_df = final_disp[PO_COLS_copy].copy()
     num_cols_img = img_df.select_dtypes(include=['number']).columns
     for nc in num_cols_img:
-        img_df[nc] = img_df[nc].apply(lambda v: f"{v:.2f}" if pd.notna(v) else "")
+        img_df[nc] = img_df[nc].apply(lambda v: f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(v) else "")
     sc_col = next((c for c in img_df.columns if "supply" in c.lower() and "control" in c.lower()), None)
     stop_mask = img_df[sc_col].str.strip().str.upper().isin(["STOP PO","OOS","DISCONTINUED","UNAVAILABLE"])
     stop_df = img_df[stop_mask].reset_index(drop=True)
