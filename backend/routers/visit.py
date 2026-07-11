@@ -627,7 +627,7 @@ def list_visits(
 
     # Role scoping
     role = current_user.role
-    if role in ("se", "SE"):
+    if role == "salesman":
         visit_conditions.append("AND v.salesman_sk = @self_sk")
         params.append(bq.p("self_sk", "STRING", current_user.salesman_sk or current_user.user_id))
     elif role == "distributor_admin":

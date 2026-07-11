@@ -16,7 +16,7 @@ export default function Reports() {
   const [activeReport, setActiveReport] = useState("Achievement");
   const [period, setPeriod]   = useState("Bulan Ini");
   const [tier, setTier]       = useState("Semua Tier");
-  const [exporting, setExporting] = useState<"excel" | "csv" | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["reports", activeReport, period, tier],
@@ -28,15 +28,14 @@ export default function Reports() {
   const rows = data?.rows ?? [];
   const kpis = data?.kpis ?? [];
 
-  const handleExport = async (format: "excel" | "csv") => {
-    setExporting(format);
+  const handleExport = async () => {
+    setExporting(true);
     try {
-      const res = await api.get("/reports/export", {
-        params: { type: activeReport, period, tier, format },
+      const res = await api.get("/reports/export.csv", {
+        params: { type: activeReport, period, tier },
         responseType: "blob",
       });
-      const ext      = format === "excel" ? "xlsx" : "csv";
-      const filename = `${activeReport.replace(/\s+/g, "-").toLowerCase()}-${period}.${ext}`;
+      const filename = `${activeReport.replace(/\s+/g, "-").toLowerCase()}-${period}.csv`;
       const url = URL.createObjectURL(res.data as Blob);
       const a   = document.createElement("a");
       a.href = url; a.download = filename; a.click();
@@ -45,7 +44,7 @@ export default function Reports() {
     } catch {
       toast.error("Gagal mengunduh laporan.");
     } finally {
-      setExporting(null);
+      setExporting(false);
     }
   };
 
@@ -54,28 +53,16 @@ export default function Reports() {
       <TopNav
         title="Reports"
         actions={
-          <div className="flex gap-2">
-            <button
-              className="btn-secondary text-sm"
-              onClick={() => handleExport("excel")}
-              disabled={!!exporting}
-            >
-              {exporting === "excel"
-                ? <Icon name="arrow-path" className="w-3.5 h-3.5 animate-spin" />
-                : <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />}
-              Excel
-            </button>
-            <button
-              className="btn-secondary text-sm"
-              onClick={() => handleExport("csv")}
-              disabled={!!exporting}
-            >
-              {exporting === "csv"
-                ? <Icon name="arrow-path" className="w-3.5 h-3.5 animate-spin" />
-                : <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />}
-              CSV
-            </button>
-          </div>
+          <button
+            className="btn-secondary text-sm"
+            onClick={handleExport}
+            disabled={exporting}
+          >
+            {exporting
+              ? <Icon name="arrow-path" className="w-3.5 h-3.5 animate-spin" />
+              : <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />}
+            Export CSV
+          </button>
         }
       />
 

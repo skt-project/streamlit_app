@@ -41,7 +41,7 @@ const NAV_TREE: NavItem[] = [
     to: "/dashboard",
     label: "Dashboard",
     icon: "chart-bar",
-    roles: ["spv", "asm", "dm", "rsm", "ho_admin"],
+    roles: ["spv", "asm", "dm", "ho_admin"],
   },
   {
     kind: "group",
@@ -53,7 +53,7 @@ const NAV_TREE: NavItem[] = [
       { to: "/master-data-pjp",      label: "Master Data PJP",   roles: ["asm", "dm", "ho_admin"] },
       { to: "/master-data-salesman", label: "Master Salesman",   roles: ["asm", "dm", "ho_admin"] },
       { to: "/target-management",    label: "Target Management", roles: ["spv", "asm", "dm", "ho_admin"] },
-      { to: "/outlet-salesman",      label: "Outlet & Salesman", roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
+      { to: "/outlet-salesman",      label: "Outlet & Salesman", roles: ["spv", "asm", "dm", "ho_admin"] },
     ],
   },
   {
@@ -62,11 +62,11 @@ const NAV_TREE: NavItem[] = [
     label: "Reports",
     icon: "chart-pie",
     children: [
-      { to: "/route-evaluate",    label: "Route Evaluate",    roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
-      { to: "/visits",            label: "Visit & Demand",    roles: ["spv", "asm", "dm", "rsm", "ho_admin", "distributor_admin"] },
-      { to: "/store-opportunity", label: "Store Opportunity", roles: ["asm", "dm", "rsm", "ho_admin"] },
-      { to: "/store360",          label: "Store 360°",        roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
-      { to: "/salesman360",       label: "Salesman 360°",     roles: ["spv", "asm", "dm", "rsm", "ho_admin"] },
+      { to: "/route-evaluate",    label: "Route Evaluate",    roles: ["spv", "asm", "dm", "ho_admin"] },
+      { to: "/visits",            label: "Visit & Demand",    roles: ["spv", "asm", "dm", "ho_admin"] },
+      { to: "/store-opportunity", label: "Store Opportunity", roles: ["asm", "dm", "ho_admin"] },
+      { to: "/store360",          label: "Store 360°",        roles: ["spv", "asm", "dm", "ho_admin"] },
+      { to: "/salesman360",       label: "Salesman 360°",     roles: ["spv", "asm", "dm", "ho_admin"] },
     ],
   },
   {
@@ -74,7 +74,7 @@ const NAV_TREE: NavItem[] = [
     to: "/approvals",
     label: "Approvals",
     icon: "check-circle",
-    roles: ["spv", "asm", "dm", "rsm", "ho_admin"],
+    roles: ["spv", "asm", "dm", "ho_admin"],
   },
   {
     kind: "single",
@@ -88,7 +88,7 @@ const NAV_TREE: NavItem[] = [
     to: "/announcements",
     label: "Announcements",
     icon: "megaphone",
-    roles: ["spv", "asm", "dm", "rsm", "ho_admin"],
+    roles: ["spv", "asm", "dm", "ho_admin"],
   },
   {
     kind: "single",
@@ -102,7 +102,7 @@ const NAV_TREE: NavItem[] = [
     to: "/notifications",
     label: "Notifikasi",
     icon: "bell",
-    roles: ["spv", "asm", "dm", "rsm", "ho_admin", "distributor_admin"],
+    roles: ["spv", "asm", "dm", "ho_admin"],
   },
 ];
 

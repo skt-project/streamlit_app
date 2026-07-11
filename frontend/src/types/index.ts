@@ -12,7 +12,7 @@ export interface User {
   is_active: boolean;
 }
 
-export type Role = "se" | "spv" | "asm" | "ddm" | "dm" | "rsm" | "ho_admin" | "distributor_admin";
+export type Role = "salesman" | "spv" | "asm" | "dm" | "ho_admin" | "demo";
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export interface DashboardKpi {
