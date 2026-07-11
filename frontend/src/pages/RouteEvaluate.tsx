@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
+import { Icon, EmptyState, SkeletonTable, SkeletonStatCards } from "@/components/ui";
 import { api } from "@/api/client";
 import type { EvaluateTeamRow, EvaluateStoreRow } from "@/types";
 import { format, startOfISOWeek, addDays, getISOWeek } from "date-fns";
@@ -32,6 +33,7 @@ export default function RouteEvaluate() {
   const { data: team = [], isLoading } = useQuery<EvaluateTeamRow[]>({
     queryKey: ["evaluate-team", weekKey],
     queryFn: () => fetchTeam(weekKey),
+    placeholderData: (prev) => prev,
   });
 
   const { data: detail } = useQuery<{ salesman: EvaluateTeamRow; stores: EvaluateStoreRow[] }>({
@@ -54,46 +56,64 @@ export default function RouteEvaluate() {
       <main className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Week nav */}
         <div className="flex items-center gap-3">
-          <button onClick={() => setWeekStart((d) => addDays(d, -7))} className="btn-secondary px-3 py-1.5 text-sm">‹</button>
+          <button onClick={() => setWeekStart((d) => addDays(d, -7))} className="btn-secondary p-1.5"><Icon name="chevron-left" className="w-4 h-4" /></button>
           <span className="text-sm font-semibold text-slate-700">{weekLabel}</span>
-          <button onClick={() => setWeekStart((d) => addDays(d, 7))} className="btn-secondary px-3 py-1.5 text-sm">›</button>
+          <button onClick={() => setWeekStart((d) => addDays(d, 7))} className="btn-secondary p-1.5"><Icon name="chevron-right" className="w-4 h-4" /></button>
         </div>
 
         {/* Drill-down view */}
         {drillSalesman ? (
           <>
-            <button onClick={() => setDrillSalesman(null)} className="text-sm text-primary-600 hover:underline">← Kembali ke Tim</button>
+            <button onClick={() => setDrillSalesman(null)} className="flex items-center gap-1.5 text-sm text-primary-600 hover:underline">
+              <Icon name="arrow-left" className="w-4 h-4" />Kembali ke Tim
+            </button>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="card"><p className="text-xs text-slate-400">Planned Visit</p><p className="text-2xl font-bold text-slate-800">{detail?.stores.length ?? 0}</p></div>
-              <div className="card"><p className="text-xs text-slate-400">Call (Terlaksana)</p><p className="text-2xl font-bold text-blue-600">{drillSalesman.call_count}</p></div>
-              <div className="card"><p className="text-xs text-slate-400">Effective Call</p><p className="text-2xl font-bold text-green-600">{drillSalesman.effective_call_count}</p></div>
-              <div className="card"><p className="text-xs text-slate-400">EC Rate</p><ECBadge pct={drillSalesman.ec_rate_pct} /></div>
+              <div className="kpi-tile">
+                <span className="icon-badge icon-badge-slate"><Icon name="calendar" className="w-4 h-4" /></span>
+                <p className="kpi-tile-value mt-2">{detail?.stores.length ?? 0}</p>
+                <p className="kpi-tile-label">Planned Visit</p>
+              </div>
+              <div className="kpi-tile">
+                <span className="icon-badge icon-badge-blue"><Icon name="map-pin" className="w-4 h-4" /></span>
+                <p className="kpi-tile-value mt-2">{drillSalesman.call_count}</p>
+                <p className="kpi-tile-label">Call (Terlaksana)</p>
+              </div>
+              <div className="kpi-tile">
+                <span className="icon-badge icon-badge-green"><Icon name="check-circle" className="w-4 h-4" /></span>
+                <p className="kpi-tile-value mt-2">{drillSalesman.effective_call_count}</p>
+                <p className="kpi-tile-label">Effective Call</p>
+              </div>
+              <div className="kpi-tile">
+                <span className="icon-badge icon-badge-amber"><Icon name="chart-pie" className="w-4 h-4" /></span>
+                <div className="mt-2"><ECBadge pct={drillSalesman.ec_rate_pct} /></div>
+                <p className="kpi-tile-label">EC Rate</p>
+              </div>
             </div>
 
             <div className="card">
               <h2 className="font-semibold text-slate-800 mb-4">{drillSalesman.salesman_name} — Detail Toko</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="table-container">
+                <table className="table">
                   <thead>
-                    <tr className="border-b border-slate-100">
-                      <th className="text-left py-2 text-xs font-medium text-slate-400">Toko</th>
-                      <th className="text-center py-2 text-xs font-medium text-slate-400">Tier</th>
-                      <th className="text-center py-2 text-xs font-medium text-slate-400">Planned</th>
-                      <th className="text-center py-2 text-xs font-medium text-slate-400">Call</th>
-                      <th className="text-center py-2 text-xs font-medium text-slate-400">Eff. Call</th>
-                      <th className="text-right py-2 text-xs font-medium text-slate-400">Status</th>
+                    <tr>
+                      <th>Toko</th>
+                      <th className="text-center">Tier</th>
+                      <th className="text-center">Planned</th>
+                      <th className="text-center">Call</th>
+                      <th className="text-center">Eff. Call</th>
+                      <th className="text-right">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(detail?.stores ?? []).map((row) => (
-                      <tr key={row.outlet_sk} className="border-b border-slate-50 hover:bg-slate-50">
-                        <td className="py-2 font-medium text-slate-700">{row.store_name}</td>
-                        <td className="py-2 text-center text-slate-500">{row.store_grade ?? "—"}</td>
-                        <td className="py-2 text-center">{row.planned ? "✓" : "—"}</td>
-                        <td className="py-2 text-center">{row.is_call ? "✓" : "✗"}</td>
-                        <td className="py-2 text-center">{row.is_effective === null ? "—" : row.is_effective ? "✓" : "✗"}</td>
-                        <td className="py-2 text-right"><StatusBadge status={row.status} /></td>
+                      <tr key={row.outlet_sk}>
+                        <td className="font-medium text-slate-700">{row.store_name}</td>
+                        <td className="text-center text-slate-500">{row.store_grade ?? "—"}</td>
+                        <td className="text-center">{row.planned ? <span className="badge-green text-xs">Ya</span> : "—"}</td>
+                        <td className="text-center">{row.is_call ? <span className="badge-green text-xs">Ya</span> : <span className="badge-red text-xs">Tidak</span>}</td>
+                        <td className="text-center">{row.is_effective === null ? "—" : row.is_effective ? <span className="badge-green text-xs">Ya</span> : <span className="badge-red text-xs">Tidak</span>}</td>
+                        <td className="text-right"><StatusBadge status={row.status} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -104,28 +124,52 @@ export default function RouteEvaluate() {
         ) : (
           /* Team Roll-up */
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="card"><p className="text-xs text-slate-400">Total Call</p><p className="text-2xl font-bold text-blue-600">{teamKpis.totalCall}</p></div>
-              <div className="card"><p className="text-xs text-slate-400">Effective Call</p><p className="text-2xl font-bold text-green-600">{teamKpis.totalEC}</p></div>
-              <div className="card"><p className="text-xs text-slate-400">EC Rate (Tim)</p><ECBadge pct={teamKpis.ecRate} /></div>
-              <div className="card"><p className="text-xs text-slate-400">Low Conversion</p><p className="text-2xl font-bold text-amber-600">{teamKpis.lowConv}</p><p className="text-xs text-slate-400">salesman</p></div>
-            </div>
+            {isLoading ? (
+              <SkeletonStatCards count={4} />
+            ) : (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="kpi-tile">
+                  <span className="icon-badge icon-badge-blue"><Icon name="map-pin" className="w-4 h-4" /></span>
+                  <p className="kpi-tile-value mt-2">{teamKpis.totalCall}</p>
+                  <p className="kpi-tile-label">Total Call</p>
+                </div>
+                <div className="kpi-tile">
+                  <span className="icon-badge icon-badge-green"><Icon name="check-circle" className="w-4 h-4" /></span>
+                  <p className="kpi-tile-value mt-2">{teamKpis.totalEC}</p>
+                  <p className="kpi-tile-label">Effective Call</p>
+                </div>
+                <div className="kpi-tile">
+                  <span className="icon-badge icon-badge-amber"><Icon name="chart-pie" className="w-4 h-4" /></span>
+                  <div className="mt-2"><ECBadge pct={teamKpis.ecRate} /></div>
+                  <p className="kpi-tile-label">EC Rate (Tim)</p>
+                </div>
+                <div className="kpi-tile">
+                  <span className="icon-badge icon-badge-purple"><Icon name="exclamation-triangle" className="w-4 h-4" /></span>
+                  <p className="kpi-tile-value mt-2">{teamKpis.lowConv}</p>
+                  <p className="kpi-tile-label">Low Conversion</p>
+                </div>
+              </div>
+            )}
 
             <div className="card">
               <h2 className="font-semibold text-slate-800 mb-4">Performa Tim</h2>
               {isLoading ? (
-                <p className="text-sm text-slate-400">Memuat...</p>
+                <SkeletonTable rows={5} cols={4} />
               ) : team.length === 0 ? (
-                <p className="text-sm text-slate-400">Belum ada data kunjungan minggu ini.</p>
+                <EmptyState
+                  icon="calendar"
+                  title="Belum ada data minggu ini"
+                  description="Data kunjungan akan muncul setelah salesman melakukan check-in"
+                />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                <div className="table-container">
+                  <table className="table">
                     <thead>
-                      <tr className="border-b border-slate-100">
-                        <th className="text-left py-2 text-xs font-medium text-slate-400">Salesman</th>
-                        <th className="text-right py-2 text-xs font-medium text-slate-400">Call</th>
-                        <th className="text-right py-2 text-xs font-medium text-slate-400">Eff. Call</th>
-                        <th className="text-right py-2 text-xs font-medium text-slate-400">EC Rate</th>
+                      <tr>
+                        <th>Salesman</th>
+                        <th className="text-right">Call</th>
+                        <th className="text-right">Eff. Call</th>
+                        <th className="text-right">EC Rate</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -133,12 +177,12 @@ export default function RouteEvaluate() {
                         <tr
                           key={row.salesman_sk}
                           onClick={() => setDrillSalesman(row)}
-                          className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer"
+                          className="cursor-pointer"
                         >
-                          <td className="py-3 font-medium text-slate-700">{row.salesman_name}</td>
-                          <td className="py-3 text-right text-slate-600">{row.call_count}</td>
-                          <td className="py-3 text-right text-slate-600">{row.effective_call_count}</td>
-                          <td className="py-3 text-right"><ECBadge pct={row.ec_rate_pct} /></td>
+                          <td className="font-medium text-slate-700">{row.salesman_name}</td>
+                          <td className="text-right text-slate-600 tabular-nums">{row.call_count}</td>
+                          <td className="text-right text-slate-600 tabular-nums">{row.effective_call_count}</td>
+                          <td className="text-right"><ECBadge pct={row.ec_rate_pct} /></td>
                         </tr>
                       ))}
                     </tbody>

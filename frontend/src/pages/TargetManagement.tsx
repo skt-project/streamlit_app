@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
+import { Icon, EmptyState, SkeletonTable } from "@/components/ui";
 import { api } from "@/api/client";
 import type { TargetComply, SpvTargetRow } from "@/types";
 import { format } from "date-fns";
@@ -40,6 +41,7 @@ export default function TargetManagement() {
   const { data: comply = [], isLoading } = useQuery<TargetComply[]>({
     queryKey: ["target-comply"],
     queryFn: fetchComply,
+    placeholderData: (prev) => prev,
   });
 
   const { data: spvRows = [] } = useQuery<SpvTargetRow[]>({
@@ -88,7 +90,7 @@ export default function TargetManagement() {
       <main className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Comply definition */}
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
-          <span className="text-xl">📐</span>
+          <Icon name="information-circle" className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm text-blue-800 font-medium">Definisi Comply</p>
             <p className="text-sm text-blue-700 mt-1">
@@ -104,9 +106,21 @@ export default function TargetManagement() {
         <div className="card">
           <h2 className="font-semibold text-slate-800 mb-4">Comply per Brand — {format(new Date(), "MMMM yyyy")}</h2>
           {isLoading ? (
-            <p className="text-sm text-slate-400">Memuat data...</p>
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 p-4 space-y-2 animate-pulse">
+                  <div className="h-4 w-32 bg-slate-200 rounded" />
+                  <div className="h-2 w-full bg-slate-200 rounded-full" />
+                  <div className="h-3 w-48 bg-slate-100 rounded" />
+                </div>
+              ))}
+            </div>
           ) : comply.length === 0 ? (
-            <p className="text-sm text-slate-400">Belum ada data target bulan ini.</p>
+            <EmptyState
+              icon="clipboard-document-list"
+              title="Belum ada data target"
+              description="Data target bulan ini belum tersedia"
+            />
           ) : (
             <div className="space-y-3">
               {comply.map((c) => (
@@ -143,24 +157,28 @@ export default function TargetManagement() {
               <button className="btn-secondary text-sm">Atur Target Massal</button>
             </div>
             {spvRows.length === 0 ? (
-              <p className="text-sm text-slate-400">Belum ada distribusi target. Klik "Simpan Draft" untuk memulai.</p>
+              <EmptyState
+                icon="clipboard-document-list"
+                title="Belum ada distribusi target"
+                description='Klik "Simpan Draft" untuk memulai distribusi target'
+              />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="table-container">
+                <table className="table">
                   <thead>
-                    <tr className="border-b border-slate-100">
-                      <th className="text-left py-2 text-xs font-medium text-slate-400">Salesman</th>
-                      <th className="text-left py-2 text-xs font-medium text-slate-400">Area</th>
-                      <th className="text-right py-2 text-xs font-medium text-slate-400">Target (Rp)</th>
-                      <th className="text-right py-2 text-xs font-medium text-slate-400">Status</th>
+                    <tr>
+                      <th>Salesman</th>
+                      <th>Area</th>
+                      <th className="text-right">Target (Rp)</th>
+                      <th className="text-right">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {spvRows.map((row) => (
-                      <tr key={row.salesman_sk} className="border-b border-slate-50">
-                        <td className="py-3 font-medium text-slate-700">{row.salesman_name}</td>
-                        <td className="py-3 text-slate-500">—</td>
-                        <td className="py-3 text-right">
+                      <tr key={row.salesman_sk}>
+                        <td className="font-medium text-slate-700">{row.salesman_name}</td>
+                        <td className="text-slate-500">—</td>
+                        <td className="text-right">
                           <input
                             type="number"
                             className="input text-right w-36 text-sm"
@@ -168,7 +186,7 @@ export default function TargetManagement() {
                             onChange={(e) => setEditValues((prev) => ({ ...prev, [row.salesman_sk]: e.target.value }))}
                           />
                         </td>
-                        <td className="py-3 text-right"><StatusBadge status={row.approval_status} /></td>
+                        <td className="text-right"><StatusBadge status={row.approval_status} /></td>
                       </tr>
                     ))}
                   </tbody>

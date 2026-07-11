@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
+import { Icon, EmptyState, Skeleton } from "@/components/ui";
 import { api } from "@/api/client";
 import type { Announcement, AnnouncementType } from "@/types";
 import { format } from "date-fns";
@@ -21,6 +22,7 @@ export default function Announcements() {
   const { data: items = [], isLoading } = useQuery<Announcement[]>({
     queryKey: ["announcements", activeType],
     queryFn: () => fetchAnnouncements(activeType),
+    placeholderData: (prev) => prev,
   });
 
   const createMutation = useMutation({
@@ -48,9 +50,7 @@ export default function Announcements() {
             <button
               key={t}
               onClick={() => setActiveType(t)}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                activeType === t ? "bg-primary-600 text-white" : "bg-white text-slate-600 border border-slate-200 hover:border-primary-300"
-              }`}
+              className={`chip ${activeType === t ? "chip-active" : ""}`}
             >
               {t}
             </button>
@@ -58,12 +58,25 @@ export default function Announcements() {
         </div>
 
         {isLoading ? (
-          <p className="text-sm text-slate-400">Memuat...</p>
-        ) : items.length === 0 ? (
-          <div className="text-center py-16 text-slate-400">
-            <p className="text-4xl mb-3">📢</p>
-            <p>Belum ada pengumuman.</p>
+          <div className="space-y-4 max-w-2xl" aria-hidden="true">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="card space-y-2">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-5 w-20 rounded-full" />
+                  <Skeleton className="h-4 w-24 ml-auto" />
+                </div>
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ))}
           </div>
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon="megaphone"
+            title="Belum ada pengumuman"
+            description="Pengumuman baru akan muncul di sini"
+          />
         ) : (
           <div className="space-y-4 max-w-2xl">
             {items.map((a) => (
@@ -86,7 +99,7 @@ export default function Announcements() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h3 className="font-semibold text-slate-800">Buat Pengumuman Baru</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 text-xl">×</button>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded"><Icon name="x-mark" className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
