@@ -35,10 +35,10 @@ def _build_scope_filter(user: UserContext) -> tuple[str, list]:
     bq = BQClient.get()
     bg_clause, bg_params = brand_group_filter(user, "bg_sm")
     role_clause, role_params = "", []
-    if user.role == "distributor_admin" and user.distributor_code:
+    if user.role == "dm" and user.distributor_code:
         role_clause = "AND distributor_code = @scope_dist"
         role_params = [bq.p("scope_dist", "STRING", user.distributor_code)]
-    elif user.role in ("spv", "area_manager") and user.territory:
+    elif user.role in ("spv", "asm") and user.territory:
         role_clause = "AND region = @scope_region"
         role_params = [bq.p("scope_region", "STRING", user.territory)]
     return f"{bg_clause} {role_clause}".strip(), bg_params + role_params
@@ -145,7 +145,7 @@ def get_salesman(
 @router.post("", status_code=201, response_model=SalesmanOut)
 def create_salesman(
     body: SalesmanCreateRequest,
-    current_user: UserContext = Depends(require_role("ho_admin", "distributor_admin")),
+    current_user: UserContext = Depends(require_role("ho_admin", "dm")),
 ):
     bq = BQClient.get()
     sk = f"STEP-{body.source_salesman_code}"  # simplified key; real would use fn_surrogate_key
@@ -208,7 +208,7 @@ def create_salesman(
 def update_salesman(
     salesman_sk: str,
     body: SalesmanUpdateRequest,
-    current_user: UserContext = Depends(require_role("ho_admin", "distributor_admin")),
+    current_user: UserContext = Depends(require_role("ho_admin", "dm")),
 ):
     bq = BQClient.get()
     existing = bq.query_one(
@@ -241,7 +241,7 @@ def update_salesman(
 @router.delete("/{salesman_sk}", status_code=204)
 def deactivate_salesman(
     salesman_sk: str,
-    current_user: UserContext = Depends(require_role("ho_admin", "distributor_admin")),
+    current_user: UserContext = Depends(require_role("ho_admin", "dm")),
 ):
     bq = BQClient.get()
     bq.execute(

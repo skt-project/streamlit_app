@@ -98,7 +98,7 @@ _VISIT_COLS = """
 
 def _next_approval_status(current: str, role: str) -> str:
     """Return next approval_status when caller with `role` approves.
-    Flow: SE submits → PENDING_SPV → (SPV) SPV_APPROVED → (distributor_admin) COMPLETED
+    Flow: SE submits → PENDING_SPV → (SPV) SPV_APPROVED → (dm / ho_admin) COMPLETED
     """
     transitions = {
         ("SUBMITTED",    "spv"):      "SPV_APPROVED",
@@ -630,12 +630,12 @@ def list_visits(
     if role == "salesman":
         visit_conditions.append("AND v.salesman_sk = @self_sk")
         params.append(bq.p("self_sk", "STRING", current_user.salesman_sk or current_user.user_id))
-    elif role == "distributor_admin":
-        # Distributor admin sees only visits from their distributor's outlets
+    elif role == "dm":
+        # DM sees only visits from their distributor's outlets
         if current_user.distributor_code:
             visit_conditions.append("AND o.distributor_code = @dist_code")
             params.append(bq.p("dist_code", "STRING", current_user.distributor_code))
-        # Distributor admin sees visits that need their action or are already completed
+        # DM sees visits that need their action or are already completed
         visit_conditions.append("AND v.approval_status IN ('SPV_APPROVED','COMPLETED')")
     elif salesman_sk:
         visit_conditions.append("AND v.salesman_sk = @sm_sk")
@@ -738,8 +738,8 @@ def update_final_qty(
     role = current_user.role
     if role == "spv" and approval_status not in ("PENDING_SPV", "SUBMITTED"):
         raise HTTPException(status_code=403, detail="SPV can only edit final qty for visits pending SPV approval")
-    if role == "distributor_admin" and approval_status not in ("SPV_APPROVED", "COMPLETED"):
-        raise HTTPException(status_code=403, detail="Distributor admin can only edit final qty for SPV-approved visits")
+    if role in ("dm", "ho_admin") and approval_status not in ("SPV_APPROVED", "COMPLETED"):
+        raise HTTPException(status_code=403, detail="DM can only edit final qty for SPV-approved visits")
 
     if not body.items:
         return _get_visit_detail(visit_id, bq)
@@ -786,8 +786,8 @@ def update_store_price(
     body: UpdateStorePriceRequest,
     current_user: UserContext = Depends(require_auth),
 ):
-    if current_user.role not in ("distributor_admin", "ho_admin"):
-        raise HTTPException(status_code=403, detail="Only distributor admin can set store prices")
+    if current_user.role not in ("dm", "ho_admin"):
+        raise HTTPException(status_code=403, detail="Only DM or HO admin can set store prices")
 
     bq = BQClient.get()
     now = datetime.now(timezone.utc)

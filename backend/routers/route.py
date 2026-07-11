@@ -52,10 +52,10 @@ def list_salesmen_for_planner(
     params.extend(bg_params)
 
     # Scope by role
-    if current_user.role == "distributor_admin" and current_user.distributor_code:
+    if current_user.role == "dm" and current_user.distributor_code:
         conditions.append("AND distributor_code = @scope_dist")
         params.append(bq.p("scope_dist", "STRING", current_user.distributor_code))
-    elif current_user.role in ("spv", "area_manager") and current_user.territory:
+    elif current_user.role in ("spv", "asm") and current_user.territory:
         conditions.append("AND region = @scope_region")
         params.append(bq.p("scope_region", "STRING", current_user.territory))
 
