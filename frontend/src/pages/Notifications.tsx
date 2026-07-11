@@ -41,6 +41,7 @@ export default function Notifications() {
   const { data: items = [], isLoading } = useQuery<Notification[]>({
     queryKey: ["notifications"],
     queryFn:  fetchNotifications,
+    staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
 
@@ -89,7 +90,16 @@ export default function Notifications() {
               return (
                 <div
                   key={n.notification_id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${n.title}${!n.is_read ? " — belum dibaca" : ""}`}
                   onClick={() => { if (!n.is_read) markOneMutation.mutate(n.notification_id); }}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === " ") && !n.is_read) {
+                      e.preventDefault();
+                      markOneMutation.mutate(n.notification_id);
+                    }
+                  }}
                   className={`card flex items-start gap-4 cursor-pointer transition-colors ${
                     !n.is_read
                       ? "border-l-4 border-primary-400 bg-primary-50/30"
@@ -113,7 +123,7 @@ export default function Notifications() {
                   </div>
 
                   {!n.is_read && (
-                    <div className="w-2 h-2 rounded-full bg-primary-500 shrink-0 mt-2" />
+                    <div className="w-2 h-2 rounded-full bg-primary-500 shrink-0 mt-2" aria-hidden="true" />
                   )}
                 </div>
               );
