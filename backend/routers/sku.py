@@ -37,6 +37,11 @@ def list_sku(
     where = " ".join(conditions)
     offset = (page - 1) * page_size
 
+    cache_key = f"sku:{current_user.brand_group or 'all'}:{q or ''}:{brand or ''}:{category or ''}:{page}:{page_size}"
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     total = (bq.query_one(
         f"SELECT COUNT(*) AS n FROM {settings.table('dim_sku')} WHERE {where}",
         params,
@@ -53,10 +58,12 @@ def list_sku(
         params + [bq.p("lim", "INT64", page_size), bq.p("off", "INT64", offset)],
     )
 
-    return SkuListResponse(
+    result = SkuListResponse(
         items=[SkuOut(**r) for r in rows],
         total=total,
         page=page,
         page_size=page_size,
         has_next=(offset + page_size) < total,
     )
+    bq.cache.set(cache_key, result, ttl=300)  # 5 min — dim_sku changes only on master import
+    return result

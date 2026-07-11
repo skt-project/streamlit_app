@@ -17,9 +17,17 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 SFA_WEB = f"`{settings.bq_project}.{settings.bq_dataset}`"
 
 
+def _notif_cache_key(user_id: str) -> str:
+    return f"notif:{user_id}"
+
+
 @router.get("")
 def list_notifications(current_user: UserContext = Depends(require_auth)):
     bq = BQClient.get()
+    cache_key = _notif_cache_key(current_user.user_id)
+    cached = bq.cache.get(cache_key)
+    if cached is not None:
+        return cached
     rows = bq.query(
         f"""
         SELECT notification_id, type, title, body, is_read, deep_link, created_at
@@ -30,9 +38,9 @@ def list_notifications(current_user: UserContext = Depends(require_auth)):
         """,
         [bq.p("uid", "STRING", current_user.user_id)],
     )
-    return [
-        {**r, "created_at": str(r["created_at"])} for r in rows
-    ]
+    result = [{**r, "created_at": str(r["created_at"])} for r in rows]
+    bq.cache.set(cache_key, result, ttl=60)  # 60s — matches frontend staleTime
+    return result
 
 
 @router.post("/{notification_id}/read")
@@ -46,6 +54,7 @@ def mark_read(notification_id: str, current_user: UserContext = Depends(require_
         """,
         [bq.p("nid", "STRING", notification_id), bq.p("uid", "STRING", current_user.user_id)],
     )
+    bq.cache.invalidate(_notif_cache_key(current_user.user_id))
     return {"message": "Marked as read."}
 
 
@@ -60,6 +69,7 @@ def mark_all_read(current_user: UserContext = Depends(require_auth)):
         """,
         [bq.p("uid", "STRING", current_user.user_id)],
     )
+    bq.cache.invalidate(_notif_cache_key(current_user.user_id))
     return {"message": "All notifications marked as read."}
 
 
