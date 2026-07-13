@@ -258,6 +258,62 @@ export default function VisitDetail() {
     }
   };
 
+  // ── Derived values (memoized — finalQtyMap/priceMap change on each keystroke) ──
+  // These hooks MUST run on every render, including while the query is loading:
+  // placing hooks after the early returns below renders more hooks once data
+  // arrives than during the loading render (React error #310).
+  const items = useMemo(() => visit?.items ?? [], [visit?.items]);
+
+  const totalQty = useMemo(
+    () => items.reduce((s, i) => s + (i.qty ?? 0), 0),
+    [items],
+  );
+
+  const totalFinalQty = useMemo(
+    () => items.reduce((s, i) => s + (finalQtyMap[i.sku_id] ?? i.qty ?? 0), 0),
+    [items, finalQtyMap],
+  );
+
+  const liveFinalDemand = useMemo(
+    () => items.reduce(
+      (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0),
+      0,
+    ),
+    [items, finalQtyMap],
+  );
+
+  const grandTotal = useMemo(
+    () => items.reduce((s, i) => {
+      const qty   = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
+      const price = priceMap[i.sku_id] ?? i.price_for_store ?? i.stp ?? 0;
+      return s + qty * price;
+    }, 0),
+    [items, finalQtyMap, priceMap],
+  );
+
+  const brandGroups = useMemo(
+    () => [...new Set(items.map((i) => i.brand).filter(Boolean))],
+    [items],
+  );
+
+  const showFinalQtyCol = useMemo(
+    () => canEditFinalQty(visit?.approval_status ?? null, role) || items.some((i) => i.final_qty != null),
+    [visit?.approval_status, role, items],
+  );
+
+  const showPriceCol = useMemo(
+    () => isDistAdm || items.some((i) => (i.price_for_store ?? 0) > 0),
+    [isDistAdm, items],
+  );
+
+  const stockWarningCount = useMemo(
+    () => items.filter((i) => {
+      const effQty = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
+      return i.warehouse_stock_qty != null && effQty > i.warehouse_stock_qty;
+    }).length,
+    [items, finalQtyMap],
+  );
+
   // ── Loading / Error ────────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -288,58 +344,6 @@ export default function VisitDetail() {
       </div>
     );
   }
-
-  // ── Derived values (memoized — finalQtyMap/priceMap change on each keystroke) ──
-
-  const totalQty = useMemo(
-    () => visit.items.reduce((s, i) => s + (i.qty ?? 0), 0),
-    [visit.items],
-  );
-
-  const totalFinalQty = useMemo(
-    () => visit.items.reduce((s, i) => s + (finalQtyMap[i.sku_id] ?? i.qty ?? 0), 0),
-    [visit.items, finalQtyMap],
-  );
-
-  const liveFinalDemand = useMemo(
-    () => visit.items.reduce(
-      (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0),
-      0,
-    ),
-    [visit.items, finalQtyMap],
-  );
-
-  const grandTotal = useMemo(
-    () => visit.items.reduce((s, i) => {
-      const qty   = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
-      const price = priceMap[i.sku_id] ?? i.price_for_store ?? i.stp ?? 0;
-      return s + qty * price;
-    }, 0),
-    [visit.items, finalQtyMap, priceMap],
-  );
-
-  const brandGroups = useMemo(
-    () => [...new Set(visit.items.map((i) => i.brand).filter(Boolean))],
-    [visit.items],
-  );
-
-  const showFinalQtyCol = useMemo(
-    () => canEditFinalQty(visit.approval_status, role) || visit.items.some((i) => i.final_qty != null),
-    [visit.approval_status, role, visit.items],
-  );
-
-  const showPriceCol = useMemo(
-    () => isDistAdm || visit.items.some((i) => (i.price_for_store ?? 0) > 0),
-    [isDistAdm, visit.items],
-  );
-
-  const stockWarningCount = useMemo(
-    () => visit.items.filter((i) => {
-      const effQty = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
-      return i.warehouse_stock_qty != null && effQty > i.warehouse_stock_qty;
-    }).length,
-    [visit.items, finalQtyMap],
-  );
 
   const canDownloadPdf = ["spv", "asm", "dm", "ho_admin"].includes(role);
   const isDirty        = fqtyDirty || priceDirty;
