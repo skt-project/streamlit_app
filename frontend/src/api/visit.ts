@@ -29,14 +29,20 @@ export const updateStorePrice = (
   items: { sku_id: string; price_for_store: number }[],
 ) => api.put<Visit>(`/visit/${visitId}/store-price`, { items }).then((r) => r.data);
 
-export const downloadVisitPdf = async (visitId: string): Promise<void> => {
+export const updateAdjustment = (
+  visitId: string,
+  adjustment_amount: number,
+  adjustment_note: string | null,
+) => api.put<Visit>(`/visit/${visitId}/adjustment`, { adjustment_amount, adjustment_note }).then((r) => r.data);
+
+export const downloadVisitPdf = async (visitId: string, filename?: string): Promise<void> => {
   const response = await api.get(`/visit/${visitId}/pdf`, {
     responseType: "blob",
   });
   const url = window.URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `demand_${visitId}.pdf`;
+  a.download = filename ?? `Order_${visitId}.pdf`;
   a.click();
   window.URL.revokeObjectURL(url);
 };

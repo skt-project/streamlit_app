@@ -28,7 +28,8 @@ from models.auth import UserContext
 from models.visit import (
     ApproveRequest, CheckinRequest, CheckinResponse,
     CheckoutRequest, RejectRequest, ResubmitRequest,
-    SubmitRequest, UpdateFinalQtyRequest, UpdateStorePriceRequest,
+    SubmitRequest, UpdateAdjustmentRequest, UpdateFinalQtyRequest,
+    UpdateStorePriceRequest,
     VisitItemOut, VisitListResponse, VisitOut,
 )
 from services.bq import BQClient
@@ -834,6 +835,48 @@ def update_store_price(
 
 
 # ------------------------------------------------------------------
+# PUT /visit/{visit_id}/adjustment  — Distributor admin invoice adjustment
+# ------------------------------------------------------------------
+@router.put("/{visit_id}/adjustment", response_model=VisitOut)
+def update_adjustment(
+    visit_id: str,
+    body: UpdateAdjustmentRequest,
+    current_user: UserContext = Depends(require_auth),
+):
+    """Add or reduce the invoice total (delivery fee, discount, promo, misc).
+    Positive = surcharge, negative = reduction. Distributor admin only."""
+    if current_user.role not in ("dm", "ho_admin"):
+        raise HTTPException(status_code=403, detail="Only DM or HO admin can adjust the invoice")
+
+    bq = BQClient.get()
+    now = datetime.now(timezone.utc)
+
+    visit = bq.query_one(
+        f"SELECT visit_id FROM {settings.table('fact_visit')} WHERE visit_id = @vid AND is_deleted = FALSE",
+        [bq.p("vid", "STRING", visit_id)],
+    )
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    bq.execute(
+        f"""
+        UPDATE {settings.table('fact_visit')} SET
+          adjustment_amount = @amt,
+          adjustment_note = @note,
+          updated_at = @now
+        WHERE visit_id = @vid
+        """,
+        [
+            bq.p("amt",  "FLOAT64",   body.adjustment_amount),
+            bq.p("note", "STRING",    body.adjustment_note),
+            bq.p("now",  "TIMESTAMP", now.isoformat()),
+            bq.p("vid",  "STRING",    visit_id),
+        ],
+    )
+    return _get_visit_detail(visit_id, bq)
+
+
+# ------------------------------------------------------------------
 # GET /visit/{visit_id}/pdf  — Generate offering letter PDF
 # ------------------------------------------------------------------
 @router.get("/{visit_id}/pdf")
@@ -935,7 +978,7 @@ def download_pdf(
         pdf.set_xy(9, 14)
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*C_LBLUE)
-        pdf.cell(100, 5, "SURAT PENAWARAN DEMAND")
+        pdf.cell(100, 5, "SURAT PENAWARAN ORDER")
 
         # Right — visit ID + date
         pdf.set_xy(105, 6)
@@ -1035,11 +1078,11 @@ def download_pdf(
         # ── PRODUCTS TABLE ───────────────────────────────────────────
         pdf.set_font("Helvetica", "B", 8.5)
         pdf.set_text_color(*C_TEXT)
-        pdf.cell(0, 7, "DETAIL PRODUK DEMAND", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 7, "DETAIL PRODUK ORDER", new_x="LMARGIN", new_y="NEXT")
 
-        # col widths: No, Nama Produk, Brand, Qty Final, Harga/Toko, Total Harga = 180 total
-        cw = [9, 65, 25, 18, 33, 30]
-        col_headers = ["No", "Nama Produk", "Brand", "Qty Final", "Harga/Toko (Rp)", "Total Harga (Rp)"]
+        # col widths: No, Nama Produk, Brand, Qty Final, Harga Toko/PCS, Total Harga = 180 total
+        cw = [9, 63, 24, 18, 34, 32]
+        col_headers = ["No", "Nama Produk", "Brand", "Qty Final", "Harga Toko/PCS", "Total Harga (Rp)"]
         col_aligns  = ["C",  "L",           "L",     "R",         "R",               "R"]
 
         # Header row
@@ -1099,12 +1142,44 @@ def download_pdf(
         pdf.ln(4)
 
         if has_prices:
-            pdf.set_font("Helvetica", "B", 8)
+            adj_amt = visit_out.adjustment_amount or 0
+            final_invoice = grand_total_price + adj_amt
+            sy = pdf.get_y() + 1
+            box_x, box_w2 = 110, 85
+            rows_n = 3 if adj_amt else 1
+            pdf.set_draw_color(*C_BORDER)
+            pdf.set_fill_color(*C_BG)
+            pdf.rect(box_x, sy, box_w2, 8 * rows_n + 3, "FD")
+
+            def _sum_row(i: int, label: str, value: str, bold: bool = False, color=C_TEXT) -> None:
+                yy = sy + 2 + i * 8
+                pdf.set_xy(box_x + 3, yy)
+                pdf.set_font("Helvetica", "B" if bold else "", 8)
+                pdf.set_text_color(*(color if bold else C_MUTED))
+                pdf.cell(42, 6, label)
+                pdf.set_xy(box_x + 3, yy)
+                pdf.set_font("Helvetica", "B", 9.5 if bold else 8)
+                pdf.set_text_color(*color)
+                pdf.cell(box_w2 - 6, 6, value, align="R")
+
+            if adj_amt:
+                _sum_row(0, "Subtotal", f"Rp {grand_total_price:,.0f}")
+                sign = "+" if adj_amt > 0 else "-"
+                a_color = C_AMBER if adj_amt > 0 else C_RED
+                a_label = "Adjustment"
+                if visit_out.adjustment_note:
+                    a_label = f"Adj: {_safe(visit_out.adjustment_note, 16)}"
+                _sum_row(1, a_label, f"{sign} Rp {abs(adj_amt):,.0f}", color=a_color)
+                # divider before final
+                pdf.set_draw_color(*C_BORDER)
+                pdf.line(box_x + 3, sy + 2 + 2 * 8 - 1, box_x + box_w2 - 3, sy + 2 + 2 * 8 - 1)
+                _sum_row(2, "Final Invoice", f"Rp {final_invoice:,.0f}", bold=True, color=C_GREEN)
+            else:
+                _sum_row(0, "Grand Total", f"Rp {grand_total_price:,.0f}", bold=True, color=C_GREEN)
+
+            pdf.set_y(sy + 8 * rows_n + 3)
+            pdf.ln(6)
             pdf.set_text_color(*C_TEXT)
-            pdf.cell(sum(cw[:4]), 7, "")
-            pdf.set_text_color(*C_GREEN)
-            pdf.cell(cw[4] + cw[5], 7, f"Grand Total: Rp {grand_total_price:,.0f}", align="R")
-            pdf.ln(10)
         else:
             pdf.ln(3)
 
@@ -1223,7 +1298,15 @@ def download_pdf(
     except Exception:
         pass  # log failure must never block the download
 
-    filename = f"demand_{visit_id}_{now.strftime('%Y%m%d')}.pdf"
+    # Filename: {StoreName}_{OrderDate ddMMyyyy}.pdf  e.g. Guardian_Bandung_13072026.pdf
+    import re as _re
+    _store = visit_out.store_name or visit_out.outlet_sk or "Order"
+    _store = _re.sub(r"[^A-Za-z0-9]+", "_", str(_store)).strip("_") or "Order"
+    try:
+        _date = visit_out.visit_date.strftime("%d%m%Y")
+    except Exception:
+        _date = now.strftime("%d%m%Y")
+    filename = f"{_store}_{_date}.pdf"
     return StreamingResponse(
         io.BytesIO(bytes(pdf_bytes)),
         media_type="application/pdf",
@@ -1311,8 +1394,23 @@ def _get_visit_detail(visit_id: str, bq: BQClient) -> VisitOut:
     except Exception:
         pass
 
+    # Invoice adjustment (graceful — columns may not exist until migration 005 runs)
+    adjustment_amount, adjustment_note = None, None
+    try:
+        adj = bq.query_one(
+            f"SELECT adjustment_amount, adjustment_note FROM {settings.table('fact_visit')} WHERE visit_id = @vid",
+            [bq.p("vid", "STRING", visit_id)],
+        )
+        if adj:
+            adjustment_amount = adj.get("adjustment_amount")
+            adjustment_note = adj.get("adjustment_note")
+    except Exception:
+        pass  # pre-migration: adjustment columns not present yet
+
     enriched_row = dict(row)
     enriched_row["final_demand"] = final_demand if has_override else None
     enriched_row["download_count"] = download_count
+    enriched_row["adjustment_amount"] = adjustment_amount
+    enriched_row["adjustment_note"] = adjustment_note
 
     return _row_to_visit(enriched_row, items)

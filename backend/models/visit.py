@@ -102,6 +102,13 @@ class UpdateStorePriceRequest(BaseModel):
     items: list[StorePriceItem]
 
 
+class UpdateAdjustmentRequest(BaseModel):
+    """Distributor Admin invoice adjustment (delivery fee, discount, promo, etc.).
+    Positive = surcharge added to invoice, negative = reduction/discount."""
+    adjustment_amount: float = 0.0
+    adjustment_note: str | None = None
+
+
 class DownloadLogOut(BaseModel):
     download_id: str
     visit_id: str
@@ -150,6 +157,9 @@ class VisitOut(BaseModel):
 
     rejection_notes: str | None = None
     revision_count: int | None = None
+
+    adjustment_amount: float | None = None   # distributor invoice adjustment (+/-)
+    adjustment_note: str | None = None       # reason for the adjustment
 
     download_count: int = 0             # number of times PDF has been downloaded
 

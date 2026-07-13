@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, Skeleton, EmptyState } from "@/components/ui";
 import { toast } from "@/store/toastStore";
-import { getVisit, approveVisit, rejectVisit, updateFinalQty, updateStorePrice, downloadVisitPdf } from "@/api/visit";
+import { getVisit, approveVisit, rejectVisit, updateFinalQty, updateStorePrice, updateAdjustment, downloadVisitPdf } from "@/api/visit";
 import { useAuthStore } from "@/store/authStore";
 import type { Visit, VisitApprovalStatus, VisitItem } from "@/types";
 
@@ -135,6 +135,10 @@ export default function VisitDetail() {
   const [priceDirty,   setPriceDirty]   = useState(false);
   const [isSaving,     setIsSaving]     = useState(false);
 
+  const [adjEditing,   setAdjEditing]   = useState(false);
+  const [adjAmount,    setAdjAmount]    = useState<number>(0);
+  const [adjNote,      setAdjNote]      = useState("");
+
   const { data: visit, isLoading, error } = useQuery<Visit>({
     queryKey: ["visit", visitId],
     queryFn:  () => getVisit(visitId!),
@@ -149,10 +153,15 @@ export default function VisitDetail() {
       const prInit: Record<string, number> = {};
       for (const it of visit.items) {
         fqInit[it.sku_id] = it.final_qty ?? it.qty ?? 0;
-        prInit[it.sku_id] = it.price_for_store ?? 0;
+        // Price template: default Harga Toko/PCS from Harga Rekomendasi (STP) when not yet set
+        prInit[it.sku_id] = it.price_for_store ?? it.stp ?? 0;
       }
       setFinalQtyMap(fqInit);
       setPriceMap(prInit);
+    }
+    if (visit) {
+      setAdjAmount(visit.adjustment_amount ?? 0);
+      setAdjNote(visit.adjustment_note ?? "");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visit?.updated_at]);
@@ -213,17 +222,34 @@ export default function VisitDetail() {
       const prReset: Record<string, number> = {};
       for (const it of visit.items) {
         fqReset[it.sku_id] = it.final_qty ?? it.qty ?? 0;
-        prReset[it.sku_id] = it.price_for_store ?? 0;
+        prReset[it.sku_id] = it.price_for_store ?? it.stp ?? 0;
       }
       setFinalQtyMap(fqReset);
       setPriceMap(prReset);
     }
   };
 
+  const adjustMut = useMutation({
+    mutationFn: () => updateAdjustment(visitId!, adjAmount || 0, adjNote.trim() || null),
+    onSuccess:  () => { invalidate(); setAdjEditing(false); toast.success("Penyesuaian invoice disimpan."); },
+    onError:    () => toast.error("Gagal menyimpan penyesuaian."),
+  });
+
+  const buildPdfFilename = (): string => {
+    const rawStore = visit?.store_name ?? visit?.outlet_sk ?? "Order";
+    const store = rawStore.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "Order";
+    let datePart = "";
+    if (visit?.visit_date) {
+      const [y, m, d] = visit.visit_date.split("-");
+      datePart = d && m && y ? `${d}${m}${y}` : visit.visit_date.replace(/-/g, "");
+    }
+    return `${store}_${datePart}.pdf`;
+  };
+
   const handlePdfDownload = async () => {
     setPdfLoading(true);
     try {
-      await downloadVisitPdf(visitId!);
+      await downloadVisitPdf(visitId!, buildPdfFilename());
       toast.success("PDF berhasil diunduh.");
     } catch {
       toast.error("Gagal mengunduh PDF. Coba lagi.");
@@ -286,7 +312,7 @@ export default function VisitDetail() {
   const grandTotal = useMemo(
     () => visit.items.reduce((s, i) => {
       const qty   = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
-      const price = priceMap[i.sku_id] ?? i.price_for_store ?? 0;
+      const price = priceMap[i.sku_id] ?? i.price_for_store ?? i.stp ?? 0;
       return s + qty * price;
     }, 0),
     [visit.items, finalQtyMap, priceMap],
@@ -407,14 +433,6 @@ export default function VisitDetail() {
                 </div>
                 <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
                   <div>
-                    <dt className="text-slate-400 text-xs mb-0.5">Salesman</dt>
-                    <dd className="font-medium text-slate-700">{visit.salesman_name ?? visit.salesman_sk}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-400 text-xs mb-0.5">Toko</dt>
-                    <dd className="font-medium text-slate-700">{visit.store_name ?? visit.outlet_sk ?? "—"}</dd>
-                  </div>
-                  <div>
                     <dt className="text-slate-400 text-xs mb-0.5">Check-in</dt>
                     <dd className="font-medium text-slate-700">{fmt(visit.checkin_time)}</dd>
                   </div>
@@ -436,12 +454,12 @@ export default function VisitDetail() {
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-400 text-xs mb-0.5">Total Demand (SE)</dt>
+                    <dt className="text-slate-400 text-xs mb-0.5">Total Order (SE)</dt>
                     <dd className="font-semibold text-primary-700 text-base tabular-nums">{fmtRp(visit.total_demand)}</dd>
                   </div>
                   {(visit.final_demand != null || fqtyDirty) && (
                     <div>
-                      <dt className="text-slate-400 text-xs mb-0.5">Total Demand (Final)</dt>
+                      <dt className="text-slate-400 text-xs mb-0.5">Total Order (Final)</dt>
                       <dd className="font-semibold text-emerald-700 text-base tabular-nums">{fmtRp(liveFinalDemand)}</dd>
                     </div>
                   )}
@@ -489,7 +507,7 @@ export default function VisitDetail() {
               <div className="card">
                 <div className="section-heading mb-4">
                   <div>
-                    <p className="section-heading-title">Detail Demand</p>
+                    <p className="section-heading-title">Detail Order</p>
                     <p className="section-heading-sub">
                       {visit.items.length} SKU · {totalQty} pcs SE
                       {showFinalQtyCol && ` · ${totalFinalQty} pcs Final`}
@@ -541,7 +559,7 @@ export default function VisitDetail() {
                 )}
 
                 {visit.items.length === 0 ? (
-                  <EmptyState icon="inbox" title="Tidak ada item" description="Tidak ada item demand untuk kunjungan ini." />
+                  <EmptyState icon="inbox" title="Tidak ada item" description="Tidak ada item order untuk kunjungan ini." />
                 ) : (
                   <div className="table-container -mx-1">
                     <table className={`table ${showPriceCol ? "min-w-[920px]" : "min-w-[600px]"}`}>
@@ -557,10 +575,10 @@ export default function VisitDetail() {
                             </th>
                           )}
                           <th className="text-right">Stok Gudang</th>
-                          <th className="text-right">Demand</th>
+                          <th className="text-right">Harga Rekomendasi</th>
                           {showPriceCol && (
                             <th className="text-right">
-                              Harga/Toko{fqtyEditing && isDistAdm && <Icon name="pencil" className="inline w-3 h-3 ml-1 text-emerald-400" />}
+                              Harga Toko / PCS{fqtyEditing && isDistAdm && <Icon name="pencil" className="inline w-3 h-3 ml-1 text-emerald-400" />}
                             </th>
                           )}
                           {showPriceCol && <th className="text-right">Total Harga</th>}
@@ -569,8 +587,8 @@ export default function VisitDetail() {
                       <tbody>
                         {visit.items.map((item: VisitItem) => {
                           const effQty       = finalQtyMap[item.sku_id] ?? item.final_qty ?? item.qty ?? 0;
-                          const effDemand    = effQty * (item.stp ?? 0);
-                          const priceVal     = priceMap[item.sku_id] ?? item.price_for_store ?? 0;
+                          const recoPrice    = item.stp ?? 0;   // Harga Rekomendasi = STP per PCS
+                          const priceVal     = priceMap[item.sku_id] ?? item.price_for_store ?? item.stp ?? 0;
                           const totalPrice   = effQty * priceVal;
                           const changed      = fqtyEditing && (finalQtyMap[item.sku_id] ?? item.qty ?? 0) !== (item.qty ?? 0);
                           const hasStockWarn = item.warehouse_stock_qty != null && effQty > item.warehouse_stock_qty;
@@ -625,17 +643,17 @@ export default function VisitDetail() {
                               <td className={`text-right tabular-nums ${hasStockWarn ? "text-amber-700 font-medium" : "text-slate-600"}`}>
                                 {item.warehouse_stock_qty != null ? item.warehouse_stock_qty : "—"}
                               </td>
-                              <td className="text-right font-semibold text-primary-700 tabular-nums">{fmtRp(effDemand)}</td>
+                              <td className="text-right font-semibold text-slate-600 tabular-nums">{recoPrice > 0 ? fmtRp(recoPrice) : "—"}</td>
 
                               {showPriceCol && (
                                 <td className="text-right">
                                   {fqtyEditing && isDistAdm ? (
                                     <input
                                       type="number" min={0} step="1"
-                                      aria-label={`Harga toko ${item.sku_name ?? item.sku_id}`}
+                                      aria-label={`Harga toko per pcs ${item.sku_name ?? item.sku_id}`}
                                       className="w-28 text-right border border-slate-300 rounded px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                                      value={priceMap[item.sku_id] || ""}
-                                      placeholder="0"
+                                      value={priceMap[item.sku_id] ?? item.price_for_store ?? item.stp ?? ""}
+                                      placeholder={recoPrice > 0 ? String(recoPrice) : "0"}
                                       onChange={(e) => {
                                         setPriceMap((m) => ({ ...m, [item.sku_id]: Math.max(0, parseFloat(e.target.value) || 0) }));
                                         setPriceDirty(true);
@@ -664,7 +682,7 @@ export default function VisitDetail() {
                           <td className="text-right text-slate-800 tabular-nums">{totalQty}</td>
                           {showFinalQtyCol && <td className="text-right text-primary-600 tabular-nums">{totalFinalQty}</td>}
                           <td className="text-right text-slate-400">—</td>
-                          <td className="text-right text-primary-700 tabular-nums">{fmtRp(liveFinalDemand)}</td>
+                          <td className="text-right text-slate-400">—</td>
                           {showPriceCol && <td className="text-right text-slate-400">—</td>}
                           {showPriceCol && (
                             <td className="text-right text-emerald-700 tabular-nums">
@@ -698,6 +716,93 @@ export default function VisitDetail() {
                   </div>
                 )}
               </div>
+
+              {/* ── Invoice adjustment (Distributor Admin) ─────── */}
+              {isDistAdm && (
+                <div className="card">
+                  <div className="section-heading mb-4">
+                    <div>
+                      <p className="section-heading-title">Penyesuaian Invoice</p>
+                      <p className="section-heading-sub">Biaya kirim, diskon, promo, atau biaya lain</p>
+                    </div>
+                    {!adjEditing && (
+                      <button className="btn-secondary btn-sm" onClick={() => setAdjEditing(true)}>
+                        <Icon name="pencil" className="w-3.5 h-3.5" />
+                        {(visit.adjustment_amount ?? 0) !== 0 ? "Ubah" : "Tambah"}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="info-grid">
+                    <div className="data-row">
+                      <span className="data-label">Subtotal</span>
+                      <span className="data-value tabular-nums">{fmtRp(grandTotal)}</span>
+                    </div>
+
+                    {adjEditing ? (
+                      <div className="space-y-3 py-2">
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">
+                            Nominal penyesuaian (Rp) — gunakan minus untuk pengurangan
+                          </label>
+                          <input
+                            type="number"
+                            className="input text-sm tabular-nums"
+                            value={adjAmount || ""}
+                            placeholder="0"
+                            aria-label="Nominal penyesuaian"
+                            onChange={(e) => setAdjAmount(parseFloat(e.target.value) || 0)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">Keterangan</label>
+                          <input
+                            type="text"
+                            className="input text-sm"
+                            value={adjNote}
+                            placeholder="mis. Ongkos kirim / Diskon promo"
+                            aria-label="Keterangan penyesuaian"
+                            onChange={(e) => setAdjNote(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="btn-primary btn-sm flex-1"
+                            disabled={adjustMut.isPending}
+                            onClick={() => adjustMut.mutate()}
+                          >
+                            {adjustMut.isPending ? "Menyimpan…" : "Simpan"}
+                          </button>
+                          <button
+                            className="btn-secondary btn-sm flex-1"
+                            onClick={() => {
+                              setAdjEditing(false);
+                              setAdjAmount(visit.adjustment_amount ?? 0);
+                              setAdjNote(visit.adjustment_note ?? "");
+                            }}
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </div>
+                    ) : adjAmount !== 0 ? (
+                      <div className="data-row">
+                        <span className="data-label">{adjNote || "Adjustment"}</span>
+                        <span className={`data-value tabular-nums ${adjAmount > 0 ? "text-amber-600" : "text-red-600"}`}>
+                          {adjAmount > 0 ? "+ " : "− "}{fmtRp(Math.abs(adjAmount))}
+                        </span>
+                      </div>
+                    ) : null}
+
+                    <div className="data-row border-t border-slate-200 mt-1 pt-3">
+                      <span className="data-label font-semibold text-slate-700">Final Invoice</span>
+                      <span className="data-value tabular-nums font-bold text-emerald-700 text-base">
+                        {fmtRp(grandTotal + (adjAmount || 0))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ── Right: approval panel ─────────────────────── */}

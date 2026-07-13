@@ -244,6 +244,8 @@ export interface Visit {
   ddm_approved_at: string | null;
   rejection_notes: string | null;
   revision_count: number | null;
+  adjustment_amount: number | null;   // distributor invoice adjustment (+/-)
+  adjustment_note: string | null;
   download_count: number;
   created_at: string | null;
   updated_at: string | null;

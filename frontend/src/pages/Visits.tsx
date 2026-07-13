@@ -69,7 +69,7 @@ export default function Visits() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopNav title="Visit & Demand" />
+      <TopNav title="Visit & Order" />
 
       <main className="flex-1 overflow-y-auto">
         {/* ── Tabs ── */}
@@ -163,7 +163,7 @@ export default function Visits() {
                     <th>Tanggal</th>
                     <th>Salesman</th>
                     <th>Toko</th>
-                    <th className="text-right">Total Demand</th>
+                    <th className="text-right">Total Order</th>
                     <th>EC</th>
                     <th>Durasi</th>
                     <th>Status</th>

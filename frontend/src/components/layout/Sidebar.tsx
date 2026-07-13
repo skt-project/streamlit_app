@@ -61,7 +61,7 @@ const NAV_TREE: NavItem[] = [
     icon: "chart-pie",
     children: [
       { to: "/route-evaluate",    label: "Route Evaluate",    roles: ["spv", "asm", "dm", "ho_admin"] },
-      { to: "/visits",            label: "Visit & Demand",    roles: ["spv", "asm", "dm", "ho_admin"] },
+      { to: "/visits",            label: "Visit & Order",     roles: ["spv", "asm", "dm", "ho_admin"] },
       { to: "/store-opportunity", label: "Store Opportunity", roles: ["asm", "dm", "ho_admin"] },
       { to: "/store360",          label: "Store 360°",        roles: ["spv", "asm", "dm", "ho_admin"] },
       { to: "/salesman360",       label: "Salesman 360°",     roles: ["spv", "asm", "dm", "ho_admin"] },
