@@ -31,6 +31,17 @@
   :focus-visible {
     @apply outline-none ring-2 ring-primary-500 ring-offset-2;
   }
+
+  /* Skip-to-main-content link — visually hidden until focused */
+  .skip-link {
+    @apply absolute -top-full left-2 z-[9999]
+           bg-primary-600 text-white text-sm font-semibold
+           px-4 py-2 rounded-b-lg
+           transition-all duration-150;
+    &:focus-visible {
+      @apply top-0 ring-2 ring-white ring-offset-2 ring-offset-primary-600 outline-none;
+    }
+  }
 }
 
 @layer components {
@@ -525,9 +536,14 @@
   .icon-badge-red    { @apply icon-badge bg-red-100    text-red-600;    }
   .icon-badge-purple { @apply icon-badge bg-purple-100 text-purple-600; }
   .icon-badge-slate  { @apply icon-badge bg-slate-100  text-slate-600;  }
+  .icon-badge-indigo { @apply icon-badge bg-indigo-100 text-indigo-600; }
 
   .icon-badge-lg {
     @apply w-12 h-12 rounded-2xl;
+  }
+
+  .icon-badge-sm {
+    @apply w-7 h-7 rounded-lg;
   }
 
   /* ── KPI Tile (Gojek metric card with icon) ────────────────────────────── */
@@ -754,9 +770,18 @@
     @apply text-sm font-semibold text-slate-700;
   }
 
-  /* ── Line-clamp utilities ────────────────────────────────────────────────── */
-  .line-clamp-1 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
-  .line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .line-clamp-3 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+}
 
+/* Disable animations for users who prefer reduced motion (WCAG 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

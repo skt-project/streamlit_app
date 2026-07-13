@@ -5,8 +5,7 @@ import type { IconName } from "@/components/ui/Icon";
 import { api } from "@/api/client";
 import type { Notification } from "@/types";
 import { format } from "date-fns";
-
-const fetchNotifications = () => api.get("/notifications").then((r) => r.data);
+import { fetchNotifications } from "@/api/notifications";
 
 type TypeConfig = { icon: IconName; badgeCls: string };
 const TYPE_CONFIG: Record<string, TypeConfig> = {
@@ -74,7 +73,8 @@ export default function Notifications() {
         }
       />
 
-      <main className="flex-1 overflow-y-auto p-6 max-w-2xl">
+      <main className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-2xl">
         {isLoading ? (
           <NotificationSkeleton />
         ) : items.length === 0 ? (
@@ -130,6 +130,7 @@ export default function Notifications() {
             })}
           </div>
         )}
+        </div>
       </main>
     </div>
   );

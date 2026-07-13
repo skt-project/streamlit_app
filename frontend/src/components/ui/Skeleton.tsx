@@ -63,14 +63,25 @@ export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
   );
 }
 
+const STAT_GRID_COLS: Record<number, string> = {
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
+  5: "lg:grid-cols-5",
+  6: "lg:grid-cols-6",
+};
+
 export function SkeletonStatCards({ count = 4 }: { count?: number }) {
   return (
-    <div className={`grid gap-4 grid-cols-2 lg:grid-cols-${count}`} aria-hidden="true">
+    <div className={`grid gap-4 grid-cols-2 ${STAT_GRID_COLS[count] ?? "lg:grid-cols-4"}`} aria-hidden="true">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="stat-card">
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="h-8 w-16 mt-1" />
-          <Skeleton className="h-3 w-24" />
+        <div key={i} className="kpi-tile">
+          <Skeleton className="w-12 h-12 rounded-2xl shrink-0" />
+          <div className="flex-1 min-w-0 space-y-2">
+            <Skeleton className="h-7 w-14" />
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-3 w-20" />
+          </div>
         </div>
       ))}
     </div>

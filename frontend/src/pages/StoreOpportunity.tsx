@@ -65,8 +65,10 @@ export default function StoreOpportunity() {
                 <span className={`icon-badge ${c.cls}`}>
                   <Icon name={c.icon} className="w-4 h-4" />
                 </span>
-                <p className="kpi-tile-value mt-2">{c.value}</p>
-                <p className="kpi-tile-label">{c.label}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="kpi-tile-value">{c.value}</p>
+                  <p className="kpi-tile-label">{c.label}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -81,6 +83,7 @@ export default function StoreOpportunity() {
                 onClick={() => setTier(t)}
                 className={`chip ${tier === t ? "chip-active" : ""}`}
                 aria-pressed={tier === t}
+                aria-label={t ? `Tier ${t}` : "Semua Tier"}
               >
                 {t || "Semua Tier"}
               </button>
@@ -123,7 +126,7 @@ export default function StoreOpportunity() {
                 </thead>
                 <tbody>
                   {rows.map((r: Record<string, string | number>, i: number) => (
-                    <tr key={i}>
+                    <tr key={String(r.source_outlet_code ?? i)}>
                       <td className="text-slate-400 text-xs">#{i + 1}</td>
                       <td className="font-mono text-xs text-slate-500">{r.source_outlet_code}</td>
                       <td>{r.store_name}</td>

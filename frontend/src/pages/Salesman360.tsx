@@ -35,6 +35,7 @@ export default function Salesman360() {
   const [selectedSk, setSelectedSk] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef     = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, 300);
 
   useEffect(() => {
@@ -75,9 +76,14 @@ export default function Salesman360() {
             aria-hidden={true}
           />
           <input
+            ref={inputRef}
             className="input w-full text-sm pl-8"
             placeholder="Cari nama atau ID salesman..."
             aria-label="Cari salesman"
+            role="combobox"
+            aria-expanded={dropdownOpen && debouncedQuery.length >= 2 && suggestions.length > 0}
+            aria-autocomplete="list"
+            aria-controls="salesman360-listbox"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -85,6 +91,7 @@ export default function Salesman360() {
               setDropdownOpen(true);
             }}
             onFocus={() => { if (debouncedQuery.length >= 2) setDropdownOpen(true); }}
+            onKeyDown={(e) => { if (e.key === "Escape") { setDropdownOpen(false); inputRef.current?.blur(); } }}
           />
           {searching && (
             <Icon
@@ -95,6 +102,7 @@ export default function Salesman360() {
           )}
           {dropdownOpen && debouncedQuery.length >= 2 && suggestions.length > 0 && (
             <div
+              id="salesman360-listbox"
               className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20 max-h-48 overflow-y-auto"
               role="listbox"
               aria-label="Hasil pencarian salesman"
@@ -121,6 +129,16 @@ export default function Salesman360() {
                   <p className="text-xs text-slate-400">{s.source_salesman_code}</p>
                 </button>
               ))}
+            </div>
+          )}
+          {dropdownOpen && debouncedQuery.length >= 2 && !searching && suggestions.length === 0 && (
+            <div
+              className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20"
+              aria-live="polite"
+            >
+              <p className="px-4 py-3 text-sm text-slate-400 text-center">
+                Tidak ada salesman ditemukan untuk &ldquo;{debouncedQuery}&rdquo;
+              </p>
             </div>
           )}
         </div>
@@ -175,8 +193,10 @@ export default function Salesman360() {
                   <span className={`icon-badge ${k.cls} shrink-0`}>
                     <Icon name={k.icon} className="w-4 h-4" />
                   </span>
-                  <p className="kpi-tile-value mt-2">{k.value}</p>
-                  <p className="kpi-tile-label">{k.label}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="kpi-tile-value">{k.value}</p>
+                    <p className="kpi-tile-label">{k.label}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -188,9 +208,9 @@ export default function Salesman360() {
                 <EmptyState icon="calendar" title="Tidak ada jadwal hari ini" />
               ) : (
                 <div className="space-y-2">
-                  {(d.today_schedule as Record<string, string>[]).map((r, i) => (
+                  {(d.today_schedule as Record<string, string>[]).map((r, idx) => (
                     <div
-                      key={i}
+                      key={r.route_plan_sk ?? r.outlet_sk}
                       className="flex items-center justify-between py-2 border-b border-slate-50"
                     >
                       <div className="flex items-center gap-3">
@@ -201,7 +221,7 @@ export default function Salesman360() {
                               : "bg-slate-100 text-slate-400"
                           }`}
                         >
-                          {Number(r.sequence_order) || i + 1}
+                          {Number(r.sequence_order) || idx + 1}
                         </div>
                         <div>
                           <p className="text-sm font-medium text-slate-700">{r.store_name}</p>
@@ -253,8 +273,8 @@ export default function Salesman360() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(d.outlets as Record<string, string>[]).map((o, i) => (
-                        <tr key={i}>
+                      {(d.outlets as Record<string, string>[]).map((o) => (
+                        <tr key={o.outlet_sk}>
                           <td className="font-mono text-xs text-slate-500">{o.source_outlet_code}</td>
                           <td>{o.store_name}</td>
                           <td>{o.kecamatan ?? "—"}</td>

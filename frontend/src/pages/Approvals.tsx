@@ -92,7 +92,7 @@ export default function Approvals() {
               >
                 <Icon name="clock" className="w-3.5 h-3.5" />
                 Menunggu
-                {tab !== "pending" && approvals.length > 0 && (
+                {tab === "pending" && approvals.length > 0 && (
                   <span className="ml-1 inline-flex items-center justify-center w-4 h-4 text-2xs rounded-full bg-primary-100 text-primary-700">
                     {approvals.length}
                   </span>
@@ -126,11 +126,12 @@ export default function Approvals() {
                   <button
                     key={req.approval_id}
                     onClick={() => setSelected(req)}
+                    aria-current={selected?.approval_id === req.approval_id ? "true" : undefined}
                     className={`approval-item w-full ${selected?.approval_id === req.approval_id ? "approval-item-active" : ""}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="icon-badge icon-badge-blue shrink-0" style={{ width: 28, height: 28 }}>
+                        <span className="icon-badge icon-badge-sm icon-badge-blue shrink-0">
                           {TYPE_ICON[req.type] ?? <Icon name="document-text" className="w-3.5 h-3.5" />}
                         </span>
                         <p className="text-sm font-medium text-slate-800 line-clamp-2 text-left leading-snug">{req.title}</p>
@@ -215,8 +216,8 @@ export default function Approvals() {
                     Komentar &amp; Timeline
                   </p>
                   <div className="space-y-3">
-                    {selected.comments.map((c, i) => (
-                      <div key={i} className="flex gap-3">
+                    {selected.comments.map((c) => (
+                      <div key={`${c.author}-${c.created_at}`} className="flex gap-3">
                         <div className="icon-badge icon-badge-slate shrink-0" style={{ width: 28, height: 28 }}>
                           <Icon name="user" className="w-3.5 h-3.5" />
                         </div>
@@ -247,6 +248,7 @@ export default function Approvals() {
                   <textarea
                     className="input text-sm"
                     placeholder="Tambahkan komentar (wajib jika menolak)…"
+                    aria-label="Komentar persetujuan"
                     rows={3}
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
@@ -279,11 +281,15 @@ export default function Approvals() {
               {/* Revise (submitter after rejection) */}
               {selected.status === "rejected" && user?.role === "spv" && (
                 <div className="card">
-                  <p className="text-xs text-slate-500 mb-3">Permintaan ini ditolak. Kamu bisa revisi dan kirim ulang.</p>
-                  <button className="btn-primary w-full">
-                    <Icon name="pencil" className="w-4 h-4" />
-                    Revisi &amp; Submit Ulang
-                  </button>
+                  <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
+                    <Icon name="information-circle" className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800 mb-0.5">Permintaan Ditolak</p>
+                      <p className="text-xs text-amber-700 leading-relaxed">
+                        Buat pengajuan baru dari halaman yang relevan (Target, dll.) dengan penyesuaian sesuai catatan penolakan.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

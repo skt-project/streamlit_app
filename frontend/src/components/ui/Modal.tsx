@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import Icon from "./Icon";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface ModalProps {
   open: boolean;
@@ -28,16 +29,15 @@ export default function Modal({
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
+  useFocusTrap(panelRef, open);
+
   useEffect(() => {
     if (!open) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
+    const handleEscape = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
   }, [open, onClose]);
 
-  // Focus trap — focus the panel when opened
   useEffect(() => {
     if (open) panelRef.current?.focus();
   }, [open]);
@@ -48,13 +48,13 @@ export default function Modal({
     <div
       className="modal-backdrop"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="modal-title"
     >
       <div
         ref={panelRef}
         tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
         className={`modal-panel ${MAX_W[maxWidth]} outline-none`}
       >
         <div className="modal-header">
@@ -62,7 +62,7 @@ export default function Modal({
           <button
             onClick={onClose}
             className="btn-icon -m-1 shrink-0"
-            aria-label="Close"
+            aria-label="Tutup"
           >
             <Icon name="x-mark" className="w-5 h-5" />
           </button>

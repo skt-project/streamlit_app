@@ -93,6 +93,10 @@ def _build_rows(
         ]
 
     elif report_type == "Route Compliance":
+        # Route compliance query joins on dim_salesman (alias "sm"), so we need
+        # the brand_group filter scoped to that alias — not the "v" alias used
+        # for visit-level queries elsewhere in this function.
+        rc_bg_clause, rc_bg_params = brand_group_filter(current_user, "bg_rc", "sm")
         rows = bq.query(
             f"""
             SELECT
@@ -106,14 +110,13 @@ def _build_rows(
               ON v.salesman_sk = sm.salesman_sk
               AND v.visit_date BETWEEN @ds AND @de
               AND v.is_deleted = FALSE
-            WHERE sm.is_active = TRUE
-              {bg_clause.replace('v.brand_group', 'sm.brand_group')}
+            WHERE sm.is_active = TRUE {rc_bg_clause}
             GROUP BY sm.salesman_name
             HAVING COUNT(DISTINCT p.outlet_sk) > 0
             ORDER BY comply_pct DESC
             LIMIT 500
             """,
-            [bq.p("ds", "DATE", date_start), bq.p("de", "DATE", date_end)] + bg_params,
+            [bq.p("ds", "DATE", date_start), bq.p("de", "DATE", date_end)] + rc_bg_params,
         )
         kpis = [
             {"label": "Planned", "value": str(sum(r.get("planned", 0) or 0 for r in rows))},

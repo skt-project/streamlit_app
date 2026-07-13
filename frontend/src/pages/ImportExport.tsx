@@ -173,7 +173,7 @@ export default function ImportExport() {
           <div className="section-heading mb-5">
             <div>
               <p className="section-heading-title">Bulk Import</p>
-              <p className="section-heading-sub">Upload file .xlsx atau .csv untuk memperbarui data master</p>
+              <p className="section-heading-sub">Upload file .csv untuk memperbarui data master</p>
             </div>
           </div>
 
@@ -245,13 +245,13 @@ export default function ImportExport() {
                       <>
                         <Icon name="arrow-up-tray" className={`w-6 h-6 mb-2 ${isOver ? "text-primary-500" : "text-slate-300"}`} aria-hidden={true} />
                         <p className={`text-xs font-medium ${isOver ? "text-primary-600" : "text-slate-500"}`}>
-                          {isOver ? "Lepaskan file di sini" : "Drag & drop .xlsx / .csv"}
+                          {isOver ? "Lepaskan file di sini" : "Drag & drop file .csv"}
                         </p>
                         <p className="text-2xs text-slate-400 mt-0.5">atau</p>
                         <label className="mt-2 btn-secondary btn-sm cursor-pointer">
                           Pilih File
                           <input
-                            type="file" accept=".xlsx,.xls,.csv" className="hidden"
+                            type="file" accept=".csv" className="hidden"
                             onChange={(e) => {
                               const f = e.target.files?.[0];
                               if (f) handleFile(key, endpoint, f);
@@ -266,6 +266,7 @@ export default function ImportExport() {
                   {/* Template download */}
                   <button
                     className="w-full flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-primary-600 transition-colors py-1.5 border border-slate-100 rounded-lg hover:border-primary-200 hover:bg-primary-50"
+                    aria-label={`Download template ${label}`}
                     onClick={() => handleExport(`/template/${key}`, `template-${key}.csv`, `Template ${label}`)}
                   >
                     <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />
@@ -302,6 +303,7 @@ export default function ImportExport() {
                     onClick={() => handleExport(endpoint, filename, label)}
                     disabled={isLoading}
                     className="btn-secondary btn-sm shrink-0"
+                    aria-label={isLoading ? `Mengunduh ${label}` : `Download CSV ${label}`}
                   >
                     {isLoading
                       ? <Icon name="arrow-path" className="w-3.5 h-3.5 animate-spin" />

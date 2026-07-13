@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, EmptyState, SkeletonTable } from "@/components/ui";
 import { api } from "@/api/client";
 import { toast } from "@/store/toastStore";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { Salesman } from "@/types";
 import { useDebounce } from "@/hooks/useDebounce";
 
@@ -27,6 +28,13 @@ export default function MasterDataSalesman() {
   const [statusFilter,  setStatusFilter]  = useState("");
   const [selected,      setSelected]      = useState<Salesman | null>(null);
   const [exporting,     setExporting]     = useState(false);
+  const drawerTriggerRef = useRef<Element | null>(null);
+  const drawerPanelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(drawerPanelRef, !!selected);
+  const closeDrawer = () => {
+    setSelected(null);
+    setTimeout(() => { (drawerTriggerRef.current as HTMLElement | null)?.focus(); }, 0);
+  };
 
   const debouncedSearch = useDebounce(searchInput, 350);
 
@@ -49,7 +57,7 @@ export default function MasterDataSalesman() {
   useEffect(() => {
     if (!selected) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelected(null);
+      if (e.key === "Escape") closeDrawer();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -96,6 +104,7 @@ export default function MasterDataSalesman() {
             <input
               className="input w-64 text-sm pl-8 pr-8"
               placeholder="Cari nama atau ID..."
+              aria-label="Cari nama atau ID salesman"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
             />
@@ -108,6 +117,7 @@ export default function MasterDataSalesman() {
           </div>
           <select
             className="input w-36 text-sm"
+            aria-label="Filter tipe salesman"
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
           >
@@ -118,6 +128,7 @@ export default function MasterDataSalesman() {
           </select>
           <select
             className="input w-36 text-sm"
+            aria-label="Filter status salesman"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -177,8 +188,9 @@ export default function MasterDataSalesman() {
                       </td>
                       <td>
                         <button
-                          onClick={() => setSelected(s)}
+                          onClick={() => { drawerTriggerRef.current = document.activeElement; setSelected(s); }}
                           className="text-xs text-primary-600 hover:underline"
+                          aria-label={`Detail ${s.salesman_name}`}
                         >
                           Detail
                         </button>
@@ -197,14 +209,14 @@ export default function MasterDataSalesman() {
         <>
           <div
             className="fixed inset-0 bg-black/20 z-30"
-            onClick={() => setSelected(null)}
+            onClick={closeDrawer}
             aria-hidden="true"
           />
-          <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-2xl border-l border-slate-200 flex flex-col z-40">
+          <div ref={drawerPanelRef} role="dialog" aria-modal="true" aria-labelledby="salesman-drawer-title" className="fixed inset-y-0 right-0 w-96 bg-white shadow-2xl border-l border-slate-200 flex flex-col z-40">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">Detail Salesman</h3>
+              <h3 id="salesman-drawer-title" className="font-semibold text-slate-800">Detail Salesman</h3>
               <button
-                onClick={() => setSelected(null)}
+                onClick={closeDrawer}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
                 aria-label="Tutup"
               >
@@ -244,7 +256,7 @@ export default function MasterDataSalesman() {
             </div>
             <div className="p-4 border-t border-slate-100 flex gap-2">
               <button className="btn-secondary flex-1">Edit</button>
-              <button onClick={() => setSelected(null)} className="btn-primary flex-1">
+              <button onClick={closeDrawer} className="btn-primary flex-1">
                 Tutup
               </button>
             </div>

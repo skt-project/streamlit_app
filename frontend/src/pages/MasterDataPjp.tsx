@@ -82,8 +82,10 @@ export default function MasterDataPjp() {
                 <span className={`icon-badge ${c.cls} shrink-0`}>
                   <Icon name={c.icon} className="w-4 h-4" />
                 </span>
-                <p className="kpi-tile-value mt-2">{c.value}</p>
-                <p className="kpi-tile-label">{c.label}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="kpi-tile-value">{c.value}</p>
+                  <p className="kpi-tile-label">{c.label}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -128,6 +130,7 @@ export default function MasterDataPjp() {
                 <input
                   className="input w-64 text-sm pl-8"
                   placeholder="Cari toko atau salesman..."
+                  aria-label="Cari toko atau salesman"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -153,8 +156,8 @@ export default function MasterDataPjp() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(pjpList as Record<string, string>[]).map((r, i) => (
-                      <tr key={i}>
+                    {(pjpList as Record<string, string>[]).map((r) => (
+                      <tr key={`${r.source_outlet_code}-${r.brand ?? ""}-${r.visit_day_of_week}`}>
                         <td className="font-mono text-xs text-slate-500">{r.source_outlet_code}</td>
                         <td>{r.store_name}</td>
                         <td>{r.brand ?? "—"}</td>
@@ -255,10 +258,10 @@ export default function MasterDataPjp() {
         {activeTab === "config" && (
           <div id="panel-pjp-config" role="tabpanel" aria-labelledby="tab-pjp-config" className="card max-w-sm space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label htmlFor="pjp-deadline" className="block text-sm font-medium text-slate-700 mb-1">
                 Deadline Input PJP
               </label>
-              <input type="date" className="input" />
+              <input id="pjp-deadline" type="date" className="input" />
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" className="rounded" defaultChecked />

@@ -19,7 +19,10 @@ export const useToastStore = create<ToastStore>((set) => ({
   toasts: [],
 
   show: (type, message, duration = 3500) => {
-    const id = Math.random().toString(36).slice(2);
+    // Suppress duplicates: same type + message already visible
+    const existing = useToastStore.getState().toasts;
+    if (existing.some((t) => t.type === type && t.message === message)) return;
+    const id = `${type}-${Date.now()}`;
     set((s) => ({ toasts: [...s.toasts, { id, type, message, duration }] }));
     setTimeout(() => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));

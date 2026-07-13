@@ -10,13 +10,33 @@ import { id as idLocale } from "date-fns/locale";
 import type { ComplyBrand, LeaderboardRow } from "@/types";
 
 // ── API ───────────────────────────────────────────────────────────────────────
-const fetchDashboard = () => api.get("/dashboard/web").then((r) => r.data);
+interface DashboardRaw {
+  comply_brands?: { brand: string; management_target: number; spv_target: number; comply_pct: number }[];
+  leaderboard?:   { salesman_sk: string; salesman_name?: string; visit_mtd: number; ec_rate: number }[];
+  route_comply_pct?: number;
+  visit_today?:   number;
+  ec_today?:      number;
+  comply_pct?:    number;
+  announcements?: { type: string; title: string; body: string; created_at: string }[];
+}
+
+const fetchDashboard = (): Promise<DashboardRaw> => api.get("/dashboard/web").then((r) => r.data);
 
 function complyStatus(pct: number): ComplyBrand["comply_status"] {
   if (pct >= 100) return "Over Target";
   if (pct >= 80)  return "Comply";
   if (pct > 0)    return "Under Comply";
   return "No Data";
+}
+
+// ── Announcement type → color mapping ─────────────────────────────────────────
+function announcementColors(type: string): { badge: string; rail: string } {
+  const t = (type ?? "").toUpperCase();
+  if (t === "WARNING" || t === "URGENT")   return { badge: "badge-yellow", rail: "rail-amber"  };
+  if (t === "ALERT"   || t === "CRITICAL") return { badge: "badge-red",    rail: "rail-red"    };
+  if (t === "SUCCESS" || t === "UPDATE")   return { badge: "badge-green",  rail: "rail-green"  };
+  if (t === "PROMO")                       return { badge: "badge-purple", rail: "rail-purple" };
+  return { badge: "badge-blue", rail: "rail-blue" };
 }
 
 // ── KPI Tile (Gojek service-icon style) ───────────────────────────────────────
@@ -35,9 +55,9 @@ function KpiTile({ label, value, sub, icon, iconCls = "icon-badge-blue", trend }
       <div className={`${iconCls} icon-badge icon-badge-lg shrink-0`}>
         {icon}
       </div>
-      <div className="min-w-0">
-        <p className="kpi-tile-label">{label}</p>
+      <div className="min-w-0 flex-1">
         <p className="kpi-tile-value">{value}</p>
+        <p className="kpi-tile-label">{label}</p>
         {trend != null && (
           <p className={trend.value >= 0 ? "kpi-tile-delta-up" : "kpi-tile-delta-down"}>
             <Icon
@@ -60,8 +80,8 @@ function ComplyGauge({ pct, status }: { pct: number; status: string }) {
     status === "Over Target" ? "#2563eb" :
     status === "Comply"      ? "#10b981" : "#ef4444";
   return (
-    <div className="relative w-12 h-12 shrink-0">
-      <svg viewBox="0 0 36 36" className="w-12 h-12 -rotate-90">
+    <div className="relative w-12 h-12 shrink-0" role="img" aria-label={`${pct.toFixed(0)}% ${status}`}>
+      <svg viewBox="0 0 36 36" className="w-12 h-12 -rotate-90" aria-hidden="true">
         <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="3" />
         <circle
           cx="18" cy="18" r="15.9" fill="none"
@@ -70,7 +90,7 @@ function ComplyGauge({ pct, status }: { pct: number; status: string }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-slate-700 tabular-nums">
+      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-slate-700 tabular-nums" aria-hidden="true">
         {pct.toFixed(0)}%
       </span>
     </div>
@@ -86,7 +106,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, refetch, isFetching } = useQuery<DashboardRaw>({
     queryKey: ["dashboard-web"],
     queryFn: fetchDashboard,
     staleTime: 5 * 60 * 1000,
@@ -95,7 +115,7 @@ export default function Dashboard() {
 
   const complyBrands: ComplyBrand[] = useMemo(
     () =>
-      (data?.comply_brands ?? []).map((r: any) => ({
+      (data?.comply_brands ?? []).map((r) => ({
         brand:             r.brand,
         management_target: r.management_target ?? 0,
         spv_target:        r.spv_target ?? 0,
@@ -107,7 +127,7 @@ export default function Dashboard() {
 
   const leaderboard: (LeaderboardRow & { visit_mtd: number; ec_rate: number })[] = useMemo(
     () =>
-      (data?.leaderboard ?? []).map((r: any, i: number) => ({
+      (data?.leaderboard ?? []).map((r, i) => ({
         rank:                 i + 1,
         salesman_sk:          r.salesman_sk,
         salesman_name:        r.salesman_name ?? "—",
@@ -141,9 +161,11 @@ export default function Dashboard() {
             onClick={() => refetch()}
             className="btn-secondary btn-sm"
             disabled={isFetching}
+            aria-busy={isFetching}
+            aria-label={isFetching ? "Memuat data..." : "Muat Ulang"}
           >
-            <Icon name="arrow-path" className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
-            Muat Ulang
+            <Icon name="arrow-path" className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} aria-hidden={true} />
+            {isFetching ? "Memuat..." : "Muat Ulang"}
           </button>
         }
       />
@@ -208,7 +230,7 @@ export default function Dashboard() {
                     <p className="section-heading-title">Comply Target</p>
                     <p className="section-heading-sub">Bulan berjalan per brand</p>
                   </div>
-                  <Link to="/target-management" className="section-heading-action">
+                  <Link to="/target-management" className="section-heading-action" aria-label="Kelola Target Management">
                     Kelola →
                   </Link>
                 </div>
@@ -225,7 +247,7 @@ export default function Dashboard() {
                             <p className="text-sm font-semibold text-slate-800 truncate">{c.brand}</p>
                             <StatusBadge status={c.comply_status} />
                           </div>
-                          <div className="progress-track mt-2">
+                          <div className="progress-track mt-2" aria-hidden="true">
                             <div
                               className={`progress-fill ${c.comply_pct >= 80 ? "progress-fill-green" : c.comply_pct >= 50 ? "progress-fill-amber" : "progress-fill-red"}`}
                               style={{ width: `${Math.min(c.comply_pct, 100)}%` }}
@@ -248,12 +270,13 @@ export default function Dashboard() {
                     <p className="section-heading-title">EC Rate per Salesman</p>
                     <p className="section-heading-sub">MTD, diurutkan by kunjungan terbanyak</p>
                   </div>
-                  <Link to="/route-evaluate" className="section-heading-action">Evaluate →</Link>
+                  <Link to="/route-evaluate" className="section-heading-action" aria-label="Pergi ke Route Evaluate">Evaluate →</Link>
                 </div>
 
                 {leaderboard.length === 0 ? (
                   <EmptyState icon="users" title="Belum ada data" description="Belum ada data kunjungan bulan ini." />
                 ) : (
+                  <div role="img" aria-label="Grafik EC Rate per salesman MTD, diurutkan berdasarkan jumlah kunjungan terbanyak">
                   <ResponsiveContainer width="100%" height={220}>
                     <BarChart data={leaderboard.slice(0, 8)} layout="vertical" margin={{ left: 100, right: 48 }}>
                       <XAxis
@@ -275,14 +298,15 @@ export default function Dashboard() {
                         contentStyle={{ fontSize: 12, borderRadius: 10, border: "1px solid #e2e8f0", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}
                       />
                       <Bar dataKey="ec_rate" radius={[0, 6, 6, 0]} maxBarSize={18}>
-                        {leaderboard.slice(0, 8).map((r, i) => (
-                          <Cell key={i}
+                        {leaderboard.slice(0, 8).map((r) => (
+                          <Cell key={r.salesman_sk}
                             fill={r.ec_rate >= 80 ? "#10b981" : r.ec_rate >= 60 ? "#2563eb" : "#ef4444"}
                           />
                         ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
+                  </div>
                 )}
               </div>
             </div>
@@ -295,8 +319,8 @@ export default function Dashboard() {
                   <p className="section-heading-title text-center">Route Compliance</p>
                   <p className="section-heading-sub text-center mt-0.5">MTD — planned vs. actual</p>
                 </div>
-                <div className="relative w-32 h-32">
-                  <svg viewBox="0 0 36 36" className="w-32 h-32 -rotate-90">
+                <div className="relative w-32 h-32" role="img" aria-label={`Route compliance ${routeCompliancePct.toFixed(0)}%`}>
+                  <svg viewBox="0 0 36 36" className="w-32 h-32 -rotate-90" aria-hidden="true">
                     <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="2.5" />
                     <circle
                       cx="18" cy="18" r="15.9" fill="none"
@@ -306,7 +330,7 @@ export default function Dashboard() {
                       strokeLinecap="round"
                     />
                   </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center" aria-hidden="true">
                     <span className="text-3xl font-bold text-slate-900 tabular-nums">{routeCompliancePct.toFixed(0)}%</span>
                     <span className="text-2xs text-slate-400 uppercase tracking-wide">Compliance</span>
                   </div>
@@ -372,27 +396,30 @@ export default function Dashboard() {
                 <div>
                   <p className="section-heading-title">Feed Pengumuman</p>
                 </div>
-                <Link to="/announcements" className="section-heading-action">Lihat semua →</Link>
+                <Link to="/announcements" className="section-heading-action" aria-label="Lihat semua pengumuman">Lihat semua →</Link>
               </div>
 
               {announcements.length === 0 ? (
                 <EmptyState icon="megaphone" title="Belum ada pengumuman" description="Pengumuman terbaru akan muncul di sini." className="py-8" />
               ) : (
                 <div className="space-y-3">
-                  {announcements.slice(0, 3).map((a, i) => (
-                    <div key={i} className="rail-blue hover-lift p-4 rounded-xl">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="badge-blue">{a.type}</span>
-                          <span className="text-2xs text-slate-400">
-                            {format(new Date(a.created_at), "d MMM yyyy")}
-                          </span>
+                  {announcements.slice(0, 3).map((a) => {
+                    const { badge, rail } = announcementColors(a.type);
+                    return (
+                      <div key={`${a.type}-${a.created_at}`} className={`${rail} hover-lift p-4 rounded-xl`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={badge}>{a.type}</span>
+                            <span className="text-2xs text-slate-400">
+                              {format(new Date(a.created_at), "d MMM yyyy")}
+                            </span>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-800">{a.title}</p>
+                          <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">{a.body}</p>
                         </div>
-                        <p className="text-sm font-semibold text-slate-800">{a.title}</p>
-                        <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">{a.body}</p>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

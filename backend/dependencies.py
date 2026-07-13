@@ -84,11 +84,11 @@ def brand_list_filter(
     that belong to the user's business group.  Used for tables (e.g. spv_target)
     that store the brand name rather than a brand_group foreign key.
 
-    ho_admin / no brand_group → no restriction (sees all brands).
-    Unknown brand_group       → restrict to nothing (AND 1=0).
+    ho_admin / dm / no brand_group → no restriction (sees all brands).
+    Unknown brand_group            → restrict to nothing (AND 1=0).
     """
     from services.bq import BQClient
-    if user.role == "ho_admin" or not user.brand_group or user.brand_group in _UNRESTRICTED_GROUPS:
+    if user.role in ("ho_admin", "dm") or not user.brand_group or user.brand_group in _UNRESTRICTED_GROUPS:
         return "", []
     brands = BRAND_GROUPS.get(user.brand_group, [])
     if not brands:

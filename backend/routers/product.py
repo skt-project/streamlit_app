@@ -11,6 +11,7 @@ Access control (TASK 3):
 """
 from fastapi import APIRouter, Depends
 
+from config import settings
 from dependencies import BRAND_GROUPS, brand_list_filter, require_auth
 from models.auth import UserContext
 from services.bq import BQClient
@@ -25,7 +26,8 @@ _BRAND_TO_GROUP: dict[str, str] = {
     for brand in brands
 }
 
-_GT_TABLE = "`skintific-data-warehouse.gt_schema.master_product`"
+# gt_schema is the read-only canonical product catalog (separate from sfa_web).
+_GT_TABLE = f"`{settings.bq_project}.gt_schema.master_product`"
 
 
 @router.get("")

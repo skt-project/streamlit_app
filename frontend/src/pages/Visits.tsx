@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, SkeletonTable, EmptyState } from "@/components/ui";
 import { listVisits } from "@/api/visit";
+import { useDebounce } from "@/hooks/useDebounce";
 import type { Visit, VisitApprovalStatus } from "@/types";
 
 const APPROVAL_STATUS_MAP: Record<VisitApprovalStatus, { label: string; cls: string }> = {
@@ -38,18 +39,19 @@ export default function Visits() {
   const [statusFilter, setStatusFilter] = useState("");
   const [storeSearch,  setStoreSearch]  = useState("");
   const [page,         setPage]         = useState(1);
+  const debouncedStoreSearch = useDebounce(storeSearch, 350);
 
   const activeStatus = tab === "waiting" && !statusFilter
     ? "PENDING_SPV"
     : statusFilter || undefined;
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["visits-list", tab, dateFilter, statusFilter, storeSearch, page],
+    queryKey: ["visits-list", tab, dateFilter, statusFilter, debouncedStoreSearch, page],
     queryFn: () =>
       listVisits({
-        visit_date:  dateFilter   || undefined,
+        visit_date:  dateFilter              || undefined,
         status:      activeStatus,
-        store_name:  storeSearch  || undefined,
+        store_name:  debouncedStoreSearch    || undefined,
         page,
         page_size:   50,
       }),
@@ -97,6 +99,7 @@ export default function Visits() {
             <input
               type="text"
               placeholder="Cari nama toko..."
+              aria-label="Cari nama toko"
               value={storeSearch}
               onChange={(e) => { setStoreSearch(e.target.value); setPage(1); }}
             />
@@ -105,6 +108,7 @@ export default function Visits() {
           <input
             type="date"
             className="input w-44"
+            aria-label="Filter tanggal kunjungan"
             value={dateFilter}
             onChange={(e) => { setDateFilter(e.target.value); setPage(1); }}
           />
@@ -112,6 +116,7 @@ export default function Visits() {
           {tab === "all" && (
             <select
               className="input w-52"
+              aria-label="Filter status kunjungan"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             >
@@ -180,12 +185,12 @@ export default function Visits() {
                     visits.map((v: Visit) => (
                       <tr
                         key={v.visit_id}
-                        className="cursor-pointer"
+                        className="cursor-pointer group"
                         tabIndex={0}
                         role="link"
                         aria-label={`Detail kunjungan ${v.store_name ?? v.outlet_sk ?? ""} — ${v.visit_date}`}
                         onClick={() => navigate(`/visits/${v.visit_id}`)}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") navigate(`/visits/${v.visit_id}`); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") navigate(`/visits/${v.visit_id}`); }}
                       >
                         <td className="text-slate-500 tabular-nums">{v.visit_date}</td>
                         <td className="font-medium text-slate-800">
@@ -227,30 +232,32 @@ export default function Visits() {
 
           {/* ── Pagination ── */}
           {data && data.total > 50 && (
-            <div className="pagination">
+            <nav className="pagination" aria-label="Navigasi halaman">
               <span>{data.total.toLocaleString()} kunjungan total</span>
               <div className="flex items-center gap-2">
                 <button
                   className="pagination-btn"
                   disabled={page === 1}
                   onClick={() => setPage((p) => p - 1)}
+                  aria-label="Halaman sebelumnya"
                 >
-                  <Icon name="chevron-left" className="w-4 h-4" />
+                  <Icon name="chevron-left" className="w-4 h-4" aria-hidden={true} />
                   Sebelumnya
                 </button>
-                <span className="text-xs text-slate-500 tabular-nums">
+                <span className="text-xs text-slate-500 tabular-nums" aria-live="polite" aria-atomic="true">
                   Hal. {page} / {totalPages}
                 </span>
                 <button
                   className="pagination-btn"
                   disabled={!data.has_next}
                   onClick={() => setPage((p) => p + 1)}
+                  aria-label="Halaman berikutnya"
                 >
                   Berikutnya
-                  <Icon name="chevron-right" className="w-4 h-4" />
+                  <Icon name="chevron-right" className="w-4 h-4" aria-hidden={true} />
                 </button>
               </div>
-            </div>
+            </nav>
           )}
         </div>
       </main>

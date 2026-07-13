@@ -20,7 +20,7 @@ from services.bq import BQClient
 
 router = APIRouter(prefix="/skipped-stores", tags=["skipped-stores"])
 
-_TABLE = "`skintific-data-warehouse.sfa_web.step_skipped_store`"
+_TABLE = f"`{settings.bq_project}.{settings.bq_dataset}.step_skipped_store`"
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────

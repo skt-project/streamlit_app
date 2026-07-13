@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, SkeletonTable, EmptyState } from "@/components/ui";
 import { api } from "@/api/client";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { Outlet } from "@/types";
 
 const fetchOutlets = (search: string, unassigned: boolean) =>
@@ -18,6 +19,13 @@ export default function OutletSalesman() {
   const search = useDebounce(searchInput, 350);
   const [selected, setSelected] = useState<Outlet | null>(null);
   const [reassignSk, setReassignSk] = useState("");
+  const modalTriggerRef = useRef<Element | null>(null);
+  const modalPanelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalPanelRef, !!selected);
+  const closeModal = () => {
+    setSelected(null);
+    setTimeout(() => { (modalTriggerRef.current as HTMLElement | null)?.focus(); }, 0);
+  };
 
   const { data: outletsData, isLoading } = useQuery({
     queryKey: ["outlets", search, unassigned],
@@ -32,7 +40,7 @@ export default function OutletSalesman() {
   const reassignMutation = useMutation({
     mutationFn: ({ outletId, salesman_sk }: { outletId: string; salesman_sk: string }) =>
       api.post("/outlet/assign", { outlet_id: outletId, salesman_sk }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["outlets"] }); setSelected(null); setReassignSk(""); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["outlets"] }); closeModal(); setReassignSk(""); },
   });
 
   return (
@@ -49,9 +57,12 @@ export default function OutletSalesman() {
 
       <main className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="flex gap-3 flex-wrap items-center">
-          <input className="input w-64 text-sm" placeholder="Cari kode atau nama toko..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
-          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={unassigned} onChange={(e) => setUnassigned(e.target.checked)} />
+          <div className="relative">
+            <Icon name="magnifying-glass" className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input className="input w-64 text-sm pl-8" placeholder="Cari kode atau nama toko..." aria-label="Cari kode atau nama toko" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
+            <input type="checkbox" checked={unassigned} onChange={(e) => setUnassigned(e.target.checked)} className="rounded" />
             Belum memiliki salesman
           </label>
         </div>
@@ -85,7 +96,7 @@ export default function OutletSalesman() {
                       <td>{o.salesman_name ?? <span className="text-red-400 text-xs">Belum ditugaskan</span>}</td>
                       <td className="font-mono text-xs text-slate-500">{o.salesman_code ?? "—"}</td>
                       <td>
-                        <button onClick={() => { setSelected(o); setReassignSk(""); }} className="text-xs text-primary-600 hover:underline">
+                        <button onClick={() => { modalTriggerRef.current = document.activeElement; setSelected(o); setReassignSk(""); }} className="text-xs text-primary-600 hover:underline" aria-label={`Assign ${o.store_name}`}>
                           Assign
                         </button>
                       </td>
@@ -99,11 +110,20 @@ export default function OutletSalesman() {
       </main>
 
       {selected && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+        >
+          <div
+            ref={modalPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="outlet-modal-title"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
+          >
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">Assign Toko ke Salesman</h3>
-              <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded"><Icon name="x-mark" className="w-5 h-5" /></button>
+              <h3 id="outlet-modal-title" className="font-semibold text-slate-800">Assign Toko ke Salesman</h3>
+              <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors" aria-label="Tutup"><Icon name="x-mark" className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-4 text-sm">
               <div className="bg-slate-50 rounded-xl p-4">
@@ -111,8 +131,8 @@ export default function OutletSalesman() {
                 <p className="text-xs text-slate-400 mt-0.5">{selected.source_outlet_code} · {selected.kecamatan ?? "—"}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Salesman Baru</label>
-                <select className="input" value={reassignSk} onChange={(e) => setReassignSk(e.target.value)}>
+                <label htmlFor="outlet-salesman-select" className="block text-sm font-medium text-slate-700 mb-1">Salesman Baru</label>
+                <select id="outlet-salesman-select" className="input" value={reassignSk} onChange={(e) => setReassignSk(e.target.value)} autoFocus>
                   <option value="">— Pilih Salesman —</option>
                   {(salesmen as {salesman_sk: string; salesman_name: string; source_salesman_code: string}[]).map((s) => (
                     <option key={s.salesman_sk} value={s.salesman_sk}>{s.salesman_name} ({s.source_salesman_code})</option>
@@ -121,7 +141,7 @@ export default function OutletSalesman() {
               </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
-              <button onClick={() => setSelected(null)} className="btn-secondary">Batal</button>
+              <button onClick={closeModal} className="btn-secondary">Batal</button>
               <button
                 onClick={() => reassignMutation.mutate({ outletId: selected.outlet_id, salesman_sk: reassignSk })}
                 className="btn-primary"

@@ -160,6 +160,7 @@ def assign_store(
             bq.p("now", "TIMESTAMP", now),
         ],
     )
+    bq.cache.invalidate("route-planner:salesmen:")
     return {"assignment_id": new_id, "message": "Toko berhasil ditambahkan ke rute."}
 
 
@@ -175,4 +176,5 @@ def remove_assignment(
         f"UPDATE {SFA_WEB}.route_assignment SET is_deleted = TRUE WHERE assignment_id = @id",
         [bq.p("id", "STRING", assignment_id)],
     )
+    bq.cache.invalidate("route-planner:salesmen:")
     return {"message": "Assignment removed."}

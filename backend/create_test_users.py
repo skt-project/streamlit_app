@@ -146,9 +146,9 @@ for u in TEST_USERS:
 print("""
 Done. Test credentials:
 
-  test_se    / STEP@2026   — SE  (has real store routes)
-  test_spv   / STEP@2026   — SPV (approves first)
-  test_dist  / STEP@2026   — Distributor Admin (final approver)
+  test_se    / STEP@2026   — SE (salesman)    — has real store routes
+  test_spv   / STEP@2026   — SPV              — approves first
+  test_dist  / STEP@2026   — DM (dm role)     — final approver
 
 Approval flow to test:
   1. Login as test_se → open Route List → check in to a store → submit visit

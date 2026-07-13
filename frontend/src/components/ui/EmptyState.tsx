@@ -17,7 +17,7 @@ export default function EmptyState({
 }: EmptyStateProps) {
   return (
     <div className={`empty-state ${className}`}>
-      <Icon name={icon} className="empty-state-icon" />
+      <Icon name={icon} className="empty-state-icon" aria-hidden={true} />
       <p className="empty-state-title">{title}</p>
       {description && <p className="empty-state-text">{description}</p>}
       {action && <div className="mt-4">{action}</div>}

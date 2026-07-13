@@ -63,7 +63,9 @@ def get_web_dashboard(
     comply_pct  = round((total_spv / total_mgmt * 100) if total_mgmt > 0 else 0.0, 1)
 
     # ── Route compliance (MTD): visits with matching route plan entries ──────────
-    rc_row = bq.query_one(
+    rc_cache_key = f"dashboard:rc:{month_start}:{today}"
+    rc_row = bq.query_one_cached(
+        rc_cache_key,
         f"""
         SELECT
           COUNT(DISTINCT CONCAT(v.salesman_sk, v.outlet_sk)) AS visited,
@@ -77,6 +79,7 @@ def get_web_dashboard(
         WHERE r.is_deleted = FALSE
         """,
         [bq.p("ms", "DATE", month_start), bq.p("today", "DATE", today)],
+        ttl=120,
     ) or {}
     visited = rc_row.get("visited", 0) or 0
     planned = rc_row.get("planned", 0) or 0

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, EmptyState, SkeletonTable, SkeletonStatCards } from "@/components/ui";
@@ -45,12 +45,12 @@ export default function RouteEvaluate() {
     placeholderData: (prev) => prev,
   });
 
-  const teamKpis = {
+  const teamKpis = useMemo(() => ({
     totalCall: team.reduce((s, r) => s + r.call_count, 0),
     totalEC:   team.reduce((s, r) => s + r.effective_call_count, 0),
     ecRate:    team.length ? team.reduce((s, r) => s + r.ec_rate_pct, 0) / team.length : 0,
     lowConv:   team.filter((r) => r.ec_rate_pct < 50).length,
-  };
+  }), [team]);
 
   return (
     <div className="flex flex-col h-full">
@@ -67,30 +67,38 @@ export default function RouteEvaluate() {
         {/* Drill-down view */}
         {drillSalesman ? (
           <>
-            <button onClick={() => setDrillSalesman(null)} className="flex items-center gap-1.5 text-sm text-primary-600 hover:underline">
-              <Icon name="arrow-left" className="w-4 h-4" />Kembali ke Tim
+            <button onClick={() => setDrillSalesman(null)} className="btn-ghost btn-sm -ml-2 text-primary-600 hover:text-primary-700">
+              <Icon name="arrow-left" className="w-4 h-4" aria-hidden={true} />Kembali ke Tim
             </button>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="kpi-tile">
                 <span className="icon-badge icon-badge-slate"><Icon name="calendar" className="w-4 h-4" /></span>
-                <p className="kpi-tile-value mt-2">{detail?.stores.length ?? 0}</p>
-                <p className="kpi-tile-label">Planned Visit</p>
+                <div className="min-w-0 flex-1">
+                  <p className="kpi-tile-value">{detail?.stores.length ?? 0}</p>
+                  <p className="kpi-tile-label">Planned Visit</p>
+                </div>
               </div>
               <div className="kpi-tile">
                 <span className="icon-badge icon-badge-blue"><Icon name="map-pin" className="w-4 h-4" /></span>
-                <p className="kpi-tile-value mt-2">{drillSalesman.call_count}</p>
-                <p className="kpi-tile-label">Call (Terlaksana)</p>
+                <div className="min-w-0 flex-1">
+                  <p className="kpi-tile-value">{drillSalesman.call_count}</p>
+                  <p className="kpi-tile-label">Call (Terlaksana)</p>
+                </div>
               </div>
               <div className="kpi-tile">
                 <span className="icon-badge icon-badge-green"><Icon name="check-circle" className="w-4 h-4" /></span>
-                <p className="kpi-tile-value mt-2">{drillSalesman.effective_call_count}</p>
-                <p className="kpi-tile-label">Effective Call</p>
+                <div className="min-w-0 flex-1">
+                  <p className="kpi-tile-value">{drillSalesman.effective_call_count}</p>
+                  <p className="kpi-tile-label">Effective Call</p>
+                </div>
               </div>
               <div className="kpi-tile">
                 <span className="icon-badge icon-badge-amber"><Icon name="chart-pie" className="w-4 h-4" /></span>
-                <div className="mt-2"><ECBadge pct={drillSalesman.ec_rate_pct} /></div>
-                <p className="kpi-tile-label">EC Rate</p>
+                <div className="min-w-0 flex-1">
+                  <ECBadge pct={drillSalesman.ec_rate_pct} />
+                  <p className="kpi-tile-label">EC Rate</p>
+                </div>
               </div>
             </div>
 
@@ -133,23 +141,31 @@ export default function RouteEvaluate() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="kpi-tile">
                   <span className="icon-badge icon-badge-blue"><Icon name="map-pin" className="w-4 h-4" /></span>
-                  <p className="kpi-tile-value mt-2">{teamKpis.totalCall}</p>
-                  <p className="kpi-tile-label">Total Call</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="kpi-tile-value">{teamKpis.totalCall}</p>
+                    <p className="kpi-tile-label">Total Call</p>
+                  </div>
                 </div>
                 <div className="kpi-tile">
                   <span className="icon-badge icon-badge-green"><Icon name="check-circle" className="w-4 h-4" /></span>
-                  <p className="kpi-tile-value mt-2">{teamKpis.totalEC}</p>
-                  <p className="kpi-tile-label">Effective Call</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="kpi-tile-value">{teamKpis.totalEC}</p>
+                    <p className="kpi-tile-label">Effective Call</p>
+                  </div>
                 </div>
                 <div className="kpi-tile">
                   <span className="icon-badge icon-badge-amber"><Icon name="chart-pie" className="w-4 h-4" /></span>
-                  <div className="mt-2"><ECBadge pct={teamKpis.ecRate} /></div>
-                  <p className="kpi-tile-label">EC Rate (Tim)</p>
+                  <div className="min-w-0 flex-1">
+                    <ECBadge pct={teamKpis.ecRate} />
+                    <p className="kpi-tile-label">EC Rate (Tim)</p>
+                  </div>
                 </div>
                 <div className="kpi-tile">
                   <span className="icon-badge icon-badge-purple"><Icon name="exclamation-triangle" className="w-4 h-4" /></span>
-                  <p className="kpi-tile-value mt-2">{teamKpis.lowConv}</p>
-                  <p className="kpi-tile-label">Low Conversion</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="kpi-tile-value">{teamKpis.lowConv}</p>
+                    <p className="kpi-tile-label">Low Conversion</p>
+                  </div>
                 </div>
               </div>
             )}
@@ -179,10 +195,14 @@ export default function RouteEvaluate() {
                       {team.map((row) => (
                         <tr
                           key={row.salesman_sk}
+                          role="button"
                           onClick={() => setDrillSalesman(row)}
-                          className="cursor-pointer"
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrillSalesman(row); } }}
+                          tabIndex={0}
+                          aria-label={`Lihat detail ${row.salesman_name}`}
+                          className="cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500"
                         >
-                          <td className="font-medium text-slate-700">{row.salesman_name}</td>
+                          <td className="font-medium text-slate-700 group-hover:text-primary-700 transition-colors">{row.salesman_name}</td>
                           <td className="text-right text-slate-600 tabular-nums">{row.call_count}</td>
                           <td className="text-right text-slate-600 tabular-nums">{row.effective_call_count}</td>
                           <td className="text-right"><ECBadge pct={row.ec_rate_pct} /></td>

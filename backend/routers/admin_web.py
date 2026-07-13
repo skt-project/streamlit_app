@@ -171,7 +171,7 @@ def update_user(
     sets.append("updated_at = @now"); params.append(bq.p("now", "TIMESTAMP", now))
     params.append(bq.p("id", "STRING", user_id))
     bq.execute(
-        f"UPDATE {SFA_WEB}.users SET {', '.join(sets)} WHERE user_id = @id AND is_active = TRUE",
+        f"UPDATE {SFA_WEB}.users SET {', '.join(sets)} WHERE user_id = @id",
         params,
     )
     bq.cache.invalidate("admin:users:")

@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+import { useRef, useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, Skeleton, EmptyState } from "@/components/ui";
 import { toast } from "@/store/toastStore";
 import { api } from "@/api/client";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { SalesmanRoute, RouteStore, DayId } from "@/types";
 import { format, startOfISOWeek, addDays } from "date-fns";
 import { id } from "date-fns/locale";
@@ -48,8 +49,8 @@ function StoreCard({ store, onRemove }: { store: RouteStore; onRemove: () => voi
       </div>
       <button
         onClick={onRemove}
-        className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all p-1 rounded"
-        aria-label="Hapus toko"
+        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 text-slate-300 hover:text-red-500 transition-all p-1 rounded"
+        aria-label={`Hapus ${store.store_name}`}
       >
         <Icon name="x-mark" className="w-4 h-4" />
       </button>
@@ -80,6 +81,14 @@ export default function RoutePlanner() {
   const [selectedSalesmanSk, setSelectedSalesmanSk] = useState<string | null>(null);
   const [selectedDay, setSelectedDay]   = useState<DayId>("Senin");
   const [showAddModal, setShowAddModal] = useState(false);
+  const modalTriggerRef = useRef<Element | null>(null);
+  const modalPanelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalPanelRef, showAddModal);
+  const closeAddModal = () => {
+    setShowAddModal(false);
+    setSearchStore("");
+    setTimeout(() => { (modalTriggerRef.current as HTMLElement | null)?.focus(); }, 0);
+  };
   const [salesmanSearch, setSalesmanSearch] = useState("");
   const [searchStore, setSearchStore]   = useState("");
   const debouncedSearch      = useDebounce(salesmanSearch, 250);
@@ -139,8 +148,7 @@ export default function RoutePlanner() {
     onSuccess: (_data, store) => {
       qc.invalidateQueries({ queryKey: ["route-planner"] });
       toast.success(`${store.store_name} ditambahkan ke rute ${selectedDay}.`);
-      setShowAddModal(false);
-      setSearchStore("");
+      closeAddModal();
     },
     onError: () => toast.error("Gagal menambahkan toko ke rute."),
   });
@@ -150,7 +158,7 @@ export default function RoutePlanner() {
       <TopNav
         title="Route Planner"
         actions={
-          <button onClick={() => setShowAddModal(true)} className="btn-primary text-sm">
+          <button onClick={() => { modalTriggerRef.current = document.activeElement; setShowAddModal(true); }} className="btn-primary text-sm" disabled={!selected}>
             <Icon name="plus" className="w-4 h-4" />
             Tambah Store
           </button>
@@ -159,7 +167,7 @@ export default function RoutePlanner() {
 
       <div className="flex flex-1 min-h-0">
         {/* ── Left: Salesman Rail ── */}
-        <aside className="w-64 border-r border-slate-200 bg-white flex flex-col">
+        <aside className="w-64 border-r border-slate-200 bg-white flex flex-col" aria-label="Daftar salesman">
           <div className="p-3 border-b border-slate-100 shrink-0">
             <div className="relative">
               <Icon
@@ -169,6 +177,7 @@ export default function RoutePlanner() {
               <input
                 className="input text-sm pl-8"
                 placeholder="Cari salesman..."
+                aria-label="Cari salesman"
                 value={salesmanSearch}
                 onChange={(e) => setSalesmanSearch(e.target.value)}
               />
@@ -190,6 +199,8 @@ export default function RoutePlanner() {
                   <button
                     key={s.salesman_sk}
                     onClick={() => setSelectedSalesmanSk(s.salesman_sk)}
+                    aria-current={selected?.salesman_sk === s.salesman_sk ? "true" : undefined}
+                    aria-label={`${s.salesman_name}, ${s.total_stores} toko, kepatuhan ${s.compliance_pct?.toFixed(0) ?? "—"}%, pencapaian ${s.achievement_pct?.toFixed(0) ?? "—"}%`}
                     className={`w-full text-left p-3 hover:bg-slate-50 transition-colors ${
                       selected?.salesman_sk === s.salesman_sk
                         ? "bg-primary-50 border-r-2 border-primary-600"
@@ -233,7 +244,7 @@ export default function RoutePlanner() {
             >
               <Icon name="chevron-left" className="w-4 h-4" />
             </button>
-            <span className="text-sm font-medium text-slate-700 min-w-[160px] text-center">
+            <span className="text-sm font-medium text-slate-700 min-w-[160px] text-center" aria-live="polite">
               {weekLabel}
             </span>
             <button
@@ -333,13 +344,13 @@ export default function RoutePlanner() {
       {showAddModal && (
         <div
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) { setShowAddModal(false); setSearchStore(""); } }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeAddModal(); }}
         >
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+          <div ref={modalPanelRef} role="dialog" aria-modal="true" aria-labelledby="add-store-modal-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">Tambah Store ke Rute</h3>
+              <h3 id="add-store-modal-title" className="font-semibold text-slate-800">Tambah Store ke Rute</h3>
               <button
-                onClick={() => { setShowAddModal(false); setSearchStore(""); }}
+                onClick={closeAddModal}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
                 aria-label="Tutup"
               >
@@ -413,7 +424,7 @@ export default function RoutePlanner() {
               </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
-              <button onClick={() => { setShowAddModal(false); setSearchStore(""); }} className="btn-secondary">
+              <button onClick={closeAddModal} className="btn-secondary">
                 Batal
               </button>
             </div>

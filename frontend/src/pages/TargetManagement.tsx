@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
-import { Icon, EmptyState, SkeletonTable } from "@/components/ui";
+import { Icon, EmptyState, SkeletonTable, Skeleton } from "@/components/ui";
 import { api } from "@/api/client";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { TargetComply, SpvTargetRow } from "@/types";
 import { format } from "date-fns";
 
@@ -18,14 +19,14 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function ComplyBar({ pct }: { pct: number }) {
-  const capped = Math.min(pct, 110);
-  const color = pct >= 100 ? "bg-green-500" : pct >= 80 ? "bg-blue-500" : "bg-red-400";
+  const capped = Math.min(pct, 100);
+  const fillCls = pct >= 100 ? "progress-fill-green" : pct >= 80 ? "" : "progress-fill-red";
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 bg-slate-100 rounded-full h-2">
-        <div className={`h-2 rounded-full transition-all ${color}`} style={{ width: `${capped}%` }} />
+      <div className="progress-track flex-1" aria-hidden="true">
+        <div className={`progress-fill ${fillCls}`} style={{ width: `${capped}%` }} />
       </div>
-      <span className="text-xs font-medium text-slate-600 w-10 text-right">{pct.toFixed(1)}%</span>
+      <span className="text-xs font-medium text-slate-600 w-10 text-right tabular-nums">{pct.toFixed(1)}%</span>
     </div>
   );
 }
@@ -37,6 +38,13 @@ export default function TargetManagement() {
   const [simulationDelta, setSimulationDelta] = useState(0);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const modalTriggerRef = useRef<Element | null>(null);
+  const modalPanelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalPanelRef, showSubmitModal);
+  const closeSubmitModal = () => {
+    setShowSubmitModal(false);
+    setTimeout(() => { (modalTriggerRef.current as HTMLElement | null)?.focus(); }, 0);
+  };
 
   const { data: comply = [], isLoading } = useQuery<TargetComply[]>({
     queryKey: ["target-comply"],
@@ -72,7 +80,7 @@ export default function TargetManagement() {
 
   const submitMutation = useMutation({
     mutationFn: () => api.post("/target/spv/submit", { brand: selectedBrand, period_month: period }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["target-comply"] }); setShowSubmitModal(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["target-comply"] }); closeSubmitModal(); },
   });
 
   const selectedComply = comply.find((c) => c.brand === selectedBrand);
@@ -98,7 +106,7 @@ export default function TargetManagement() {
             >
               {saveMutation.isPending ? "Menyimpan..." : "Simpan Draft"}
             </button>
-            <button className="btn-primary text-sm" onClick={() => setShowSubmitModal(true)} disabled={!selectedBrand}>Submit</button>
+            <button className="btn-primary text-sm" onClick={() => { modalTriggerRef.current = document.activeElement; setShowSubmitModal(true); }} disabled={!selectedBrand}>Submit</button>
           </div>
         }
       />
@@ -124,10 +132,10 @@ export default function TargetManagement() {
           {isLoading ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 p-4 space-y-2 animate-pulse">
-                  <div className="h-4 w-32 bg-slate-200 rounded" />
-                  <div className="h-2 w-full bg-slate-200 rounded-full" />
-                  <div className="h-3 w-48 bg-slate-100 rounded" />
+                <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 p-4 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-2 w-full" />
+                  <Skeleton className="h-3 w-48" />
                 </div>
               ))}
             </div>
@@ -199,6 +207,7 @@ export default function TargetManagement() {
                           <input
                             type="number"
                             className="input text-right w-36 text-sm"
+                            aria-label={`Target ${row.salesman_name}`}
                             value={editValues[row.salesman_sk] ?? row.spv_target_amount}
                             onChange={(e) => setEditValues((prev) => ({ ...prev, [row.salesman_sk]: e.target.value }))}
                           />
@@ -227,13 +236,14 @@ export default function TargetManagement() {
                 value={simulationDelta}
                 onChange={(e) => setSimulationDelta(Number(e.target.value))}
                 className="flex-1"
+                aria-label="Simulasi delta target (%)"
               />
               <span className="text-sm text-slate-500">+20%</span>
               <span className="w-16 text-center text-sm font-semibold text-primary-600">
                 {simulationDelta > 0 ? "+" : ""}{simulationDelta}%
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4" aria-live="polite" aria-atomic="true">
               <div className="bg-slate-50 rounded-xl p-4">
                 <p className="text-xs text-slate-500 mb-1">SPV Target Baru (Simulasi)</p>
                 <p className="text-xl font-bold text-slate-800">Rp {(simNewSpvTotal / 1e6).toFixed(1)}M</p>
@@ -251,10 +261,20 @@ export default function TargetManagement() {
 
       {/* Submit Modal */}
       {showSubmitModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">Submit Target {selectedBrand}?</h3>
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) closeSubmitModal(); }}
+        >
+          <div ref={modalPanelRef} role="dialog" aria-modal="true" aria-labelledby="target-submit-modal-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h3 id="target-submit-modal-title" className="font-semibold text-slate-800">Submit Target {selectedBrand}?</h3>
+              <button
+                onClick={() => closeSubmitModal()}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+                aria-label="Tutup"
+              >
+                <Icon name="x-mark" className="w-5 h-5" />
+              </button>
             </div>
             <div className="p-5">
               <p className="text-sm text-slate-600">
@@ -263,11 +283,13 @@ export default function TargetManagement() {
               <textarea
                 className="input mt-4 text-sm"
                 placeholder="Komentar (opsional)..."
+                aria-label="Komentar (opsional)"
                 rows={3}
+                autoFocus
               />
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
-              <button onClick={() => setShowSubmitModal(false)} className="btn-secondary">Batal</button>
+              <button onClick={() => closeSubmitModal()} className="btn-secondary">Batal</button>
               <button onClick={() => submitMutation.mutate()} className="btn-primary" disabled={submitMutation.isPending}>
                 {submitMutation.isPending ? "Memproses..." : "Submit"}
               </button>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
@@ -125,6 +125,7 @@ export default function VisitDetail() {
 
   const [rejectOpen,  setRejectOpen]  = useState(false);
   const [rejectNotes, setRejectNotes] = useState("");
+  const rejectBtnRef = useRef<HTMLButtonElement>(null);
   const [pdfLoading,  setPdfLoading]  = useState(false);
 
   const [finalQtyMap,  setFinalQtyMap]  = useState<Record<string, number>>({});
@@ -262,29 +263,60 @@ export default function VisitDetail() {
     );
   }
 
-  // ── Derived values ─────────────────────────────────────────────────────────
+  // ── Derived values (memoized — finalQtyMap/priceMap change on each keystroke) ──
 
-  const totalQty       = visit.items.reduce((s, i) => s + (i.qty ?? 0), 0);
-  const totalFinalQty  = visit.items.reduce((s, i) => s + (finalQtyMap[i.sku_id] ?? i.qty ?? 0), 0);
-  const liveFinalDemand = visit.items.reduce(
-    (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0),
-    0,
+  const totalQty = useMemo(
+    () => visit.items.reduce((s, i) => s + (i.qty ?? 0), 0),
+    [visit.items],
   );
-  const grandTotal = visit.items.reduce((s, i) => {
-    const qty   = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
-    const price = priceMap[i.sku_id] ?? i.price_for_store ?? 0;
-    return s + qty * price;
-  }, 0);
-  const brandGroups     = [...new Set(visit.items.map((i) => i.brand).filter(Boolean))];
-  const showFinalQtyCol = canEditFinalQty(visit.approval_status, role) || visit.items.some((i) => i.final_qty != null);
-  const showPriceCol    = isDistAdm || visit.items.some((i) => (i.price_for_store ?? 0) > 0);
-  const canDownloadPdf  = ["spv", "asm", "dm", "ho_admin"].includes(role);
-  const isDirty         = fqtyDirty || priceDirty;
 
-  const stockWarningCount = visit.items.filter((i) => {
-    const effQty = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
-    return i.warehouse_stock_qty != null && effQty > i.warehouse_stock_qty;
-  }).length;
+  const totalFinalQty = useMemo(
+    () => visit.items.reduce((s, i) => s + (finalQtyMap[i.sku_id] ?? i.qty ?? 0), 0),
+    [visit.items, finalQtyMap],
+  );
+
+  const liveFinalDemand = useMemo(
+    () => visit.items.reduce(
+      (s, i) => s + (finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0) * (i.stp ?? 0),
+      0,
+    ),
+    [visit.items, finalQtyMap],
+  );
+
+  const grandTotal = useMemo(
+    () => visit.items.reduce((s, i) => {
+      const qty   = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
+      const price = priceMap[i.sku_id] ?? i.price_for_store ?? 0;
+      return s + qty * price;
+    }, 0),
+    [visit.items, finalQtyMap, priceMap],
+  );
+
+  const brandGroups = useMemo(
+    () => [...new Set(visit.items.map((i) => i.brand).filter(Boolean))],
+    [visit.items],
+  );
+
+  const showFinalQtyCol = useMemo(
+    () => canEditFinalQty(visit.approval_status, role) || visit.items.some((i) => i.final_qty != null),
+    [visit.approval_status, role, visit.items],
+  );
+
+  const showPriceCol = useMemo(
+    () => isDistAdm || visit.items.some((i) => (i.price_for_store ?? 0) > 0),
+    [isDistAdm, visit.items],
+  );
+
+  const stockWarningCount = useMemo(
+    () => visit.items.filter((i) => {
+      const effQty = finalQtyMap[i.sku_id] ?? i.final_qty ?? i.qty ?? 0;
+      return i.warehouse_stock_qty != null && effQty > i.warehouse_stock_qty;
+    }).length,
+    [visit.items, finalQtyMap],
+  );
+
+  const canDownloadPdf = ["spv", "asm", "dm", "ho_admin"].includes(role);
+  const isDirty        = fqtyDirty || priceDirty;
 
   // ── Approval timeline steps ────────────────────────────────────────────────
 
@@ -400,7 +432,7 @@ export default function VisitDetail() {
                     <dt className="text-slate-400 text-xs mb-0.5">Jarak GPS (check-in)</dt>
                     <dd className={`font-medium flex items-center gap-1 ${visit.gps_warning ? "text-amber-600" : "text-slate-700"}`}>
                       {visit.checkin_distance_m != null ? `${Math.round(visit.checkin_distance_m)} m` : "—"}
-                      {visit.gps_warning && <Icon name="exclamation-triangle" className="w-3.5 h-3.5 text-amber-500" />}
+                      {visit.gps_warning && <Icon name="exclamation-triangle" className="w-3.5 h-3.5 text-amber-500" aria-label="Peringatan GPS" />}
                     </dd>
                   </div>
                   <div>
@@ -445,7 +477,7 @@ export default function VisitDetail() {
                 )}
                 {visit.rejection_notes && (
                   <div className="mt-5 pt-4 border-t border-slate-100">
-                    <div className="rail-red p-3 rounded-lg">
+                    <div className="rail-red p-3 rounded-xl">
                       <p className="text-xs font-semibold text-red-600 mb-1">Catatan Revisi</p>
                       <p className="text-sm text-red-700 leading-relaxed">{visit.rejection_notes}</p>
                     </div>
@@ -562,6 +594,7 @@ export default function VisitDetail() {
                                   {fqtyEditing ? (
                                     <input
                                       type="number" min={0}
+                                      aria-label={`Qty Final ${item.sku_name ?? item.sku_id}`}
                                       className={`w-20 text-right border rounded px-2 py-1 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 ${
                                         hasStockWarn
                                           ? "border-amber-400 bg-amber-50 focus:ring-amber-300"
@@ -582,7 +615,8 @@ export default function VisitDetail() {
                                   {hasStockWarn && (
                                     <span
                                       className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-2xs bg-amber-500 text-white rounded-full cursor-help font-bold leading-none"
-                                      title={`Qty Final (${effQty}) melebihi stok gudang (${item.warehouse_stock_qty} pcs).`}
+                                      role="img"
+                                      aria-label={`Peringatan: Qty Final (${effQty}) melebihi stok gudang (${item.warehouse_stock_qty} pcs)`}
                                     >!</span>
                                   )}
                                 </td>
@@ -598,6 +632,7 @@ export default function VisitDetail() {
                                   {fqtyEditing && isDistAdm ? (
                                     <input
                                       type="number" min={0} step="1"
+                                      aria-label={`Harga toko ${item.sku_name ?? item.sku_id}`}
                                       className="w-28 text-right border border-slate-300 rounded px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-300"
                                       value={priceMap[item.sku_id] || ""}
                                       placeholder="0"
@@ -676,7 +711,7 @@ export default function VisitDetail() {
                 <ol className="space-y-5">
                   {timelineSteps.map(({ stage, approver, approvedAt, active, done }) => (
                     <li key={stage} className="flex items-start gap-3">
-                      <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 ${
+                      <div className={`w-7 h-7 rounded-full shrink-0 flex items-center justify-center mt-0.5 ${
                         done ? "bg-emerald-100 text-emerald-700" :
                         active ? "bg-amber-100 text-amber-700" :
                         "bg-slate-100 text-slate-400"
@@ -729,6 +764,7 @@ export default function VisitDetail() {
 
                   {canReject(visit.approval_status, role) && !rejectOpen && (
                     <button
+                      ref={rejectBtnRef}
                       className="btn-secondary w-full text-red-600 border-red-200 hover:bg-red-50"
                       onClick={() => setRejectOpen(true)}
                     >
@@ -743,6 +779,7 @@ export default function VisitDetail() {
                         className="input text-sm resize-none"
                         rows={3}
                         placeholder="Tulis alasan revisi…"
+                        aria-label="Alasan revisi"
                         value={rejectNotes}
                         onChange={(e) => setRejectNotes(e.target.value)}
                         autoFocus
@@ -757,7 +794,7 @@ export default function VisitDetail() {
                         </button>
                         <button
                           className="btn-secondary flex-1 text-sm"
-                          onClick={() => { setRejectOpen(false); setRejectNotes(""); }}
+                          onClick={() => { setRejectOpen(false); setRejectNotes(""); setTimeout(() => rejectBtnRef.current?.focus(), 0); }}
                         >
                           Batal
                         </button>

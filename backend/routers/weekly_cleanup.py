@@ -23,7 +23,7 @@ from services.bq import BQClient
 
 router = APIRouter(prefix="/weekly-cleanup", tags=["weekly-cleanup"])
 
-_SKIPPED_TABLE = "`skintific-data-warehouse.sfa_web.step_skipped_store`"
+_SKIPPED_TABLE = f"`{settings.bq_project}.{settings.bq_dataset}.step_skipped_store`"
 
 
 class CleanupRequest(BaseModel):

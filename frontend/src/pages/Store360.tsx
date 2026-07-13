@@ -43,6 +43,7 @@ export default function Store360() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef     = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, 300);
 
   // Close dropdown when clicking outside the search container
@@ -86,9 +87,14 @@ export default function Store360() {
             aria-hidden={true}
           />
           <input
+            ref={inputRef}
             className="input w-full text-sm pl-8"
             placeholder="Cari toko (min 2 huruf)..."
             aria-label="Cari toko"
+            role="combobox"
+            aria-expanded={dropdownOpen && debouncedQuery.length >= 2 && suggestions.length > 0}
+            aria-autocomplete="list"
+            aria-controls="store360-listbox"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -96,6 +102,7 @@ export default function Store360() {
               setDropdownOpen(true);
             }}
             onFocus={() => { if (debouncedQuery.length >= 2) setDropdownOpen(true); }}
+            onKeyDown={(e) => { if (e.key === "Escape") { setDropdownOpen(false); inputRef.current?.blur(); } }}
           />
           {searching && (
             <Icon
@@ -106,6 +113,7 @@ export default function Store360() {
           )}
           {dropdownOpen && debouncedQuery.length >= 2 && suggestions.length > 0 && (
             <div
+              id="store360-listbox"
               className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20 max-h-48 overflow-y-auto"
               role="listbox"
               aria-label="Hasil pencarian toko"
@@ -132,6 +140,16 @@ export default function Store360() {
                   <p className="text-xs text-slate-400">{s.source_outlet_code}</p>
                 </button>
               ))}
+            </div>
+          )}
+          {dropdownOpen && debouncedQuery.length >= 2 && !searching && suggestions.length === 0 && (
+            <div
+              className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 z-20"
+              aria-live="polite"
+            >
+              <p className="px-4 py-3 text-sm text-slate-400 text-center">
+                Tidak ada toko ditemukan untuk &ldquo;{debouncedQuery}&rdquo;
+              </p>
             </div>
           )}
         </div>
@@ -187,8 +205,10 @@ export default function Store360() {
                   <span className={`icon-badge ${k.cls} shrink-0`}>
                     <Icon name={k.icon} className="w-4 h-4" />
                   </span>
-                  <p className="kpi-tile-value mt-2">{k.value}</p>
-                  <p className="kpi-tile-label">{k.label}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="kpi-tile-value">{k.value}</p>
+                    <p className="kpi-tile-label">{k.label}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -213,8 +233,8 @@ export default function Store360() {
                       </tr>
                     </thead>
                     <tbody>
-                      {s.visits.map((v: Record<string, string>, i: number) => (
-                        <tr key={i}>
+                      {s.visits.map((v: Record<string, string>) => (
+                        <tr key={v.visit_id}>
                           <td>{v.visit_date}</td>
                           <td>{v.salesman_name}</td>
                           <td className="text-slate-500">

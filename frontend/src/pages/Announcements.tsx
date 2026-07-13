@@ -1,13 +1,22 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TopNav from "@/components/layout/TopNav";
 import { Icon, EmptyState, Skeleton } from "@/components/ui";
 import { api } from "@/api/client";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { Announcement, AnnouncementType } from "@/types";
 import { format } from "date-fns";
 import { useAuthStore } from "@/store/authStore";
 
 const TYPES: AnnouncementType[] = ["Campaign", "Policy", "Meeting", "Distributor", "Training"];
+
+const TYPE_BADGE: Record<string, string> = {
+  Campaign:    "badge-blue",
+  Policy:      "badge-yellow",
+  Meeting:     "badge-green",
+  Distributor: "badge-purple",
+  Training:    "badge-gray",
+};
 
 const fetchAnnouncements = (type: string) =>
   api.get("/announcements", { params: type !== "Semua" ? { type } : {} }).then((r) => r.data);
@@ -18,6 +27,13 @@ export default function Announcements() {
   const [activeType, setActiveType] = useState<string>("Semua");
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ type: "Campaign", title: "", body: "", audience: "Semua" });
+  const modalTriggerRef = useRef<Element | null>(null);
+  const modalPanelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalPanelRef, showModal);
+  const closeModal = () => {
+    setShowModal(false);
+    setTimeout(() => { (modalTriggerRef.current as HTMLElement | null)?.focus(); }, 0);
+  };
 
   const { data: items = [], isLoading } = useQuery<Announcement[]>({
     queryKey: ["announcements", activeType],
@@ -28,7 +44,7 @@ export default function Announcements() {
 
   const createMutation = useMutation({
     mutationFn: () => api.post("/announcements", form),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["announcements"] }); setShowModal(false); setForm({ type: "Campaign", title: "", body: "", audience: "Semua" }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["announcements"] }); closeModal(); setForm({ type: "Campaign", title: "", body: "", audience: "Semua" }); },
   });
 
   return (
@@ -37,7 +53,7 @@ export default function Announcements() {
         title="Pusat Pengumuman"
         actions={
           user?.role === "ho_admin" ? (
-            <button onClick={() => setShowModal(true)} className="btn-primary text-sm">
+            <button onClick={() => { modalTriggerRef.current = document.activeElement; setShowModal(true); }} className="btn-primary text-sm">
               + Pengumuman Baru
             </button>
           ) : undefined
@@ -84,7 +100,7 @@ export default function Announcements() {
             {items.map((a) => (
               <div key={a.announcement_id} className="card">
                 <div className="flex items-start gap-3 mb-2">
-                  <span className="badge-blue shrink-0">{a.type}</span>
+                  <span className={`${TYPE_BADGE[a.type] ?? "badge-blue"} shrink-0`}>{a.type}</span>
                   <p className="text-xs text-slate-400 ml-auto shrink-0">{format(new Date(a.created_at), "d MMM yyyy")}</p>
                 </div>
                 <h3 className="font-semibold text-slate-800 mb-1">{a.title}</h3>
@@ -97,34 +113,43 @@ export default function Announcements() {
       </main>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+        >
+          <div
+            ref={modalPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ann-modal-title"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
+          >
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">Buat Pengumuman Baru</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded"><Icon name="x-mark" className="w-5 h-5" /></button>
+              <h3 id="ann-modal-title" className="font-semibold text-slate-800">Buat Pengumuman Baru</h3>
+              <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors" aria-label="Tutup"><Icon name="x-mark" className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Tipe</label>
-                <select className="input" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
+                <label htmlFor="ann-type" className="block text-sm font-medium text-slate-700 mb-1">Tipe</label>
+                <select id="ann-type" className="input" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
                   {TYPES.map((t) => <option key={t}>{t}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Judul</label>
-                <input className="input" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
+                <label htmlFor="ann-title" className="block text-sm font-medium text-slate-700 mb-1">Judul</label>
+                <input id="ann-title" className="input" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} autoFocus />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Isi</label>
-                <textarea className="input" rows={4} value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} />
+                <label htmlFor="ann-body" className="block text-sm font-medium text-slate-700 mb-1">Isi</label>
+                <textarea id="ann-body" className="input" rows={4} value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Audience</label>
-                <input className="input" value={form.audience} onChange={(e) => setForm((f) => ({ ...f, audience: e.target.value }))} />
+                <label htmlFor="ann-audience" className="block text-sm font-medium text-slate-700 mb-1">Audience</label>
+                <input id="ann-audience" className="input" value={form.audience} onChange={(e) => setForm((f) => ({ ...f, audience: e.target.value }))} />
               </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
-              <button onClick={() => setShowModal(false)} className="btn-secondary">Batal</button>
+              <button onClick={closeModal} className="btn-secondary">Batal</button>
               <button onClick={() => createMutation.mutate()} className="btn-primary" disabled={!form.title || !form.body || createMutation.isPending}>
                 {createMutation.isPending ? "Memproses..." : "Publikasikan"}
               </button>

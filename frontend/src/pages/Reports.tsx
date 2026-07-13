@@ -68,7 +68,7 @@ export default function Reports() {
 
       <div className="flex flex-1 min-h-0">
         {/* ── Sidebar report list ── */}
-        <aside className="w-52 border-r border-slate-200 bg-white p-3 space-y-1">
+        <aside className="w-52 border-r border-slate-200 bg-white p-3 space-y-1" aria-label="Daftar laporan">
           <p className="text-xs font-medium text-slate-400 px-2 py-1 uppercase tracking-wide">
             Laporan
           </p>
@@ -76,6 +76,7 @@ export default function Reports() {
             <button
               key={r}
               onClick={() => setActiveReport(r)}
+              aria-pressed={activeReport === r}
               className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                 activeReport === r
                   ? "bg-primary-50 text-primary-700 font-medium"
@@ -111,6 +112,7 @@ export default function Reports() {
                   onClick={() => setTier(t)}
                   className={`chip ${tier === t ? "chip-active" : ""}`}
                   aria-pressed={tier === t}
+                  aria-label={t === "Semua Tier" ? t : `Tier ${t}`}
                 >
                   {t}
                 </button>
@@ -121,10 +123,12 @@ export default function Reports() {
           {/* KPI row */}
           {kpis.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              {kpis.map((k: { label: string; value: string }, i: number) => (
-                <div key={i} className="kpi-tile">
-                  <p className="kpi-tile-label">{k.label}</p>
-                  <p className="kpi-tile-value">{k.value}</p>
+              {kpis.map((k: { label: string; value: string }) => (
+                <div key={k.label} className="kpi-tile">
+                  <div className="min-w-0 flex-1">
+                    <p className="kpi-tile-value">{k.value}</p>
+                    <p className="kpi-tile-label">{k.label}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -159,7 +163,7 @@ export default function Reports() {
                   </thead>
                   <tbody>
                     {rows.map((row: Record<string, unknown>, i: number) => (
-                      <tr key={i}>
+                      <tr key={String(row.salesman_sk ?? row.outlet_id ?? i)}>
                         <td className="text-slate-400 tabular-nums">{i + 1}</td>
                         {Object.entries(row)
                           .filter(([k]) => k !== "salesman_sk")

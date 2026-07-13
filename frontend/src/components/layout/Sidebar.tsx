@@ -1,13 +1,11 @@
 import { useState, useEffect } from "react";
-import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import { Icon } from "@/components/ui";
 import type { IconName } from "@/components/ui";
 import type { Notification, Role } from "@/types";
-import { api } from "@/api/client";
-
-const fetchNotifications = () => api.get("/notifications").then((r) => r.data);
+import { fetchNotifications } from "@/api/notifications";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface NavLeaf {
@@ -173,7 +171,7 @@ export default function Sidebar() {
     <aside className="w-60 min-h-screen bg-slate-900 flex flex-col shrink-0">
       {/* ── Brand ── */}
       <div className="px-5 py-5 border-b border-white/10 shrink-0">
-        <div className="flex items-center gap-3">
+        <Link to="/dashboard" className="flex items-center gap-3 rounded-lg hover:opacity-80 transition-opacity -m-1 p-1">
           <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
             <Icon name="map" className="w-4 h-4 text-white" />
           </div>
@@ -181,7 +179,7 @@ export default function Sidebar() {
             <p className="text-white font-bold text-sm leading-tight tracking-wide">STEP</p>
             <p className="text-slate-500 text-xs mt-0.5">Territory &amp; Execution</p>
           </div>
-        </div>
+        </Link>
       </div>
 
       {/* ── Navigation ── */}
@@ -197,6 +195,7 @@ export default function Sidebar() {
                 <button
                   onClick={() => toggleGroup(item.id)}
                   aria-expanded={open}
+                  aria-controls={`nav-group-${item.id}`}
                   className={`
                     w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
                     font-medium transition-all duration-150 select-none
@@ -214,7 +213,8 @@ export default function Sidebar() {
                 </button>
 
                 <div
-                  style={{ maxHeight: open ? `${visible.length * 40}px` : "0px" }}
+                  id={`nav-group-${item.id}`}
+                  style={{ maxHeight: open ? "24rem" : "0px" }}
                   className="overflow-hidden transition-[max-height] duration-200 ease-in-out"
                 >
                   <div className="mt-0.5 ml-3 pl-3 border-l border-white/10 space-y-0.5 pb-1">
@@ -231,7 +231,7 @@ export default function Sidebar() {
                            }`
                         }
                       >
-                        <span className="w-1 h-1 rounded-full bg-current opacity-60 shrink-0" />
+                        <span aria-hidden="true" className="w-1 h-1 rounded-full bg-current opacity-60 shrink-0" />
                         <span className="truncate">{child.label}</span>
                       </NavLink>
                     ))}
@@ -249,6 +249,7 @@ export default function Sidebar() {
             <NavLink
               key={item.to}
               to={item.to}
+              aria-label={badge !== null ? `${item.label}, ${badge} belum dibaca` : undefined}
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium
                  transition-all duration-150
@@ -261,7 +262,7 @@ export default function Sidebar() {
               <Icon name={item.icon} className="w-4 h-4 shrink-0" />
               <span className="flex-1 truncate">{item.label}</span>
               {badge !== null && (
-                <span className="ml-auto text-xs bg-red-500 text-white rounded-full px-1.5 min-w-[18px] text-center font-bold leading-5">
+                <span aria-hidden="true" className="ml-auto text-xs bg-red-500 text-white rounded-full px-1.5 min-w-[18px] text-center font-bold leading-5">
                   {badge > 99 ? "99+" : badge}
                 </span>
               )}
