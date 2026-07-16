@@ -741,6 +741,13 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                        _rejected_skus_2, region_list_2,
                        limited_skus_qty, __MAX_QTY_LIMIT):
     manual_reject_all = manual_reject_approval + manual_reject_no_tol
+    def _norm(s):
+        return (s.astype(str)
+                 .str.replace(r'[\xa0\u200b\ufeff]', '', regex=True)
+                 .str.replace(r'\s+', ' ', regex=True)
+                 .str.replace(r'[–—]', '-', regex=True)
+                 .str.strip()
+                 .str.upper())                      
     sim_df[qty_col] = pd.to_numeric(sim_df[qty_col], errors="coerce")
     sim_df = sim_df.dropna(subset=[qty_col])
     sim_df = sim_df[sim_df[qty_col] > 0].copy()
@@ -754,6 +761,15 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
     zero_price_skus = get_zero_price_skus()
     prog = st.progress(0)
     distributors = sim_df["Distributor"].unique().tolist()
+                           
+    valid_dist = {c.upper().strip() for c in CUSTOMER_NAMES}
+    invalid_dist = [d for d in distributors if d not in valid_dist]
+    if invalid_dist:
+        st.error(f"❌ Distributor tidak match ke master BQ: {invalid_dist}")
+        from difflib import get_close_matches
+        for d in invalid_dist:
+            near = get_close_matches(d, list(valid_dist), n=2, cutoff=0.7)
+            st.caption(f"  {d!r} → mirip: {near}")                      
 
     for di, dist_name in enumerate(distributors):
         prog.progress((di+1)/len(distributors), f"Processing {dist_name}...")
