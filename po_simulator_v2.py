@@ -944,7 +944,7 @@ PO_TEMPLATE_COLS = [
     'Stock + Suggested Qty WOI (Projection at EOM)',
     'Remaining Allocation (By Region)','RSA Notes',
 ]
-PO_IMG_COLS = [PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:14]
+PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:14]
 PO_COLS_copy = PO_TEMPLATE_COLS[:13]
 
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim):
