@@ -1882,7 +1882,8 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["is_po_sku"] == False),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
-                        result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False),
+                        (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False)
+                        & result_df["region"].astype(str).str.contains("sulawesi 1", case=False, na=False)),
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
