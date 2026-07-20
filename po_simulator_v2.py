@@ -2305,13 +2305,13 @@ with tabs[0]:
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_product_list() -> pd.DataFrame:
         try:
-            df_raw = pd.read_csv(PRODUCT_LIST_URL, header=None, nrows=10)
+            df_raw = pd.read_csv(PRODUCT_LIST_URL, header=None, nrows=10, dtype=str)
             header_row = 0
             for i, row in df_raw.iterrows():
-                row_str = ' '.join(row.astype(str).str.upper().tolist())
+                row_str = ' '.join(row.fillna('').astype(str).str.upper().tolist())
                 if any(k in row_str for k in ['PRODUCT','SKU','CODE']):
                     header_row = i; break
-            df_p = pd.read_csv(PRODUCT_LIST_URL, header=header_row)
+            df_p = pd.read_csv(PRODUCT_LIST_URL, header=header_row, dtype=str)
             df_p.columns = [str(c).strip().upper() for c in df_p.columns]
             return df_p
         except Exception as e:
