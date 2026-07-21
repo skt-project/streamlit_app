@@ -1194,12 +1194,22 @@ def _file_upload_section(page_key: str):
         start = int(left.strip()) if left.strip() else None
         end = int(right.strip()) if right.strip() else None
         return start, (end+1) if end is not None else None
+    
+    def _resolve_header_row(row_rng_str, fbytes, fname, sheet_sel):
+        """Row Range's leading integer = header row override (1-indexed).
+         Kosong / invalid → auto-detect."""
+        if row_rng_str and row_rng_str.strip():
+            start_str = row_rng_str.strip().split(":", 1)[0].strip()
+            if start_str:
+                try:
+                    h = int(start_str) - 1
+                    if h >= 0:
+                        return h, True
+                except ValueError:
+                    pass
+        return detect_header_row(fbytes, fname, sheet_name=sheet_sel), False
 
     def _apply_range(df, rng_r, rng_c):
-        if rng_r.strip():
-            try:
-                rs, re = _parse_idx(rng_r); df = df.iloc[rs:re]
-            except Exception: pass
         if rng_c.strip():
             try:
                 cs, ce = _parse_idx(rng_c); df = df.iloc[:, cs:ce]
@@ -1238,6 +1248,7 @@ def _file_upload_section(page_key: str):
     parsed = []
     for idx, (fname, fbytes) in enumerate(raw_entries):
         with st.container(border=True):
+           
             hc1, hc2 = st.columns([2,1])
             with hc1:
                 st.markdown(f"**#{idx+1} &nbsp; {fname}**")
@@ -1255,13 +1266,25 @@ def _file_upload_section(page_key: str):
                 else:
                     sheet_sel = 0
 
+           
+            row_rng_key = f"row_{page_key}_{idx}_{fname}"
+            col_rng_key = f"col_{page_key}_{idx}_{fname}"
+            row_rng_prev = st.session_state.get(row_rng_key, "")
+            hrow, hrow_overridden = _resolve_header_row(row_rng_prev, fbytes, fname, sheet_sel)
+
+           
             try:
-                df_f, hrow = _read_one(fname, fbytes, sheet_sel)
+                ext = fname.rsplit(".",1)[-1].lower()
+                if ext == "csv":
+                    df_f = pd.read_csv(io.BytesIO(fbytes), header=hrow, dtype=str, encoding_errors="replace")
+                else:
+                    engine = _excel_engine(fname)
+                    df_f = pd.read_excel(io.BytesIO(fbytes), sheet_name=sheet_sel, header=hrow, engine=engine, dtype=str)
                 df_f = df_f.loc[:, ~df_f.columns.astype(str).str.startswith('Unnamed')].dropna(how='all')
                 df_f = df_f[df_f.apply(lambda r: r.astype(str).str.strip().ne('').any(), axis=1)]
                 parse_err = None
             except Exception as e:
-                df_f, hrow, parse_err = None, "-", str(e)
+                df_f, parse_err = None, str(e)
 
             if df_f is not None:
                 df_f.columns = [str(c).strip().upper() for c in df_f.columns]
@@ -1278,6 +1301,7 @@ def _file_upload_section(page_key: str):
                     if removed:
                         st.caption(f"🗑 {removed:,} baris dibuang (QTY tidak valid — kolom **{qty_col}**)")
 
+               
                 has_dist = any("DISTRIBUTOR" in c.upper() for c in df_f.columns)
                 dc1, dc2 = st.columns([1,2])
                 with dc1:
@@ -1286,14 +1310,34 @@ def _file_upload_section(page_key: str):
                     dist_val = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
                                             key=f"dist_{page_key}_{idx}_{fname}", label_visibility="collapsed")
 
-                with st.expander(f"👁 Lihat isi · header row {hrow} · {len(df_f)} baris", expanded=False):
-                    st.dataframe(df_f.iloc[:,:6].reset_index(drop=True), use_container_width=True)
-
+               
+                auto_hrow_display = detect_header_row(fbytes, fname, sheet_name=sheet_sel) + 1
                 rc1, rc2 = st.columns(2)
                 with rc1:
-                    row_rng = st.text_input("Row Range", value="", key=f"row_{page_key}_{idx}_{fname}", placeholder="5:10")
+                    row_rng = st.text_input(
+                        f"Row Range",
+                        value="",
+                        key=row_rng_key,
+                        placeholder="0:6"
+                    )
                 with rc2:
-                    col_rng = st.text_input("Column Range", value="", key=f"col_{page_key}_{idx}_{fname}", placeholder="0:3")
+                    col_rng = st.text_input("Column Range", value="", key=col_rng_key, placeholder="0:6")
+
+                
+                df_preview = df_f.copy()
+                if col_rng.strip():
+                    try:
+                        cs, ce = _parse_idx(col_rng)
+                        df_preview = df_preview.iloc[:, cs:ce]
+                    except Exception:
+                        pass
+
+                override_note = " (manual)" if hrow_overridden else " (auto)"
+                with st.expander(
+                    f"👁 Lihat isi · header row {hrow+1}{override_note} · {len(df_preview)} baris × {df_preview.shape[1]} kolom",
+                    expanded=False
+                ):
+                    st.dataframe(df_preview.reset_index(drop=True), use_container_width=True)
 
                 parsed.append({"name":fname,"df":df_f,"row_rng":row_rng,"col_rng":col_rng,
                                 "dist_val":dist_val,"has_dist":has_dist,"error":None})
@@ -1304,7 +1348,12 @@ def _file_upload_section(page_key: str):
     ready = [p for p in parsed if p["df"] is not None]
     st.divider()
 
-    if st.button("🔎 Cek Semua File", disabled=not ready, use_container_width=True, key=f"concat_btn_{page_key}"):
+    auto_run = bool(ready) and any(
+        p["row_rng"].strip() or p["col_rng"].strip() or p["dist_val"] not in ("", "(Pilih)")
+        for p in ready
+    )
+    manual_click = st.button("🔎 Cek Semua File", disabled=not ready, use_container_width=True, key=f"concat_btn_{page_key}")
+    if ready and (manual_click or auto_run):
         frames = []
         for p in ready:
             df_tmp = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
@@ -1315,12 +1364,10 @@ def _file_upload_section(page_key: str):
                     df_tmp.insert(0, "DISTRIBUTOR", p["dist_val"])
             df_tmp["_source_file"] = p["name"]
             frames.append(df_tmp)
-
         try:
             tpl_bytes = _fetch_template_bytes(TEMPLATE_DRIVE_URL)
         except Exception:
             tpl_bytes = None
-
         seen = set(); ref_cols = []
         for f in frames:
             for c in f.columns:
@@ -1332,7 +1379,6 @@ def _file_upload_section(page_key: str):
         combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
         st.session_state[f"folder_result_{page_key}"] = {"df": combined_df, "tpl_bytes": tpl_bytes}
         st.session_state.pop(f"sim_result_{page_key}", None)
-        st.rerun()
 
     res = st.session_state.get(f"folder_result_{page_key}")
     if res is not None:
