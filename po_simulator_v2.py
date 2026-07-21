@@ -121,9 +121,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
-def get_npd_data(sku_list) -> pd.DataFrame:
-    if not sku_list:
-        return pd.DataFrame()
+def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
     query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date = '2026-06-01'"
     try:
@@ -131,6 +129,9 @@ def get_npd_data(sku_list) -> pd.DataFrame:
     except Exception as e:
         st.error(f"Error fetching NPD data: {e}")
         return pd.DataFrame()
+
+def get_npd_data(sku_list=None) -> pd.DataFrame:
+    return _get_npd_data_cached()
 
 
 @st.cache_data(ttl=21600, show_spinner="Fetching suggestions from BigQuery...")
@@ -769,7 +770,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         from difflib import get_close_matches
         for d in invalid_dist:
             near = get_close_matches(d, list(valid_dist), n=2, cutoff=0.7)
-            st.caption(f"  {d!r} → mirip: {near}")                      
+            st.caption(f"  {d!r} → mirip: {near}")   
+
+    zero_sugg_all = []                   
 
     for di, dist_name in enumerate(distributors):
         prog.progress((di+1)/len(distributors), f"Processing {dist_name}...")
@@ -931,6 +934,11 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         excel_dfs[dist_name] = res_df.copy()
 
     prog.progress(1.0, "Selesai")
+    if zero_sugg_all:
+        combined_zero = pd.concat(zero_sugg_all, ignore_index=True)
+        with st.expander(f"⚠️ {len(combined_zero)} SKU dari {combined_zero['Distributor'].nunique()} distributor memiliki Suggested PO Qty = 0", expanded=False):
+            st.dataframe(combined_zero, use_container_width=True, hide_index=True)
+            
     missing_dist = [d for d in distributors if d not in excel_dfs]
     if missing_dist:
         st.error(f"⚠️ **{len(missing_dist)} distributor TIDAK diproses** (tidak ada data SKU/Stock di BigQuery): {', '.join(missing_dist)}")
@@ -1377,8 +1385,18 @@ def _file_upload_section(page_key: str):
         frames = [f.reindex(columns=ref_cols) for f in frames]
         combined_df = pd.concat(frames, ignore_index=True)
         combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
+
+
+        try:
+            new_hash = int(pd.util.hash_pandas_object(combined_df, index=False).sum())
+        except Exception:
+            new_hash = None
+        old_hash = st.session_state.get(f"folder_hash_{page_key}")
+
         st.session_state[f"folder_result_{page_key}"] = {"df": combined_df, "tpl_bytes": tpl_bytes}
-        st.session_state.pop(f"sim_result_{page_key}", None)
+        if new_hash is None or new_hash != old_hash:
+            st.session_state[f"folder_hash_{page_key}"] = new_hash
+            st.session_state.pop(f"sim_result_{page_key}", None)
 
     res = st.session_state.get(f"folder_result_{page_key}")
     if res is not None:
