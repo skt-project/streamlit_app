@@ -123,7 +123,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
 def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
-    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date = '2026-06-01'"
+    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date between '2026-06-01' and '2026-07-01'"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -721,6 +721,8 @@ with st.sidebar:
     __REGION_LIST_1 = ["Central Sumatera","Northern Sumatera","Jakarta (Csa)","West Kalimantan","South Kalimantan","East Kalimantan"]
     __REJECTED_SKUS_2 = []
     _REGION_LIST_2 = []
+    _STOP_PO_SKU_ALLOWED_REGION = {
+    "G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA"] }
 
     st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
     st.divider()
@@ -838,6 +840,11 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 
         bp = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
         res_df = res_df[(res_df["PO Qty"] > 0) | (bp > 0)].copy()
+        
+        for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
+            allowed_up = [r.upper() for r in allowed_regions]
+            mask_stop = (res_df["Customer SKU Code"] == sku) & (~res_df["region"].str.upper().isin(allowed_up))
+            res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
 
         sugg_mask = res_df["is_po_sku"] == False
         sc_s = res_df.get("supply_control_status_gt", pd.Series([""]*len(res_df), index=res_df.index))
