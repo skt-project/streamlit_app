@@ -1607,7 +1607,7 @@ if st.session_state.get('page') == 'po_changer':
 
     if folder_res is not None:
         sim_df = folder_res["df"].copy()
-        sku_col_sim = next((c for c in sim_df.columns if c.upper() in ("SKU","PRODUCT CODE")), None)
+        sku_col_sim = next((c for c in sim_df.columns if c.upper() in ("SKU","PRODUCT CODE", "SKU CODE")), None)
         qty_col_sim = next((c for c in sim_df.columns if c.upper() in ("QTY","QUANTITY")), None)
         dist_col_sim = next((c for c in sim_df.columns if "DISTRIBUTOR" in c.upper()), None)
 
