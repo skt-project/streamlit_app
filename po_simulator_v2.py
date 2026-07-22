@@ -722,7 +722,7 @@ with st.sidebar:
     __REJECTED_SKUS_2 = []
     _REGION_LIST_2 = []
     _STOP_PO_SKU_ALLOWED_REGION = {
-    "G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA"] }
+    "G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
 
     st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
     st.divider()
