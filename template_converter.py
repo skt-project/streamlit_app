@@ -70,7 +70,7 @@ BRAND_OPTIONS = list(BRAND_PREFIXES.keys())
 
 # Distributors whose raw files require the 3M cleaning pipeline
 # (matched via case-insensitive prefix)
-M3_DISTRIBUTOR_PREFIX = "cv mitra makmur mandiri"
+M3_DISTRIBUTOR_PREFIX = "pt mitra makmur mandiri sejahtera"
 
 # Master distributor table for BQ lookups
 BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
