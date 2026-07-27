@@ -854,7 +854,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         excl = (res_df["Customer SKU Code"].isin(skus_not_found) |
                 res_df["Customer SKU Code"].isin(manual_reject_all) |
                 (ra_s < 0) |
-                sc_s.str.upper().isin(["STOP PO","DISCONTINUEDD","OOS","UNAVAILABLE"]) |
+                sc_s.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]) |
                 (res_df["Customer SKU Code"].isin(limited_skus_qty) & (bp_s > __MAX_QTY_LIMIT)) |
                 (bp_s == 0))
         if rejected_skus_1:
@@ -885,8 +885,8 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["Customer SKU Code"].isin(manual_reject_no_tol),
             (res_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False)
                         & res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
-            sc2.str.upper().isin(["STOP PO","DISCONTINUEDD","OOS","UNAVAILABLE"]),
-            ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUEDD","OOS"])),
+            sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]),
+            ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])),
             bp3 == 0,
             res_df["PO Qty"] > bp3,
             res_df["PO Qty"] < bp3,
@@ -1818,7 +1818,7 @@ if st.session_state.get('page') == 'po_spv':
                     if "product_name" in sku_data_df.columns:
                         sku_data_df.drop(columns=["product_name"], inplace=True)
 
-                    # ===== TRACK SKUs NOT FOUND IN BIGQUERY =====
+                    #TRACK SKUs NOT FOUND IN BIGQUERY
                     skus_in_sku_df = set(sku_df["Customer SKU Code"].tolist()) if not sku_df.empty else set()
                     skus_in_stock_df = set(sku_data_df["Customer SKU Code"].tolist()) if not sku_data_df.empty else set()
                     skus_not_in_bq = set(sku_list) - (skus_in_sku_df | skus_in_stock_df)
@@ -1955,7 +1955,7 @@ if st.session_state.get('page') == 'po_spv':
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
                         (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False)
-                        & result_df["region"].astype(str).str.lower().contains("sulawesi 1", case=False, na=False)),
+                        & result_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
                         (
                             (result_df["avg_weekly_st_lm_qty"] == 0) &
