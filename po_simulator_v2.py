@@ -1060,7 +1060,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     for col_ui, df_cat, title, label, icon in [
         (cat1, stop_df, "Product Stop PO", "product_stop_po", "🚫"),
         (cat2, steve_df, "Reject by Steve", "reject_by_steve", "❌"),
-        (cat3, approval_df, "Products Need Approval", "products_need_approval", "⚠️"),
+        (cat3, approval_df, "Reject Status", "products_need_approval", "⚠️"),
     ]:
         with col_ui:
             st.markdown(f"""<div class="metric-card" style="text-align:center;"><div style="font-size:1.6rem;">{icon}</div><div style="font-weight:700;color:#CA6180;">{title}</div></div>""", unsafe_allow_html=True)
