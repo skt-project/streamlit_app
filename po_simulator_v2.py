@@ -123,7 +123,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
 def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
-    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date between '2026-06-01' and '2026-07-01'"
+    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date = '2026-07-01'"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
