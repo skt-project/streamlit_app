@@ -723,6 +723,8 @@ with st.sidebar:
     _REGION_LIST_2 = []
     _STOP_PO_SKU_ALLOWED_REGION = {
     "G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
+    STOP_PO_BB= ["BSR112002", "BSR111002", "BSR111001", "BSR112001","BXS001001", "BXS002001"]
+    
 
     st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
     st.divider()
@@ -844,6 +846,11 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
             allowed_up = [r.upper() for r in allowed_regions]
             mask_stop = (res_df["Customer SKU Code"] == sku) & (~res_df["region"].str.upper().isin(allowed_up))
+            res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+
+
+        for sku in STOP_PO_BB.items():
+            mask_stop = (~res_df["Customer SKU Code"] == sku) & (res_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False))
             res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
 
         sugg_mask = res_df["is_po_sku"] == False
