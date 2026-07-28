@@ -848,7 +848,13 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             mask_stop = (res_df["Customer SKU Code"] == sku) & (~res_df["region"].str.upper().isin(allowed_up))
             res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
 
-        mask_stop = (res_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False) & ~res_df["Customer SKU Code"].isin(STOP_PO_BB))
+        STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
+
+        sku_norm = res_df["Customer SKU Code"].astype(str).str.strip().str.upper()
+        is_bodibreze = res_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
+        is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
+
+        mask_stop = is_bodibreze & ~is_in_allowlist
         res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
 
         sugg_mask = res_df["is_po_sku"] == False
