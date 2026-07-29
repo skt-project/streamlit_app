@@ -847,7 +847,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
             allowed_up = [r.upper() for r in allowed_regions]
             mask_stop = (res_df["Customer SKU Code"] == sku) & (~res_df["region"].str.upper().isin(allowed_up))
-            res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+            res_df.loc[mask_stop, "supply_control_status_gt"] = "Stop PO"
 #STOP PO BB-------------------------------
         STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
         sku_norm = res_df["Customer SKU Code"].astype(str).str.strip().str.upper()
