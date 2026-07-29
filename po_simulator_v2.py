@@ -1968,7 +1968,7 @@ if st.session_state.get('page') == 'po_spv':
                     is_bodibreze = result_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
                     is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
                     mask_stop = is_bodibreze & ~is_in_allowlist
-                    result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+                    result_df.loc[mask_stop, "supply_control_status_gt"] = "Stop PO"
                     ##-------------------------------
 
                     conditions = [
