@@ -1125,31 +1125,20 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     use_container_width=True, hide_index=True
                 )
             with pc2:
-                total_sku = grouped["Jumlah SKU"].sum()
-                with st.expander(f"📋 Copy SKU per Remark ({total_sku} SKU total)", expanded=False):
-                    all_lines = []
-                    for _, row in grouped.iterrows():
-                        all_lines.append(f"-- {row['Remark']}")
-                        all_lines.extend(row["SKU"])
-                        all_lines.append("")
-                    st.code("\n".join(all_lines), language=None)
-
-            # ── Per Distributor breakdown ──
-            grouped_dist = (
-                combined.groupby(["Distributor", "Remark"])["SKU"]
-                .apply(lambda s: sorted(set(s)))
-                .reset_index()
-            )
-            grouped_dist["Jumlah SKU"] = grouped_dist["SKU"].apply(len)
-
-            with st.expander(f"📦 Copy SKU per Distributor ({total_sku} SKU total)", expanded=False):
-                for dist_name, dist_grp in grouped_dist.groupby("Distributor"):
-                    dist_lines = [f"=== {dist_name} ==="]
-                    for _, row in dist_grp.iterrows():
-                        dist_lines.append(f"-- {row['Remark']} ({row['Jumlah SKU']} SKU)")
-                        dist_lines.extend(row["SKU"])
-                        dist_lines.append("")
-                    st.code("\n".join(dist_lines), language=None)
+                total_sku = grouped["Jumlah SKU"].sum()  # ← TAMBAH INI
+                grouped_dist = (
+                    combined.groupby(["Distributor", "Remark"])["SKU"]
+                    .apply(lambda s: sorted(set(s)))
+                    .reset_index())
+                grouped_dist["Jumlah SKU"] = grouped_dist["SKU"].apply(len)
+                with st.expander(f"📦 Copy SKU per Distributor ({total_sku} SKU total)", expanded=False):
+                    for dist_name, dist_grp in grouped_dist.groupby("Distributor"):
+                        dist_lines = [f"=== {dist_name} ==="]
+                        for _, row in dist_grp.iterrows():
+                            dist_lines.append(f"-- {row['Remark']} ({row['Jumlah SKU']} SKU)") 
+                            dist_lines.extend(row["SKU"])  
+                            dist_lines.append("")  
+                        st.code("\n".join(dist_lines), language=None)
                     
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+3}</span><strong>Summary PO</strong></div>""", unsafe_allow_html=True)
     summary_df = final_disp.copy()
