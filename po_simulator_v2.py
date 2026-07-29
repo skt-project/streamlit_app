@@ -848,16 +848,15 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             allowed_up = [r.upper() for r in allowed_regions]
             mask_stop = (res_df["Customer SKU Code"] == sku) & (~res_df["region"].str.upper().isin(allowed_up))
             res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
-
+#STOP PO BB-------------------------------
         STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
-
         sku_norm = res_df["Customer SKU Code"].astype(str).str.strip().str.upper()
         is_bodibreze = res_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
         is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
 
         mask_stop = is_bodibreze & ~is_in_allowlist
         res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
-
+##-------------------------------
         sugg_mask = res_df["is_po_sku"] == False
         sc_s = res_df.get("supply_control_status_gt", pd.Series([""]*len(res_df), index=res_df.index))
         ra_s = res_df.get("remaining_allocation_qty_region", pd.Series([0]*len(res_df), index=res_df.index))
@@ -895,7 +894,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["is_po_sku"] == False,
             res_df["Customer SKU Code"].isin(manual_reject_approval),
             res_df["Customer SKU Code"].isin(manual_reject_no_tol),
-            (res_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False)
+            (res_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False) & ~res_df["Customer SKU Code"].isin(FLUSH_OUT)
                         & res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
             sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]),
             ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])),
@@ -1157,7 +1156,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         sul1_mask_s = grp_po["Remark"].str.strip().str.lower() == "reject (sulawesi 1 only)"
         sul1_grp = grp_po[sul1_mask_s]
         total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum() + sul1_grp["PO Value"].sum()
-        total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum()
+        #total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum()
         grand_total_po = grp_po["PO Value"].sum()
         grand_total_after = grand_total_po - total_reduction
 
@@ -1966,7 +1965,19 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["is_po_sku"] == False),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
-                        (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False)
+                        for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
+                            allowed_up = [r.upper() for r in allowed_regions]
+                            mask_stop = (result_df["Customer SKU Code"] == sku) & (~result_df["region"].str.upper().isin(allowed_up))
+                            result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+#STOP PO BB-------------------------------
+                        STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
+                        sku_norm = result_df["Customer SKU Code"].astype(str).str.strip().str.upper()
+                        is_bodibreze = result_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
+                        is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
+                        mask_stop = is_bodibreze & ~is_in_allowlist
+                        result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+##-------------------------------
+                        (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False)& ~result_df["Customer SKU Code"].isin(FLUSH_OUT)
                         & result_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
                         (
