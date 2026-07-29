@@ -1087,14 +1087,14 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     pairs = []
     if "SKU" in stop_df.columns and "Supply Control" in stop_df.columns:
         pairs.append(
-            stop_df[["SKU", "Supply Control"]]
+            stop_df[["Distributor", "SKU", "Supply Control"]]
             .rename(columns={"Supply Control": "Remark"})
         )
     if "SKU" in steve_df.columns and "Remark" in steve_df.columns:
-        pairs.append(steve_df[["SKU", "Remark"]])
+        pairs.append(steve_df[["Distributor", "SKU", "Remark"]])
 
     if "SKU" in sul1_df.columns and "Remark" in sul1_df.columns:
-        pairs.append(sul1_df[["SKU", "Remark"]])
+        pairs.append(sul1_df[["Distributor", "SKU", "Remark"]])
 
     if not pairs:
         st.info("Tidak ada product code yang perlu dihapus.")
@@ -1102,6 +1102,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         combined = pd.concat(pairs, ignore_index=True)
         combined["SKU"] = combined["SKU"].astype(str).str.strip()
         combined["Remark"] = combined["Remark"].astype(str).str.strip().str.upper()
+        combined["Distributor"] = combined["Distributor"].astype(str).str.strip()
         combined = combined[
             combined["SKU"].ne("") & combined["Remark"].ne("")
         ].drop_duplicates()
@@ -1130,9 +1131,26 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     for _, row in grouped.iterrows():
                         all_lines.append(f"-- {row['Remark']}")
                         all_lines.extend(row["SKU"])
-                        all_lines.append("") 
+                        all_lines.append("")
                     st.code("\n".join(all_lines), language=None)
 
+            # ── Per Distributor breakdown ──
+            grouped_dist = (
+                combined.groupby(["Distributor", "Remark"])["SKU"]
+                .apply(lambda s: sorted(set(s)))
+                .reset_index()
+            )
+            grouped_dist["Jumlah SKU"] = grouped_dist["SKU"].apply(len)
+
+            with st.expander(f"📦 Copy SKU per Distributor ({total_sku} SKU total)", expanded=False):
+                for dist_name, dist_grp in grouped_dist.groupby("Distributor"):
+                    dist_lines = [f"=== {dist_name} ==="]
+                    for _, row in dist_grp.iterrows():
+                        dist_lines.append(f"-- {row['Remark']} ({row['Jumlah SKU']} SKU)")
+                        dist_lines.extend(row["SKU"])
+                        dist_lines.append("")
+                    st.code("\n".join(dist_lines), language=None)
+                    
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+3}</span><strong>Summary PO</strong></div>""", unsafe_allow_html=True)
     summary_df = final_disp.copy()
     summary_df["PO Value"] = pd.to_numeric(summary_df["PO Value"], errors="coerce").fillna(0)
