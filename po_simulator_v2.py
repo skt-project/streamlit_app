@@ -1154,7 +1154,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                         grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False))
         steve_grp = grp_po[steve_mask_s]
         #sul1_mask_s = grp_po["Remark"].str.strip().str.lower() == "reject (sulawesi 1 only)"
-        sul1_mask_s = grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi 1 only", na=False)
+        #sul1_mask_s = grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi 1 only", na=False)
+        sul1_mask_s = (grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi 1 only", na=False) & ~stop_mask_s)
         sul1_grp = grp_po[sul1_mask_s]
         total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum() + sul1_grp["PO Value"].sum()
         #total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum()
