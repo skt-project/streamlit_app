@@ -725,8 +725,8 @@ with st.sidebar:
     _STOP_PO_SKU_ALLOWED_REGION = {
     "G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
     STOP_PO_BB= ["BSR112002", "BSR111002", "BSR111001", "BSR112001","BXS001001", "BXS002001"]
-    
-
+    FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
+  #OR sku LIKE "%G2G-2970%
     st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
     st.divider()
 
@@ -1067,7 +1067,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     for col_ui, df_cat, title, label, icon in [
         (cat1, stop_df, "Product Stop PO", "product_stop_po", "🚫"),
         (cat2, steve_df, "Reject by Steve", "reject_by_steve", "❌"),
-        (cat3, approval_df, "Reject Status", "products_need_approval", "⚠️"),
+        (cat3, approval_df, "Product Reject", "product_reject", "⚠️"),
     ]:
         with col_ui:
             st.markdown(f"""<div class="metric-card" style="text-align:center;"><div style="font-size:1.6rem;">{icon}</div><div style="font-weight:700;color:#CA6180;">{title}</div></div>""", unsafe_allow_html=True)
