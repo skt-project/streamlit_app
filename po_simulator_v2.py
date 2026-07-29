@@ -1101,7 +1101,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     else:
         combined = pd.concat(pairs, ignore_index=True)
         combined["SKU"] = combined["SKU"].astype(str).str.strip()
-        combined["Remark"] = combined["Remark"].astype(str).str.strip()
+        combined["Remark"] = combined["Remark"].astype(str).str.strip().str.upper()
         combined = combined[
             combined["SKU"].ne("") & combined["Remark"].ne("")
         ].drop_duplicates()
