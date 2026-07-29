@@ -1956,6 +1956,18 @@ if st.session_state.get('page') == 'po_spv':
                         0,
                         result_df["avg_weekly_st_lm_qty"],
                     )
+                    for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
+                            allowed_up = [r.upper() for r in allowed_regions]
+                            mask_stop = (result_df["Customer SKU Code"] == sku) & (~result_df["region"].str.upper().isin(allowed_up))
+                            result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+                    #STOP PO BB-------------------------------
+                    STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
+                    sku_norm = result_df["Customer SKU Code"].astype(str).str.strip().str.upper()
+                    is_bodibreze = result_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
+                    is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
+                    mask_stop = is_bodibreze & ~is_in_allowlist
+                    result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+                    ##-------------------------------
 
                     conditions = [
                         result_df["Customer SKU Code"].isin(zero_price_skus),
@@ -1965,18 +1977,7 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["is_po_sku"] == False),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
-                        for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
-                            allowed_up = [r.upper() for r in allowed_regions]
-                            mask_stop = (result_df["Customer SKU Code"] == sku) & (~result_df["region"].str.upper().isin(allowed_up))
-                            result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
-#STOP PO BB-------------------------------
-                        STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
-                        sku_norm = result_df["Customer SKU Code"].astype(str).str.strip().str.upper()
-                        is_bodibreze = result_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
-                        is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
-                        mask_stop = is_bodibreze & ~is_in_allowlist
-                        result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
-##-------------------------------
+                        
                         (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False)& ~result_df["Customer SKU Code"].isin(FLUSH_OUT)
                         & result_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
                         (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
