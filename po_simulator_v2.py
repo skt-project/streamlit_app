@@ -1162,7 +1162,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         grand_total_po = grp_po["PO Value"].sum()
         grand_total_after = grand_total_po - total_reduction
 
-        stop_cats = (stop_grp["Supply Control"].dropna().astype(str).str.strip().str.title().replace({"Stop Po":"Stop PO","Oos":"OOS"}).unique().tolist())
+        stop_cats = (stop_grp["Supply Control"].dropna().astype(str).str.strip().str.title().replace({"Stop Po":"STOP PO","Oos":"OOS"}).unique().tolist())
         stop_cats = [c for c in stop_cats if c]
         stop_label = ", ".join(stop_cats) if stop_cats else "Discontinued / Stop PO"
         steve_cats = []
