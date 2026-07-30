@@ -894,8 +894,8 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["is_po_sku"] == False,
             #sulawesi 1 only
             (res_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False) & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) &
-             (res_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) | res_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL))
-                        & res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
+            # (res_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) | res_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
+            res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
             #end
             res_df["Customer SKU Code"].isin(manual_reject_approval),
             res_df["Customer SKU Code"].isin(manual_reject_no_tol),
@@ -1989,8 +1989,8 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["remaining_allocation_qty_region"] < 0),
                         (result_df["is_po_sku"] == False),
                         #sulawesi 1 only
-                        (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False) 
-                         & (result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
+                        (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False) & 
+                         #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
                          ~result_df["Customer SKU Code"].isin(FLUSH_OUT)
                         & result_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
                         #end
