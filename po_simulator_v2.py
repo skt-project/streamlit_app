@@ -2390,14 +2390,27 @@ with tabs[0]:
             st.markdown("**RSA NAME**")
             rsa_pilih = st.selectbox("", options=["(Pilih)"] + RSA, key="rsa", label_visibility="collapsed")
 
-    if pilih == "(Pilih)":
-        st.info("Silakan pilih Distributor terlebih dahulu.")
-        st.stop()
+    distributor_selected = pilih != "(Pilih)"
 
-    if 'DISTRIBUTOR' not in df.columns:
-        df['DISTRIBUTOR'] = pilih
+    if distributor_selected:
+        if 'DISTRIBUTOR' not in df.columns:
+            df['DISTRIBUTOR'] = pilih
+        else:
+            df['DISTRIBUTOR'] = df['DISTRIBUTOR'].fillna(pilih)
     else:
-        df['DISTRIBUTOR'] = df['DISTRIBUTOR'].fillna(pilih)
+        st.caption("ℹ️ Optional")
+        if 'DISTRIBUTOR' not in df.columns:
+            df['DISTRIBUTOR'] = ""
+        else:
+            df['DISTRIBUTOR'] = df['DISTRIBUTOR'].fillna("")
+
+    
+    if distributor_selected:
+        distributor_label = pilih
+    else:
+        _dist_vals = df['DISTRIBUTOR'].dropna().astype(str).str.strip()
+        _dist_vals = _dist_vals[_dist_vals != ""]
+        distributor_label = _dist_vals.iloc[0] if not _dist_vals.empty else "Unnamed Distributor"
 
     df['QTY'] = pd.to_numeric(df['QTY'], errors='coerce').fillna(0)
     df['DPP'] = pd.to_numeric(df['DPP'].astype(str).str.replace(',','.'), errors='coerce').fillna(0)
