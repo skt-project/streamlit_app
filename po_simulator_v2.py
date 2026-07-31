@@ -2419,7 +2419,13 @@ with tabs[0]:
                 df['DISTRIBUTOR'] = ""
 
     df['QTY'] = pd.to_numeric(df['QTY'], errors='coerce').fillna(0)
-    df['DPP'] = pd.to_numeric(df['DPP'].astype(str).str.replace(',','.'), errors='coerce').fillna(0)
+    df['DPP'] = (
+    df['DPP'].astype(str)
+    .str.replace(r'[^\d,.-]', '', regex=True)
+    .str.replace('.', '', regex=False)
+    .str.replace(',', '.', regex=False)
+    .pipe(pd.to_numeric, errors='coerce')
+    .fillna(0))
     df['TOTAL PRICE'] = df['QTY'] * df['DPP']
 
     discount = 0
