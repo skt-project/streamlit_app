@@ -2507,23 +2507,6 @@ with tabs[0]:
         ws = wb.active
         if ws.max_row > 200: ws.delete_rows(201, ws.max_row - 200)
         if ws.max_column > 7: ws.delete_cols(8, ws.max_column - 7)
-        
-        from openpyxl.worksheet.page import PageMargins
-        ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT  # ganti LANDSCAPE kalau mau
-        ws.page_setup.paperSize = ws.PAPERSIZE_A4
-        ws.page_setup.fitToWidth = 1
-        ws.page_setup.fitToHeight = 0  # 0 = unlimited height, biar gak dipaksa 1 halaman vertikal
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-        ws.print_options.horizontalCentered = True
-        ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.2, footer=0.2)
-        
-        
-        ws.print_area = f'A1:F{sig_row + 1}'
-        ws.print_title_rows = f'{header_row_idx}:{header_row_idx}' 
-        
-        col_widths = {'A': 22, 'B': 15, 'C': 45, 'D': 8, 'E': 10, 'F': 15}
-        for col_letter, width in col_widths.items():
-            ws.column_dimensions[col_letter].width = width
         buf = io.BytesIO(); wb.save(buf)
         return buf.getvalue()
 
@@ -2591,6 +2574,21 @@ with tabs[0]:
         ws.cell(row=sig_row, column=6, value="APPROVE").font = _black_font
         ws.cell(row=sig_row+1, column=2, value="(mandatory sign)").font = _red_font
         ws.cell(row=sig_row+1, column=6, value="(SIGN/CAP DISTRIBUTOR)").font = _red_font
+
+        from openpyxl.worksheet.page import PageMargins
+        ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.print_options.horizontalCentered = True
+        ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.2, footer=0.2)
+        ws.print_area = f'A1:F{sig_row + 1}'
+        ws.print_title_rows = f'{header_row_idx}:{header_row_idx}'
+        col_widths = {'A': 22, 'B': 15, 'C': 45, 'D': 8, 'E': 10, 'F': 15}
+        for col_letter, width in col_widths.items():
+            ws.column_dimensions[col_letter].width = width
+
         buf = io.BytesIO(); wb.save(buf)
         return buf.getvalue()
 
