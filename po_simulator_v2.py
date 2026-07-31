@@ -4,8 +4,6 @@ from datetime import datetime
 import io
 import zipfile
 import math
-import subprocess
-import tempfile
 import re
 import base64
 import urllib.request
@@ -18,10 +16,19 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 from google.cloud import bigquery
 from google.oauth2 import service_account
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 import os
 
 BASE_DIR = os.path.dirname(__file__)
 
+pdfmetrics.registerFont(TTFont('Trebuchet', os.path.join(BASE_DIR, 'trebuc.ttf')))
+pdfmetrics.registerFont(TTFont('Trebuchet-Bold', os.path.join(BASE_DIR, 'trebucbd.ttf')))
 
 try:
     import matplotlib
@@ -313,38 +320,7 @@ def _sanitize_xlsx_bytes(xlsx_bytes: bytes) -> bytes:
         return _dst.getvalue()
     except Exception:
         return xlsx_bytes
-def xlsx_to_pdf_libreoffice(xlsx_bytes: bytes, timeout: int = 120) -> bytes:
-    """Convert xlsx bytes → pdf bytes pakai LibreOffice headless."""
-    # cari binary LibreOffice
-    soffice = None
-    for cand in ["libreoffice", "soffice", "/usr/bin/libreoffice", "/usr/bin/soffice"]:
-        try:
-            subprocess.run([cand, "--version"], capture_output=True, check=True, timeout=10)
-            soffice = cand
-            break
-        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            continue
-    if soffice is None:
-        raise RuntimeError("LibreOffice tidak ditemukan. Cek packages.txt.")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        xlsx_path = os.path.join(tmpdir, "po.xlsx")
-        with open(xlsx_path, "wb") as f:
-            f.write(xlsx_bytes)
-
-        result = subprocess.run(
-            [soffice, "--headless", "--nologo", "--nofirststartwizard",
-             "--convert-to", "pdf", "--outdir", tmpdir, xlsx_path],
-            capture_output=True, timeout=timeout,
-            env={**os.environ, "HOME": tmpdir},  # hindari lock file issue di Streamlit Cloud
-        )
-        pdf_path = os.path.join(tmpdir, "po.pdf")
-        if not os.path.exists(pdf_path):
-            err = result.stderr.decode(errors="ignore")[:500]
-            raise RuntimeError(f"Convert gagal: {err}")
-        with open(pdf_path, "rb") as f:
-            return f.read()
-        
 
 def _excel_engine(fname: str) -> str:
     if fname.lower().endswith('.xls'):
@@ -2510,7 +2486,7 @@ with tabs[0]:
         buf = io.BytesIO(); wb.save(buf)
         return buf.getvalue()
 
-    def export_to_template(df_data, template_bytes, distributor, rsa_name, discount, use_formula=True):
+    def export_to_template(df_data, template_bytes, distributor, rsa_name, discount):
         wb = openpyxl.load_workbook(io.BytesIO(template_bytes), data_only=False, keep_links=False)
         ws = wb.active
         ws['B3'] = distributor
@@ -2518,20 +2494,6 @@ with tabs[0]:
         ws['E5'] = rsa_name
         COL_MAP = {'DISTRIBUTOR':1,'PRODUCT CODE':2,'DESCRIPTION':3,'QTY':4,'DPP':5,'TOTAL PRICE':6}
         START_ROW = 10
-
-        arial_font = Font(name='Arial', size=9)
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.font = Font(name='Arial', size=cell.font.size or 9, bold=cell.font.bold, color=cell.font.color)
-        header_row_idx = START_ROW - 1 
-        yellow_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        for c in range(1, 7):
-            hc = ws.cell(row=header_row_idx, column=c)
-            hc.fill = yellow_fill
-            hc.font = Font(name='Arial', size=9, bold=True, color="000000")
-            
-        for r in range(START_ROW, START_ROW + 300):
-            ws.row_dimensions[r].height = 14  # default biasanya ~20
         CLEAR_UNTIL_ROW = ws.max_row + 5
         for r in range(START_ROW, CLEAR_UNTIL_ROW + 1):
             for c in range(1, 7):
@@ -2540,19 +2502,9 @@ with tabs[0]:
         df_export = df_data[df_data['PRODUCT CODE'].notna() & ~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
         for r_offset, (_, row) in enumerate(df_export.iterrows()):
             excel_row = START_ROW + r_offset
-            
-            qty_val = pd.to_numeric(row.get('QTY', 0), errors='coerce')
-            qty_val = 0 if pd.isna(qty_val) else float(qty_val)
-            dpp_val = pd.to_numeric(row.get('DPP', 0), errors='coerce')
-            dpp_val = 0 if pd.isna(dpp_val) else float(dpp_val)
-            
             for col_name, col_idx in COL_MAP.items():
                 if col_name == 'TOTAL PRICE':
-                    if use_formula:
-                        cell = ws.cell(row=excel_row, column=col_idx, value=f"=D{excel_row}*E{excel_row}")
-                    else:
-                        cell = ws.cell(row=excel_row, column=col_idx, value=qty_val * dpp_val)
-                    cell.number_format = '#,##0.00'
+                    ws.cell(row=excel_row, column=col_idx).value = f"=D{excel_row}*E{excel_row}"
                 else:
                     val = row.get(col_name, "")
                     if pd.isna(val) or str(val).strip() in ('','nan','None'): val = None
@@ -2560,32 +2512,14 @@ with tabs[0]:
         last_data_row = START_ROW + len(df_export) - 1
         summary_start = last_data_row + 2
         sub_row, disc_row, tax_row, grand_row = summary_start, summary_start+1, summary_start+2, summary_start+3
-        if use_formula:
-            for row_idx, label, formula in [
-                (sub_row, "SUB-TOTAL", f"=SUM(F{START_ROW}:F{last_data_row})"),
-                (disc_row, "DISCOUNTS", "=0"),
-                (tax_row, "Tax (11%)", f"=F{sub_row}*0.11"),
-                (grand_row, "GRAND TOTAL", f"=F{sub_row}-F{disc_row}+F{tax_row}"),
-            ]:
-                ws.cell(row=row_idx, column=4, value=label)
-                cell = ws.cell(row=row_idx, column=6, value=formula)
-                cell.number_format = '#,##0.00'
-        else:
-            # Hitung statis di Python
-            sub_total_val = float((df_export['QTY'].apply(pd.to_numeric, errors='coerce').fillna(0) * 
-                                   df_export['DPP'].apply(pd.to_numeric, errors='coerce').fillna(0)).sum())
-            discount_val = float(discount) if discount else 0.0
-            tax_val = sub_total_val * 0.11
-            grand_total_val = sub_total_val - discount_val + tax_val
-            for row_idx, label, value in [
-                (sub_row, "SUB-TOTAL", sub_total_val),
-                (disc_row, "DISCOUNTS", discount_val),
-                (tax_row, "Tax (11%)", tax_val),
-                (grand_row, "GRAND TOTAL", grand_total_val),
-            ]:
-                ws.cell(row=row_idx, column=4, value=label)
-                cell = ws.cell(row=row_idx, column=6, value=value)
-                cell.number_format = '#,##0.00'
+        for row_idx, label, formula in [
+            (sub_row, "SUB-TOTAL", f"=SUM(F{START_ROW}:F{last_data_row})"),
+            (disc_row, "DISCOUNTS", "=0"),
+            (tax_row, "Tax (11%)", f"=F{sub_row}*0.11"),
+            (grand_row, "GRAND TOTAL", f"=F{sub_row}-F{disc_row}+F{tax_row}"),
+        ]:
+            ws.cell(row=row_idx, column=4, value=label)
+            ws.cell(row=row_idx, column=6, value=formula)
         try:
             wb.calculation.fullCalcOnLoad = True; wb.calculation.calcMode = 'auto'
         except Exception: pass
@@ -2602,22 +2536,67 @@ with tabs[0]:
         ws.cell(row=sig_row, column=6, value="APPROVE").font = _black_font
         ws.cell(row=sig_row+1, column=2, value="(mandatory sign)").font = _red_font
         ws.cell(row=sig_row+1, column=6, value="(SIGN/CAP DISTRIBUTOR)").font = _red_font
-
-        from openpyxl.worksheet.page import PageMargins
-        ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
-        ws.page_setup.paperSize = ws.PAPERSIZE_A4
-        ws.page_setup.fitToWidth = 1
-        ws.page_setup.fitToHeight = 0
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-        ws.print_options.horizontalCentered = True
-        ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.2, footer=0.2)
-        ws.print_area = f'A1:F{sig_row + 1}'
-        ws.print_title_rows = f'{header_row_idx}:{header_row_idx}'
-        col_widths = {'A': 22, 'B': 15, 'C': 45, 'D': 8, 'E': 10, 'F': 15}
-        for col_letter, width in col_widths.items():
-            ws.column_dimensions[col_letter].width = width
-
         buf = io.BytesIO(); wb.save(buf)
+        return buf.getvalue()
+
+    def excel_to_pdf(df_data, distributor, rsa_name, sub_total, tax, grand_total, discount=0):
+        df_clean = df_data[df_data['PRODUCT CODE'].notna()].copy()
+        df_clean['TOTAL PRICE'] = pd.to_numeric(
+            df_clean['TOTAL PRICE'].astype(str).str.replace('.','').str.replace(',','.'), errors='coerce').fillna(0)
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+        elements = []
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('Title', parent=styles['Title'], fontName='Trebuchet-Bold',
+                                      fontSize=12, textColor=colors.HexColor("#B53473"), alignment=1, spaceAfter=12)
+        elements.append(Paragraph("PURCHASE ORDER", title_style))
+        info_data = [['Distributor:', distributor, 'Date:', datetime.now().strftime("%d %B %Y")], ['RSA:', rsa_name, '', '']]
+        info_tbl = Table(info_data, colWidths=[20*mm, 85*mm, 20*mm, 50*mm])
+        info_tbl.setStyle(TableStyle([
+            ('FONTNAME',(0,0),(-1,-1),'Trebuchet'), ('FONTSIZE',(0,0),(-1,-1),10),
+            ('FONTNAME',(0,0),(0,-1),'Trebuchet-Bold'), ('FONTNAME',(2,0),(2,-1),'Trebuchet-Bold'),
+            ('BOTTOMPADDING',(0,0),(-1,-1),6),
+        ]))
+        elements.append(info_tbl)
+        elements.append(Spacer(1, 8*mm))
+        header = ['No','PRODUCT CODE','DESCRIPTION','QTY','DPP','TOTAL PRICE']
+        data = [header]
+        for i, (_, row) in enumerate(df_clean.iterrows(), start=1):
+            qty = row.get('QTY',''); dpp = row.get('DPP',''); total = row.get('TOTAL PRICE',0)
+            data.append([str(i), str(row.get('PRODUCT CODE','')), str(row.get('DESCRIPTION',''))[:40],
+                         f"{qty}" if pd.notna(qty) else "",
+                         f"{dpp:,.0f}" if isinstance(dpp,(int,float)) else str(dpp),
+                         f"{total:,.0f}" if isinstance(total,(int,float)) else str(total)])
+        data += [['','','','','SUB-TOTAL', f"{sub_total:,.0f}"],
+                 ['','','','','DISCOUNTS', f"-{discount:,.0f}"],
+                 ['','','','','Tax (11%)', f"{tax:,.0f}"],
+                 ['','','','','GRAND TOTAL', f"{grand_total:,.0f}"]]
+        tbl = Table(data, colWidths=[10*mm,25*mm,70*mm,20*mm,20*mm,30*mm])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#BF3979')),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.white), ('FONTSIZE',(0,0),(-1,0),7),
+            ('ALIGN',(0,0),(-1,0),'CENTER'), ('FONTNAME',(0,1),(-1,-5),'Trebuchet'),
+            ('FONTSIZE',(0,1),(-1,-1),6), ('ALIGN',(3,1),(-1,-1),'RIGHT'),
+            ('GRID',(0,0),(-1,-5),0.4,colors.HexColor('#FFB6C1')),
+            ('FONTNAME',(4,-4),(-1,-1),'Trebuchet-Bold'),
+            ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#FFB6C1')),
+            ('BOTTOMPADDING',(0,0),(-1,-1),4), ('TOPPADDING',(0,0),(-1,-1),4),
+            ('ROWBACKGROUNDS',(0,1),(-1,-5),[colors.white,colors.HexColor('#FAFAFA')]),
+        ]))
+        elements.append(tbl)
+        elements.append(Spacer(1, 15*mm))
+        sig_data = [['Initiated by,', f'ASM Approval, ({distributor})', '', 'APPROVE'],
+                    ['', '(mandatory sign)', '', '(SIGN/CAP DISTRIBUTOR)']]
+        sig_tbl = Table(sig_data, colWidths=[25*mm,70*mm,20*mm,60*mm])
+        sig_tbl.setStyle(TableStyle([
+            ('FONTNAME',(0,0),(-1,-1),'Trebuchet-Bold'), ('FONTSIZE',(0,0),(-1,0),9),
+            ('TEXTCOLOR',(1,0),(1,0),colors.HexColor('#006400')),
+            ('BOX',(1,0),(1,0),0.8,colors.HexColor('#006400')),
+            ('TEXTCOLOR',(1,1),(1,1),colors.HexColor('#C00000')),
+            ('TEXTCOLOR',(3,1),(3,1),colors.HexColor('#C00000')),
+        ]))
+        elements.append(sig_tbl)
+        doc.build(elements)
         return buf.getvalue()
 
     if st.button("🔄 Generate", use_container_width=True):
@@ -2626,18 +2605,13 @@ with tabs[0]:
             st.stop()
         with st.spinner("Prepare file..."):
             try:
-                fetch_template_xlsx.clear()
+                fetch_template_xlsx.clear()  # <-- paksa fetch ulang, jangan pakai cache lama
                 tpl_bytes = fetch_template_xlsx(st.session_state['gsheet_url'])
-                # Versi Excel: pakai formula (biar live update)
-                export_bytes_excel = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount, use_formula=True)
-                # Versi PDF: nilai statis (biar angka muncul di PDF)
-                export_bytes_pdf = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount, use_formula=False)
-                st.session_state['export_bytes'] = export_bytes_excel
-                st.session_state['export_bytes_pdf'] = export_bytes_pdf
+                export_bytes = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount)
+                st.session_state['export_bytes'] = export_bytes
             except Exception as e:
                 st.error(f"Gagal generate file: {e}")
                 st.session_state.pop('export_bytes', None)
-                st.session_state.pop('export_bytes_pdf', None)
 
     if 'export_bytes' in st.session_state:
         prog = st.progress(0)
@@ -2654,15 +2628,9 @@ with tabs[0]:
                                 use_container_width=True, key="dl_excel")
         with dl_col2:
             try:
-             
-                pdf_source = st.session_state.get('export_bytes_pdf', st.session_state['export_bytes'])
-                pdf_bytes = xlsx_to_pdf_libreoffice(pdf_source)
-                st.download_button(
-                    label="📄 Export PDF",
-                    data=pdf_bytes,
-                    file_name=f"PO_{safe_dist_name}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True, key="dl_pdf"
-                )
+                pdf_bytes = excel_to_pdf(df, distributor_label, rsa_pilih, sub_total, tax, grand_total, discount)
+                st.download_button(label="📄 Export PDF", data=pdf_bytes,
+                                    file_name=f"PO_{safe_dist_name}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    mime="application/pdf", use_container_width=True, key="dl_pdf")
             except Exception as e:
                 st.error(f"Gagal generate PDF: {e}")
