@@ -2510,7 +2510,7 @@ with tabs[0]:
         buf = io.BytesIO(); wb.save(buf)
         return buf.getvalue()
 
-    def export_to_template(df_data, template_bytes, distributor, rsa_name, discount):
+    def export_to_template(df_data, template_bytes, distributor, rsa_name, discount, use_formula=True):
         wb = openpyxl.load_workbook(io.BytesIO(template_bytes), data_only=False, keep_links=False)
         ws = wb.active
         ws['B3'] = distributor
@@ -2540,9 +2540,19 @@ with tabs[0]:
         df_export = df_data[df_data['PRODUCT CODE'].notna() & ~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
         for r_offset, (_, row) in enumerate(df_export.iterrows()):
             excel_row = START_ROW + r_offset
+            
+            qty_val = pd.to_numeric(row.get('QTY', 0), errors='coerce')
+            qty_val = 0 if pd.isna(qty_val) else float(qty_val)
+            dpp_val = pd.to_numeric(row.get('DPP', 0), errors='coerce')
+            dpp_val = 0 if pd.isna(dpp_val) else float(dpp_val)
+            
             for col_name, col_idx in COL_MAP.items():
                 if col_name == 'TOTAL PRICE':
-                    ws.cell(row=excel_row, column=col_idx).value = f"=D{excel_row}*E{excel_row}"
+                    if use_formula:
+                        cell = ws.cell(row=excel_row, column=col_idx, value=f"=D{excel_row}*E{excel_row}")
+                    else:
+                        cell = ws.cell(row=excel_row, column=col_idx, value=qty_val * dpp_val)
+                    cell.number_format = '#,##0.00'
                 else:
                     val = row.get(col_name, "")
                     if pd.isna(val) or str(val).strip() in ('','nan','None'): val = None
@@ -2550,14 +2560,32 @@ with tabs[0]:
         last_data_row = START_ROW + len(df_export) - 1
         summary_start = last_data_row + 2
         sub_row, disc_row, tax_row, grand_row = summary_start, summary_start+1, summary_start+2, summary_start+3
-        for row_idx, label, formula in [
-            (sub_row, "SUB-TOTAL", f"=SUM(F{START_ROW}:F{last_data_row})"),
-            (disc_row, "DISCOUNTS", "=0"),
-            (tax_row, "Tax (11%)", f"=F{sub_row}*0.11"),
-            (grand_row, "GRAND TOTAL", f"=F{sub_row}-F{disc_row}+F{tax_row}"),
-        ]:
-            ws.cell(row=row_idx, column=4, value=label)
-            ws.cell(row=row_idx, column=6, value=formula)
+        if use_formula:
+            for row_idx, label, formula in [
+                (sub_row, "SUB-TOTAL", f"=SUM(F{START_ROW}:F{last_data_row})"),
+                (disc_row, "DISCOUNTS", "=0"),
+                (tax_row, "Tax (11%)", f"=F{sub_row}*0.11"),
+                (grand_row, "GRAND TOTAL", f"=F{sub_row}-F{disc_row}+F{tax_row}"),
+            ]:
+                ws.cell(row=row_idx, column=4, value=label)
+                cell = ws.cell(row=row_idx, column=6, value=formula)
+                cell.number_format = '#,##0.00'
+        else:
+            # Hitung statis di Python
+            sub_total_val = float((df_export['QTY'].apply(pd.to_numeric, errors='coerce').fillna(0) * 
+                                   df_export['DPP'].apply(pd.to_numeric, errors='coerce').fillna(0)).sum())
+            discount_val = float(discount) if discount else 0.0
+            tax_val = sub_total_val * 0.11
+            grand_total_val = sub_total_val - discount_val + tax_val
+            for row_idx, label, value in [
+                (sub_row, "SUB-TOTAL", sub_total_val),
+                (disc_row, "DISCOUNTS", discount_val),
+                (tax_row, "Tax (11%)", tax_val),
+                (grand_row, "GRAND TOTAL", grand_total_val),
+            ]:
+                ws.cell(row=row_idx, column=4, value=label)
+                cell = ws.cell(row=row_idx, column=6, value=value)
+                cell.number_format = '#,##0.00'
         try:
             wb.calculation.fullCalcOnLoad = True; wb.calculation.calcMode = 'auto'
         except Exception: pass
@@ -2598,13 +2626,18 @@ with tabs[0]:
             st.stop()
         with st.spinner("Prepare file..."):
             try:
-                fetch_template_xlsx.clear()  # <-- paksa fetch ulang, jangan pakai cache lama
+                fetch_template_xlsx.clear()
                 tpl_bytes = fetch_template_xlsx(st.session_state['gsheet_url'])
-                export_bytes = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount)
-                st.session_state['export_bytes'] = export_bytes
+                # Versi Excel: pakai formula (biar live update)
+                export_bytes_excel = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount, use_formula=True)
+                # Versi PDF: nilai statis (biar angka muncul di PDF)
+                export_bytes_pdf = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount, use_formula=False)
+                st.session_state['export_bytes'] = export_bytes_excel
+                st.session_state['export_bytes_pdf'] = export_bytes_pdf
             except Exception as e:
                 st.error(f"Gagal generate file: {e}")
                 st.session_state.pop('export_bytes', None)
+                st.session_state.pop('export_bytes_pdf', None)
 
     if 'export_bytes' in st.session_state:
         prog = st.progress(0)
@@ -2621,7 +2654,9 @@ with tabs[0]:
                                 use_container_width=True, key="dl_excel")
         with dl_col2:
             try:
-                pdf_bytes = xlsx_to_pdf_libreoffice(st.session_state['export_bytes'])
+             
+                pdf_source = st.session_state.get('export_bytes_pdf', st.session_state['export_bytes'])
+                pdf_bytes = xlsx_to_pdf_libreoffice(pdf_source)
                 st.download_button(
                     label="📄 Export PDF",
                     data=pdf_bytes,
