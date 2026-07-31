@@ -2596,10 +2596,13 @@ with tabs[0]:
         return buf.getvalue()
 
     if st.button("🔄 Generate", use_container_width=True):
+        if distributor_label == "Unnamed Distributor":
+            st.error("❌ Tidak bisa generate — distributor tidak ditemukan. Pilih manual dulu.")
+            st.stop()
         with st.spinner("Prepare file..."):
             try:
                 tpl_bytes = fetch_template_xlsx(st.session_state['gsheet_url'])
-                export_bytes = export_to_template(df, tpl_bytes, pilih, rsa_pilih, discount)
+                export_bytes = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount)
                 st.session_state['export_bytes'] = export_bytes
             except Exception as e:
                 st.error(f"Gagal generate file: {e}")
@@ -2610,17 +2613,19 @@ with tabs[0]:
         for i in range(101):
             prog.progress(i, text="Processing complete" if i == 100 else f"Loading... {i}%")
 
+        safe_dist_name = re.sub(r'[\\/*?:"<>|]', "", distributor_label).strip() or "Unnamed_Distributor"
+
         dl_col1, dl_col2 = st.columns(2)
         with dl_col1:
             st.download_button(label="Export Excel", data=st.session_state['export_bytes'],
-                                file_name=f"PO_{pilih}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                file_name=f"PO_{safe_dist_name}_{datetime.now().strftime('%Y%m%d')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 use_container_width=True, key="dl_excel")
         with dl_col2:
             try:
-                pdf_bytes = excel_to_pdf(df, pilih, rsa_pilih, sub_total, tax, grand_total, discount)
+                pdf_bytes = excel_to_pdf(df, distributor_label, rsa_pilih, sub_total, tax, grand_total, discount)
                 st.download_button(label="📄 Export PDF", data=pdf_bytes,
-                                    file_name=f"PO_{pilih}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    file_name=f"PO_{safe_dist_name}_{datetime.now().strftime('%Y%m%d')}.pdf",
                                     mime="application/pdf", use_container_width=True, key="dl_pdf")
             except Exception as e:
                 st.error(f"Gagal generate PDF: {e}")
