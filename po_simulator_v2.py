@@ -2618,7 +2618,7 @@ with tabs[0]:
             ('GRID',(0,0),(-1,-5),0.4,colors.HexColor("#000000")),
             ('FONTNAME',(4,-4),(-1,-1),'Trebuchet-Bold'),
             ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#FFB6C1')),
-            ('BOTTOMPADDING',(0,0),(-1,-1),4), ('TOPPADDING',(0,0),(-1,-1),1.5),
+            ('BOTTOMPADDING',(0,0),(-1,-1),4), ('TOPPADDING',(0,0),(-1,-1),3),
             ('ROWBACKGROUNDS',(0,1),(-1,-5),[colors.white,colors.HexColor('#FAFAFA')]),
         ]))
         elements.append(tbl)
