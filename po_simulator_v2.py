@@ -2621,7 +2621,7 @@ with tabs[0]:
             ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
             ('GRID',(0,0),(-1,-5),0.4,colors.HexColor("#000000")),
             ('FONTNAME',(4,-4),(-1,-1),'Helvetica-Bold'),
-            ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#FFB6C1')),
+            ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#F7F0F0')),
             ('BOTTOMPADDING',(0,0),(-1,-1),2), ('TOPPADDING',(0,0),(-1,-1),2),
             ('ROWBACKGROUNDS',(0,1),(-1,-5),[colors.white,colors.HexColor('#FAFAFA')]),
             ]))
