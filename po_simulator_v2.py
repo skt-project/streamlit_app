@@ -2612,7 +2612,7 @@ with tabs[0]:
                 rowHeights=[6*mm] + [4.5*mm]*(n_data_rows-1))
         tbl.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0),colors.HexColor("#F1F382")),
-            ('TEXTCOLOR',(0,0),(-1,0),colors.Black), ('FONTSIZE',(0,0),(-1,0),8),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.black), ('FONTSIZE',(0,0),(-1,0),8),
             ('ALIGN',(0,0),(-1,0),'CENTER'), ('FONTNAME',(0,1),(-1,-5),'Trebuchet'),
             ('FONTSIZE',(0,1),(-1,-1),6), ('ALIGN',(3,1),(-1,-1),'RIGHT'),
             ('GRID',(0,0),(-1,-5),0.4,colors.HexColor("#000000")),
