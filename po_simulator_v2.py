@@ -22,7 +22,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 import os
 
 BASE_DIR = os.path.dirname(__file__)
@@ -2553,18 +2553,48 @@ with tabs[0]:
         doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
         elements = []
         styles = getSampleStyleSheet()
-        title_style = ParagraphStyle('Title', parent=styles['Title'], fontName='Trebuchet-Bold',
-                                      fontSize=12, textColor=colors.HexColor("#B53473"), alignment=1, spaceAfter=12)
-        elements.append(Paragraph("PURCHASE ORDER", title_style))
-        info_data = [['Distributor:', distributor, 'Date:', datetime.now().strftime("%d %B %Y")], ['RSA:', rsa_name, '', '']]
-        info_tbl = Table(info_data, colWidths=[20*mm, 85*mm, 20*mm, 50*mm])
+        
+        # Header: title kiri + logo kanan
+        title_style = ParagraphStyle('POHeader', parent=styles['Title'], fontName='Trebuchet-Bold',
+                                     fontSize=14, textColor=colors.black, alignment=0, spaceAfter=0)
+        title_para = Paragraph("PUCHASE ORDER FORM", title_style)
+
+        logo_path = os.path.join(BASE_DIR, 'logo.png')
+        logo_cell = ''
+        if os.path.exists(logo_path):
+            try:
+                logo_cell = Image(logo_path, width=35*mm, height=12*mm, kind='proportional')
+            except Exception:
+                logo_cell = ''
+
+        header_tbl = Table([[title_para, logo_cell]], colWidths=[130*mm, 45*mm])
+        header_tbl.setStyle(TableStyle([
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ('ALIGN',(1,0),(1,0),'RIGHT'),
+            ('BOTTOMPADDING',(0,0),(-1,-1),4),
+        ]))
+        elements.append(header_tbl)
+        elements.append(Spacer(1, 4*mm))
+
+        # Info block: 3 rows kiri-kanan (mirip Excel)
+        info_data = [
+            ['CUSTOMER NAME :', distributor, 'DATE :', datetime.now().strftime("%d %B %Y")],
+            ['NPWP / ID CARD :', '', 'Berlaku Sampai:', ''],
+            ['ADDRESS :', '', 'Issued by:', rsa_name],
+        ]
+        info_tbl = Table(info_data, colWidths=[35*mm, 70*mm, 30*mm, 40*mm])
         info_tbl.setStyle(TableStyle([
-            ('FONTNAME',(0,0),(-1,-1),'Trebuchet'), ('FONTSIZE',(0,0),(-1,-1),10),
-            ('FONTNAME',(0,0),(0,-1),'Trebuchet-Bold'), ('FONTNAME',(2,0),(2,-1),'Trebuchet-Bold'),
-            ('BOTTOMPADDING',(0,0),(-1,-1),6),
+            ('FONTNAME',(0,0),(-1,-1),'Trebuchet'),
+            ('FONTSIZE',(0,0),(-1,-1),9),
+            ('FONTNAME',(0,0),(0,-1),'Trebuchet-Bold'),   # label kiri bold
+            ('FONTNAME',(2,0),(2,-1),'Trebuchet-Bold'),   # label kanan bold
+            ('FONTNAME',(1,0),(1,0),'Trebuchet-Bold'),    # CUSTOMER NAME value bold
+            ('VALIGN',(0,0),(-1,-1),'TOP'),
+            ('BOTTOMPADDING',(0,0),(-1,-1),3),
         ]))
         elements.append(info_tbl)
-        elements.append(Spacer(1, 8*mm))
+        elements.append(Spacer(1, 6*mm))
+        
         header = ['No','PRODUCT CODE','DESCRIPTION','QTY','DPP','TOTAL PRICE']
         data = [header]
         for i, (_, row) in enumerate(df_clean.iterrows(), start=1):
