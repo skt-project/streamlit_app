@@ -2507,6 +2507,23 @@ with tabs[0]:
         ws = wb.active
         if ws.max_row > 200: ws.delete_rows(201, ws.max_row - 200)
         if ws.max_column > 7: ws.delete_cols(8, ws.max_column - 7)
+        
+        from openpyxl.worksheet.page import PageMargins
+        ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT  # ganti LANDSCAPE kalau mau
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0  # 0 = unlimited height, biar gak dipaksa 1 halaman vertikal
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.print_options.horizontalCentered = True
+        ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.2, footer=0.2)
+        
+        
+        ws.print_area = f'A1:F{sig_row + 1}'
+        ws.print_title_rows = f'{header_row_idx}:{header_row_idx}' 
+        
+        col_widths = {'A': 22, 'B': 15, 'C': 45, 'D': 8, 'E': 10, 'F': 15}
+        for col_letter, width in col_widths.items():
+            ws.column_dimensions[col_letter].width = width
         buf = io.BytesIO(); wb.save(buf)
         return buf.getvalue()
 
@@ -2523,7 +2540,7 @@ with tabs[0]:
         for row in ws.iter_rows():
             for cell in row:
                 cell.font = Font(name='Arial', size=cell.font.size or 9, bold=cell.font.bold, color=cell.font.color)
-        header_row_idx = START_ROW - 1  # baris header ("No, PRODUCT CODE, DESCRIPTION, ...")
+        header_row_idx = START_ROW - 1 
         yellow_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
         for c in range(1, 7):
             hc = ws.cell(row=header_row_idx, column=c)
