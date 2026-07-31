@@ -2494,6 +2494,10 @@ with tabs[0]:
         ws['E5'] = rsa_name
         COL_MAP = {'DISTRIBUTOR':1,'PRODUCT CODE':2,'DESCRIPTION':3,'QTY':4,'DPP':5,'TOTAL PRICE':6}
         START_ROW = 10
+        CLEAR_UNTIL_ROW = ws.max_row + 5
+        for r in range(START_ROW, CLEAR_UNTIL_ROW + 1):
+            for c in range(1, 7):
+                ws.cell(row=r, column=c).value = None
         SUMMARY_LABELS = ['SUB-TOTAL','DISCOUNTS','Tax (11%)','GRAND TOTAL']
         df_export = df_data[df_data['PRODUCT CODE'].notna() & ~df_data['QTY'].astype(str).isin(SUMMARY_LABELS)].copy()
         for r_offset, (_, row) in enumerate(df_export.iterrows()):
@@ -2601,6 +2605,7 @@ with tabs[0]:
             st.stop()
         with st.spinner("Prepare file..."):
             try:
+                fetch_template_xlsx.clear()  # <-- paksa fetch ulang, jangan pakai cache lama
                 tpl_bytes = fetch_template_xlsx(st.session_state['gsheet_url'])
                 export_bytes = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount)
                 st.session_state['export_bytes'] = export_bytes
