@@ -2609,16 +2609,16 @@ with tabs[0]:
                  ['','','','','GRAND TOTAL', f"{grand_total:,.0f}"]]
         n_data_rows = len(data)
         tbl = Table(data, colWidths=[10*mm,25*mm,70*mm,20*mm,20*mm,30*mm],
-                rowHeights=[6*mm] + [4.5*mm]*(n_data_rows-1))
+            rowHeights=[5.5*mm] + [4*mm]*(n_data_rows-1))
         tbl.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0),colors.HexColor("#F1F382")),
-            ('TEXTCOLOR',(0,0),(-1,0),colors.black), ('FONTSIZE',(0,0),(-1,0),8),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.Black), ('FONTSIZE',(0,0),(-1,0),8),
             ('ALIGN',(0,0),(-1,0),'CENTER'), ('FONTNAME',(0,1),(-1,-5),'Trebuchet'),
             ('FONTSIZE',(0,1),(-1,-1),6), ('ALIGN',(3,1),(-1,-1),'RIGHT'),
             ('GRID',(0,0),(-1,-5),0.4,colors.HexColor("#000000")),
             ('FONTNAME',(4,-4),(-1,-1),'Trebuchet-Bold'),
             ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#FFB6C1')),
-            ('BOTTOMPADDING',(0,0),(-1,-1),4), ('TOPPADDING',(0,0),(-1,-1),1),
+            ('BOTTOMPADDING',(0,0),(-1,-1),4), ('TOPPADDING',(0,0),(-1,-1),1.5),
             ('ROWBACKGROUNDS',(0,1),(-1,-5),[colors.white,colors.HexColor('#FAFAFA')]),
         ]))
         elements.append(tbl)
