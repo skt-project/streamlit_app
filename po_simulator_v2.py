@@ -2584,11 +2584,11 @@ with tabs[0]:
         ]
         info_tbl = Table(info_data, colWidths=[35*mm, 70*mm, 30*mm, 40*mm])
         info_tbl.setStyle(TableStyle([
-            ('FONTNAME',(0,0),(-1,-1),'Helvetica'),
-            ('FONTSIZE',(0,0),(-1,-1),9),
-            ('FONTNAME',(0,0),(0,-1),'Helvetica-Bold'),   # label kiri bold
-            ('FONTNAME',(2,0),(2,-1),'Helvetica-Bold'),   # label kanan bold
-            ('FONTNAME',(1,0),(1,0),'Helvetica-Bold'),    # CUSTOMER NAME value bold
+            ('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'),
+            ('FONTSIZE',(0,0),(-1,-1),7),
+            ('FONTNAME',(0,0),(0,-1),'Helvetica-Bold'),   
+            ('FONTNAME',(2,0),(2,-1),'Helvetica-Bold'),  
+            ('FONTNAME',(1,0),(1,0),'Helvetica-Bold'),    
             ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
             ('BOTTOMPADDING',(0,0),(-1,-1),3),
         ]))
@@ -2628,7 +2628,7 @@ with tabs[0]:
                     ['', '(mandatory sign)', '', '(SIGN/CAP DISTRIBUTOR)']]
         sig_tbl = Table(sig_data, colWidths=[25*mm,70*mm,20*mm,60*mm])
         sig_tbl.setStyle(TableStyle([
-            ('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'), ('FONTSIZE',(0,0),(-1,0),9),
+            ('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'), ('FONTSIZE',(0,0),(-1,0),6),
             ('TEXTCOLOR',(1,0),(1,0),colors.HexColor("#000000")),
             
             ('TEXTCOLOR',(1,1),(1,1),colors.HexColor('#C00000')),
