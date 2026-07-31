@@ -2397,20 +2397,26 @@ with tabs[0]:
             df['DISTRIBUTOR'] = pilih
         else:
             df['DISTRIBUTOR'] = df['DISTRIBUTOR'].fillna(pilih)
-    else:
-        st.caption("ℹ️ Optional")
-        if 'DISTRIBUTOR' not in df.columns:
-            df['DISTRIBUTOR'] = ""
-        else:
-            df['DISTRIBUTOR'] = df['DISTRIBUTOR'].fillna("")
-
-    
-    if distributor_selected:
         distributor_label = pilih
     else:
-        _dist_vals = df['DISTRIBUTOR'].dropna().astype(str).str.strip()
-        _dist_vals = _dist_vals[_dist_vals != ""]
-        distributor_label = _dist_vals.iloc[0] if not _dist_vals.empty else "Unnamed Distributor"
+        if 'DISTRIBUTOR' in df.columns:
+            _dist_vals = df['DISTRIBUTOR'].dropna().astype(str).str.strip()
+            _dist_vals = _dist_vals[_dist_vals != ""]
+            _uniq_dist = _dist_vals.unique().tolist()
+        else:
+            _uniq_dist = []
+
+        if len(_uniq_dist) == 1:
+            distributor_label = _uniq_dist[0]
+            st.caption(f"ℹ️ Distributor otomatis terisi dari data: **{distributor_label}**")
+        elif len(_uniq_dist) > 1:
+            distributor_label = _uniq_dist[0]
+            st.warning(f"⚠️ Ditemukan {len(_uniq_dist)} nilai distributor berbeda di data: {', '.join(_uniq_dist)}. Menggunakan **{distributor_label}** sebagai default — pilih manual di atas jika salah.")
+        else:
+            distributor_label = "Unnamed Distributor"
+            st.warning("⚠️ Pilih Distributor (Optional)")
+            if 'DISTRIBUTOR' not in df.columns:
+                df['DISTRIBUTOR'] = ""
 
     df['QTY'] = pd.to_numeric(df['QTY'], errors='coerce').fillna(0)
     df['DPP'] = pd.to_numeric(df['DPP'].astype(str).str.replace(',','.'), errors='coerce').fillna(0)
