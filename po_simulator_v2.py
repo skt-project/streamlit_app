@@ -2589,7 +2589,7 @@ with tabs[0]:
             ('FONTNAME',(0,0),(0,-1),'Trebuchet-Bold'),   # label kiri bold
             ('FONTNAME',(2,0),(2,-1),'Trebuchet-Bold'),   # label kanan bold
             ('FONTNAME',(1,0),(1,0),'Trebuchet-Bold'),    # CUSTOMER NAME value bold
-            ('VALIGN',(0,0),(-1,-1),'TOP'),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
             ('BOTTOMPADDING',(0,0),(-1,-1),3),
         ]))
         elements.append(info_tbl)
