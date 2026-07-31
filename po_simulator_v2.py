@@ -2615,12 +2615,13 @@ with tabs[0]:
             ('TEXTCOLOR',(0,0),(-1,0),colors.black), ('FONTSIZE',(0,0),(-1,0),8),
             ('ALIGN',(0,0),(-1,0),'CENTER'), ('FONTNAME',(0,1),(-1,-5),'Trebuchet'),
             ('FONTSIZE',(0,1),(-1,-1),6), ('ALIGN',(3,1),(-1,-1),'RIGHT'),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
             ('GRID',(0,0),(-1,-5),0.4,colors.HexColor("#000000")),
             ('FONTNAME',(4,-4),(-1,-1),'Trebuchet-Bold'),
             ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#FFB6C1')),
-            ('BOTTOMPADDING',(0,0),(-1,-1),4), ('TOPPADDING',(0,0),(-1,-1),3),
+            ('BOTTOMPADDING',(0,0),(-1,-1),2), ('TOPPADDING',(0,0),(-1,-1),2),
             ('ROWBACKGROUNDS',(0,1),(-1,-5),[colors.white,colors.HexColor('#FAFAFA')]),
-        ]))
+            ]))
         elements.append(tbl)
         elements.append(Spacer(1, 30*mm))
         sig_data = [['Initiated by,', f'ASM Approval, ({distributor})', '', 'APPROVE'],
