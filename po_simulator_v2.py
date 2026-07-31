@@ -4,6 +4,8 @@ from datetime import datetime
 import io
 import zipfile
 import math
+import subprocess
+import tempfile
 import re
 import base64
 import urllib.request
@@ -16,19 +18,10 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 import os
 
 BASE_DIR = os.path.dirname(__file__)
 
-pdfmetrics.registerFont(TTFont('Trebuchet', os.path.join(BASE_DIR, 'trebuc.ttf')))
-pdfmetrics.registerFont(TTFont('Trebuchet-Bold', os.path.join(BASE_DIR, 'trebucbd.ttf')))
 
 try:
     import matplotlib
@@ -320,7 +313,38 @@ def _sanitize_xlsx_bytes(xlsx_bytes: bytes) -> bytes:
         return _dst.getvalue()
     except Exception:
         return xlsx_bytes
+def xlsx_to_pdf_libreoffice(xlsx_bytes: bytes, timeout: int = 120) -> bytes:
+    """Convert xlsx bytes → pdf bytes pakai LibreOffice headless."""
+    # cari binary LibreOffice
+    soffice = None
+    for cand in ["libreoffice", "soffice", "/usr/bin/libreoffice", "/usr/bin/soffice"]:
+        try:
+            subprocess.run([cand, "--version"], capture_output=True, check=True, timeout=10)
+            soffice = cand
+            break
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            continue
+    if soffice is None:
+        raise RuntimeError("LibreOffice tidak ditemukan. Cek packages.txt.")
 
+    with tempfile.TemporaryDirectory() as tmpdir:
+        xlsx_path = os.path.join(tmpdir, "po.xlsx")
+        with open(xlsx_path, "wb") as f:
+            f.write(xlsx_bytes)
+
+        result = subprocess.run(
+            [soffice, "--headless", "--nologo", "--nofirststartwizard",
+             "--convert-to", "pdf", "--outdir", tmpdir, xlsx_path],
+            capture_output=True, timeout=timeout,
+            env={**os.environ, "HOME": tmpdir},  # hindari lock file issue di Streamlit Cloud
+        )
+        pdf_path = os.path.join(tmpdir, "po.pdf")
+        if not os.path.exists(pdf_path):
+            err = result.stderr.decode(errors="ignore")[:500]
+            raise RuntimeError(f"Convert gagal: {err}")
+        with open(pdf_path, "rb") as f:
+            return f.read()
+        
 
 def _excel_engine(fname: str) -> str:
     if fname.lower().endswith('.xls'):
@@ -2494,6 +2518,20 @@ with tabs[0]:
         ws['E5'] = rsa_name
         COL_MAP = {'DISTRIBUTOR':1,'PRODUCT CODE':2,'DESCRIPTION':3,'QTY':4,'DPP':5,'TOTAL PRICE':6}
         START_ROW = 10
+
+        arial_font = Font(name='Arial', size=9)
+        for row in ws.iter_rows():
+            for cell in row:
+                cell.font = Font(name='Arial', size=cell.font.size or 9, bold=cell.font.bold, color=cell.font.color)
+        header_row_idx = START_ROW - 1  # baris header ("No, PRODUCT CODE, DESCRIPTION, ...")
+        yellow_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+        for c in range(1, 7):
+            hc = ws.cell(row=header_row_idx, column=c)
+            hc.fill = yellow_fill
+            hc.font = Font(name='Arial', size=9, bold=True, color="000000")
+            
+        for r in range(START_ROW, START_ROW + 300):
+            ws.row_dimensions[r].height = 14  # default biasanya ~20
         CLEAR_UNTIL_ROW = ws.max_row + 5
         for r in range(START_ROW, CLEAR_UNTIL_ROW + 1):
             for c in range(1, 7):
@@ -2539,66 +2577,6 @@ with tabs[0]:
         buf = io.BytesIO(); wb.save(buf)
         return buf.getvalue()
 
-    def excel_to_pdf(df_data, distributor, rsa_name, sub_total, tax, grand_total, discount=0):
-        df_clean = df_data[df_data['PRODUCT CODE'].notna()].copy()
-        df_clean['TOTAL PRICE'] = pd.to_numeric(
-            df_clean['TOTAL PRICE'].astype(str).str.replace('.','').str.replace(',','.'), errors='coerce').fillna(0)
-        buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
-        elements = []
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle('Title', parent=styles['Title'], fontName='Trebuchet-Bold',
-                                      fontSize=12, textColor=colors.HexColor("#B53473"), alignment=1, spaceAfter=12)
-        elements.append(Paragraph("PURCHASE ORDER", title_style))
-        info_data = [['Distributor:', distributor, 'Date:', datetime.now().strftime("%d %B %Y")], ['RSA:', rsa_name, '', '']]
-        info_tbl = Table(info_data, colWidths=[20*mm, 85*mm, 20*mm, 50*mm])
-        info_tbl.setStyle(TableStyle([
-            ('FONTNAME',(0,0),(-1,-1),'Trebuchet'), ('FONTSIZE',(0,0),(-1,-1),10),
-            ('FONTNAME',(0,0),(0,-1),'Trebuchet-Bold'), ('FONTNAME',(2,0),(2,-1),'Trebuchet-Bold'),
-            ('BOTTOMPADDING',(0,0),(-1,-1),6),
-        ]))
-        elements.append(info_tbl)
-        elements.append(Spacer(1, 8*mm))
-        header = ['No','PRODUCT CODE','DESCRIPTION','QTY','DPP','TOTAL PRICE']
-        data = [header]
-        for i, (_, row) in enumerate(df_clean.iterrows(), start=1):
-            qty = row.get('QTY',''); dpp = row.get('DPP',''); total = row.get('TOTAL PRICE',0)
-            data.append([str(i), str(row.get('PRODUCT CODE','')), str(row.get('DESCRIPTION',''))[:40],
-                         f"{qty}" if pd.notna(qty) else "",
-                         f"{dpp:,.0f}" if isinstance(dpp,(int,float)) else str(dpp),
-                         f"{total:,.0f}" if isinstance(total,(int,float)) else str(total)])
-        data += [['','','','','SUB-TOTAL', f"{sub_total:,.0f}"],
-                 ['','','','','DISCOUNTS', f"-{discount:,.0f}"],
-                 ['','','','','Tax (11%)', f"{tax:,.0f}"],
-                 ['','','','','GRAND TOTAL', f"{grand_total:,.0f}"]]
-        tbl = Table(data, colWidths=[10*mm,25*mm,70*mm,20*mm,20*mm,30*mm])
-        tbl.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#BF3979')),
-            ('TEXTCOLOR',(0,0),(-1,0),colors.white), ('FONTSIZE',(0,0),(-1,0),7),
-            ('ALIGN',(0,0),(-1,0),'CENTER'), ('FONTNAME',(0,1),(-1,-5),'Trebuchet'),
-            ('FONTSIZE',(0,1),(-1,-1),6), ('ALIGN',(3,1),(-1,-1),'RIGHT'),
-            ('GRID',(0,0),(-1,-5),0.4,colors.HexColor('#FFB6C1')),
-            ('FONTNAME',(4,-4),(-1,-1),'Trebuchet-Bold'),
-            ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#FFB6C1')),
-            ('BOTTOMPADDING',(0,0),(-1,-1),4), ('TOPPADDING',(0,0),(-1,-1),4),
-            ('ROWBACKGROUNDS',(0,1),(-1,-5),[colors.white,colors.HexColor('#FAFAFA')]),
-        ]))
-        elements.append(tbl)
-        elements.append(Spacer(1, 15*mm))
-        sig_data = [['Initiated by,', f'ASM Approval, ({distributor})', '', 'APPROVE'],
-                    ['', '(mandatory sign)', '', '(SIGN/CAP DISTRIBUTOR)']]
-        sig_tbl = Table(sig_data, colWidths=[25*mm,70*mm,20*mm,60*mm])
-        sig_tbl.setStyle(TableStyle([
-            ('FONTNAME',(0,0),(-1,-1),'Trebuchet-Bold'), ('FONTSIZE',(0,0),(-1,0),9),
-            ('TEXTCOLOR',(1,0),(1,0),colors.HexColor('#006400')),
-            ('BOX',(1,0),(1,0),0.8,colors.HexColor('#006400')),
-            ('TEXTCOLOR',(1,1),(1,1),colors.HexColor('#C00000')),
-            ('TEXTCOLOR',(3,1),(3,1),colors.HexColor('#C00000')),
-        ]))
-        elements.append(sig_tbl)
-        doc.build(elements)
-        return buf.getvalue()
-
     if st.button("🔄 Generate", use_container_width=True):
         if distributor_label == "Unnamed Distributor":
             st.error("❌ Tidak bisa generate — distributor tidak ditemukan. Pilih manual dulu.")
@@ -2628,9 +2606,13 @@ with tabs[0]:
                                 use_container_width=True, key="dl_excel")
         with dl_col2:
             try:
-                pdf_bytes = excel_to_pdf(df, distributor_label, rsa_pilih, sub_total, tax, grand_total, discount)
-                st.download_button(label="📄 Export PDF", data=pdf_bytes,
-                                    file_name=f"PO_{safe_dist_name}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                                    mime="application/pdf", use_container_width=True, key="dl_pdf")
+                pdf_bytes = xlsx_to_pdf_libreoffice(st.session_state['export_bytes'])
+                st.download_button(
+                    label="📄 Export PDF",
+                    data=pdf_bytes,
+                    file_name=f"PO_{safe_dist_name}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True, key="dl_pdf"
+                )
             except Exception as e:
                 st.error(f"Gagal generate PDF: {e}")
