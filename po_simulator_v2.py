@@ -726,6 +726,7 @@ with st.sidebar:
     "G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
     STOP_PO_BB= ["BSR112002", "BSR111002", "BSR111001", "BSR112001","BXS001001", "BXS002001"]
     FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
+    PROGRAM = ["G2G-262",	"G2G-264",	"G2G-267",	"G2G-271",	"G2G-272",	"G2G-276"]
   #OR sku LIKE "%G2G-2970%
     st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
     st.divider()
@@ -936,11 +937,18 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df = apply_sku_rejection_rules(rejected_skus_1, res_df, __REGION_LIST_1, is_in=False)
         if __REJECTED_SKUS_2:
             res_df = apply_sku_rejection_rules(__REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
+        
+        program_conds = [
+        res_df["SKU"].isin(FLUSH_OUT) | res_df["SKU"].str.contains("G2G-2970", case=False, na=False),
+        res_df["SKU"].isin(PROGRAM),]
+        program_choices = ["Flush Out", "MSL WAR"]
+        res_df["Program"] = np.select(program_conds, program_choices, default="")
 
         res_df["RSA Notes"] = ""
+        #PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
-                    "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark",
+                    "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark","Program",
                     "Suggested PO Qty","Suggested PO Value",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
@@ -969,14 +977,14 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 PO_TEMPLATE_COLS = [
     'Distributor','SKU','Product Name','Assortment','Supply Control',
     'Avg Weekly Sales LM (Qty)','Total Stock (Qty)','Current WOI',
-    'PO Qty','PO Value','WOI (Stock + PO Ori)','Remark',
+    'PO Qty','PO Value','WOI (Stock + PO Ori)','Remark', 'Program',
     'Suggested PO Qty','Suggested PO Value',
     'WOI After Buffer (Stock + Suggested Qty)',
     'Stock + Suggested Qty WOI (Projection at EOM)',
     'Remaining Allocation (By Region)','RSA Notes',
 ]
-PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:14]
-PO_COLS_copy = PO_TEMPLATE_COLS[:13]
+PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:15]
+PO_COLS_copy = PO_TEMPLATE_COLS[:14]
 
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim):
     final_disp = pd.concat(e_dfs.values(), ignore_index=True)
@@ -1129,7 +1137,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     use_container_width=True, hide_index=True
                 )
             with pc2:
-                total_sku = grouped["Jumlah SKU"].sum()  # ← TAMBAH INI
+                total_sku = grouped["Jumlah SKU"].sum()  
                 grouped_dist = (
                     combined.groupby(["Distributor", "Remark"])["SKU"]
                     .apply(lambda s: sorted(set(s)))
@@ -1143,6 +1151,37 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                             dist_lines.extend(row["SKU"])  
                             dist_lines.append("")  
                         st.code("\n".join(dist_lines), language=None)
+            #---------------TESTING MASUKKAN KOLOM SUMMARY PROGRAM------------------            
+            if "Program" in final_disp.columns:
+                prog_df = final_disp[final_disp["Program"].astype(str).str.strip().ne("")].copy()
+                if not prog_df.empty:
+                    prog_summary = (
+                        prog_df.groupby("Program")["SKU"]
+                        .nunique()
+                        .reset_index()
+                        .rename(columns={"SKU": "Jumlah SKU"})
+                        .sort_values("Jumlah SKU", ascending=False)
+                    )
+                    pg1, pg2 = st.columns(2)
+                    with pg1:
+                        st.markdown("**Program**")
+                        st.dataframe(prog_summary, use_container_width=True, hide_index=True)
+                    with pg2:
+                        prog_dist = (
+                            prog_df.groupby(["Distributor", "Program"])["SKU"]
+                            .apply(lambda s: sorted(set(s)))
+                            .reset_index()
+                        )
+                        prog_dist["Jumlah SKU"] = prog_dist["SKU"].apply(len)
+                        total_prog_sku = prog_df["SKU"].nunique()
+                        with st.expander(f"📦 Copy SKU Program per Distributor ({total_prog_sku} SKU total)", expanded=False):
+                            for dist_name, dist_grp in prog_dist.groupby("Distributor"):
+                                dist_lines = [f"=== {dist_name} ==="]
+                                for _, row in dist_grp.iterrows():
+                                    dist_lines.append(f"-- {row['Program']} ({row['Jumlah SKU']} SKU)")
+                                    dist_lines.extend(row["SKU"])
+                                    dist_lines.append("")
+                                st.code("\n".join(dist_lines), language=None)
                     
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+3}</span><strong>Summary PO</strong></div>""", unsafe_allow_html=True)
     summary_df = final_disp.copy()
