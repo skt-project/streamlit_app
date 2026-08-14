@@ -888,41 +888,39 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         avg2 = res_df.get("avg_weekly_st_lm_qty", pd.Series([0]*len(res_df), index=res_df.index))
 
         conds = [
-            res_df["Customer SKU Code"].isin(zero_price_skus),
-            res_df["Customer SKU Code"].isin(skus_not_found),
-            res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT),
-            ra2 < 0,
-            res_df["is_po_sku"] == False,
-            #sulawesi 1 only
+            (res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False)) , #0 
+            res_df["Customer SKU Code"].isin(zero_price_skus), #1
+            res_df["Customer SKU Code"].isin(skus_not_found), #2
+            res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT), #3
+            ra2 < 0, #4
+            res_df["is_po_sku"] == False, #5
             (res_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False) & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) &
-            # (res_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) | res_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
-            res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
-            #end
-            res_df["Customer SKU Code"].isin(manual_reject_approval),
-            res_df["Customer SKU Code"].isin(manual_reject_no_tol),
-            
-            sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]),
-            ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])),
-            bp3 == 0,
-            res_df["PO Qty"] > bp3,
-            res_df["PO Qty"] < bp3,
-            res_df["PO Qty"] == bp3,
+                res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)), #6
+            res_df["Customer SKU Code"].isin(manual_reject_approval), #7
+            res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
+            sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]), #9
+            ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])), #10
+            bp3 == 0, #11
+            (res_df["PO Qty"] > bp3) & ((~res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (~res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False)))  , #12
+            res_df["PO Qty"] < bp3, #13
+            res_df["PO Qty"] == bp3, #14
         ]
         choices = [
-            "Price Not Available Yet",
-            "Reject (SKU Not Found in System)",
-            f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",
-            "Reject (Negative Allocation)",
-            "Additional Suggestion",
-            "Reject (Sulawesi 1 Only)",
-            "Reject (Stop by Steve - Need approval email)",
-            "Reject (Stop by Steve - No tolerance to open)",
-            "Reject",
-            "Proceed",
-            "Reject",
-            "Reject with suggestion",
-            "Proceed with suggestion",
-            "Proceed",
+            "Proceed",                                              #0 FLUSH_OUT
+            "Price Not Available Yet",                              #1
+            "Reject (SKU Not Found in System)",                     #2
+            f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",      #3
+            "Reject (Negative Allocation)",                          #4
+            "Additional Suggestion",                                 #5
+            "Reject (Sulawesi 1 Only)",                              #6
+            "Reject (Stop by Steve - Need approval email)",          #7
+            "Reject (Stop by Steve - No tolerance to open)",         #8
+            "Reject",                                                 #9
+            "Proceed",                                                #10
+            "Reject",                                                 #11
+            "Reject with suggestion",                                 #12
+            "Proceed with suggestion",                                #13
+            "Proceed",                                                 #14
         ]
         res_df["Remark"] = np.select(conds, choices, default="N/A (Missing Data)")
         res_df = res_df.rename(columns={
