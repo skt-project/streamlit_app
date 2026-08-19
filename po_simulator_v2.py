@@ -1520,7 +1520,7 @@ def _modify_qty_section(raw_entries, page_key: str):
                 st.dataframe(tpl_df, use_container_width=True, hide_index=True)
 
             qty_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['qty','quantity'])), None)
-            sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code', 'sku code'])), None)
+            sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code', 'sku code', 'sku kode', 'product kode'])), None)
             if not qty_col_t or not sku_col_t:
                 st.info("ℹ️ Kolom SKU / QTY tidak terdeteksi."); continue
 
