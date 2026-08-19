@@ -446,20 +446,44 @@ def _refresh_credentials():
             "write access to gt_schema (see README §6e)."
         ) from exc
 
-    key = raw.get("private_key", "")
-    key = key.replace("\\n", "\n") if key else key
-    # Catches the single most common misconfiguration directly, instead of
-    # letting it surface as "InvalidData(Invalid symbol 46, offset 0.)" from
-    # deep inside the cryptography library: pasting the docs' example
-    # verbatim, "..." placeholder and all, instead of the real base64 key.
-    if not key or "-----BEGIN" not in key or "..." in key or len(key) < 200:
+    key = raw.get("private_key", "") or ""
+    key = key.replace("\\n", "\n")
+    # Diagnose each failure mode SEPARATELY and report which one specifically
+    # fired, plus safe metadata (length, a short prefix — the PEM boilerplate
+    # itself isn't sensitive, this reveals nothing about the real key
+    # material) — rather than one generic message covering 4 different root
+    # causes. Without this, "still broken" and "broken differently" look
+    # identical from outside, and neither the user nor a future debugger can
+    # tell which condition is actually firing.
+    prefix = key[:15].replace('\n', '\\n') if key else '(empty)'
+    if not key:
         raise RuntimeError(
-            "[refresh].private_key in secrets.toml doesn't look like a real "
-            "PEM private key (missing, too short, or still contains a "
-            "placeholder like '...'). Copy the exact private_key value from "
-            "the downloaded service-account JSON — the real key is a long "
-            "base64 block between -----BEGIN PRIVATE KEY----- and "
-            "-----END PRIVATE KEY-----, not a shortened example."
+            "[refresh].private_key is empty or missing entirely. Check the "
+            "field name is exactly `private_key` (not PrivateKey, private-key, "
+            "etc.) and that it's inside the [refresh] table in secrets.toml."
+        )
+    if len(key) < 200:
+        raise RuntimeError(
+            f"[refresh].private_key is only {len(key)} characters after "
+            f"unescaping — a real RSA private key is normally 1,700+ "
+            f"characters. Starts with: {prefix!r}. This usually means the "
+            f"value got truncated during copy/paste, or a placeholder was "
+            f"left in place instead of the real key."
+        )
+    if "-----BEGIN" not in key:
+        raise RuntimeError(
+            f"[refresh].private_key doesn't contain a PEM '-----BEGIN' "
+            f"header. Starts with: {prefix!r} ({len(key)} chars). Copy the "
+            f"private_key field's value exactly as it appears in the "
+            f"downloaded service-account JSON, including the BEGIN/END lines."
+        )
+    if "..." in key:
+        raise RuntimeError(
+            f"[refresh].private_key still contains a literal '...' "
+            f"placeholder ({len(key)} chars total) instead of the real "
+            f"base64 key content. If you copied an example from README/docs, "
+            f"replace the whole '...' with the actual key body from your "
+            f"downloaded service-account JSON."
         )
     raw["private_key"] = key
     return raw
