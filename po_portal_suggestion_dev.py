@@ -442,7 +442,7 @@ def _refresh_credentials():
         raise RuntimeError(
             "No [refresh] section in secrets.toml — add a service account "
             "with Sheets read access to the raw spreadsheet and BigQuery "
-            "write access to gt_schema (see README §6c)."
+            "write access to gt_schema (see README §6e)."
         ) from exc
     raw["private_key"] = raw["private_key"].replace("\\n", "\n")
     return raw
