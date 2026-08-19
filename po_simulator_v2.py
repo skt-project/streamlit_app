@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import io
 import zipfile
 import math
@@ -10,6 +9,8 @@ import urllib.request
 from pathlib import Path
 import openpyxl
 import numpy as np
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import List
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -1627,7 +1628,7 @@ def _modify_qty_section(raw_entries, page_key: str):
                 customer_name = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
                                               key=f"tpl_cust_{page_key}_{fi}", label_visibility="collapsed")
                 file_label = re.sub(r'[\\/*?:"<>|]', "", (customer_name or "").strip()) or "Unnamed_Customer"
-                timestamp = datetime.now().strftime("%H-%M-%S")
+                timestamp = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%H.%M.%S")
                 st.download_button(
                     label=f"⬇ Download Hasil Modifikasi (.{res_t['ext']})",
                     data=res_t["buf"],
