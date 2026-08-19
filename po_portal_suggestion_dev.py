@@ -1,11 +1,16 @@
 import streamlit as st
 import pandas as pd
 import uuid
+import time
+import logging
+import requests
 from io import BytesIO
 from pendulum import now
 from datetime import datetime
 from google.oauth2 import service_account
 from google.cloud import bigquery
+
+log = logging.getLogger("po_portal_suggestion_dev")
 
 # ====================================================================
 # DEV / READ-ONLY BUILD
@@ -273,6 +278,108 @@ def load_po_tracking(company):
 
     return df
 
+
+# --------------------------------------------------
+# Manual DAG refresh (user-initiated only — never automatic on login/page-load)
+# --------------------------------------------------
+# Explicit design choice, not the naive approach: this does NOT import and
+# execute the DAG's Python files directly (they depend on Airflow's own
+# runtime — BigQueryHook/Variable.get() only resolve inside an Airflow
+# worker, and running that code here would either crash or silently use the
+# wrong credentials). This calls Airflow's own REST API instead, the same
+# mechanism Airflow itself uses to start a scheduled or manually-triggered
+# run — https://airflow.apache.org/docs/apache-airflow/stable/stable-rest-api-ref.html#operation/post_dag_run
+#
+# Deliberately NOT triggered automatically on login. `po_portal_suggestion`
+# (production's table) has been under an active, unresolved race condition
+# since 2026-08-17 — a second unidentified process already truncates it
+# every ~15 minutes (see the 2026-08-18 schema-race RCA). Auto-firing DAG
+# runs on every login would add a third uncoordinated writer on top of that.
+# A manual, explicit button avoids amplifying an already-active incident
+# while still giving on-demand freshness when someone actually wants it.
+#
+# DEV never exposes a trigger for GT_po_portal_suggestion_refresh (the
+# production DAG) — only GT_po_portal_suggestion_refresh_DEV (isolated dev
+# table) and GT_po_portal_suggestion_matrix_refresh (shared, but its tables
+# are new and untouched by anything in production, so it's safe from either
+# app). Keeping "_dev" out of anything that can reach the production DAG is
+# the same isolation guarantee the rest of this file already enforces.
+REFRESH_COOLDOWN_S = 60  # blocks rapid double-clicks from firing overlapping DagRuns
+
+
+def trigger_dag_run(base_url: str, auth: tuple, dag_id: str, timeout_s: int = 15):
+    """
+    POST a manual DagRun request to Airflow's REST API.
+
+    Pure aside from the one HTTP call — takes its config as arguments rather
+    than reading st.secrets itself, so it's unit-testable without stubbing
+    Streamlit. Never raises: every failure (network error, non-2xx response)
+    is caught and returned as (False, reason), so one flow's trigger failing
+    can never propagate into or block another flow's trigger.
+    """
+    run_id = f"streamlit_manual__{dag_id}__{int(time.time())}"
+    url = f"{base_url.rstrip('/')}/api/v1/dags/{dag_id}/dagRuns"
+    try:
+        resp = requests.post(
+            url,
+            json={"dag_run_id": run_id, "conf": {}},
+            auth=auth,
+            timeout=timeout_s,
+        )
+    except requests.RequestException as exc:
+        return False, f"Could not reach Airflow: {type(exc).__name__}: {exc}"
+
+    if resp.status_code in (200, 201):
+        return True, f"Triggered `{dag_id}` (run_id={run_id})"
+    return False, f"Airflow rejected the trigger: HTTP {resp.status_code} — {resp.text[:300]}"
+
+
+def render_refresh_button(label: str, dag_id: str, state_key: str):
+    """
+    Renders one independent manual-refresh button (with a per-flow cooldown
+    and session_state-tracked last result). Wrapped in its own try/except on
+    top of trigger_dag_run's own error handling — an "absolute last resort"
+    guard, since this function is called once per flow in sequence and a
+    stray exception here must never stop the next flow's button from
+    rendering.
+    """
+    last = st.session_state.get(state_key)
+    now_ts = time.time()
+    cooling_down = last is not None and (now_ts - last["at"]) < REFRESH_COOLDOWN_S
+
+    try:
+        if cooling_down:
+            remaining = int(REFRESH_COOLDOWN_S - (now_ts - last["at"]))
+            st.button(label, disabled=True, key=f"{state_key}_btn",
+                      help=f"Triggered {int(now_ts - last['at'])}s ago — "
+                           f"wait {remaining}s before triggering again.")
+        elif st.button(label, key=f"{state_key}_btn"):
+            af = st.secrets.get("airflow", {})
+            if not af.get("base_url") or not af.get("username"):
+                ok, msg = False, ("Airflow trigger not configured — add an "
+                                   "[airflow] section (base_url, username, "
+                                   "password) to secrets.toml")
+            else:
+                ok, msg = trigger_dag_run(
+                    af["base_url"], (af["username"], af["password"]), dag_id)
+
+            st.session_state[state_key] = {"at": now_ts, "ok": ok, "msg": msg}
+            if ok:
+                log.info("[manual refresh] %s", msg)
+                st.success(f"✅ {msg}")
+            else:
+                log.error("[manual refresh] %s", msg)
+                st.error(f"❌ {msg}")
+    except Exception as exc:  # noqa: BLE001 - last-resort guard, see docstring
+        log.error("[manual refresh] unexpected error rendering %r: %s", state_key, exc)
+        st.error(f"❌ Unexpected error triggering `{dag_id}`: {type(exc).__name__}: {exc}")
+        last = st.session_state.get(state_key)  # may be unset — re-read is safe
+
+    if last is not None and not cooling_down:
+        badge = "✅" if last["ok"] else "❌"
+        st.caption(f"{badge} Last attempt: {last['msg']}")
+
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
@@ -361,6 +468,33 @@ else:
         "ℹ️ Matrix tables not found or empty — showing the fixed legacy column "
         "set. Run `GT_po_portal_suggestion_matrix_refresh` at least once to "
         "test the dynamic path."
+    )
+
+with st.expander("🔄 Manual data refresh", expanded=False):
+    st.caption(
+        "Triggers the underlying Airflow DAG directly (via Airflow's REST "
+        "API) instead of waiting for its normal 30-minute schedule. "
+        "User-initiated only — never runs automatically on login or page "
+        "refresh. Each button is fully independent: a failure on one does "
+        "not block or affect the other."
+    )
+    rc1, rc2 = st.columns(2)
+    with rc1:
+        render_refresh_button(
+            "🔄 Refresh DEV data (_dev)",
+            "GT_po_portal_suggestion_refresh_DEV",
+            "refresh_dev",
+        )
+    with rc2:
+        render_refresh_button(
+            "🔄 Refresh dynamic matrix data (_matrix)",
+            "GT_po_portal_suggestion_matrix_refresh",
+            "refresh_matrix",
+        )
+    st.caption(
+        "No button here for the production DAG — DEV is intentionally never "
+        "able to trigger `GT_po_portal_suggestion_refresh`, the same "
+        "isolation guarantee this file already enforces for reads."
     )
 
 
