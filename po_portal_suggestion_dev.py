@@ -713,10 +713,22 @@ def render_refresh_button(label: str, action_fn, state_key: str):
             st.session_state[state_key] = {"at": now_ts, "ok": ok, "msg": msg}
             if ok:
                 log.info("[manual refresh] %s", msg)
-                st.success(f"✅ {msg}")
             else:
                 log.error("[manual refresh] %s", msg)
-                st.error(f"❌ {msg}")
+
+            # The refresh writes fresh rows to BigQuery, but load_po_suggestion()
+            # / load_po_suggestion_dynamic() are @st.cache_data(ttl=600) — without
+            # clearing that cache, the page would keep showing the pre-refresh
+            # snapshot for up to 10 minutes even though BigQuery already has the
+            # new data. Cleared unconditionally (not only on full success) since
+            # a partial outcome (e.g. _dev succeeded, _matrix didn't) still means
+            # SOME table has new data that should show immediately. st.rerun()
+            # re-executes the script so the fresh read actually happens now
+            # instead of waiting for the next unrelated interaction; the
+            # success/error message above survives the rerun via session_state
+            # and is still shown via the "Last attempt" caption below.
+            st.cache_data.clear()
+            st.rerun()
     except Exception as exc:  # noqa: BLE001 - last-resort guard, see docstring
         log.error("[manual refresh] unexpected error rendering %r: %s", state_key, exc)
         st.error(f"❌ Unexpected error running `{label}`: {type(exc).__name__}: {exc}")
