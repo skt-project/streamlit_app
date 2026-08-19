@@ -3,32 +3,41 @@ import pandas as pd
 import uuid
 import time
 import logging
-import requests
+import gspread
 from io import BytesIO
 from pendulum import now
 from datetime import datetime
 from google.oauth2 import service_account
 from google.cloud import bigquery
+from google.api_core.exceptions import NotFound
 
 log = logging.getLogger("po_portal_suggestion_dev")
 
 # ====================================================================
-# DEV / READ-ONLY BUILD
+# DEV BUILD
 # ====================================================================
 # This file is a duplicate of po_portal_suggestion.py used ONLY to validate
 # the dynamic-matrix table against real production data before promotion.
 #
-# Hard guarantee: this file contains ZERO calls to insert_rows_json, UPDATE,
-# DELETE, DROP, MERGE, or any BigQuery write/DML verb, ZERO GCS writes, and
-# ZERO DAG-trigger calls. The single production-mutating statement that
-# exists in po_portal_suggestion.py — the `bq_client.insert_rows_json(...)`
-# in Upload Feedback — has been physically deleted below, not merely
-# disabled behind a flag. Search this file for DEV_MODE to see every place
-# that differs from production.
+# Write scope, precisely (revised 2026-08-19 — this file was read-only
+# until this revision; see git history for that version if needed):
+# this file can write to EXACTLY THREE tables — po_portal_suggestion_matrix,
+# po_portal_suggestion_matrix_schema, and po_portal_suggestion_dev — and
+# NOTHING else. All three are tables this DEV build already exclusively
+# owns/feeds; none are read by production. The single production-mutating
+# statement that ever existed here — the `bq_client.insert_rows_json(...)`
+# in Upload Feedback — remains physically deleted, not disabled. Every write
+# call in this file lives inside run_matrix_refresh_inline() or
+# run_dev_refresh_inline(), both grep-findable, both using a SEPARATE
+# credential (`st.secrets["refresh"]`) from the one powering every read in
+# the rest of this app (`st.secrets["connections"]["bigquery"]`, still
+# recommended read-only per the README) — a write-capable credential
+# misconfigured or compromised on the read path still can't write, and vice
+# versa. Search this file for DEV_MODE to see every place that differs from
+# production.
 #
 # DEV_MODE exists for UI labeling only (banners, titles, captions). No
-# conditional in this file uses DEV_MODE to gate a write — there is no write
-# to gate. Removing DEV_MODE entirely would not make any write possible.
+# conditional in this file uses DEV_MODE to gate a write.
 DEV_MODE = True
 
 # --------------------------------------------------
@@ -37,13 +46,15 @@ DEV_MODE = True
 st.set_page_config(page_title="PO Portal Suggestion (DEV)", layout="wide")
 
 st.warning(
-    "🧪 **DEV / READ-ONLY ENVIRONMENT** — this app reads real production "
-    "BigQuery data (including the new dynamic matrix table) to validate the "
-    "dynamic PO Portal Suggestion table before it is promoted. **No action "
-    "on this page can write to production.** Upload Feedback submission is "
-    "disabled; PO Tracking Data and Upload Feedback are otherwise read "
-    "exactly as in production. See `README.md` in "
-    "`po_portal_dynamic_matrix/` for the full audit.",
+    "🧪 **DEV ENVIRONMENT** — this app reads real production BigQuery data "
+    "(including the dynamic matrix table) to validate the dynamic PO Portal "
+    "Suggestion table before promotion. **This build can write, but only to "
+    "its own three isolated tables** (`po_portal_suggestion_matrix`, "
+    "`_matrix_schema`, `po_portal_suggestion_dev`) via the manual refresh "
+    "buttons below — never to production tables, never automatically. "
+    "Upload Feedback submission is disabled; PO Tracking Data and Upload "
+    "Feedback are otherwise read exactly as in production. See `README.md` "
+    "in `po_portal_dynamic_matrix/` for the full audit.",
     icon="🧪",
 )
 
@@ -63,17 +74,23 @@ credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
 PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = st.secrets["bigquery"]["dataset"]
 
-# Isolated DEV table — NOT the production po_portal_suggestion table.
-# Fed only by DAG `GT_po_portal_suggestion_refresh_DEV` (dags/dag_gt_po_portal_suggestion_dev.py),
-# reading the same source spreadsheet as production but writing to its own
-# destination, so this app is unaffected by whatever is currently racing
-# against the production table (see the 2026-08-18 schema-race RCA).
+# Isolated DEV table — NOT the production po_portal_suggestion table. Fed by
+# DAG `GT_po_portal_suggestion_refresh_DEV` on its normal schedule, AND by
+# this app's own manual "Refresh DEV data" button (run_dev_refresh_inline,
+# below) — reading the same raw source spreadsheet as production but writing
+# to its own destination, so this app is unaffected by whatever is currently
+# racing against the production table (see the 2026-08-18 schema-race RCA).
 PO_TABLE = "po_portal_suggestion_dev"
 FEEDBACK_TABLE = "po_portal_feedback"  # read-only reference only — see Upload Feedback section
 USER_TABLE = "po_portal_distributor_users"
 
-# Dynamic matrix tables (populated by GT_po_portal_suggestion_matrix_refresh).
-# Read-only from this app. Independent of PO_TABLE and FEEDBACK_TABLE.
+# Dynamic matrix tables. Fed by DAG `GT_po_portal_suggestion_matrix_refresh`
+# on its normal schedule, AND by this app's own manual "Refresh dynamic
+# matrix data" button (run_matrix_refresh_inline, below). All reads in this
+# file (load_po_suggestion_dynamic, the mapping-detail expander) are still
+# SELECT-only; only run_matrix_refresh_inline writes here, via the separate
+# [refresh] credential, not the bq_client below. Independent of PO_TABLE and
+# FEEDBACK_TABLE either way.
 MATRIX_TABLE = "po_portal_suggestion_matrix"
 MATRIX_SCHEMA_TABLE = "po_portal_suggestion_matrix_schema"
 
@@ -280,68 +297,341 @@ def load_po_tracking(company):
 
 
 # --------------------------------------------------
-# Manual DAG refresh (user-initiated only — never automatic on login/page-load)
+# Manual data refresh (user-initiated only — never automatic on login/page-load)
 # --------------------------------------------------
-# Explicit design choice, not the naive approach: this does NOT import and
-# execute the DAG's Python files directly (they depend on Airflow's own
-# runtime — BigQueryHook/Variable.get() only resolve inside an Airflow
-# worker, and running that code here would either crash or silently use the
-# wrong credentials). This calls Airflow's own REST API instead, the same
-# mechanism Airflow itself uses to start a scheduled or manually-triggered
-# run — https://airflow.apache.org/docs/apache-airflow/stable/stable-rest-api-ref.html#operation/post_dag_run
+# 2026-08-19 design change: this used to trigger the Airflow DAGs via
+# Airflow's REST API. Switched to running the same extraction/load logic
+# INLINE, synchronously, right here, because the Airflow path turned out to
+# depend on infrastructure this app has no way to reach or verify: the
+# Airflow REST API returns 401 (a documented, unresolved auth-backend issue),
+# fixing it needs Docker/server access nobody in this project currently has
+# from a coding session, AND the Airflow host is a private IP
+# (192.168.110.37) that Streamlit Cloud's servers may not even be able to
+# reach over the network — untested, unconfirmed, a real risk the trigger
+# design carried. Running inline avoids all of that.
 #
-# Deliberately NOT triggered automatically on login. `po_portal_suggestion`
-# (production's table) has been under an active, unresolved race condition
-# since 2026-08-17 — a second unidentified process already truncates it
-# every ~15 minutes (see the 2026-08-18 schema-race RCA). Auto-firing DAG
-# runs on every login would add a third uncoordinated writer on top of that.
-# A manual, explicit button avoids amplifying an already-active incident
-# while still giving on-demand freshness when someone actually wants it.
+# Explicitly, still NOT the same as "import and execute the DAG's Python
+# files" — the DAG files depend on Airflow's own runtime
+# (BigQueryHook/Variable.get() only resolve inside an Airflow worker) and
+# were never meant to run standalone. The functions below are a deliberate,
+# separately-maintained PORT of the same business logic (sheet read -> cast
+# -> load), re-credentialed to run from Streamlit instead of an Airflow
+# worker. This is real logic duplication — a genuine, named cost: the DAGs
+# (dag_gt_po_portal_suggestion_matrix.py / dag_gt_po_portal_suggestion_dev.py)
+# and the two functions below can drift out of sync if one is edited without
+# the other. Kept as small and literal a port as possible to minimize that
+# risk, and called out here so it isn't a silent trap for a future editor.
 #
-# DEV never exposes a trigger for GT_po_portal_suggestion_refresh (the
-# production DAG) — only GT_po_portal_suggestion_refresh_DEV (isolated dev
-# table) and GT_po_portal_suggestion_matrix_refresh (shared, but its tables
-# are new and untouched by anything in production, so it's safe from either
-# app). Keeping "_dev" out of anything that can reach the production DAG is
-# the same isolation guarantee the rest of this file already enforces.
-REFRESH_COOLDOWN_S = 60  # blocks rapid double-clicks from firing overlapping DagRuns
+# Credential separation: uses st.secrets["refresh"], a SEPARATE service
+# account from st.secrets["connections"]["bigquery"] (used for every read
+# in this app). That account needs (a) Google Sheets read access to
+# 16diDHZExJeeQlJT9b4knVaamSsFJ86-6nLi3ipwU_RY ("PO Portal Project") and
+# (b) BigQuery write access scoped to gt_schema — ideally via IAM Conditions
+# restricted to just po_portal_suggestion_matrix / _matrix_schema /
+# po_portal_suggestion_dev, not a blanket dataset Editor role, though the
+# simpler dataset-level grant is what's documented as the default in the
+# README. Read lazily, inside the refresh functions, not at module import
+# time — a missing/misconfigured [refresh] secrets block must only disable
+# the refresh buttons, never crash the rest of the app for every visitor.
+#
+# Still deliberately NOT triggered automatically on login/page-load, for the
+# same reason as before: `po_portal_suggestion` (production's table) has an
+# active, unresolved race condition (2026-08-18 schema-race RCA); firing
+# writes on every visit — even to DEV's own isolated tables — has no upside
+# over an explicit button and just adds load for no reason.
+#
+# DEV still never exposes anything that can write GT_po_portal_suggestion's
+# table or touch production in any way — same isolation boundary as before,
+# just enforced by "the code that runs doesn't reference that table" instead
+# of "the button that would call it doesn't exist."
+#
+# Synchronous, not async: unlike the old Airflow-trigger design (which
+# returned near-instantly, with Airflow doing the real work in the
+# background), a click here BLOCKS the page for as long as the real read+load
+# takes — a ~34,000-row Sheets read plus a BigQuery load, realistically tens
+# of seconds. Streamlit's own spinner communicates this; there is no
+# instant-return "queued" state anymore because there's no queue.
+REFRESH_COOLDOWN_S = 60  # blocks rapid double-clicks from firing overlapping loads
+
+RAW_SPREADSHEET_ID   = '16diDHZExJeeQlJT9b4knVaamSsFJ86-6nLi3ipwU_RY'  # 'PO Portal Project'
+RAW_SHEET_NAME       = 'WIP - List PO Suggestion'
+RAW_HEADER_ROW_INDEX = 2   # 1-based; row 1 on this raw tab holds KPI/summary values, not headers
+
+# ---- matrix refresh: mirrors dag_gt_po_portal_suggestion_matrix.py ----
+MATRIX_BUSINESS_FIELDS = ['distributor_company', 'region', 'distributor_branch']
+MATRIX_FIXED_SCHEMA = [
+    bigquery.SchemaField('distributor_company', 'STRING'),
+    bigquery.SchemaField('region',              'STRING'),
+    bigquery.SchemaField('distributor_branch',  'STRING'),
+    bigquery.SchemaField('row_index',           'INTEGER'),
+    bigquery.SchemaField('loaded_at',           'TIMESTAMP'),
+]
+MATRIX_SCHEMA_TABLE_SCHEMA = [
+    bigquery.SchemaField('matrix_column',          'STRING'),
+    bigquery.SchemaField('source_header',          'STRING'),
+    bigquery.SchemaField('source_header_original', 'STRING'),
+    bigquery.SchemaField('column_position',        'INTEGER'),
+    bigquery.SchemaField('loaded_at',              'TIMESTAMP'),
+]
+MATRIX_MIN_EXPECTED_ROWS = 1
+
+# ---- dev refresh: mirrors dag_gt_po_portal_suggestion_dev.py ----
+DEV_STRING_COLUMNS = [
+    'sku_status', 'brand', 'region', 'distributor_company',
+    'distributor_branch', 'product_id', 'product_name', 'assortment',
+]
+DEV_INTEGER_COLUMNS = [
+    'current_stock_friday', 'in_transit_stock', 'total_stock', 'moq',
+    'standard_woi', 'avg_weekly_st_l3m', 'avg_weekly_st_lm', 'si_target',
+    'stock_wh_qty', 'recomended_qty', 'ideal_weekly_po_qty',
+    'max_weekly_po_qty', 'min_weekly_po_qty',
+]
+DEV_FLOAT_COLUMNS = ['current_woi', 'avg_weekly_st_mtd', 'avg_weekly_so_mtd']
+DEV_BQ_SCHEMA = [
+    bigquery.SchemaField('sku_status',            'STRING'),
+    bigquery.SchemaField('brand',                 'STRING'),
+    bigquery.SchemaField('region',                'STRING'),
+    bigquery.SchemaField('distributor_company',   'STRING'),
+    bigquery.SchemaField('distributor_branch',    'STRING'),
+    bigquery.SchemaField('product_id',            'STRING'),
+    bigquery.SchemaField('product_name',          'STRING'),
+    bigquery.SchemaField('current_stock_friday',  'INTEGER'),
+    bigquery.SchemaField('in_transit_stock',      'INTEGER'),
+    bigquery.SchemaField('total_stock',           'INTEGER'),
+    bigquery.SchemaField('moq',                   'INTEGER'),
+    bigquery.SchemaField('standard_woi',          'INTEGER'),
+    bigquery.SchemaField('avg_weekly_st_l3m',     'INTEGER'),
+    bigquery.SchemaField('avg_weekly_st_lm',      'INTEGER'),
+    bigquery.SchemaField('current_woi',           'FLOAT'),
+    bigquery.SchemaField('si_target',             'INTEGER'),
+    bigquery.SchemaField('assortment',            'STRING'),
+    bigquery.SchemaField('stock_wh_qty',          'INTEGER'),
+    bigquery.SchemaField('avg_weekly_st_mtd',     'FLOAT'),
+    bigquery.SchemaField('avg_weekly_so_mtd',     'FLOAT'),
+    bigquery.SchemaField('recomended_qty',        'INTEGER'),
+    bigquery.SchemaField('ideal_weekly_po_qty',   'INTEGER'),
+    bigquery.SchemaField('max_weekly_po_qty',     'INTEGER'),
+    bigquery.SchemaField('min_weekly_po_qty',     'INTEGER'),
+]
+DEV_EXPECTED_COLS = [f.name for f in DEV_BQ_SCHEMA]
+# Raw tab header (normalised) -> this schema's legacy column name. Only
+# entries that don't already match 1:1 are needed. No source exists for
+# avg_weekly_st_mtd / avg_weekly_so_mtd anywhere — they stay null.
+DEV_HEADER_RENAME_MAP = {
+    'stock_on_hand':                                    'current_stock_friday',
+    'current_woi_vs_l3m':                               'current_woi',
+    'standard_woi_(lead_time_+_assortment_woi_target)': 'standard_woi',
+    'avg_weekly_l13_week':                              'avg_weekly_st_l3m',
+    'avg_weekly_l5_week':                               'avg_weekly_st_lm',
+    'norm_qty':                                         'ideal_weekly_po_qty',
+    'saran_order_qty_(monthly_po)':                     'recomended_qty',
+    'lowest_saran_order_(monthly_po)':                  'min_weekly_po_qty',
+    'highest_saran_order':                               'max_weekly_po_qty',
+}
 
 
-def trigger_dag_run(base_url: str, auth: tuple, dag_id: str, timeout_s: int = 15):
+def _refresh_credentials():
     """
-    POST a manual DagRun request to Airflow's REST API.
-
-    Pure aside from the one HTTP call — takes its config as arguments rather
-    than reading st.secrets itself, so it's unit-testable without stubbing
-    Streamlit. Never raises: every failure (network error, non-2xx response)
-    is caught and returned as (False, reason), so one flow's trigger failing
-    can never propagate into or block another flow's trigger.
+    Raises a clear exception (never a bare KeyError) if [refresh] secrets
+    are absent — caught by each run_*_refresh_inline() caller, never at
+    import time, so a missing block only disables the buttons.
     """
-    run_id = f"streamlit_manual__{dag_id}__{int(time.time())}"
-    url = f"{base_url.rstrip('/')}/api/v1/dags/{dag_id}/dagRuns"
     try:
-        resp = requests.post(
-            url,
-            json={"dag_run_id": run_id, "conf": {}},
-            auth=auth,
-            timeout=timeout_s,
-        )
-    except requests.RequestException as exc:
-        return False, f"Could not reach Airflow: {type(exc).__name__}: {exc}"
-
-    if resp.status_code in (200, 201):
-        return True, f"Triggered `{dag_id}` (run_id={run_id})"
-    return False, f"Airflow rejected the trigger: HTTP {resp.status_code} — {resp.text[:300]}"
+        raw = dict(st.secrets["refresh"])
+    except KeyError as exc:
+        raise RuntimeError(
+            "No [refresh] section in secrets.toml — add a service account "
+            "with Sheets read access to the raw spreadsheet and BigQuery "
+            "write access to gt_schema (see README §6c)."
+        ) from exc
+    raw["private_key"] = raw["private_key"].replace("\\n", "\n")
+    return raw
 
 
-def render_refresh_button(label: str, dag_id: str, state_key: str):
+def _read_raw_sheet_rows():
+    """Authenticates with [refresh] creds, reads the raw tab, drops row 1."""
+    raw = _refresh_credentials()
+    creds = service_account.Credentials.from_service_account_info(raw, scopes=[
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ])
+    gc = gspread.authorize(creds)
+    all_rows = gc.open_by_key(RAW_SPREADSHEET_ID).worksheet(RAW_SHEET_NAME).get_all_values()
+    return all_rows[RAW_HEADER_ROW_INDEX - 1:]
+
+
+def _refresh_bq_client():
+    raw = _refresh_credentials()
+    creds = service_account.Credentials.from_service_account_info(raw)
+    return bigquery.Client(credentials=creds, project=PROJECT_ID)
+
+
+def _normalise_header(header: str) -> str:
+    return str(header).strip().lower().replace(' ', '_')
+
+
+def _sync_bq_schema(client, table_id: str, desired: list) -> list:
+    """Additive-only schema sync — identical contract to the matrix DAG's."""
+    try:
+        table = client.get_table(table_id)
+    except NotFound:
+        client.create_table(bigquery.Table(table_id, schema=desired))
+        return list(desired)
+    existing = list(table.schema)
+    known = {f.name for f in existing}
+    additions = [f for f in desired if f.name not in known]
+    if additions:
+        table.schema = existing + additions
+        client.update_table(table, ['schema'])
+        return existing + additions
+    return existing
+
+
+def run_matrix_refresh_inline():
     """
-    Renders one independent manual-refresh button (with a per-flow cooldown
-    and session_state-tracked last result). Wrapped in its own try/except on
-    top of trigger_dag_run's own error handling — an "absolute last resort"
-    guard, since this function is called once per flow in sequence and a
-    stray exception here must never stop the next flow's button from
-    rendering.
+    Port of dag_gt_po_portal_suggestion_matrix.py's extract_and_load(),
+    re-credentialed for Streamlit. Writes ONLY to po_portal_suggestion_matrix
+    and po_portal_suggestion_matrix_schema. Never raises — every failure
+    mode returns (False, reason).
+    """
+    try:
+        rows = _read_raw_sheet_rows()
+        if not rows or len(rows) < 2:
+            return False, f"Sheet returned only {len(rows) if rows else 0} row(s) — nothing to load."
+
+        header_row = list(rows[0])
+        while header_row and not str(header_row[-1]).strip():
+            header_row.pop()
+        width = len(header_row)
+        if width == 0:
+            return False, "Sheet header row is empty."
+
+        headers = [_normalise_header(h) or f'column_{i + 1}' for i, h in enumerate(header_row)]
+        body = [(list(r) + [''] * width)[:width] for r in rows[1:]]
+        matrix_cols = [f'matrix_{i + 1}' for i in range(width)]
+        df = pd.DataFrame(body, columns=matrix_cols, dtype=str).fillna('')
+
+        if len(df):
+            non_blank = df.apply(lambda s: s.str.strip()).ne('').any(axis=1)
+            df = df[non_blank].reset_index(drop=True)
+
+        position = {h: i for i, h in enumerate(headers)}
+        for field in MATRIX_BUSINESS_FIELDS:
+            if field in position:
+                df[field] = df[f'matrix_{position[field] + 1}'].str.strip()
+            else:
+                df[field] = ''
+
+        now_ts = pd.Timestamp.utcnow()
+        df['row_index'] = range(1, len(df) + 1)
+        df['loaded_at'] = now_ts
+
+        mapping = pd.DataFrame({
+            'matrix_column':          matrix_cols,
+            'source_header':          headers,
+            'source_header_original': header_row,
+            'column_position':        list(range(1, width + 1)),
+            'loaded_at':              now_ts,
+        })
+
+        if len(df) < MATRIX_MIN_EXPECTED_ROWS:
+            return False, f"Only {len(df)} data row(s) after cleaning — refused to truncate the table."
+
+        client = _refresh_bq_client()
+        matrix_id = f"{PROJECT_ID}.{DATASET}.{MATRIX_TABLE}"
+        schema_id = f"{PROJECT_ID}.{DATASET}.{MATRIX_SCHEMA_TABLE}"
+        desired = MATRIX_FIXED_SCHEMA + [bigquery.SchemaField(f'matrix_{i + 1}', 'STRING')
+                                          for i in range(width)]
+
+        effective = _sync_bq_schema(client, matrix_id, desired)
+        frame = df.copy()
+        for field in effective:
+            if field.name not in frame.columns:
+                frame[field.name] = None
+        frame = frame[[f.name for f in effective]]
+        client.load_table_from_dataframe(
+            frame, matrix_id,
+            job_config=bigquery.LoadJobConfig(schema=effective,
+                                               write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE),
+        ).result()
+
+        _sync_bq_schema(client, schema_id, MATRIX_SCHEMA_TABLE_SCHEMA)
+        client.load_table_from_dataframe(
+            mapping, schema_id,
+            job_config=bigquery.LoadJobConfig(schema=MATRIX_SCHEMA_TABLE_SCHEMA,
+                                               write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE),
+        ).result()
+
+        return True, f"Loaded {len(df):,} rows × {width} columns into {MATRIX_TABLE}"
+    except Exception as exc:  # noqa: BLE001 - must never raise into the caller
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def run_dev_refresh_inline():
+    """
+    Port of dag_gt_po_portal_suggestion_dev.py's extract_and_load(),
+    re-credentialed for Streamlit. Writes ONLY to po_portal_suggestion_dev.
+    Never raises — every failure mode returns (False, reason).
+    """
+    try:
+        rows = _read_raw_sheet_rows()
+        if not rows:
+            return False, "Sheet is empty."
+
+        df = pd.DataFrame(rows[1:], columns=rows[0])
+        df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
+        df = df.rename(columns=DEV_HEADER_RENAME_MAP)
+
+        for col in DEV_STRING_COLUMNS:
+            df[col] = df[col].astype(str).str.strip() if col in df.columns else ''
+
+        for col in DEV_FLOAT_COLUMNS:
+            if col in df.columns:
+                df[col] = pd.to_numeric(
+                    df[col].replace('', None).astype(str).str.replace(',', '.', regex=False),
+                    errors='coerce')
+            else:
+                df[col] = None
+
+        for col in DEV_INTEGER_COLUMNS:
+            if col in df.columns:
+                df[col] = pd.to_numeric(
+                    df[col].replace('', None).astype(str).str.replace(',', '', regex=False),
+                    errors='coerce').fillna(0).astype(int)
+            else:
+                df[col] = 0
+
+        for col in DEV_EXPECTED_COLS:
+            if col not in df.columns:
+                df[col] = None
+        df = df[DEV_EXPECTED_COLS]
+        df = df[df['product_id'].str.strip().ne('') & df['product_id'].notna()]
+
+        if df.empty:
+            return False, "No data rows survived filtering — refused to truncate the table."
+
+        client = _refresh_bq_client()
+        table_id = f"{PROJECT_ID}.{DATASET}.{PO_TABLE}"
+        client.load_table_from_dataframe(
+            df, table_id,
+            job_config=bigquery.LoadJobConfig(schema=DEV_BQ_SCHEMA,
+                                               write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE),
+        ).result()
+
+        return True, f"Loaded {len(df):,} rows into {PO_TABLE}"
+    except Exception as exc:  # noqa: BLE001 - must never raise into the caller
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def render_refresh_button(label: str, action_fn, state_key: str):
+    """
+    Renders one independent manual-refresh button (per-flow cooldown,
+    session_state-tracked last result). action_fn is a zero-arg callable
+    returning (ok, msg) — both run_matrix_refresh_inline and
+    run_dev_refresh_inline already never raise, but this wraps the call in
+    its own try/except anyway as an absolute last-resort guard, since this
+    function runs once per flow in sequence and a stray exception here must
+    never stop the next flow's button from rendering.
     """
     last = st.session_state.get(state_key)
     now_ts = time.time()
@@ -351,17 +641,12 @@ def render_refresh_button(label: str, dag_id: str, state_key: str):
         if cooling_down:
             remaining = int(REFRESH_COOLDOWN_S - (now_ts - last["at"]))
             st.button(label, disabled=True, key=f"{state_key}_btn",
-                      help=f"Triggered {int(now_ts - last['at'])}s ago — "
-                           f"wait {remaining}s before triggering again.")
+                      help=f"Ran {int(now_ts - last['at'])}s ago — "
+                           f"wait {remaining}s before running again.")
         elif st.button(label, key=f"{state_key}_btn"):
-            af = st.secrets.get("airflow", {})
-            if not af.get("base_url") or not af.get("username"):
-                ok, msg = False, ("Airflow trigger not configured — add an "
-                                   "[airflow] section (base_url, username, "
-                                   "password) to secrets.toml")
-            else:
-                ok, msg = trigger_dag_run(
-                    af["base_url"], (af["username"], af["password"]), dag_id)
+            with st.spinner(f"Running {label}… this reads the full sheet and "
+                             f"reloads BigQuery, typically tens of seconds."):
+                ok, msg = action_fn()
 
             st.session_state[state_key] = {"at": now_ts, "ok": ok, "msg": msg}
             if ok:
@@ -372,7 +657,7 @@ def render_refresh_button(label: str, dag_id: str, state_key: str):
                 st.error(f"❌ {msg}")
     except Exception as exc:  # noqa: BLE001 - last-resort guard, see docstring
         log.error("[manual refresh] unexpected error rendering %r: %s", state_key, exc)
-        st.error(f"❌ Unexpected error triggering `{dag_id}`: {type(exc).__name__}: {exc}")
+        st.error(f"❌ Unexpected error running `{label}`: {type(exc).__name__}: {exc}")
         last = st.session_state.get(state_key)  # may be unset — re-read is safe
 
     if last is not None and not cooling_down:
@@ -446,7 +731,7 @@ USING_DYNAMIC = dyn_df is not None and not dyn_df.empty
 # 🔒 FORCE DATA BY LOGIN (ROW LEVEL SECURITY) — same rule as production
 logged_company = st.session_state["distributor_company"]
 
-st.caption(f"Logged in as: {logged_company}  ·  🧪 DEV build — real prod data, no writes possible")
+st.caption(f"Logged in as: {logged_company}  ·  🧪 DEV build — real prod data reads, writes only to its own isolated tables")
 
 # 🔒 Row level security
 if logged_company != "Admin":
@@ -472,29 +757,35 @@ else:
 
 with st.expander("🔄 Manual data refresh", expanded=False):
     st.caption(
-        "Triggers the underlying Airflow DAG directly (via Airflow's REST "
-        "API) instead of waiting for its normal 30-minute schedule. "
-        "User-initiated only — never runs automatically on login or page "
-        "refresh. Each button is fully independent: a failure on one does "
-        "not block or affect the other."
+        "Runs the same read-sheet-and-load-BigQuery logic as the Airflow "
+        "DAGs, inline, right now — instead of waiting for their normal "
+        "30-minute schedule. Synchronous: the button blocks for as long as "
+        "the real load takes (typically tens of seconds for a ~34,000-row "
+        "sheet). User-initiated only — never runs automatically on login or "
+        "page refresh. Each button is fully independent: a failure on one "
+        "does not block or affect the other. Writes only to "
+        "`po_portal_suggestion_dev` / `po_portal_suggestion_matrix` / "
+        "`_matrix_schema` — the three tables this DEV build already "
+        "exclusively owns. Never touches production."
     )
     rc1, rc2 = st.columns(2)
     with rc1:
         render_refresh_button(
             "🔄 Refresh DEV data (_dev)",
-            "GT_po_portal_suggestion_refresh_DEV",
+            run_dev_refresh_inline,
             "refresh_dev",
         )
     with rc2:
         render_refresh_button(
             "🔄 Refresh dynamic matrix data (_matrix)",
-            "GT_po_portal_suggestion_matrix_refresh",
+            run_matrix_refresh_inline,
             "refresh_matrix",
         )
     st.caption(
-        "No button here for the production DAG — DEV is intentionally never "
-        "able to trigger `GT_po_portal_suggestion_refresh`, the same "
-        "isolation guarantee this file already enforces for reads."
+        "No button here for production — this DEV build has no code path "
+        "that references `po_portal_suggestion` (production's table) at "
+        "all, the same isolation guarantee this file already enforces for "
+        "reads."
     )
 
 
