@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import io
 import zipfile
 import math
@@ -10,6 +9,8 @@ import urllib.request
 from pathlib import Path
 import openpyxl
 import numpy as np
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import List
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -722,9 +723,9 @@ with st.sidebar:
     __REGION_LIST_1 = ["Central Sumatera","Northern Sumatera","Jakarta (Csa)","West Kalimantan","South Kalimantan","East Kalimantan"]
     __REJECTED_SKUS_2 = []
     _REGION_LIST_2 = []
-    _STOP_PO_SKU_ALLOWED_REGION = {
-    "G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
-    STOP_PO_BB= ["BSR112002", "BSR111002", "BSR111001", "BSR112001","BXS001001", "BXS002001"]
+    #_STOP_PO_SKU_ALLOWED_REGION = {"G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
+    STOP_PO_BB= ["BXS003001", "BXS012001", "BXS006001", "BXS009001","BXS005001", "BXS004001", "BXS017001",
+"BXS015" , "BXS014", "BXS013", "BXS008001"]
     FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
     PROGRAM = ["G2G-262",	"G2G-264",	"G2G-267",	"G2G-271",	"G2G-272",	"G2G-276"]
   #OR sku LIKE "%G2G-2970%
@@ -845,18 +846,18 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         bp = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
         res_df = res_df[(res_df["PO Qty"] > 0) | (bp > 0)].copy()
         
-        for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
-            allowed_up = [r.upper() for r in allowed_regions]
-            mask_stop = (res_df["Customer SKU Code"] == sku) & (~res_df["region"].str.upper().isin(allowed_up))
-            res_df.loc[mask_stop, "supply_control_status_gt"] = "Stop PO"
+        #for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
+        #    allowed_up = [r.upper() for r in allowed_regions]
+        #    mask_stop = (res_df["Customer SKU Code"] == sku) & (~res_df["region"].str.upper().isin(allowed_up))
+        #    res_df.loc[mask_stop, "supply_control_status_gt"] = "Stop PO"
 #STOP PO BB-------------------------------
         STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
         sku_norm = res_df["Customer SKU Code"].astype(str).str.strip().str.upper()
         is_bodibreze = res_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
         is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
 
-        mask_stop = is_bodibreze & ~is_in_allowlist
-        res_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+        mask_stop = ~is_bodibreze & is_in_allowlist
+        res_df.loc[mask_stop, "supply_control_status_gt"] = "Stop PO"
 ##-------------------------------
         sugg_mask = res_df["is_po_sku"] == False
         sc_s = res_df.get("supply_control_status_gt", pd.Series([""]*len(res_df), index=res_df.index))
@@ -1520,7 +1521,7 @@ def _modify_qty_section(raw_entries, page_key: str):
                 st.dataframe(tpl_df, use_container_width=True, hide_index=True)
 
             qty_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['qty','quantity'])), None)
-            sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code', 'sku code'])), None)
+            sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code', 'sku code', 'sku kode', 'product kode'])), None)
             if not qty_col_t or not sku_col_t:
                 st.info("ℹ️ Kolom SKU / QTY tidak terdeteksi."); continue
 
@@ -1627,10 +1628,11 @@ def _modify_qty_section(raw_entries, page_key: str):
                 customer_name = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
                                               key=f"tpl_cust_{page_key}_{fi}", label_visibility="collapsed")
                 file_label = re.sub(r'[\\/*?:"<>|]', "", (customer_name or "").strip()) or "Unnamed_Customer"
+                timestamp = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%H.%M.%S")
                 st.download_button(
                     label=f"⬇ Download Hasil Modifikasi (.{res_t['ext']})",
                     data=res_t["buf"],
-                    file_name=f"Form PO {file_label}.{res_t['ext']}",
+                    file_name=f"Form PO {file_label} {timestamp}.{res_t['ext']}",
                     mime=res_t["mime"],
                     use_container_width=True, key=f"tpl_dl_{page_key}_{fi}",
                 )
@@ -2006,16 +2008,16 @@ if st.session_state.get('page') == 'po_spv':
                         0,
                         result_df["avg_weekly_st_lm_qty"],
                     )
-                    for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
-                            allowed_up = [r.upper() for r in allowed_regions]
-                            mask_stop = (result_df["Customer SKU Code"] == sku) & (~result_df["region"].str.upper().isin(allowed_up))
-                            result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
+                    #for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
+                    #        allowed_up = [r.upper() for r in allowed_regions]
+                    #        mask_stop = (result_df["Customer SKU Code"] == sku) & (~result_df["region"].str.upper().isin(allowed_up))
+                    #        result_df.loc[mask_stop, "supply_control_status_gt"] = "STOP PO"
                     #STOP PO BB-------------------------------
                     STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
                     sku_norm = result_df["Customer SKU Code"].astype(str).str.strip().str.upper()
                     is_bodibreze = result_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
                     is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
-                    mask_stop = is_bodibreze & ~is_in_allowlist
+                    mask_stop = ~is_bodibreze & is_in_allowlist
                     result_df.loc[mask_stop, "supply_control_status_gt"] = "Stop PO"
                     ##-------------------------------
 
