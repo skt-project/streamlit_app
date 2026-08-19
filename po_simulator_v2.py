@@ -1627,10 +1627,11 @@ def _modify_qty_section(raw_entries, page_key: str):
                 customer_name = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
                                               key=f"tpl_cust_{page_key}_{fi}", label_visibility="collapsed")
                 file_label = re.sub(r'[\\/*?:"<>|]', "", (customer_name or "").strip()) or "Unnamed_Customer"
+                timestamp = datetime.now().strftime("%H-%M-%S")
                 st.download_button(
                     label=f"⬇ Download Hasil Modifikasi (.{res_t['ext']})",
                     data=res_t["buf"],
-                    file_name=f"Form PO {file_label}.{res_t['ext']}",
+                    file_name=f"Form PO {file_label} {timestamp}.{res_t['ext']}",
                     mime=res_t["mime"],
                     use_container_width=True, key=f"tpl_dl_{page_key}_{fi}",
                 )
