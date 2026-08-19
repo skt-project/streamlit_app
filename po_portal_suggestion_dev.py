@@ -432,9 +432,10 @@ DEV_HEADER_RENAME_MAP = {
 
 def _refresh_credentials():
     """
-    Raises a clear exception (never a bare KeyError) if [refresh] secrets
-    are absent — caught by each run_*_refresh_inline() caller, never at
-    import time, so a missing block only disables the buttons.
+    Raises a clear exception (never a bare KeyError, never a cryptic PEM
+    parse error) if [refresh] secrets are absent or malformed — caught by
+    each run_*_refresh_inline() caller, never at import time, so a missing
+    or bad block only disables the buttons.
     """
     try:
         raw = dict(st.secrets["refresh"])
@@ -444,7 +445,23 @@ def _refresh_credentials():
             "with Sheets read access to the raw spreadsheet and BigQuery "
             "write access to gt_schema (see README §6e)."
         ) from exc
-    raw["private_key"] = raw["private_key"].replace("\\n", "\n")
+
+    key = raw.get("private_key", "")
+    key = key.replace("\\n", "\n") if key else key
+    # Catches the single most common misconfiguration directly, instead of
+    # letting it surface as "InvalidData(Invalid symbol 46, offset 0.)" from
+    # deep inside the cryptography library: pasting the docs' example
+    # verbatim, "..." placeholder and all, instead of the real base64 key.
+    if not key or "-----BEGIN" not in key or "..." in key or len(key) < 200:
+        raise RuntimeError(
+            "[refresh].private_key in secrets.toml doesn't look like a real "
+            "PEM private key (missing, too short, or still contains a "
+            "placeholder like '...'). Copy the exact private_key value from "
+            "the downloaded service-account JSON — the real key is a long "
+            "base64 block between -----BEGIN PRIVATE KEY----- and "
+            "-----END PRIVATE KEY-----, not a shortened example."
+        )
+    raw["private_key"] = key
     return raw
 
 
@@ -623,6 +640,27 @@ def run_dev_refresh_inline():
         return False, f"{type(exc).__name__}: {exc}"
 
 
+def run_all_refreshes_inline():
+    """
+    Single-button entry point: runs both flows from one click. Each is still
+    called unconditionally — _matrix runs even if _dev raised or failed, and
+    vice versa — preserving the same "one flow's failure can never block the
+    other" guarantee the two-button design had. The two calls are just
+    combined into one (ok, msg) result for one button/one status area
+    instead of two, so a partial failure is reported explicitly (never
+    collapsed into a generic "something failed") rather than hidden by only
+    running one flow.
+    """
+    dev_ok, dev_msg = run_dev_refresh_inline()
+    matrix_ok, matrix_msg = run_matrix_refresh_inline()
+    combined_ok = dev_ok and matrix_ok
+    combined_msg = (
+        f"_dev: {'✅' if dev_ok else '❌'} {dev_msg}\n\n"
+        f"_matrix: {'✅' if matrix_ok else '❌'} {matrix_msg}"
+    )
+    return combined_ok, combined_msg
+
+
 def render_refresh_button(label: str, action_fn, state_key: str):
     """
     Renders one independent manual-refresh button (per-flow cooldown,
@@ -759,33 +797,23 @@ with st.expander("🔄 Manual data refresh", expanded=False):
     st.caption(
         "Runs the same read-sheet-and-load-BigQuery logic as the Airflow "
         "DAGs, inline, right now — instead of waiting for their normal "
-        "30-minute schedule. Synchronous: the button blocks for as long as "
-        "the real load takes (typically tens of seconds for a ~34,000-row "
-        "sheet). User-initiated only — never runs automatically on login or "
-        "page refresh. Each button is fully independent: a failure on one "
-        "does not block or affect the other. Writes only to "
-        "`po_portal_suggestion_dev` / `po_portal_suggestion_matrix` / "
-        "`_matrix_schema` — the three tables this DEV build already "
-        "exclusively owns. Never touches production."
+        "30-minute schedule. Synchronous: this blocks for as long as the "
+        "real loads take (typically tens of seconds each, so up to ~a "
+        "minute total for both). User-initiated only — never runs "
+        "automatically on login or page refresh. One button runs both "
+        "flows (_dev and _matrix); each is still attempted independently — "
+        "a failure in one never skips or blocks the other, and both "
+        "outcomes are always reported separately below, not collapsed into "
+        "one pass/fail. Writes only to `po_portal_suggestion_dev` / "
+        "`po_portal_suggestion_matrix` / `_matrix_schema` — the three "
+        "tables this DEV build already exclusively owns. Never touches "
+        "production; this build has no code path that references "
+        "`po_portal_suggestion` (production's table) at all."
     )
-    rc1, rc2 = st.columns(2)
-    with rc1:
-        render_refresh_button(
-            "🔄 Refresh DEV data (_dev)",
-            run_dev_refresh_inline,
-            "refresh_dev",
-        )
-    with rc2:
-        render_refresh_button(
-            "🔄 Refresh dynamic matrix data (_matrix)",
-            run_matrix_refresh_inline,
-            "refresh_matrix",
-        )
-    st.caption(
-        "No button here for production — this DEV build has no code path "
-        "that references `po_portal_suggestion` (production's table) at "
-        "all, the same isolation guarantee this file already enforces for "
-        "reads."
+    render_refresh_button(
+        "🔄 Refresh all data (_dev + _matrix)",
+        run_all_refreshes_inline,
+        "refresh_all",
     )
 
 
