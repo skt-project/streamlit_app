@@ -209,9 +209,16 @@ def load_po_suggestion_dynamic():
     if schema_df.empty:
         return None, None
 
-    # Build the projection in spreadsheet order. Duplicate headers get a numeric
-    # suffix so the SELECT stays valid and no column is silently lost.
-    seen, selects, display_cols = {}, [], []
+    # Build the projection in spreadsheet order, aliased by the SAFE matrix_N
+    # name in SQL — NOT by the pretty header text. BigQuery's query-result
+    # field-name rules are stricter than what backtick-quoting allows in the
+    # query text itself: any header containing parentheses (e.g. "Price
+    # (SIP)", "Standard WOI (Lead Time + Assortment WOI Target)" — several
+    # real headers on this sheet) fails with "Invalid field name" even though
+    # the SQL parses fine. Confirmed by running the previously-generated
+    # query directly against BigQuery. Renaming to the pretty label happens
+    # AFTER the fetch, in pandas, which has no such character restriction.
+    seen, matrix_cols, display_cols = {}, [], []
     for _, r in schema_df.iterrows():
         raw = (r["source_header_original"] or r["source_header"] or r["matrix_column"])
         label = str(raw).strip() or str(r["matrix_column"])
@@ -220,12 +227,10 @@ def load_po_suggestion_dynamic():
             label = f"{label}_{seen[label]}"
         else:
             seen[label] = 1
-        selects.append(f"  {r['matrix_column']} AS `{label}`")
+        matrix_cols.append(r["matrix_column"])
         display_cols.append(label)
 
-    # Built outside the f-string: backslash escapes inside f-string expressions
-    # are a SyntaxError before Python 3.12.
-    projection = ",\n".join(selects)
+    projection = ",\n".join(f"  {c}" for c in matrix_cols)
 
     query = f"""
         SELECT
@@ -237,6 +242,7 @@ def load_po_suggestion_dynamic():
         ORDER BY row_index
     """
     df = bq_client.query(query).to_dataframe()
+    df = df.rename(columns=dict(zip(matrix_cols, display_cols)))
 
     for col in INTERNAL_COLS:
         df[col] = df[col].astype(str).str.strip()
