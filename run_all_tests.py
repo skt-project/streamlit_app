@@ -22,7 +22,8 @@ def main():
 
     try:
         import pytest_cov  # noqa: F401
-        args += ["--cov=assessment_logic", "--cov-report=term-missing"]
+        args += ["--cov=assessment_logic", "--cov=noo_sku",
+                 "--cov-report=term-missing"]
     except ImportError:
         pass
 
