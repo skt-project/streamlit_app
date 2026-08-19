@@ -58,7 +58,12 @@ credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
 PROJECT_ID = st.secrets["bigquery"]["project"]
 DATASET = st.secrets["bigquery"]["dataset"]
 
-PO_TABLE = "po_portal_suggestion"
+# Isolated DEV table — NOT the production po_portal_suggestion table.
+# Fed only by DAG `GT_po_portal_suggestion_refresh_DEV` (dags/dag_gt_po_portal_suggestion_dev.py),
+# reading the same source spreadsheet as production but writing to its own
+# destination, so this app is unaffected by whatever is currently racing
+# against the production table (see the 2026-08-18 schema-race RCA).
+PO_TABLE = "po_portal_suggestion_dev"
 FEEDBACK_TABLE = "po_portal_feedback"  # read-only reference only — see Upload Feedback section
 USER_TABLE = "po_portal_distributor_users"
 
@@ -289,8 +294,34 @@ if not st.session_state.logged_in:
 
     st.stop()
 
+_LEGACY_COLS = [
+    "sku_status", "brand", "region", "distributor_company", "distributor_branch",
+    "product_id", "product_name", "current_stock_friday", "in_transit_stock",
+    "total_stock", "moq", "standard_woi", "avg_weekly_st_l3m", "avg_weekly_st_lm",
+    "current_woi", "si_target", "assortment", "stock_wh_qty", "avg_weekly_st_mtd",
+    "avg_weekly_so_mtd", "recomended_qty", "ideal_weekly_po_qty",
+    "max_weekly_po_qty", "min_weekly_po_qty",
+]
+
 # Legacy frame — powers the Upload Feedback Excel template preview (unchanged contract).
-po_df = load_po_suggestion()
+# Reads the isolated PO_TABLE (po_portal_suggestion_dev), not production. That
+# table only exists once `GT_po_portal_suggestion_refresh_DEV` has been deployed
+# and has run at least once — until then, degrade to an empty frame with a clear
+# explanation rather than crashing the page.
+try:
+    po_df = load_po_suggestion()
+except Exception as exc:  # noqa: BLE001 - DEV table may not exist yet
+    po_df = pd.DataFrame(columns=_LEGACY_COLS)
+    st.warning(
+        f"🧪 DEV table `{PO_TABLE}` isn't available yet ({type(exc).__name__}). "
+        "This means `GT_po_portal_suggestion_refresh_DEV` "
+        "(`dags/dag_gt_po_portal_suggestion_dev.py`) hasn't been deployed to "
+        "Airflow yet, or hasn't completed its first run. Once it has, this "
+        "table is created automatically on that first load — no manual "
+        "BigQuery step needed. Showing an empty PO Suggestion / Upload "
+        "Feedback template below in the meantime.",
+        icon="🧪",
+    )
 
 # Dynamic frame — powers the on-screen table. Falls back to legacy if the matrix
 # tables have not been created/populated yet.
