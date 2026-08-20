@@ -32,22 +32,44 @@ def load_credentials(secrets=None, scopes=None):
     from google.oauth2 import service_account
 
     scopes = scopes or SCOPES_RW
+    reason = "st.secrets tidak tersedia"
     if secrets:
+        # Distinguish "the block is absent" from "the block is present but
+        # broken". Collapsing both into one message turns a malformed
+        # private_key into a misleading 'credentials not found'.
         try:
             info = dict(secrets["connections"]["bigquery"])
+        except Exception:
+            reason = ("blok [connections.bigquery] tidak ditemukan di "
+                      "st.secrets")
+            info = None
+        if info is not None:
+            missing = [k for k in ("type", "project_id", "private_key",
+                                   "client_email") if not info.get(k)]
+            if missing:
+                raise RuntimeError(
+                    "Konfigurasi [connections.bigquery] tidak lengkap. "
+                    f"Field yang hilang: {', '.join(missing)}.")
             if "private_key" in info:
                 info["private_key"] = info["private_key"].replace("\\n", "\n")
-            return service_account.Credentials.from_service_account_info(
-                info, scopes=scopes), info.get("project_id")
-        except Exception:
-            pass
+            try:
+                return service_account.Credentials.from_service_account_info(
+                    info, scopes=scopes), info.get("project_id")
+            except Exception as exc:
+                raise RuntimeError(
+                    "Kredensial [connections.bigquery] ada tetapi tidak valid "
+                    f"({type(exc).__name__}). Periksa private_key — pastikan "
+                    "disalin utuh termasuk baris BEGIN/END PRIVATE KEY."
+                ) from exc
+
     import os
 
     path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not path:
         raise RuntimeError(
-            "Kredensial Google tidak ditemukan. Set st.secrets"
-            "['connections']['bigquery'] atau GOOGLE_APPLICATION_CREDENTIALS."
+            f"Kredensial Google tidak ditemukan ({reason}). Set "
+            "st.secrets['connections']['bigquery'] atau "
+            "GOOGLE_APPLICATION_CREDENTIALS."
         )
     with open(path) as fh:
         project = json.load(fh).get("project_id")
