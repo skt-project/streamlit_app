@@ -90,3 +90,35 @@ def test_script_reuses_the_shared_modules_rather_than_reimplementing_them():
     # and must not define its own validation or write logic
     assert "def validate_" not in text
     assert "values().append" not in text
+
+
+# ─── Login source (shared credentials table) ─────────────────────────────────
+def test_login_reads_the_shared_tables_not_secrets():
+    """Credentials stay on the parent table po_portal_suggestion already uses;
+    branch detail lives on the child table so each DSTxxx logs in separately."""
+    from noo_sku import sources
+
+    app = (REPO / "noo_sku_mapping.py").read_text(encoding="utf-8")
+    assert "distributor_passwords" not in app, "secrets-based passwords removed"
+    assert "sources.check_login" in app
+    assert sources.USER_TABLE == "po_portal_distributor_users"
+    assert sources.BRANCH_TABLE == "po_portal_distributor_branches"
+
+
+def test_check_login_joins_child_to_parent_and_requires_both_active():
+    import inspect
+
+    from noo_sku import sources
+
+    src = inspect.getsource(sources.check_login)
+    assert "UPPER(TRIM(c.distributor_code)) = @code" in src, "login keys on the code"
+    assert "LOWER(TRIM(p.username)) = LOWER(TRIM(c.username))" in src, "child -> parent"
+    assert "c.is_active = TRUE" in src and "p.is_active = TRUE" in src
+    assert "password_hash" in src, "password is checked against the parent row"
+    assert "@code" in src, "must be parameterised, not string-formatted"
+
+
+def test_login_asks_for_a_distributor_code_not_a_username():
+    app = (REPO / "noo_sku_mapping.py").read_text(encoding="utf-8")
+    assert 'st.text_input("Kode Distributor"' in app
+    assert 'st.text_input("Username"' not in app

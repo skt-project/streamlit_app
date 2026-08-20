@@ -55,6 +55,24 @@ then fails at query time with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`.
 | `APP_ENV` | `dev` | environment label shown in the UI |
 | `TRACKER_SPREADSHEET_ID` | the ID above | override only if pointing at a copy |
 
+Distributor logins are **not** environment configuration. They live in two
+BigQuery tables:
+
+| Table | Role |
+|---|---|
+| `gt_schema.po_portal_distributor_users` (parent) | credentials — `username`, `password_hash`, `is_active`. Shared with `po_portal_suggestion.py`; untouched by this app. |
+| `gt_schema.po_portal_distributor_branches` (child) | one row per `distributor_code`, pointing at the account whose password unlocks it. |
+
+Admins log in with their **Distributor Code** (`DSTxxx`) and their existing
+company password. The child row resolves the code to its parent account; the
+password is checked against that parent. A company therefore keeps one password
+while each of its branches logs in under its own code — necessary because six
+companies cover 4–31 active branches and almost every branch submits in its own
+right.
+
+Adding a branch is one child row. Rotating a password is one parent row. Neither
+is a redeploy.
+
 Writing requires **both** a non-dry-run mode **and** `WRITE_ENABLED=true`. Either
 one alone leaves the run as a dry run.
 

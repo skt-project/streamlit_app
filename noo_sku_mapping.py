@@ -125,21 +125,29 @@ def render_login():
     if not code:
         st.error("Kode distributor wajib diisi.")
         return
-    record = _distributors().get(code)
+
+    creds, project, _ = _clients()
+    dataset = st.secrets["bigquery"]["dataset"]
+    try:
+        account = sources.check_login(creds, project, dataset, code, password)
+    except Exception:
+        st.error("Tidak bisa memverifikasi login saat ini. Coba lagi atau "
+                 "hubungi administrator.")
+        return
+    if account is None:
+        st.error("Kode distributor atau password salah, atau kode Anda belum "
+                 "terdaftar. Hubungi BD Support.")
+        return
+
+    # DIST DATABASE remains the authority on name, region and active status.
+    record = _distributors().get(account["distributor_code"])
     if record is None:
-        st.error(f"Kode distributor **{code}** tidak dikenali.")
+        st.error(f"Kode distributor **{code}** tidak ada di "
+                 f"{config.TAB_DIST_DATABASE}. Hubungi BD Support.")
         return
     if not record["active"]:
         st.error(f"Distributor **{code}** berstatus "
                  f"{record['status'] or 'tidak aktif'}. Hubungi BD Support.")
-        return
-    expected = dict(st.secrets.get("distributor_passwords", {})).get(code)
-    if expected is None:
-        st.error("Password untuk distributor ini belum dikonfigurasi. "
-                 "Hubungi administrator.")
-        return
-    if password != expected:
-        st.error("Password salah.")
         return
 
     st.session_state["auth"] = True

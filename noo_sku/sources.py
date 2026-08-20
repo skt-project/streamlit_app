@@ -189,6 +189,62 @@ def load_products(credentials, project) -> dict:
     }
 
 
+# ─── Login (shared credentials table) ─────────────────────────────────────────
+#: Credentials live on the parent table shared with po_portal_suggestion.py.
+#: Branch detail lives on a child table, one row per distributor_code pointing
+#: back at its parent account. That split is what lets a company keep a single
+#: password while each of its branches logs in under its own DSTxxx - necessary
+#: because six companies cover between 4 and 31 active branches, and almost
+#: every branch submits NOO rows in its own right.
+#:
+#:      parent  po_portal_distributor_users     username, password_hash, is_active
+#:      child   po_portal_distributor_branches  distributor_code -> username
+USER_TABLE = "po_portal_distributor_users"
+BRANCH_TABLE = "po_portal_distributor_branches"
+
+
+def check_login(credentials, project, dataset, distributor_code, password):
+    """Verify a distributor-code login against the parent/child tables.
+
+    The child row identifies which account owns the code; the password is
+    checked against that account's `password_hash` on the parent, using the same
+    direct comparison `po_portal_suggestion.check_login` performs.
+
+    Returns a dict with `distributor_code`, `username` and
+    `distributor_company`, or None when the code is unknown, either row is
+    inactive, or the password does not match.
+    """
+    from google.cloud import bigquery
+
+    client = bigquery.Client(credentials=credentials, project=project)
+    query = f"""
+        SELECT
+            UPPER(TRIM(c.distributor_code)) AS distributor_code,
+            p.username,
+            p.distributor_company,
+            p.password_hash
+        FROM `{project}.{dataset}.{BRANCH_TABLE}` c
+        JOIN `{project}.{dataset}.{USER_TABLE}` p
+          ON LOWER(TRIM(p.username)) = LOWER(TRIM(c.username))
+        WHERE UPPER(TRIM(c.distributor_code)) = @code
+          AND c.is_active = TRUE
+          AND p.is_active = TRUE
+        LIMIT 1
+    """
+    job = client.query(query, job_config=bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter(
+            "code", "STRING", norm_key(distributor_code))]))
+    rows = list(job.result())
+    if not rows:
+        return None
+    row = rows[0]
+    if str(row["password_hash"]).strip() != str(password).strip():
+        return None
+    return {"distributor_code": clean(row["distributor_code"]),
+            "username": clean(row["username"]),
+            "distributor_company": clean(row["distributor_company"])}
+
+
 # ─── Distributor master (BigQuery) ────────────────────────────────────────────
 def load_master_distributor(credentials, project) -> dict:
     """``{distributor_code: {...}}`` from gt_schema.master_distributor.
