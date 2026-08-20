@@ -724,6 +724,7 @@ with st.sidebar:
     __REJECTED_SKUS_2 = []
     _REGION_LIST_2 = []
     #_STOP_PO_SKU_ALLOWED_REGION = {"G2G-263": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
+    VITA_C = ['G2G-212','G2G-213','G2G-214','G2G-215','G2G-216','G2G-217','G2G-218']
     STOP_PO_BB= ["BXS003001", "BXS012001", "BXS006001", "BXS009001","BXS005001", "BXS004001", "BXS017001",
 "BXS015" , "BXS014", "BXS013", "BXS008001"]
     FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
@@ -895,7 +896,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT), #3
             ra2 < 0, #4
             res_df["is_po_sku"] == False, #5
-            (res_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False) & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) &
+            (res_df["Customer SKU Code"].isin(VITA_C) & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) &
                 res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)), #6
             res_df["Customer SKU Code"].isin(manual_reject_approval), #7
             res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
@@ -2028,7 +2029,7 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["remaining_allocation_qty_region"] < 0),
                         (result_df["is_po_sku"] == False),
                         #sulawesi 1 only
-                        (result_df["Product Name"].astype(str).str.contains("Vita C", case=False, na=False) & 
+                        (resULT_df["Customer SKU Code"].isin(VITA_C)  & 
                          #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
                          ~result_df["Customer SKU Code"].isin(FLUSH_OUT)
                         & result_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
