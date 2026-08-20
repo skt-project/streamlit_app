@@ -122,3 +122,31 @@ def test_login_asks_for_a_distributor_code_not_a_username():
     app = (REPO / "noo_sku_mapping.py").read_text(encoding="utf-8")
     assert 'st.text_input("Kode Distributor"' in app
     assert 'st.text_input("Username"' not in app
+
+
+def test_every_third_party_import_is_declared_in_requirements():
+    """Regression: googleapiclient was imported but never declared, so the app
+    ran locally and failed on a clean Streamlit Cloud build."""
+    import ast
+    import re
+    import sys
+
+    dist = {"googleapiclient": "google-api-python-client",
+            "google": "google-cloud-bigquery"}
+    sources = list((REPO / "noo_sku").glob("*.py")) + [
+        REPO / "noo_sku_mapping.py", SCRIPT]
+    modules = set()
+    for path in sources:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                modules |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules.add(node.module.split(".")[0])
+
+    req = (REPO / "requirements.txt").read_text(encoding="utf-8").lower()
+    missing = []
+    for mod in modules - set(sys.stdlib_module_names) - {"noo_sku", "tests"}:
+        pkg = dist.get(mod, mod)
+        if not re.search(rf"^{re.escape(pkg)}\b", req, re.M):
+            missing.append(pkg)
+    assert not missing, f"undeclared dependencies: {sorted(missing)}"

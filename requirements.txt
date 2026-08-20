@@ -5,6 +5,7 @@ pandas
 folium
 google-cloud-bigquery
 google-auth
+google-api-python-client
 rapidfuzz
 haversine
 openpyxl
