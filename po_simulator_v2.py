@@ -897,7 +897,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             ra2 < 0, #4
             res_df["is_po_sku"] == False, #5
             (res_df["Customer SKU Code"].isin(VITA_C) & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) &
-                res_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)), #6
+                res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)), #6
             res_df["Customer SKU Code"].isin(manual_reject_approval), #7
             res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
             sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]), #9
@@ -1095,7 +1095,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     st.error(f"Gagal generate gambar: {e}")
 
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+2}</span><strong>Product Code yang Harus Dihapus</strong></div>""", unsafe_allow_html=True)
-####################TRY CODE YAAA~~~ KHUSUS SULAWESI 1
+####################KHUSUS SULAWESI 1
     pairs = []
     if "SKU" in stop_df.columns and "Supply Control" in stop_df.columns:
         pairs.append(
@@ -2029,10 +2029,10 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["remaining_allocation_qty_region"] < 0),
                         (result_df["is_po_sku"] == False),
                         #sulawesi 1 only
-                        (resULT_df["Customer SKU Code"].isin(VITA_C)  & 
+                        (result_df["Customer SKU Code"].isin(VITA_C)  & 
                          #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
                          ~result_df["Customer SKU Code"].isin(FLUSH_OUT)
-                        & result_df["region"].astype(str).str.lower().str.contains("sulawesi 1", case=False, na=False)),
+                        & result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)),
                         #end
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
