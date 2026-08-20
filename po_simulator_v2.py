@@ -448,6 +448,16 @@ def _edit_qty_via_excel_com(xlsx_bytes, sheet_name, hdr_row_0, sku_col_name, qty
         try: pythoncom.CoUninitialize()
         except Exception: pass
 
+def _detect_brand_tag(df: pd.DataFrame, name_col) -> str:
+    if not name_col or name_col not in df.columns:
+        return ""
+    text_all = " ".join(df[name_col].dropna().astype(str).tolist()).upper()
+    tags = []
+    if re.search(r'\bGLAD2GLOW\b|\bG2G\b', text_all):
+        tags.append("G2G")
+    if re.search(r'\bNEXTPRIME\b|\bNXP\b', text_all):
+        tags.append("NXP")
+    return "-".join(tags)
 
 def numeric_coerce(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
@@ -1523,6 +1533,7 @@ def _modify_qty_section(raw_entries, page_key: str):
 
             qty_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['qty','quantity'])), None)
             sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code', 'sku code', 'sku kode', 'product kode'])), None)
+            name_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['product name','nama produk','description','item name', 'item description', 'item', 'product'])), None)
             if not qty_col_t or not sku_col_t:
                 st.info("ℹ️ Kolom SKU / QTY tidak terdeteksi."); continue
 
@@ -1629,6 +1640,9 @@ def _modify_qty_section(raw_entries, page_key: str):
                 customer_name = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
                                               key=f"tpl_cust_{page_key}_{fi}", label_visibility="collapsed")
                 file_label = re.sub(r'[\\/*?:"<>|]', "", (customer_name or "").strip()) or "Unnamed_Customer"
+                brand_tag = _detect_brand_tag(tpl_df, name_col_t)
+                if brand_tag:
+                    file_label = f"{file_label}-{brand_tag}"
                 timestamp = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%H.%M.%S")
                 st.download_button(
                     label=f"⬇ Download Hasil Modifikasi (.{res_t['ext']})",
@@ -2690,7 +2704,7 @@ with tabs[0]:
             st.stop()
         with st.spinner("Prepare file..."):
             try:
-                fetch_template_xlsx.clear()  # <-- paksa fetch ulang, jangan pakai cache lama
+                fetch_template_xlsx.clear()  
                 tpl_bytes = fetch_template_xlsx(st.session_state['gsheet_url'])
                 export_bytes = export_to_template(df, tpl_bytes, distributor_label, rsa_pilih, discount)
                 st.session_state['export_bytes'] = export_bytes
