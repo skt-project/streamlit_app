@@ -66,10 +66,20 @@ def load_credentials(secrets=None, scopes=None):
 
     path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not path:
+        # Application Default Credentials: how a server or a developer running
+        # `gcloud auth application-default login` is expected to authenticate.
+        try:
+            import google.auth
+
+            adc, adc_project = google.auth.default(scopes=scopes)
+            return adc, adc_project
+        except Exception:
+            pass
         raise RuntimeError(
             f"Kredensial Google tidak ditemukan ({reason}). Set "
-            "st.secrets['connections']['bigquery'] atau "
-            "GOOGLE_APPLICATION_CREDENTIALS."
+            "st.secrets['connections']['bigquery'], "
+            "GOOGLE_APPLICATION_CREDENTIALS, atau jalankan "
+            "`gcloud auth application-default login`."
         )
     with open(path) as fh:
         project = json.load(fh).get("project_id")
@@ -212,45 +222,29 @@ def load_products(credentials, project) -> dict:
 
 
 # ─── Login (shared credentials table) ─────────────────────────────────────────
-#: Credentials live on the parent table shared with po_portal_suggestion.py.
-#: Branch detail lives on a child table, one row per distributor_code pointing
-#: back at its parent account. That split is what lets a company keep a single
-#: password while each of its branches logs in under its own DSTxxx - necessary
-#: because six companies cover between 4 and 31 active branches, and almost
-#: every branch submits NOO rows in its own right.
-#:
-#:      parent  po_portal_distributor_users     username, password_hash, is_active
-#:      child   po_portal_distributor_branches  distributor_code -> username
-USER_TABLE = "po_portal_distributor_users"
-BRANCH_TABLE = "po_portal_distributor_branches"
+# ─── Distributor accounts (BigQuery, bcrypt) ─────────────────────────────────
+ACCOUNT_TABLE = "noo_sku_distributor_user"
 
 
-def check_login(credentials, project, dataset, distributor_code, password):
-    """Verify a distributor-code login against the parent/child tables.
+def _account_table(project, dataset):
+    return f"`{project}.{dataset}.{ACCOUNT_TABLE}`"
 
-    The child row identifies which account owns the code; the password is
-    checked against that account's `password_hash` on the parent, using the same
-    direct comparison `po_portal_suggestion.check_login` performs.
 
-    Returns a dict with `distributor_code`, `username` and
-    `distributor_company`, or None when the code is unknown, either row is
-    inactive, or the password does not match.
+def load_account(credentials, project, dataset, distributor_code):
+    """Fetch one account row. Returns None when absent or inactive.
+
+    The password hash is returned so the caller can verify it in-process; it is
+    never rendered, logged, or placed in session state.
     """
     from google.cloud import bigquery
 
     client = bigquery.Client(credentials=credentials, project=project)
     query = f"""
-        SELECT
-            UPPER(TRIM(c.distributor_code)) AS distributor_code,
-            p.username,
-            p.distributor_company,
-            p.password_hash
-        FROM `{project}.{dataset}.{BRANCH_TABLE}` c
-        JOIN `{project}.{dataset}.{USER_TABLE}` p
-          ON LOWER(TRIM(p.username)) = LOWER(TRIM(c.username))
-        WHERE UPPER(TRIM(c.distributor_code)) = @code
-          AND c.is_active = TRUE
-          AND p.is_active = TRUE
+        SELECT distributor_code, distributor_name, password_hash,
+               is_active, must_change_password, last_login_at
+        FROM {_account_table(project, dataset)}
+        WHERE UPPER(TRIM(distributor_code)) = @code
+          AND is_active = TRUE
         LIMIT 1
     """
     job = client.query(query, job_config=bigquery.QueryJobConfig(
@@ -260,11 +254,74 @@ def check_login(credentials, project, dataset, distributor_code, password):
     if not rows:
         return None
     row = rows[0]
-    if str(row["password_hash"]).strip() != str(password).strip():
-        return None
-    return {"distributor_code": clean(row["distributor_code"]),
-            "username": clean(row["username"]),
-            "distributor_company": clean(row["distributor_company"])}
+    return {
+        "distributor_code": clean(row["distributor_code"]),
+        "distributor_name": clean(row["distributor_name"]),
+        "password_hash": str(row["password_hash"] or ""),
+        "is_active": bool(row["is_active"]),
+        "must_change_password": bool(row["must_change_password"]),
+        "last_login_at": row["last_login_at"],
+    }
+
+
+def set_password(credentials, project, dataset, distributor_code, password_hash):
+    """Store a new bcrypt hash and clear the must-change flag."""
+    from google.cloud import bigquery
+
+    client = bigquery.Client(credentials=credentials, project=project)
+    query = f"""
+        UPDATE {_account_table(project, dataset)}
+        SET password_hash = @hash,
+            must_change_password = FALSE,
+            updated_at = CURRENT_TIMESTAMP()
+        WHERE UPPER(TRIM(distributor_code)) = @code
+    """
+    client.query(query, job_config=bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("hash", "STRING", password_hash),
+            bigquery.ScalarQueryParameter("code", "STRING",
+                                          norm_key(distributor_code))])).result()
+    return True
+
+
+def touch_last_login(credentials, project, dataset, distributor_code):
+    """Best-effort login stamp. Never blocks a successful login."""
+    from google.cloud import bigquery
+
+    client = bigquery.Client(credentials=credentials, project=project)
+    query = f"""
+        UPDATE {_account_table(project, dataset)}
+        SET last_login_at = CURRENT_TIMESTAMP()
+        WHERE UPPER(TRIM(distributor_code)) = @code
+    """
+    try:
+        client.query(query, job_config=bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter(
+                "code", "STRING", norm_key(distributor_code))])).result()
+    except Exception:
+        pass
+
+
+def existing_account_codes(credentials, project, dataset):
+    """Codes that already have an account, for idempotent seeding."""
+    from google.cloud import bigquery
+
+    client = bigquery.Client(credentials=credentials, project=project)
+    query = (f"SELECT UPPER(TRIM(distributor_code)) AS code "
+             f"FROM {_account_table(project, dataset)}")
+    return {r["code"] for r in client.query(query).result()}
+
+
+def insert_accounts(credentials, project, dataset, rows):
+    """Append new account rows. Existing rows are never modified here."""
+    from google.cloud import bigquery
+
+    client = bigquery.Client(credentials=credentials, project=project)
+    table = f"{project}.{dataset}.{ACCOUNT_TABLE}"
+    errors = client.insert_rows_json(table, rows)
+    if errors:
+        raise RuntimeError(f"Gagal membuat akun: {errors[:3]}")
+    return len(rows)
 
 
 # ─── Distributor master (BigQuery) ────────────────────────────────────────────

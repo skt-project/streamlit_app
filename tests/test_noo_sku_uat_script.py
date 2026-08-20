@@ -93,35 +93,34 @@ def test_script_reuses_the_shared_modules_rather_than_reimplementing_them():
 
 
 # ─── Login source (shared credentials table) ─────────────────────────────────
-def test_login_reads_the_shared_tables_not_secrets():
-    """Credentials stay on the parent table po_portal_suggestion already uses;
-    branch detail lives on the child table so each DSTxxx logs in separately."""
+def test_credentials_live_in_a_dedicated_hashed_table():
+    """Auth moved off po_portal_distributor_users: that table stores plaintext
+    and three PO-portal apps read it, so it could not be hashed in place."""
     from noo_sku import sources
 
     app = (REPO / "noo_sku_mapping.py").read_text(encoding="utf-8")
-    assert "distributor_passwords" not in app, "secrets-based passwords removed"
-    assert "sources.check_login" in app
-    assert sources.USER_TABLE == "po_portal_distributor_users"
-    assert sources.BRANCH_TABLE == "po_portal_distributor_branches"
+    assert "distributor_passwords" not in app, "no secrets-based passwords"
+    assert sources.ACCOUNT_TABLE == "noo_sku_distributor_user"
+    assert "sources.load_account" in app
+    assert not hasattr(sources, "check_login"), "plaintext login path removed"
 
 
-def test_check_login_joins_child_to_parent_and_requires_both_active():
+def test_the_po_portal_credentials_table_is_no_longer_referenced():
+    from noo_sku import sources
+    import inspect
+
+    src = inspect.getsource(sources)
+    assert "po_portal_distributor_users" not in src
+
+
+def test_password_writes_are_parameterised():
     import inspect
 
     from noo_sku import sources
 
-    src = inspect.getsource(sources.check_login)
-    assert "UPPER(TRIM(c.distributor_code)) = @code" in src, "login keys on the code"
-    assert "LOWER(TRIM(p.username)) = LOWER(TRIM(c.username))" in src, "child -> parent"
-    assert "c.is_active = TRUE" in src and "p.is_active = TRUE" in src
-    assert "password_hash" in src, "password is checked against the parent row"
-    assert "@code" in src, "must be parameterised, not string-formatted"
-
-
-def test_login_asks_for_a_distributor_code_not_a_username():
-    app = (REPO / "noo_sku_mapping.py").read_text(encoding="utf-8")
-    assert 'st.text_input("Kode Distributor"' in app
-    assert 'st.text_input("Username"' not in app
+    src = inspect.getsource(sources.set_password)
+    assert "@hash" in src and "@code" in src
+    assert "must_change_password = FALSE" in src
 
 
 def test_every_third_party_import_is_declared_in_requirements():

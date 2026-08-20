@@ -390,13 +390,13 @@ def test_nothing_is_written_when_every_row_is_ineligible():
 
 
 # ─── Guideline ────────────────────────────────────────────────────────────────
-def test_guideline_pdf_renders():
+def test_guideline_pdf_renders_per_function():
     from noo_sku import guideline
 
-    pdf = guideline.build_pdf()
-    assert pdf[:4] == b"%PDF"
-    assert "Panduan" in guideline.TITLE
-    assert "1. Login" in guideline.as_markdown()
+    for kind in (guideline.UPLOAD_NOO, guideline.UPLOAD_SKU):
+        assert guideline.build_pdf(kind)[:4] == b"%PDF"
+        assert "Panduan" in guideline.title_for(kind)
+        assert "Umum" in guideline.as_markdown(kind)
 
 
 # ─── Write modes (brief §14/§15) ──────────────────────────────────────────────
