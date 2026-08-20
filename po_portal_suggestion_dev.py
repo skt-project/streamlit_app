@@ -19,19 +19,27 @@ log = logging.getLogger("po_portal_suggestion_dev")
 # This file is a duplicate of po_portal_suggestion.py used ONLY to validate
 # the dynamic-matrix table against real production data before promotion.
 #
-# Write scope, precisely (revised 2026-08-19 — this file was read-only
-# until this revision; see git history for that version if needed):
-# this file can write to EXACTLY THREE tables — po_portal_suggestion_matrix,
-# po_portal_suggestion_matrix_schema, and po_portal_suggestion_dev — and
-# NOTHING else. All three are tables this DEV build already exclusively
-# owns/feeds; none are read by production. The single production-mutating
-# statement that ever existed here — the `bq_client.insert_rows_json(...)`
-# in Upload Feedback — remains physically deleted, not disabled. Every write
-# call in this file lives inside run_matrix_refresh_inline() or
-# run_dev_refresh_inline(), both grep-findable, both using a SEPARATE
-# credential (`st.secrets["refresh"]`) from the one powering every read in
-# the rest of this app (`st.secrets["connections"]["bigquery"]`, still
-# recommended read-only per the README) — a write-capable credential
+# Write scope, precisely (revised 2026-08-20 — added the fourth table and
+# the dynamic Upload Feedback submit path; see git history for the
+# three-table version if needed):
+# this file can write to EXACTLY FOUR tables — po_portal_suggestion_matrix,
+# po_portal_suggestion_matrix_schema, po_portal_suggestion_dev, and
+# po_portal_feedback_dev — and NOTHING else. All four are tables this DEV
+# build already exclusively owns/feeds; none are read by production, and
+# NONE of them is production's `po_portal_feedback` (122k+ real distributor
+# submissions) — that table's insert path (production's, and the near-
+# duplicate one in po_portal_suggestion_v2.py) is never called from this
+# file, on any path. The Upload Feedback DYNAMIC path (active when
+# USING_DYNAMIC is True) now performs a REAL write to po_portal_feedback_dev
+# on submit — this is new as of this revision and is the one production-
+# mutating-shaped statement in this file; the LEGACY fallback path (matrix
+# tables empty) stays preview-only, submission physically absent, unchanged
+# from before. Every write call in this file lives inside
+# run_matrix_refresh_inline(), run_dev_refresh_inline(), or the Upload
+# Feedback dynamic-submit block — all three grep-findable, all three using a
+# SEPARATE credential (`st.secrets["refresh"]`) from the one powering every
+# read in the rest of this app (`st.secrets["connections"]["bigquery"]`,
+# still recommended read-only per the README) — a write-capable credential
 # misconfigured or compromised on the read path still can't write, and vice
 # versa. Search this file for DEV_MODE to see every place that differs from
 # production.
@@ -49,12 +57,13 @@ st.warning(
     "🧪 **DEV ENVIRONMENT** — this app reads real production BigQuery data "
     "(including the dynamic matrix table) to validate the dynamic PO Portal "
     "Suggestion table before promotion. **This build can write, but only to "
-    "its own three isolated tables** (`po_portal_suggestion_matrix`, "
-    "`_matrix_schema`, `po_portal_suggestion_dev`) via the manual refresh "
-    "buttons below — never to production tables, never automatically. "
-    "Upload Feedback submission is disabled; PO Tracking Data and Upload "
-    "Feedback are otherwise read exactly as in production. See `README.md` "
-    "in `po_portal_dynamic_matrix/` for the full audit.",
+    "its own four isolated tables** (`po_portal_suggestion_matrix`, "
+    "`_matrix_schema`, `po_portal_suggestion_dev`, `po_portal_feedback_dev`) "
+    "— via the manual refresh buttons below, or (Upload Feedback, dynamic "
+    "path only) the Submit button — **never to production tables, never "
+    "automatically.** The legacy-fallback Upload Feedback path stays "
+    "preview-only. PO Tracking Data is read exactly as in production. See "
+    "`README.md` in `po_portal_dynamic_matrix/` for the full audit.",
     icon="🧪",
 )
 
@@ -81,7 +90,11 @@ DATASET = st.secrets["bigquery"]["dataset"]
 # to its own destination, so this app is unaffected by whatever is currently
 # racing against the production table (see the 2026-08-18 schema-race RCA).
 PO_TABLE = "po_portal_suggestion_dev"
-FEEDBACK_TABLE = "po_portal_feedback"  # read-only reference only — see Upload Feedback section
+FEEDBACK_TABLE = "po_portal_feedback"  # read-only reference only — legacy-fallback preview path
+# Isolated DEV write target for the DYNAMIC upload path only. Never production
+# po_portal_feedback. Auto-created on first submit via _sync_bq_schema, same
+# as po_portal_suggestion_matrix — no manual DDL required.
+FEEDBACK_DEV_TABLE = "po_portal_feedback_dev"
 USER_TABLE = "po_portal_distributor_users"
 
 # Dynamic matrix tables. Fed by DAG `GT_po_portal_suggestion_matrix_refresh`
@@ -186,6 +199,49 @@ def load_po_suggestion():
 # --------------------------------------------------
 # Load PO Suggestion — DYNAMIC (spreadsheet-driven)
 # --------------------------------------------------
+def _fetch_matrix_schema_df():
+    """
+    SELECT-only, uncached (unlike load_po_suggestion_dynamic below) — callers
+    that need the freshest possible schema, like Upload Feedback validation,
+    should call this directly rather than going through the 600s cache.
+    """
+    schema_sql = f"""
+        SELECT matrix_column, source_header, source_header_original, column_position
+        FROM `{PROJECT_ID}.{DATASET}.{MATRIX_SCHEMA_TABLE}`
+        ORDER BY column_position
+    """
+    return bq_client.query(schema_sql).to_dataframe()
+
+
+def _build_matrix_labels(schema_df):
+    """
+    Shared by the display path (load_po_suggestion_dynamic) and the Upload
+    Feedback dynamic path — they MUST produce identical labels, since Upload
+    Feedback validates an uploaded file against exactly the columns the
+    display/download path generated. Aliased by the SAFE matrix_N name in
+    SQL — NOT by the pretty header text — because BigQuery's query-result
+    field-name rules are stricter than what backtick-quoting allows in the
+    query text itself: any header containing parentheses (e.g. "Price
+    (SIP)", "Standard WOI (Lead Time + Assortment WOI Target)" — several real
+    headers on this sheet) fails with "Invalid field name" even though the
+    SQL parses fine. Confirmed by running the previously-generated query
+    directly against BigQuery. Renaming to the pretty label happens AFTER
+    the fetch, in pandas, which has no such character restriction.
+    """
+    seen, matrix_cols, display_cols = {}, [], []
+    for _, r in schema_df.iterrows():
+        raw = (r["source_header_original"] or r["source_header"] or r["matrix_column"])
+        label = str(raw).strip() or str(r["matrix_column"])
+        if label in seen:
+            seen[label] += 1
+            label = f"{label}_{seen[label]}"
+        else:
+            seen[label] = 1
+        matrix_cols.append(r["matrix_column"])
+        display_cols.append(label)
+    return matrix_cols, display_cols
+
+
 @st.cache_data(ttl=600)
 def load_po_suggestion_dynamic():
     """
@@ -200,36 +256,11 @@ def load_po_suggestion_dynamic():
     are not available yet — in which case the caller falls back to the legacy
     read, same fallback behavior as the production candidate.
     """
-    schema_sql = f"""
-        SELECT matrix_column, source_header, source_header_original, column_position
-        FROM `{PROJECT_ID}.{DATASET}.{MATRIX_SCHEMA_TABLE}`
-        ORDER BY column_position
-    """
-    schema_df = bq_client.query(schema_sql).to_dataframe()
+    schema_df = _fetch_matrix_schema_df()
     if schema_df.empty:
         return None, None
 
-    # Build the projection in spreadsheet order, aliased by the SAFE matrix_N
-    # name in SQL — NOT by the pretty header text. BigQuery's query-result
-    # field-name rules are stricter than what backtick-quoting allows in the
-    # query text itself: any header containing parentheses (e.g. "Price
-    # (SIP)", "Standard WOI (Lead Time + Assortment WOI Target)" — several
-    # real headers on this sheet) fails with "Invalid field name" even though
-    # the SQL parses fine. Confirmed by running the previously-generated
-    # query directly against BigQuery. Renaming to the pretty label happens
-    # AFTER the fetch, in pandas, which has no such character restriction.
-    seen, matrix_cols, display_cols = {}, [], []
-    for _, r in schema_df.iterrows():
-        raw = (r["source_header_original"] or r["source_header"] or r["matrix_column"])
-        label = str(raw).strip() or str(r["matrix_column"])
-        if label in seen:
-            seen[label] += 1
-            label = f"{label}_{seen[label]}"
-        else:
-            seen[label] = 1
-        matrix_cols.append(r["matrix_column"])
-        display_cols.append(label)
-
+    matrix_cols, display_cols = _build_matrix_labels(schema_df)
     projection = ",\n".join(f"  {c}" for c in matrix_cols)
 
     query = f"""
@@ -380,6 +411,17 @@ MATRIX_SCHEMA_TABLE_SCHEMA = [
     bigquery.SchemaField('loaded_at',              'TIMESTAMP'),
 ]
 MATRIX_MIN_EXPECTED_ROWS = 1
+
+# ---- feedback (dynamic): fixed columns for the DEV-isolated submission
+# target. matrix_1..matrix_N are appended at submit time, additive-synced via
+# _sync_bq_schema exactly like the matrix table — the feedback table's width
+# always matches whatever the CURRENT sheet schema was at submission time.
+FEEDBACK_DEV_FIXED_SCHEMA = [
+    bigquery.SchemaField('distributor_company', 'STRING'),
+    bigquery.SchemaField('submission_id',       'STRING'),
+    bigquery.SchemaField('submitted_at',        'DATETIME'),
+    bigquery.SchemaField('feedback_qty',        'INTEGER'),
+]
 
 # ---- dev refresh: mirrors dag_gt_po_portal_suggestion_dev.py ----
 DEV_STRING_COLUMNS = [
@@ -745,6 +787,102 @@ def render_refresh_button(label: str, action_fn, state_key: str):
         st.caption(f"{badge} Last attempt: {last['msg']}")
 
 
+def validate_feedback_dynamic(df_upload, schema_df):
+    """
+    Pure validation for a dynamic-shaped Upload Feedback file — no BigQuery
+    calls, so this is testable in isolation with a plain DataFrame. Mirrors
+    the legacy path's checks (missing columns, feedback_qty must be numeric)
+    but computes the required column list from the CURRENT schema instead of
+    a hardcoded list, since a dynamic download's columns can change any time
+    the sheet does.
+
+    Returns (ok, message, extra):
+      ok=False -> extra is {} normally, or {'invalid_rows': <DataFrame>} when
+                  the failure is specifically bad feedback_qty values, so the
+                  caller can show exactly which rows without recomputing the
+                  mask itself.
+      ok=True  -> extra has 'cleaned_df' (feedback_qty coerced to int),
+                  'matrix_cols' and 'display_cols' (the schema used — needed
+                  by submit_feedback_dynamic to map columns back to matrix_N).
+    """
+    if schema_df is None or schema_df.empty:
+        return False, ("Dynamic schema unavailable right now — cannot validate "
+                        "this upload. Try again shortly."), {}
+
+    matrix_cols, display_cols = _build_matrix_labels(schema_df)
+    required_cols = display_cols + ["feedback_qty"]
+
+    missing = [c for c in required_cols if c not in df_upload.columns]
+    if missing:
+        return False, (f"Missing columns: {missing}. The spreadsheet's "
+                        f"structure may have changed since you downloaded "
+                        f"this file — re-download and try again."), {}
+
+    raw_feedback = df_upload["feedback_qty"].fillna("").astype(str).str.strip()
+    raw_feedback = raw_feedback.str.replace(r"\.0$", "", regex=True)
+    invalid_mask = raw_feedback.ne("") & ~raw_feedback.str.match(r"^\d+(,\d+)*$")
+    if invalid_mask.any():
+        return False, "Upload gagal: feedback_qty hanya boleh berisi ANGKA", {
+            "invalid_rows": df_upload.loc[invalid_mask]
+        }
+
+    cleaned = df_upload.copy()
+    cleaned["feedback_qty"] = (
+        raw_feedback.replace("", "0")
+        .str.replace(",", "", regex=False)
+        .pipe(pd.to_numeric, errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    return True, f"{len(cleaned):,} row(s) validated.", {
+        "cleaned_df": cleaned, "matrix_cols": matrix_cols, "display_cols": display_cols
+    }
+
+
+def submit_feedback_dynamic(cleaned_df, matrix_cols, display_cols, logged_company):
+    """
+    Writes a validated dynamic-shaped feedback upload to po_portal_feedback_dev
+    — never production po_portal_feedback. Uses the SEPARATE [refresh] write
+    credential via _refresh_bq_client(), the same isolation already proven
+    for run_matrix_refresh_inline / run_dev_refresh_inline. Never raises —
+    every failure mode returns (False, reason, {}).
+    """
+    label_to_matrix = dict(zip(display_cols, matrix_cols))
+    submission_id = str(uuid.uuid4())
+    submitted_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    records = []
+    for _, row in cleaned_df.iterrows():
+        rec = {
+            "distributor_company": logged_company,
+            "submission_id": submission_id,
+            "submitted_at": submitted_at,
+            "feedback_qty": int(row["feedback_qty"]),
+        }
+        for label, mcol in label_to_matrix.items():
+            val = row.get(label)
+            rec[mcol] = "" if pd.isna(val) else str(val).strip()
+        records.append(rec)
+
+    try:
+        client = _refresh_bq_client()
+        table_id = f"{PROJECT_ID}.{DATASET}.{FEEDBACK_DEV_TABLE}"
+        desired_schema = FEEDBACK_DEV_FIXED_SCHEMA + [
+            bigquery.SchemaField(mcol, "STRING") for mcol in matrix_cols
+        ]
+        _sync_bq_schema(client, table_id, desired_schema)
+        errors = client.insert_rows_json(
+            table_id, records,
+            row_ids=[None] * len(records),
+            skip_invalid_rows=True,
+        )
+        if errors:
+            return False, "Failed to insert feedback", {"records": records, "errors": errors}
+        return True, f"{len(records):,} row(s) submitted to {FEEDBACK_DEV_TABLE}", {"records": records}
+    except Exception as exc:  # noqa: BLE001 - must never raise into the caller
+        return False, f"{type(exc).__name__}: {exc}", {"records": records}
+
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
@@ -992,11 +1130,11 @@ with st.expander("🧪 DEV — matrix column mapping detail", expanded=False):
         st.caption(f"Mapping table not available yet: {type(exc).__name__}")
 
 # --------------------------------------------------
-# DOWNLOAD EXCEL (preview only — same file production would generate)
+# DOWNLOAD EXCEL — mirrors the on-screen table exactly (display_df), whichever
+# frame is currently driving it. Downloading a file is a read from BigQuery's
+# perspective; it writes nothing.
 # --------------------------------------------------
-# Built from the LEGACY frame, not the dynamic one — mirrors production exactly.
-# Downloading a file is a read from BigQuery's perspective; it writes nothing.
-excel_df = filtered_df.copy()
+excel_df = display_df.copy()
 excel_df["feedback_qty"] = ""
 
 output = BytesIO()
@@ -1121,158 +1259,216 @@ st.download_button(
 )
 
 # --------------------------------------------------
-# UPLOAD FEEDBACK — PREVIEW ONLY. SUBMISSION IS PHYSICALLY DISABLED.
+# UPLOAD FEEDBACK
 # --------------------------------------------------
-# Everything up to and including validation/preview is IN-MEMORY pandas work —
-# no BigQuery call happens until (in production) the "Submit Feedback" button
-# is clicked. In this DEV file, that button and the insert_rows_json call it
-# used to trigger have been REMOVED, not merely hidden or gated behind a flag.
-# There is no code path in this file that can write a row to po_portal_feedback.
+# Two independent paths, matching the two shapes excel_df can come in as
+# (see DOWNLOAD EXCEL above, which always mirrors display_df):
+#
+#   USING_DYNAMIC True  -> DYNAMIC path. Validates against the CURRENT
+#                          po_portal_suggestion_matrix_schema (fetched fresh,
+#                          not the 600s-cached read) and, on submit, writes
+#                          to the DEV-isolated po_portal_feedback_dev table
+#                          via the SEPARATE [refresh] write credential — the
+#                          same credential/isolation pattern already proven
+#                          for run_matrix_refresh_inline / run_dev_refresh_inline.
+#                          This is a REAL write, not a preview.
+#   USING_DYNAMIC False -> legacy fallback path. Unchanged from before this
+#                          revision: validates the fixed 25-column shape,
+#                          preview only, submission stays physically absent.
+#                          This is the degraded/rare case (matrix tables
+#                          empty) and was never what this round-trip needed
+#                          to prove, so it isn't extended here.
 st.divider()
-st.subheader("📤 Upload Feedback  🧪 DEV — preview only, submission disabled")
-st.info(
-    "This section validates a filled Excel exactly like production, so the "
-    "template produced by the dynamic table change can be checked end to end. "
-    "**The actual BigQuery write has been removed from this build** — no "
-    "button here can insert a row into `po_portal_feedback`.",
-    icon="🚫",
-)
+st.subheader("📤 Upload Feedback  🧪 DEV")
+
+if USING_DYNAMIC:
+    st.info(
+        "Validates a filled Excel against the sheet's CURRENT structure — "
+        "exactly the columns the download above just produced. **Submitting "
+        "here writes to `po_portal_feedback_dev`, a DEV-isolated table — "
+        "never production `po_portal_feedback`.**",
+        icon="🧪",
+    )
+else:
+    st.info(
+        "Dynamic matrix tables aren't available right now, so this falls "
+        "back to the legacy fixed-column template — **preview only, "
+        "submission is physically removed from this path**, since it isn't "
+        "the round trip this build validates.",
+        icon="🚫",
+    )
 
 uploaded_file = st.file_uploader(
-    "Upload filled Excel (feedback_qty) — DEV preview, will NOT be submitted",
+    "Upload filled Excel (feedback_qty)",
     type=["xlsx"]
 )
 
 if uploaded_file:
     df_upload = pd.read_excel(uploaded_file)
 
-    required_cols = [
-        "sku_status",
-        "brand",
-        "region",
-        "distributor_company",
-        "distributor_branch",
-        "product_id",
-        "product_name",
-        "current_stock_friday",
-        "in_transit_stock",
-        "total_stock",
-        "moq",
-        "standard_woi",
-        "avg_weekly_st_l3m",
-        "avg_weekly_st_lm",
-        "current_woi",
-        "si_target",
-        "assortment",
-        "stock_wh_qty",
-        "avg_weekly_st_mtd",
-        "avg_weekly_so_mtd",
-        "recomended_qty",
-        "ideal_weekly_po_qty",
-        "max_weekly_po_qty",
-        "min_weekly_po_qty",
-        "feedback_qty"
-    ]
+    if USING_DYNAMIC:
+        # ---- DYNAMIC path: validate + REAL submit to po_portal_feedback_dev ----
+        # Both steps are standalone functions (defined above, before the login
+        # gate) precisely so they're unit-testable the same way
+        # run_matrix_refresh_inline/run_dev_refresh_inline already are — this
+        # script body is just UI glue around them, no business logic of its own.
+        schema_df = _fetch_matrix_schema_df()
+        ok, msg, extra = validate_feedback_dynamic(df_upload, schema_df)
 
-    missing = [c for c in required_cols if c not in df_upload.columns]
-    if missing:
-        st.error(f"❌ Missing columns: {missing}")
-        st.stop()
+        if not ok:
+            st.error(f"❌ {msg}")
+            if "invalid_rows" in extra:
+                st.warning("Baris berikut mengandung huruf atau simbol:")
+                st.dataframe(extra["invalid_rows"], use_container_width=True)
+            st.stop()
 
-    raw_feedback = (
-        df_upload["feedback_qty"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-    )
+        cleaned_df = extra["cleaned_df"]
+        matrix_cols = extra["matrix_cols"]
+        display_cols = extra["display_cols"]
 
-    # hilangkan .0 di belakang angka (hasil dari Excel)
-    raw_feedback = raw_feedback.str.replace(r"\.0$", "", regex=True)
+        st.success(f"✅ File validated — {msg}")
+        st.subheader("Preview")
+        st.dataframe(cleaned_df, use_container_width=True, hide_index=True)
 
-    invalid_mask = (
-        raw_feedback.ne("")   # kosong tetap boleh
-        & ~raw_feedback.str.match(r"^\d+(,\d+)*$")
-    )
+        if st.button("✅ Submit Feedback — writes to po_portal_feedback_dev"):
+            sub_ok, sub_msg, sub_extra = submit_feedback_dynamic(
+                cleaned_df, matrix_cols, display_cols, logged_company)
+            if sub_ok:
+                st.success(f"✅ {sub_msg} (DEV-isolated table).")
+            else:
+                st.error(f"❌ {sub_msg}")
+                for err in sub_extra.get("errors", []):
+                    st.write(err)
 
-    if invalid_mask.any():
-        invalid_rows = df_upload.loc[
-            invalid_mask,
-            ["region", "distributor_branch", "product_id", "product_name", "feedback_qty"]
+    else:
+        # ---- Legacy fallback path — preview only, submission stays absent ----
+        required_cols = [
+            "sku_status",
+            "brand",
+            "region",
+            "distributor_company",
+            "distributor_branch",
+            "product_id",
+            "product_name",
+            "current_stock_friday",
+            "in_transit_stock",
+            "total_stock",
+            "moq",
+            "standard_woi",
+            "avg_weekly_st_l3m",
+            "avg_weekly_st_lm",
+            "current_woi",
+            "si_target",
+            "assortment",
+            "stock_wh_qty",
+            "avg_weekly_st_mtd",
+            "avg_weekly_so_mtd",
+            "recomended_qty",
+            "ideal_weekly_po_qty",
+            "max_weekly_po_qty",
+            "min_weekly_po_qty",
+            "feedback_qty"
         ]
 
-        st.error("❌ Upload gagal: feedback_qty hanya boleh berisi ANGKA")
-        st.warning("Baris berikut mengandung huruf atau simbol:")
+        missing = [c for c in required_cols if c not in df_upload.columns]
+        if missing:
+            st.error(f"❌ Missing columns: {missing}")
+            st.stop()
 
-        st.dataframe(invalid_rows, use_container_width=True)
+        raw_feedback = (
+            df_upload["feedback_qty"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
 
-        st.stop()
+        # hilangkan .0 di belakang angka (hasil dari Excel)
+        raw_feedback = raw_feedback.str.replace(r"\.0$", "", regex=True)
 
-    # --------------------------------------------------
-    # CLEAN NUMERIC DATA (EXCEL SAFE) — in-memory only, identical to production
-    # --------------------------------------------------
-    INT_COLS = [
-        "current_stock_friday",
-        "in_transit_stock",
-        "total_stock",
-        "moq",
-        "standard_woi",
-        "avg_weekly_st_l3m",
-        "avg_weekly_st_lm",
-        "si_target",
-        "stock_wh_qty",
-        "recomended_qty",
-        "ideal_weekly_po_qty",
-        "max_weekly_po_qty",
-        "min_weekly_po_qty",
-        "feedback_qty"
-    ]
+        invalid_mask = (
+            raw_feedback.ne("")   # kosong tetap boleh
+            & ~raw_feedback.str.match(r"^\d+(,\d+)*$")
+        )
 
-    FLOAT_COLS = [
-        "current_woi",
-        "avg_weekly_st_mtd",
-        "avg_weekly_so_mtd"
-    ]
+        if invalid_mask.any():
+            invalid_rows = df_upload.loc[
+                invalid_mask,
+                ["region", "distributor_branch", "product_id", "product_name", "feedback_qty"]
+            ]
 
-    def clean_numeric(df, cols, dtype):
-        for col in cols:
-            df[col] = (
-                df[col]
-                .astype(str)
-                .str.replace(",", "", regex=False)
-                .pipe(pd.to_numeric, errors="coerce")
-                .fillna(0)
-                .astype(dtype)
-            )
+            st.error("❌ Upload gagal: feedback_qty hanya boleh berisi ANGKA")
+            st.warning("Baris berikut mengandung huruf atau simbol:")
 
-    clean_numeric(df_upload, INT_COLS, "Int64")
-    clean_numeric(df_upload, FLOAT_COLS, "float64")
+            st.dataframe(invalid_rows, use_container_width=True)
 
-    st.success(f"✅ File validated — **{len(df_upload):,} row(s)** would be submitted in production.")
-    st.subheader("Preview (read-only)")
-    preview_cols = ["product_id", "product_name", "distributor_branch",
-                    "recomended_qty", "feedback_qty"]
-    st.dataframe(
-        df_upload[[c for c in preview_cols if c in df_upload.columns]],
-        use_container_width=True,
-        hide_index=True,
-    )
+            st.stop()
 
-    # --------------------------------------------------
-    # SUBMISSION — REMOVED IN DEV.
-    #
-    # Production's "Submit Feedback" button and its bq_client.insert_rows_json(...)
-    # call intentionally do not exist below this line. The button is rendered
-    # disabled so a tester sees where it would be, but no click handler and no
-    # BigQuery write call are wired to it — there is nothing to bypass.
-    # --------------------------------------------------
-    st.button(
-        "🚫 Submit Feedback — disabled in DEV",
-        disabled=True,
-        help="Submission is physically removed from this build. "
-             "No row can be written to po_portal_feedback from here.",
-    )
-    st.caption(
-        "In production, clicking Submit here would insert these rows into "
-        f"`{PROJECT_ID}.{DATASET}.{FEEDBACK_TABLE}`. That call does not exist "
-        "in this DEV file."
-    )
+        # --------------------------------------------------
+        # CLEAN NUMERIC DATA (EXCEL SAFE) — in-memory only, identical to production
+        # --------------------------------------------------
+        INT_COLS = [
+            "current_stock_friday",
+            "in_transit_stock",
+            "total_stock",
+            "moq",
+            "standard_woi",
+            "avg_weekly_st_l3m",
+            "avg_weekly_st_lm",
+            "si_target",
+            "stock_wh_qty",
+            "recomended_qty",
+            "ideal_weekly_po_qty",
+            "max_weekly_po_qty",
+            "min_weekly_po_qty",
+            "feedback_qty"
+        ]
+
+        FLOAT_COLS = [
+            "current_woi",
+            "avg_weekly_st_mtd",
+            "avg_weekly_so_mtd"
+        ]
+
+        def clean_numeric(df, cols, dtype):
+            for col in cols:
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.replace(",", "", regex=False)
+                    .pipe(pd.to_numeric, errors="coerce")
+                    .fillna(0)
+                    .astype(dtype)
+                )
+
+        clean_numeric(df_upload, INT_COLS, "Int64")
+        clean_numeric(df_upload, FLOAT_COLS, "float64")
+
+        st.success(f"✅ File validated — **{len(df_upload):,} row(s)** would be submitted in production.")
+        st.subheader("Preview (read-only)")
+        preview_cols = ["product_id", "product_name", "distributor_branch",
+                        "recomended_qty", "feedback_qty"]
+        st.dataframe(
+            df_upload[[c for c in preview_cols if c in df_upload.columns]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # --------------------------------------------------
+        # SUBMISSION — REMOVED for this path.
+        #
+        # Production's "Submit Feedback" button and its bq_client.insert_rows_json(...)
+        # call intentionally do not exist below this line. The button is rendered
+        # disabled so a tester sees where it would be, but no click handler and no
+        # BigQuery write call are wired to it — there is nothing to bypass.
+        # --------------------------------------------------
+        st.button(
+            "🚫 Submit Feedback — disabled (legacy fallback path)",
+            disabled=True,
+            help="Submission is physically removed from this path. "
+                 "No row can be written to po_portal_feedback from here.",
+        )
+        st.caption(
+            "In production, clicking Submit here would insert these rows into "
+            f"`{PROJECT_ID}.{DATASET}.{FEEDBACK_TABLE}`. That call does not exist "
+            "in this DEV file."
+        )
