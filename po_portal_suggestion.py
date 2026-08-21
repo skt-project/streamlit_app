@@ -488,17 +488,24 @@ st.title("📦 PO Portal Suggestion")
 # --------------------------------------------------
 # FILTERS (CASCADED)
 # --------------------------------------------------
-# Filter widget OPTIONS always come from the legacy frame (po_df), regardless
-# of which frame is driving the table display. If the dynamic (raw-sheet) and
-# legacy (derived-sheet) sources have diverged -- plausible, given the
-# derived sheet's documented fragility -- a distributor must never be able to
-# select a filter value that doesn't exist in the legacy data, since the
-# Excel export / Upload Feedback template always filters that same legacy
-# frame. The dynamic table below is still filtered and rendered from dyn_df
-# itself; only the available filter CHOICES are pinned to what's actually
-# exportable, so a selection can never silently produce a 0-row export.
-flt_df, C_REGION, C_COMPANY, C_BRANCH = (
-    po_df, "region", "distributor_company", "distributor_branch")
+# Filter widget OPTIONS follow whichever frame is actually driving the table
+# and its export (2026-08-21, revised from the original always-legacy
+# pinning). That original pinning existed to stop a selected filter value
+# from being absent from the export, back when the export was hard-pinned to
+# the legacy frame regardless of what was displayed. Since the dynamic-
+# download fix (excel_df now mirrors display_df), options and export already
+# come from the SAME frame whenever USING_DYNAMIC is True, so the divergence
+# risk that pinning protected against no longer applies in that case — and
+# the legacy frame is now fed by a separate, deprecated spreadsheet that has
+# gone empty, which made every filter dropdown show zero options with the
+# old pinning. Falls back to the legacy frame only when the dynamic tables
+# are genuinely unavailable, matching display_df/excel_df's own fallback.
+if USING_DYNAMIC:
+    flt_df, C_REGION, C_COMPANY, C_BRANCH = (
+        dyn_df, FLT_REGION, RLS_COL, FLT_BRANCH)
+else:
+    flt_df, C_REGION, C_COMPANY, C_BRANCH = (
+        po_df, "region", "distributor_company", "distributor_branch")
 
 with st.expander("🔍 Filter", expanded=True):
 
