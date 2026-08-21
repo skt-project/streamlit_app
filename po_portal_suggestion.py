@@ -446,7 +446,18 @@ if not st.session_state.logged_in:
     st.stop()
 
 # Legacy frame — powers the Upload Feedback Excel template (unchanged contract).
-po_df = load_po_suggestion()
+# Wrapped in try/except (2026-08-21, emergency fix): po_portal_suggestion is fed
+# by a separate, now-deprecated spreadsheet whose formula has broken repeatedly.
+# A failure here must never crash the whole app — the sheet that matters going
+# forward is the one load_po_suggestion_dynamic() reads. Degrading to an empty
+# frame means: RLS/Fix-B filter options go empty (distributors can't narrow the
+# dynamic table by dropdown until this is resolved) but the dynamic table itself,
+# its download, and both Upload Feedback paths (neither reads po_df) stay fully
+# functional — restoring the core experience instead of a total outage.
+try:
+    po_df = load_po_suggestion()
+except Exception:  # noqa: BLE001 - degrade rather than 500 the whole page
+    po_df = pd.DataFrame(columns=LEGACY_FEEDBACK_REQUIRED_COLS[:-1])  # drop feedback_qty, not a queried column
 
 # Dynamic frame — powers the on-screen table. Falls back to legacy if the matrix
 # tables have not been created/populated yet, so this file is safe to deploy
