@@ -900,7 +900,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         avg2 = res_df.get("avg_weekly_st_lm_qty", pd.Series([0]*len(res_df), index=res_df.index))
 
         conds = [
-            (res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False)) , #0 
+            ((res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False))) & (~res_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) , #0 
             res_df["Customer SKU Code"].isin(zero_price_skus), #1
             res_df["Customer SKU Code"].isin(skus_not_found), #2
             res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT), #3
