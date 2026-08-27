@@ -85,7 +85,7 @@ def get_bq_client() -> bigquery.Client:
 def get_zero_price_skus() -> set:
     try:
         client = get_bq_client()
-        query = "SELECT UPPER(sku) as sku FROM `skintific-data-warehouse.gt_schema.master_product` WHERE price_for_distri = 0 AND brand = 'G2G'"
+        query = "SELECT UPPER(sku) as sku FROM `skintific-data-warehouse.gt_schema.master_product` WHERE price_for_distri = 0 AND brand in ('G2G', 'BODIBREZE', 'NEXTPRIME')"
         rows = client.query(query).result()
         return {r.sku for r in rows if r.sku}
     except Exception:
@@ -102,10 +102,18 @@ def fetch_customer_names() -> list:
     except Exception as e:
         st.warning(f"⚠️ Gagal memuat daftar distributor: {e}")
         return []
-
-
+#ADD MOQ MINIMUM
+@st.cache_data(show_spinner=False)
+def check_moq() -> pd.DataFrame:
+    try:
+        client = get_bq_client()
+        query = f"select sku, product_name, cast (moq as int) as MOQ FROM `{GCP_PROJECT_ID}.gt_schema.master_product` WHERE brand in ('G2G', 'BODIBREZE', 'NEXTPRIME')"
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Error fetching MOQ data: {e}")
+        return pd.DataFrame()
+#----------------------------
 CUSTOMER_NAMES = fetch_customer_names()
-
 
 @st.cache_data(ttl=21600, show_spinner="Fetching SKU data from BigQuery...")
 def get_sku_data(sku_list) -> pd.DataFrame:
@@ -124,7 +132,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
 def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
-    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date = '2026-07-01'"
+    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date between '2026-07-01' and '2026-08-31'"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -497,7 +505,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     for r_idx, row in enumerate(rows, 1):
         for c_idx, value in enumerate(row, 1):
             ws.cell(row=r_idx, column=c_idx, value=value)
-
+# WARNAIN ISI ROW DIKOLOM MANAPUN ------------------- KEY : WARNA ROW
     po_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
     suggestion_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
     npd_fill = PatternFill(start_color="B1DBF0", end_color="B1DBF0", fill_type="solid")
@@ -512,6 +520,8 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)"]
+    moq_safe_font = Font(bold=True, color="1E7A34")
+    moq_under_font = Font(bold=True, color="C00000")
 
     for r_idx, row in enumerate(rows, 1):
         for c_idx, value in enumerate(row, 1):
@@ -527,11 +537,18 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
                 if col_name in currency_cols: cell.number_format = "#,##0.00"
                 elif col_name in integer_cols: cell.number_format = "#,##0"
                 elif col_name in decimal_cols: cell.number_format = "0.00"
+
+#LOGIC : WARNA ROW
                 if col_name == "Remark":
                     val = str(cell.value or "")
                     if "Proceed" in val: cell.font = proceed_font
                     elif "Reject" in val: cell.font = reject_font
                     elif "Additional" in val: cell.font = suggest_font
+                elif col_name == "Check MOQ":
+                    val = str(cell.value or "")
+                    if val == "SAFE MOQ": cell.font = moq_safe_font
+                    elif val == "Under MOQ Minimum": cell.font = moq_under_font
+#------- END --------------
                 if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list:
                     sku_ci = col_map.get("SKU")
                     if sku_ci is not None:
@@ -752,7 +769,7 @@ with st.sidebar:
     st.markdown("<div style='text-align:center;color:rgba(255,255,255,.25);font-size:.62rem;margin-top:1rem;'>DataFlow v1.0 · Glad2Glow</div>", unsafe_allow_html=True)
 
 
-# ─── Shared PO simulation logic ───────────────────────────────────────────────
+# PO SIMULATOR LOGIC - RSA PAGE--------------->>
 
 def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                        manual_reject_approval, manual_reject_no_tol,
@@ -899,6 +916,8 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         bp3 = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
         avg2 = res_df.get("avg_weekly_st_lm_qty", pd.Series([0]*len(res_df), index=res_df.index))
 
+#-----------------KLO MAU TAMBAH KOLOM BARU---------------
+
         conds = [
             ((res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False))) & (~res_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) , #0 
             res_df["Customer SKU Code"].isin(zero_price_skus), #1
@@ -955,14 +974,33 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         res_df["Program"] = np.select(program_conds, program_choices, default="")
 
         res_df["RSA Notes"] = ""
-        #PENAMAAN KOLOM", jika mau tambah kolom
+        moq_df_lookup = check_moq()
+        if not moq_df_lookup.empty:
+            moq_map_lookup = (moq_df_lookup.assign(sku=moq_df_lookup["sku"].astype(str).str.strip().str.upper())
+                                            .set_index("sku")["MOQ"].to_dict())
+
+            sku_upper = res_df["SKU"].astype(str).str.strip().str.upper()
+            moq_lookup_val = sku_upper.map(moq_map_lookup)
+            po_qty_val = pd.to_numeric(res_df["PO Qty"], errors="coerce")
+
+            res_df["Check MOQ"] = np.select(
+                [moq_lookup_val.isna(), po_qty_val < moq_lookup_val],
+                ["MOQ Not Found", "Under MOQ Minimum"],
+                default="SAFE MOQ"
+
+            )
+        else:
+            res_df["Check MOQ"] = "MOQ Not Found"
+
+#----------------PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
                     "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark","Program",
                     "Suggested PO Qty","Suggested PO Value",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)","is_po_sku","RSA Notes"]
+                    "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "Check MOQ"]
+        
         res_df = res_df.reindex(columns=out_cols)
         res_df.sort_values(by=["is_po_sku","SKU"], ascending=[False,True], inplace=True)
 
@@ -991,7 +1029,7 @@ PO_TEMPLATE_COLS = [
     'Suggested PO Qty','Suggested PO Value',
     'WOI After Buffer (Stock + Suggested Qty)',
     'Stock + Suggested Qty WOI (Projection at EOM)',
-    'Remaining Allocation (By Region)','RSA Notes',
+    'Remaining Allocation (By Region)','RSA Notes','Check MOQ',
 ]
 PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:15]
 PO_COLS_copy = PO_TEMPLATE_COLS[:14]
@@ -1014,7 +1052,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     if woi_col is None:
         woi_col = next((c for c in final_disp.columns if "woi" in c.lower()), "Current WOI")
 
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span><strong>Preview Data — Top 10 WOI (Exclude : STOP PO/DISCONTINUED and Reject by Steve)</strong></div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">3</span><strong>Preview Data — Top 10 WOI (Exclude : STOP PO/DISCONTINUED and Reject by Steve)</strong></div>""", unsafe_allow_html=True)
     prev_df = final_disp[
     ~final_disp["Supply Control"].str.contains(
         "Stop PO|Discontinued",
@@ -1042,7 +1080,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     alloc_col = next((c for c in final_disp.columns if "allocation" in c.lower()), None)
     if alloc_col:
-        st.markdown("""<div class="pipeline-step active"><span class="step-number">3</span><strong>Remaining Allocation (per Distributor)</strong></div>""", unsafe_allow_html=True)
+        st.markdown("""<div class="pipeline-step active"><span class="step-number">4</span><strong>Remaining Allocation (per Distributor)</strong></div>""", unsafe_allow_html=True)
         alloc_df = final_disp.copy()
         alloc_df[alloc_col] = pd.to_numeric(alloc_df[alloc_col], errors="coerce")
         alloc_df = alloc_df[alloc_df[alloc_col].notna() & (alloc_df[alloc_col] != 0)]
@@ -1328,9 +1366,119 @@ def _file_upload_section(page_key: str):
                 converted_names.append(f"{uf.name} → {new_name}")
 
     if converted_names:
-        st.caption("🔄 Auto-convert: " + "  ·  ".join(converted_names))
+        st.caption("🔄 Auto-convert: " + "  ·  ".join(converted_names)) 
 
+
+    # CHECK MINIMUM MOQ 
     st.markdown("""<div class="pipeline-step active"><span class="step-number">1</span>
+    <strong>Check Minimum MOQ</strong></div>""", unsafe_allow_html=True)
+
+    moq_master = check_moq()
+    if moq_master.empty:
+        st.info("Data MOQ tidak berhasil dimuat dari BigQuery.")
+    else:
+        moq_master["sku"] = moq_master["sku"].astype(str).str.strip().str.upper()
+        moq_map = moq_master.set_index("sku")["MOQ"].to_dict()
+        moq_name_map = moq_master.set_index("sku")["product_name"].to_dict()
+
+        all_under_moq = []
+
+        for fname, fbytes in raw_entries:
+            try:
+                df_moq, _hrow = _read_one(fname, fbytes)
+            except Exception as e:
+                st.warning(f"⚠️ Gagal membaca **{fname}** untuk cek MOQ: {e}")
+                continue
+
+            df_moq.columns = [str(c).strip().upper() for c in df_moq.columns]
+            sku_col_m = next((c for c in df_moq.columns if any(k in c.lower() for k in
+                ['sku','product code','kode','code','sku code','sku kode','product kode'])), None)
+            qty_col_m = next((c for c in df_moq.columns if c.strip().upper() in ("QTY","QUANTITY")), None)
+
+            if not sku_col_m or not qty_col_m:
+                st.caption(f"ℹ️ **{fname}** — kolom SKU/QTY tidak terdeteksi, skip cek MOQ.")
+                continue
+
+            df_moq[sku_col_m] = df_moq[sku_col_m].astype(str).str.strip().str.upper()
+            df_moq["MOQ"] = df_moq[sku_col_m].map(moq_map)
+            df_moq["Product Name (MOQ Ref)"] = df_moq[sku_col_m].map(moq_name_map)
+
+            def _moq_status(row):
+                moq_val = row["MOQ"]
+                s = str(row[qty_col_m]).strip().lower()
+
+                if pd.isna(moq_val):
+                    return "MOQ Not Found"
+
+                if s in _INVALID_QTY:
+                    return "N/A"
+                try:
+                    qty_val = float(s.replace(",", "."))
+                except Exception:
+                    return "N/A"
+
+                return "Under MOQ Minimum" if qty_val < moq_val else "SAFE MOQ"
+
+            df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
+
+            show_cols = [sku_col_m, "Product Name (MOQ Ref)", qty_col_m, "MOQ", "MOQ Check"]
+            under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ Minimum"][show_cols].copy()
+
+            # Summary status untuk file ini
+            if under_moq.empty:
+                st.success(f"✅ **{fname}** — SAFE MOQ")
+            else:
+                under_moq_labeled = under_moq.copy()
+                under_moq_labeled.insert(0, "File", fname)
+                all_under_moq.append(under_moq_labeled)
+
+                st.warning(f"⚠️ **{fname}** — {len(under_moq)} baris di bawah MOQ minimum")
+                st.dataframe(under_moq, use_container_width=True, hide_index=True)
+
+            # === PREVIEW (exclude N/A) ===
+            def _highlight_moq(val):
+                if val == "Under MOQ Minimum":
+                    return "background-color:#F8D7DA;color:#721C24;font-weight:600;"
+                elif val == "SAFE MOQ":
+                    return "background-color:#D4EDDA;color:#155724;font-weight:600;"
+                elif val == "MOQ Not Found":
+                    return "background-color:#FFF3CD;color:#856404;font-weight:600;"
+                return ""
+
+            sku_valid = df_moq[sku_col_m].notna() & df_moq[sku_col_m].astype(str).str.strip().ne("") & df_moq[sku_col_m].astype(str).str.upper().ne("NAN")
+            df_preview_moq = df_moq[sku_valid & (df_moq["MOQ Check"] != "N/A")][show_cols]
+            def _clean_qty(v):
+                s = str(v).strip()
+                try:
+                    f = float(s.replace(",", "."))
+                    return str(int(f)) if f == int(f) else s
+                except Exception:
+                    return s
+            df_preview_moq[qty_col_m] = df_preview_moq[qty_col_m].apply(_clean_qty)
+            df_preview_moq["MOQ"] = df_preview_moq["MOQ"].apply(_clean_qty)
+
+            with st.expander(f"👁 Preview — {fname} ({len(df_preview_moq)} baris, {len(df_moq) - len(df_preview_moq)} N/A disembunyikan)", expanded=False):
+                if df_preview_moq.empty:
+                    st.caption("Tidak ada baris valid untuk ditampilkan (semua N/A).")
+                else:
+                    st.dataframe(
+                        df_preview_moq.style.map(_highlight_moq, subset=["MOQ Check"]),
+                        use_container_width=True, hide_index=True
+                    )
+            # === END PREVIEW ===
+
+        if all_under_moq:
+            combined_under_moq = pd.concat(all_under_moq, ignore_index=True)
+            st.divider()
+            st.error(f"❌ Total **{len(combined_under_moq)}** baris QTY di bawah MOQ minimum dari semua file")
+            st.dataframe(combined_under_moq, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # END CHECK MOQ 
+ 
+
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
     <strong>Konfigurasi per File</strong></div>""", unsafe_allow_html=True)
 
     parsed = []
@@ -1917,8 +2065,6 @@ if st.session_state.get('page') == 'po_spv':
                     # Merge with stock data (outer to include suggested SKUs)
                     result_df = pd.merge(result_df, sku_data_df, on="Customer SKU Code", how="outer")
 
-                    # After outer merge, fill Product Name for suggested SKUs from master_product
-                    # by re-merging just the product names for any new SKUs introduced via outer join
                     missing_product_names = result_df["Product Name"].isna()
                     if missing_product_names.any():
                         suggested_skus = result_df.loc[missing_product_names, "Customer SKU Code"].unique().tolist()
@@ -2123,6 +2269,21 @@ if st.session_state.get('page') == 'po_spv':
 
                     result_df["RSA Notes"] = ""
 
+                    moq_df_lookup_spv = check_moq()
+                    if not moq_df_lookup_spv.empty:
+                        moq_map_spv = (moq_df_lookup_spv.assign(sku=moq_df_lookup_spv["sku"].astype(str).str.strip().str.upper())
+                                                          .set_index("sku")["MOQ"].to_dict())
+                        sku_upper_spv = result_df["SKU"].astype(str).str.strip().str.upper()
+                        moq_val_spv = sku_upper_spv.map(moq_map_spv)
+                        po_qty_val_spv = pd.to_numeric(result_df["PO Qty"], errors="coerce")
+                        result_df["Check MOQ"] = np.select(
+                            [moq_val_spv.isna(), po_qty_val_spv < moq_val_spv],
+                            ["MOQ Not Found", "Under MOQ Minimum"],
+                            default="SAFE MOQ"
+                        )
+                    else:
+                        result_df["Check MOQ"] = "MOQ Not Found"
+
                     excel_cols = [
                         "Distributor",
                         "SKU",
@@ -2143,7 +2304,9 @@ if st.session_state.get('page') == 'po_spv':
                         "Remaining Allocation (By Region)",
                         "is_po_sku",
                         "RSA Notes",
+                        "Check MOQ",
                     ]
+
 
                     result_df = result_df.reindex(columns=excel_cols)
 
