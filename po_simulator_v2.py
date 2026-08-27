@@ -520,8 +520,8 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)"]
-    moq_safe_font = Font(bold=True, color="1E7A34")
-    moq_under_font = Font(bold=True, color="C00000")
+    moq_safe_font = Font(bold=True, color="54CE54")
+    moq_under_font = Font(bold=True, color="D73E3E")
 
     for r_idx, row in enumerate(rows, 1):
         for c_idx, value in enumerate(row, 1):
@@ -1426,7 +1426,7 @@ def _file_upload_section(page_key: str):
 
             # Summary status untuk file ini
             if under_moq.empty:
-                st.success(f"✅ **{fname}** — SAFE MOQ")
+                st.success(f"**{fname}** - ✅ **SAFE MOQ**")
             else:
                 under_moq_labeled = under_moq.copy()
                 under_moq_labeled.insert(0, "File", fname)
