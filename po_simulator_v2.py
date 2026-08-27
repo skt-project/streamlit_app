@@ -1367,118 +1367,9 @@ def _file_upload_section(page_key: str):
 
     if converted_names:
         st.caption("🔄 Auto-convert: " + "  ·  ".join(converted_names)) 
-
-
-    # CHECK MINIMUM MOQ 
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">1</span>
-    <strong>Check Minimum MOQ</strong></div>""", unsafe_allow_html=True)
-
-    moq_master = check_moq()
-    if moq_master.empty:
-        st.info("Data MOQ tidak berhasil dimuat dari BigQuery.")
-    else:
-        moq_master["sku"] = moq_master["sku"].astype(str).str.strip().str.upper()
-        moq_map = moq_master.set_index("sku")["MOQ"].to_dict()
-        moq_name_map = moq_master.set_index("sku")["product_name"].to_dict()
-
-        all_under_moq = []
-
-        for fname, fbytes in raw_entries:
-            try:
-                df_moq, _hrow = _read_one(fname, fbytes)
-            except Exception as e:
-                st.warning(f"⚠️ Gagal membaca **{fname}** untuk cek MOQ: {e}")
-                continue
-
-            df_moq.columns = [str(c).strip().upper() for c in df_moq.columns]
-            sku_col_m = next((c for c in df_moq.columns if any(k in c.lower() for k in
-                ['sku','product code','kode','code','sku code','sku kode','product kode'])), None)
-            qty_col_m = next((c for c in df_moq.columns if c.strip().upper() in ("QTY","QUANTITY")), None)
-
-            if not sku_col_m or not qty_col_m:
-                st.caption(f"ℹ️ **{fname}** — kolom SKU/QTY tidak terdeteksi, skip cek MOQ.")
-                continue
-
-            df_moq[sku_col_m] = df_moq[sku_col_m].astype(str).str.strip().str.upper()
-            df_moq["MOQ"] = df_moq[sku_col_m].map(moq_map)
-            df_moq["Product Name (MOQ Ref)"] = df_moq[sku_col_m].map(moq_name_map)
-
-            def _moq_status(row):
-                moq_val = row["MOQ"]
-                s = str(row[qty_col_m]).strip().lower()
-
-                if pd.isna(moq_val):
-                    return "MOQ Not Found"
-
-                if s in _INVALID_QTY:
-                    return "N/A"
-                try:
-                    qty_val = float(s.replace(",", "."))
-                except Exception:
-                    return "N/A"
-
-                return "Under MOQ Minimum" if qty_val < moq_val else "SAFE MOQ"
-
-            df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
-
-            show_cols = [sku_col_m, "Product Name (MOQ Ref)", qty_col_m, "MOQ", "MOQ Check"]
-            under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ Minimum"][show_cols].copy()
-
-            # Summary status untuk file ini
-            if under_moq.empty:
-                st.success(f"**{fname}** - ✅ **SAFE MOQ**")
-            else:
-                under_moq_labeled = under_moq.copy()
-                under_moq_labeled.insert(0, "File", fname)
-                all_under_moq.append(under_moq_labeled)
-
-                st.warning(f"⚠️ **{fname}** — {len(under_moq)} baris di bawah MOQ minimum")
-                st.dataframe(under_moq, use_container_width=True, hide_index=True)
-
-            # === PREVIEW (exclude N/A) ===
-            def _highlight_moq(val):
-                if val == "Under MOQ Minimum":
-                    return "background-color:#F8D7DA;color:#721C24;font-weight:600;"
-                elif val == "SAFE MOQ":
-                    return "background-color:#D4EDDA;color:#155724;font-weight:600;"
-                elif val == "MOQ Not Found":
-                    return "background-color:#FFF3CD;color:#856404;font-weight:600;"
-                return ""
-
-            sku_valid = df_moq[sku_col_m].notna() & df_moq[sku_col_m].astype(str).str.strip().ne("") & df_moq[sku_col_m].astype(str).str.upper().ne("NAN")
-            df_preview_moq = df_moq[sku_valid & (df_moq["MOQ Check"] != "N/A")][show_cols]
-            def _clean_qty(v):
-                s = str(v).strip()
-                try:
-                    f = float(s.replace(",", "."))
-                    return str(int(f)) if f == int(f) else s
-                except Exception:
-                    return s
-            df_preview_moq[qty_col_m] = df_preview_moq[qty_col_m].apply(_clean_qty)
-            df_preview_moq["MOQ"] = df_preview_moq["MOQ"].apply(_clean_qty)
-
-            with st.expander(f"👁 Preview — {fname} ({len(df_preview_moq)} baris, {len(df_moq) - len(df_preview_moq)} N/A disembunyikan)", expanded=False):
-                if df_preview_moq.empty:
-                    st.caption("Tidak ada baris valid untuk ditampilkan (semua N/A).")
-                else:
-                    st.dataframe(
-                        df_preview_moq.style.map(_highlight_moq, subset=["MOQ Check"]),
-                        use_container_width=True, hide_index=True
-                    )
-            # === END PREVIEW ===
-
-        if all_under_moq:
-            combined_under_moq = pd.concat(all_under_moq, ignore_index=True)
-            st.divider()
-            st.error(f"❌ Total **{len(combined_under_moq)}** baris QTY di bawah MOQ minimum dari semua file")
-            st.dataframe(combined_under_moq, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # END CHECK MOQ 
  
 
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">1</span>
     <strong>Konfigurasi per File</strong></div>""", unsafe_allow_html=True)
 
     parsed = []
@@ -1583,6 +1474,110 @@ def _file_upload_section(page_key: str):
 
     ready = [p for p in parsed if p["df"] is not None]
     st.divider()
+
+    # CHECK MINIMUM MOQ 
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
+    <strong>Check Minimum MOQ</strong></div>""", unsafe_allow_html=True)
+
+    moq_master = check_moq()
+    if moq_master.empty:
+        st.info("Data MOQ tidak berhasil dimuat dari BigQuery.")
+    elif not ready:
+        st.info("ℹ️ Belum ada file yang berhasil dikonfigurasi.")
+    else:
+        moq_master["sku"] = moq_master["sku"].astype(str).str.strip().str.upper()
+        moq_map = moq_master.set_index("sku")["MOQ"].to_dict()
+        moq_name_map = moq_master.set_index("sku")["product_name"].to_dict()
+
+        all_under_moq = []
+
+        for p in ready:
+            fname = p["name"]
+            df_moq = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
+            df_moq.columns = [str(c).strip().upper() for c in df_moq.columns]
+
+            sku_col_m = next((c for c in df_moq.columns if any(k in c.lower() for k in
+                ['sku','product code','kode','code','sku code','sku kode','product kode'])), None)
+            qty_col_m = next((c for c in df_moq.columns if c.strip().upper() in ("QTY","QUANTITY")), None)
+
+            if not sku_col_m or not qty_col_m:
+                st.caption(f"ℹ️ **{fname}** — kolom SKU/QTY tidak terdeteksi, skip cek MOQ.")
+                continue
+
+            df_moq[sku_col_m] = df_moq[sku_col_m].astype(str).str.strip().str.upper()
+            df_moq["MOQ"] = df_moq[sku_col_m].map(moq_map)
+            df_moq["Product Name (MOQ Ref)"] = df_moq[sku_col_m].map(moq_name_map)
+
+            def _moq_status(row):
+                moq_val = row["MOQ"]
+                s = str(row[qty_col_m]).strip().lower()
+
+                if pd.isna(moq_val):
+                    return "MOQ Not Found"
+
+                if s in _INVALID_QTY:
+                    return "N/A"
+                try:
+                    qty_val = float(s.replace(",", "."))
+                except Exception:
+                    return "N/A"
+
+                return "Under MOQ Minimum" if qty_val < moq_val else "SAFE MOQ"
+
+            df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
+
+            show_cols = [sku_col_m, "Product Name (MOQ Ref)", qty_col_m, "MOQ", "MOQ Check"]
+            under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ Minimum"][show_cols].copy()
+
+            if under_moq.empty:
+                st.success(f"**{fname}** - ✅ **SAFE MOQ**")
+            else:
+                under_moq_labeled = under_moq.copy()
+                under_moq_labeled.insert(0, "File", fname)
+                all_under_moq.append(under_moq_labeled)
+
+                st.warning(f"⚠️ **{fname}** — {len(under_moq)} baris di bawah MOQ minimum")
+                st.dataframe(under_moq, use_container_width=True, hide_index=True)
+
+            def _highlight_moq(val):
+                if val == "Under MOQ Minimum":
+                    return "background-color:#F8D7DA;color:#721C24;font-weight:600;"
+                elif val == "SAFE MOQ":
+                    return "background-color:#D4EDDA;color:#155724;font-weight:600;"
+                elif val == "MOQ Not Found":
+                    return "background-color:#FFF3CD;color:#856404;font-weight:600;"
+                return ""
+
+            sku_valid = df_moq[sku_col_m].notna() & df_moq[sku_col_m].astype(str).str.strip().ne("") & df_moq[sku_col_m].astype(str).str.upper().ne("NAN")
+            df_preview_moq = df_moq[sku_valid & (df_moq["MOQ Check"] != "N/A")][show_cols].copy()
+
+            def _clean_qty(v):
+                s = str(v).strip()
+                try:
+                    f = float(s.replace(",", "."))
+                    return str(int(f)) if f == int(f) else s
+                except Exception:
+                    return s
+            df_preview_moq[qty_col_m] = df_preview_moq[qty_col_m].apply(_clean_qty)
+            df_preview_moq["MOQ"] = df_preview_moq["MOQ"].apply(_clean_qty)
+
+            with st.expander(f"👁 Preview — {fname} ({len(df_preview_moq)} baris, {len(df_moq) - len(df_preview_moq)} N/A disembunyikan)", expanded=False):
+                if df_preview_moq.empty:
+                    st.caption("Tidak ada baris valid untuk ditampilkan (semua N/A).")
+                else:
+                    st.dataframe(
+                        df_preview_moq.style.map(_highlight_moq, subset=["MOQ Check"]),
+                        use_container_width=True, hide_index=True
+                    )
+
+        if all_under_moq:
+            combined_under_moq = pd.concat(all_under_moq, ignore_index=True)
+            st.divider()
+            st.error(f"❌ Total **{len(combined_under_moq)}** baris QTY di bawah MOQ minimum dari semua file")
+            st.dataframe(combined_under_moq, use_container_width=True, hide_index=True)
+
+    st.divider()
+    # END CHECK MOQ 
 
     auto_run = bool(ready) and any(
         p["row_rng"].strip() or p["col_rng"].strip() or p["dist_val"] not in ("", "(Pilih)")
