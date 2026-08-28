@@ -547,7 +547,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
                 elif col_name == "Check MOQ":
                     val = str(cell.value or "")
                     if val == "SAFE MOQ": cell.font = moq_safe_font
-                    elif val == "Under MOQ Minimum": cell.font = moq_under_font
+                    elif val == "Under MOQ": cell.font = moq_under_font
 #------- END --------------
                 if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list:
                     sku_ci = col_map.get("SKU")
@@ -985,13 +985,15 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             moq_lookup_val = sku_upper.map(moq_map_lookup)
             po_qty_val = pd.to_numeric(res_df["PO Qty"], errors="coerce")
 
+            res_df["MOQ"] = moq_lookup_val
             res_df["Check MOQ"] = np.select(
                 [moq_lookup_val.isna(), po_qty_val < moq_lookup_val],
-                ["MOQ Not Found", "Under MOQ Minimum"],
+                ["MOQ Not Found", "Under MOQ"],
                 default="SAFE MOQ"
 
             )
         else:
+            res_df["MOQ"] = np.nan
             res_df["Check MOQ"] = "MOQ Not Found"
 
 #----------------PENAMAAN KOLOM", jika mau tambah kolom
@@ -1001,7 +1003,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                     "Suggested PO Qty","Suggested PO Value",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "Check MOQ"]
+                    "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ"]
         
         res_df = res_df.reindex(columns=out_cols)
         res_df.sort_values(by=["is_po_sku","SKU"], ascending=[False,True], inplace=True)
@@ -1031,7 +1033,7 @@ PO_TEMPLATE_COLS = [
     'Suggested PO Qty','Suggested PO Value',
     'WOI After Buffer (Stock + Suggested Qty)',
     'Stock + Suggested Qty WOI (Projection at EOM)',
-    'Remaining Allocation (By Region)','RSA Notes','Check MOQ',
+    'Remaining Allocation (By Region)','RSA Notes','MOQ', 'Check MOQ',
 ]
 PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:15]
 PO_COLS_copy = PO_TEMPLATE_COLS[:14]
@@ -1524,12 +1526,12 @@ def _file_upload_section(page_key: str):
                 except Exception:
                     return "N/A"
 
-                return "Under MOQ Minimum" if qty_val < moq_val else "SAFE MOQ"
+                return "Under MOQ" if qty_val < moq_val else "SAFE MOQ"
 
             df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
 
             show_cols = [sku_col_m, "Product Name (MOQ Ref)", qty_col_m, "MOQ", "MOQ Check"]
-            under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ Minimum"][show_cols].copy()
+            under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ"][show_cols].copy()
 
             if under_moq.empty:
                 st.success(f"**{fname}** - ✅ **SAFE MOQ**")
@@ -1542,7 +1544,7 @@ def _file_upload_section(page_key: str):
                 st.dataframe(under_moq, use_container_width=True, hide_index=True)
 
             def _highlight_moq(val):
-                if val == "Under MOQ Minimum":
+                if val == "Under MOQ":
                     return "background-color:#F8D7DA;color:#721C24;font-weight:600;"
                 elif val == "SAFE MOQ":
                     return "background-color:#D4EDDA;color:#155724;font-weight:600;"
@@ -2274,12 +2276,14 @@ if st.session_state.get('page') == 'po_spv':
                         sku_upper_spv = result_df["SKU"].astype(str).str.strip().str.upper()
                         moq_val_spv = sku_upper_spv.map(moq_map_spv)
                         po_qty_val_spv = pd.to_numeric(result_df["PO Qty"], errors="coerce")
+                        result_df["MOQ"] = moq_val_spv
                         result_df["Check MOQ"] = np.select(
                             [moq_val_spv.isna(), po_qty_val_spv < moq_val_spv],
-                            ["MOQ Not Found", "Under MOQ Minimum"],
+                            ["MOQ Not Found", "Under MOQ"],
                             default="SAFE MOQ"
                         )
                     else:
+                        result_df["MOQ"] = np.nan
                         result_df["Check MOQ"] = "MOQ Not Found"
 
                     excel_cols = [
@@ -2302,6 +2306,7 @@ if st.session_state.get('page') == 'po_spv':
                         "Remaining Allocation (By Region)",
                         "is_po_sku",
                         "RSA Notes",
+                        "MOQ",
                         "Check MOQ",
                     ]
 
