@@ -107,7 +107,7 @@ def fetch_customer_names() -> list:
 def check_moq() -> pd.DataFrame:
     try:
         client = get_bq_client()
-        query = f"select sku, product_name, cast (moq as int) as MOQ FROM `{GCP_PROJECT_ID}.gt_schema.master_product` WHERE brand in ('G2G', 'BODIBREZE', 'NEXTPRIME')"
+        query = f"select sku, product_name, case when inner_pcs IS NULL or inner_pcs = 0 OR LOWER(CAST(inner_pcs AS STRING)) LIKE '%inner%' then outer_pcs  else inner_pcs end as MOQ FROM `{GCP_PROJECT_ID}.gt_schema.master_product` WHERE brand in ('G2G', 'BODIBREZE', 'NEXTPRIME')"
         return client.query(query).to_dataframe()
     except Exception as e:
         st.error(f"Error fetching MOQ data: {e}")
@@ -982,19 +982,30 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                                             .set_index("sku")["MOQ"].to_dict())
 
             sku_upper = res_df["SKU"].astype(str).str.strip().str.upper()
-            moq_lookup_val = sku_upper.map(moq_map_lookup)
+            moq_lookup_val =  sku_upper.map(moq_map_lookup).astype(float) 
             po_qty_val = pd.to_numeric(res_df["PO Qty"], errors="coerce")
+
+            is_multiple = np.mod(po_qty_val, moq_lookup_val) == 0
+            under_moq_mask = (po_qty_val < 50) & ~is_multiple
+            suggested_qty = np.ceil(po_qty_val / moq_lookup_val) * moq_lookup_val
 
             res_df["MOQ"] = moq_lookup_val
             res_df["Check MOQ"] = np.select(
-                [moq_lookup_val.isna(), po_qty_val < moq_lookup_val],
-                ["MOQ Not Found", "Under MOQ"],
+                [
+                    moq_lookup_val.isna(),
+                    under_moq_mask,
+                ],
+                [
+                    "MOQ Not Found",
+                    "Under MOQ",
+                ],
                 default="SAFE MOQ"
-
             )
+            res_df["Suggested Min Order Qty"] = np.where(under_moq_mask, suggested_qty, np.nan)
         else:
             res_df["MOQ"] = np.nan
             res_df["Check MOQ"] = "MOQ Not Found"
+            res_df["Suggested Min Order Qty"] = np.nan
 
 #----------------PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
@@ -1003,7 +1014,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                     "Suggested PO Qty","Suggested PO Value",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ"]
+                    "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
         
         res_df = res_df.reindex(columns=out_cols)
         res_df.sort_values(by=["is_po_sku","SKU"], ascending=[False,True], inplace=True)
@@ -1128,9 +1139,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     cat1, cat2, cat3 = st.columns(3)
     for col_ui, df_cat, title, label, icon in [
-        (cat1, stop_df, "Product Stop PO", "product_stop_po", "🚫"),
+        (cat1, stop_df, "Product <br> Stop PO / OOS / DISCONTINUED / UNAVAILABLE", "product_stop_po", "🚫"),
         (cat2, steve_df, "Reject by Steve", "reject_by_steve", "❌"),
-        (cat3, approval_df, "Product Reject", "product_reject", "⚠️"),
+        (cat3, approval_df, "Product Reject ≠ High WOI", "product_reject", "⚠️"),
     ]:
         with col_ui:
             st.markdown(f"""<div class="metric-card" style="text-align:center;"><div style="font-size:1.6rem;">{icon}</div><div style="font-weight:700;color:#CA6180;">{title}</div></div>""", unsafe_allow_html=True)
@@ -2274,17 +2285,33 @@ if st.session_state.get('page') == 'po_spv':
                         moq_map_spv = (moq_df_lookup_spv.assign(sku=moq_df_lookup_spv["sku"].astype(str).str.strip().str.upper())
                                                           .set_index("sku")["MOQ"].to_dict())
                         sku_upper_spv = result_df["SKU"].astype(str).str.strip().str.upper()
-                        moq_val_spv = sku_upper_spv.map(moq_map_spv)
+                        moq_val_spv = sku_upper_spv.map(moq_map_spv).astype(float)
                         po_qty_val_spv = pd.to_numeric(result_df["PO Qty"], errors="coerce")
+
+                        is_multiple_spv = np.mod(po_qty_val_spv, moq_val_spv) == 0
+                        under_moq_mask_spv = (po_qty_val_spv < 50) & ~is_multiple_spv
+
+                        suggested_qty_spv = np.ceil(po_qty_val_spv / moq_val_spv) * moq_val_spv
+
                         result_df["MOQ"] = moq_val_spv
                         result_df["Check MOQ"] = np.select(
-                            [moq_val_spv.isna(), po_qty_val_spv < moq_val_spv],
-                            ["MOQ Not Found", "Under MOQ"],
+                            [
+                                moq_val_spv.isna(),
+                                under_moq_mask_spv,
+                            ],
+                            [
+                                "MOQ Not Found",
+                                "Under MOQ",
+                            ],
                             default="SAFE MOQ"
                         )
+                        result_df["Suggested Min Order Qty"] = np.where(under_moq_mask_spv, suggested_qty_spv, np.nan)
                     else:
                         result_df["MOQ"] = np.nan
                         result_df["Check MOQ"] = "MOQ Not Found"
+                        result_df["Suggested Min Order Qty"] = np.nan
+
+                        
 
                     excel_cols = [
                         "Distributor",
@@ -2308,6 +2335,7 @@ if st.session_state.get('page') == 'po_spv':
                         "RSA Notes",
                         "MOQ",
                         "Check MOQ",
+                        "Suggested Min Order Qty"
                     ]
 
 
