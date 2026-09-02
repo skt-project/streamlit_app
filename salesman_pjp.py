@@ -143,11 +143,13 @@ DISTRIBUTOR_PASSWORDS = {
     "DST350": "98f33e07",
     "DST351": "12345678",
     "DST352": "12345678",
+    "DST356": "1a2b3c4d",
+    "DST363": "2b3c4d5e"
 }
 
 # ─── Input Period Deadline ─────────────────────────────────────────────────────
 # Ubah tanggal ini setiap bulan sesuai jadwal. Format: datetime(YYYY, MM, DD)
-INPUT_DEADLINE = datetime(2026, 8, 18).date()
+INPUT_DEADLINE = datetime(2026, 8, 31).date()
 
 
 def _get_password_for_distributor(dist_code: str) -> str | None:
