@@ -355,7 +355,7 @@ def load_master_distributor(credentials, project) -> dict:
 #: Fields pulled for store-level enrichment. Kept narrow on purpose: the pool
 #: columns this feeds are the only ones BD Support actually uses.
 _BASIS_FIELDS = (
-    "cust_id", "store_name", "city", "province", "area_coverage",
+    "cust_id", "store_name", "address", "city", "province", "area_coverage",
     "customer_type", "customer_category",
     "se_skt", "se_tph", "se_fcr",
     "spv_skt", "spv_tph",

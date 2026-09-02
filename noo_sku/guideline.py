@@ -60,6 +60,12 @@ NOO = [
         "**Customer Store Code** harus diawali kode cabang pada baris yang "
         "sama, bukan kode cabang lain.",
     ]),
+    ("Yang diproses sistem setelah Anda upload", [
+        "Nama Perusahaan dan Kode Cabang pada tracker mengikuti data akun Anda "
+        "untuk cabang yang bersangkutan — bukan sekadar apa yang Anda ketik.",
+        "Sistem memeriksa apakah toko yang Anda input sudah pernah terdaftar "
+        "sebelumnya. Anda tidak perlu melakukan pengecekan ini secara manual.",
+    ]),
     ("Validasi & hasil", [
         "Error ditampilkan per baris: nomor baris, kolom, masalah, dan saran "
         "perbaikan. Laporan error bisa diunduh dalam format Excel.",

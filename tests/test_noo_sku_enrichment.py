@@ -637,7 +637,11 @@ def test_noo_guideline_tells_admins_to_confirm_with_bd_support():
 
 @pytest.mark.sanity
 def test_bd_support_processing_columns_are_never_written():
-    """Added to the pool 2026-09-01; BD Support fills them, not Streamlit."""
+    """Added to the pool 2026-09-01; BD Support fills these, not Streamlit.
+    NOO/Existing is the one exception — MoM 31-Aug-2026 §2-§4 makes it the
+    integrated NOO Detector's output, tested separately below."""
     row = _noo_pipeline([fx.noo_row(store_code="DST08200074")]).pool_rows[0]
-    for column in ("DMS", "BASIS", "RSA Name", "BD Support", "NOO/Existing"):
+    for column in ("DMS", "BASIS", "RSA Name", "BD Support"):
         assert row[column] == "", f"{column} must stay blank"
+    assert row["NOO/Existing"] in (
+        "Not NOO -> Reference ID not exist", "NOO -> Create ID")

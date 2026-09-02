@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import config, duplicates, validators, writer
+from . import config, duplicates, noo_detector, validators, writer
 from .normalize import clean, norm_key, now_business
 
 
@@ -51,6 +51,11 @@ class PipelineResult:
     @property
     def ambiguous_count(self) -> int:
         return sum(1 for m in self.row_meta if m.get("ambiguous"))
+
+    @property
+    def reference_id_exists_count(self) -> int:
+        return sum(1 for m in self.row_meta
+                   if m.get("noo_existing_label") == noo_detector.LABEL_REFERENCE_EXISTS)
 
 
 def _rows_with_errors(issues) -> set:
@@ -102,10 +107,22 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
         result.enrichment_notes.extend(dist_result.notes)
         result.enrichment_notes.extend(store_result.notes)
 
+        # MoM 31-Aug-2026 §2-§5: the integrated NOO Detector decides whether
+        # this store already has a Reference ID. Runs against the same
+        # company-scoped candidate pool store_enricher was built from, so no
+        # extra query is needed here.
+        detection = noo_detector.check_reference_id(
+            {"store_name": row.get("Store Name", ""),
+             "address": row.get("Store Address", ""),
+             "city": row.get("City", ""),
+             "reference_id": row.get("Store ID (Opsional)", "")},
+            store_enricher.all_stores())
+
         # 3. final row resolution --------------------------------------------
         pool_rows.append(writer.build_noo_row(
             row, distributor_code=row_code, dist_values=dist_result.values,
-            store_values=store_result.values, when=when))
+            store_values=store_result.values, when=when,
+            noo_existing_label=detection.label))
         numbers.append(number)
         result.row_meta.append({
             "row": number,
@@ -116,6 +133,8 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
             "store_matched": store_result.matched,
             "ambiguous": store_result.ambiguous,
             "used_fallback": dist_result.used_fallback,
+            "noo_existing_label": detection.label,
+            "noo_existing_score": detection.score,
             "brand": brand,
         })
 
@@ -238,6 +257,8 @@ def mapping_sources(result: PipelineResult) -> list:
             entry["Mapping Source (Store)"] = meta["store_source"]
             entry["Matched On"] = meta["matched_on"]
             entry["SE"] = pool.get("se_kae", "")
+            entry["NOO/Existing"] = meta.get("noo_existing_label", "")
+            entry["Detector Score"] = round(meta.get("noo_existing_score", 0), 1)
             if meta.get("ambiguous"):
                 entry["Fallback"] = "AMBIGU - PERLU DITINJAU"
         else:

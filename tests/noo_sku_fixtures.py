@@ -119,6 +119,7 @@ MASTER_DISTRIBUTOR = {
 
 _BASIS_ROW = {
     "cust_id": "IESL00038", "store_name": "TOKO WILDA",
+    "address": "JL MERDEKA NO 10 BANGGAI",
     "city": "Banggai", "province": "Sulawesi Tengah",
     "area_coverage": "BANGGAI", "customer_type": "Cosmetic Store",
     "customer_category": "GT",

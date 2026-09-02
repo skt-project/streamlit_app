@@ -55,7 +55,7 @@ def new_upload_id() -> str:
 
 # ─── Row construction ─────────────────────────────────────────────────────────
 def build_noo_row(user_row, *, distributor_code=None, dist_values,
-                  store_values, when) -> dict:
+                  store_values, when, noo_existing_label="") -> dict:
     """One enriched `POOL NOO STREAMLIT` record, keyed by pool column.
 
     The branch comes from the row itself — MoM 31-Aug-2026 allows one file to
@@ -66,6 +66,11 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
     User input wins for the fields the admin is responsible for — notably
     ``store_type`` and ``city``, whose vocabulary must be preserved exactly
     (decision B3). Master values are used only to fill a blank.
+
+    `noo_existing_label` is the integrated NOO Detector's verdict — column E
+    ("NOO/Existing") of the live 41-column pool — computed by
+    `noo_sku.noo_detector.check_reference_id` in the pipeline, never typed by
+    the admin (MoM 31-Aug-2026 §3/§4).
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
     branch_code = norm_key(g("Customer Branch Code")) or norm_key(
@@ -90,6 +95,7 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
         "store_type": g("Store Type") or store_values.get("store_type", ""),
         "area": store_values.get("area", ""),
         "province": store_values.get("province", ""),
+        "NOO/Existing": noo_existing_label,
     })
     # MoM 31-Aug-2026 §5: BD Support formulates the hierarchy themselves.
     # Streamlit must leave these blank - not derived from login, branch, or any
