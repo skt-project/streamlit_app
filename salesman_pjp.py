@@ -11,6 +11,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
+from openpyxl.formatting.rule import FormulaRule
 
 # ─── Page config (must be first) ──────────────────────────────────────────────
 
@@ -701,9 +702,44 @@ def deactivate_salesman_mapping(salesman_id: str) -> tuple[bool, str]:
 STATUS_OPTIONS = ["Mix", "Eksklusif"]
 GENDER_OPTIONS = ["Male", "Female"]
 EDUCATION_OPTIONS = ["SD", "SMP", "SMA", "S1", "S2"]
-DAY_OPTIONS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
-WEEK_OPTIONS = ["Minggu Ganjil", "Minggu Genap", "Minggu Ganjil + Genap"]
-FREQUENCY_OPTIONS = ["F4+", "F4", "F2", "F1"]
+
+# ─── Frekuensi (Column I) / Hari (Column J) / Hari Minggu (Column K) /
+# Nomor Minggu (Column L, -> DB `callcycle`) ────────────────────────────────
+# Pure logic lives in pjp_hari_minggu.py (no Streamlit/BigQuery dependency)
+# so it can be unit tested directly — see tests/test_pjp_hari_minggu.py.
+# Frekuensi DRIVES both Hari's allowed day-count and callcycle's allowed
+# values — see that module's docstring for the full rule table. Hari is
+# SENIN..SABTU only ("MINGGU"/Sunday is never valid for this template).
+from pjp_hari_minggu import (  # noqa: E402
+    FREKUENSI_OPTIONS,
+    FREKUENSI_RANGE_SUFFIX,
+    HARI_CANONICAL_ORDER,
+    HARI_COMBOS_BY_FREKUENSI,
+    HARI_SEPARATOR,
+    MINGGU_COL,
+    MINGGU_COL_ALIASES,
+    MINGGU_GANJIL,
+    MINGGU_GANJIL_GENAP,
+    MINGGU_GENAP,
+    MINGGU_OPTIONS_BY_FREKUENSI,
+    MINGGU_RANGE_SUFFIX,
+    KET_MINGGU_COL,
+    KET_MINGGU_COL_ALIASES,
+    KET_OPTIONS_BY_FREKUENSI_MINGGU,
+    LEGACY_MINGGU_MAP,
+    auto_callcycle,
+    derive_minggu_from_callcycle,
+    hari_options_for_frekuensi,
+    ket_minggu_options,
+    migrate_legacy_minggu,
+    minggu_options_for_frekuensi,
+    normalize_callcycle,
+    normalize_hari,
+    normalize_minggu,
+)
+
+DAY_OPTIONS = HARI_CANONICAL_ORDER   # name kept for backward-compat call sites
+FREQUENCY_OPTIONS = FREKUENSI_OPTIONS  # name kept for backward-compat call sites
 
 SALESMAN_COLS = [
     ("Nama Salesman", True, "text"),
@@ -734,6 +770,8 @@ SALESMAN_COLS = [
 # directly from the selected distributor rather than looked up per row.
 # Step 1: user picks Salesman ID -> Step 2: Nama Salesman auto-fills (read-only)
 # Step 3: user picks Kode Toko   -> Step 4: Nama Toko auto-fills (read-only)
+# Step 5: user picks Frekuensi (I) -> drives which Hari (J) / Nomor Minggu (L)
+#         options are offered; Hari Minggu (K) is derived/display-only from L.
 PJP_COLS = [
     ("ASM", False, "auto"),
     ("Region", False, "auto"),
@@ -743,9 +781,10 @@ PJP_COLS = [
     ("Nama Salesman", False, "auto"),
     ("Kode Toko", True, "store_dropdown"),
     ("Nama Toko", False, "auto"),
-    ("Hari", True, "dropdown"),
-    ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap", True, "dropdown"),
     ("Frekuensi", True, "dropdown"),
+    ("Hari", True, "dependent_dropdown"),
+    (MINGGU_COL, True, "dependent_dropdown"),
+    (KET_MINGGU_COL, True, "dependent_dropdown"),
 ]
 
 SALESMAN_REQUIRED = [c for c, r, _ in SALESMAN_COLS if r]
@@ -896,6 +935,58 @@ def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
         "NR_STORE_LOOKUP", attr_text=f"'{LK}'!${lut_first_letter}$2:${lut_last_letter}${last_row}"
     )
 
+    # ── Frekuensi-dependent Hari / Nomor Minggu (callcycle) dropdowns ───────
+    # Column J (Hari) and Column L (Nomor Minggu) are DEPENDENT dropdowns
+    # keyed off Column I (Frekuensi) — see FREKUENSI_RANGE_SUFFIX below and
+    # _attach_pjp_dvs()'s INDIRECT("NR_HARI_"&...) / INDIRECT("NR_CALLCYCLE_"
+    # &...) formulas. Every valid combination for each Frekuensi is
+    # pre-rendered here in canonical form, so picking from the dropdown
+    # always yields an already-correctly-formatted, Frekuensi-consistent
+    # value — for F4/F4+ the "dropdown" has exactly one option (the fixed
+    # callcycle), which is the native-Excel (no VBA) way to make that field
+    # effectively non-editable while keeping every row's DV mechanism
+    # uniform (see module docstring in pjp_hari_minggu.py for the F4/F4+
+    # "no manual choice" rule).
+    next_col = lut_start + len(cols_order)
+
+    def _write_combo_column(values, tag):
+        nonlocal next_col
+        col_idx = next_col
+        next_col += 1
+        lk.cell(row=1, column=col_idx, value=tag)
+        for i, val in enumerate(values, start=2):
+            lk.cell(row=i, column=col_idx, value=val)
+        letter = get_column_letter(col_idx)
+        last = max(2, 1 + len(values))
+        return f"'{LK}'!${letter}$2:${letter}${last}"
+
+    wb.defined_names["NR_FREKUENSI_COMBO"] = DefinedName(
+        "NR_FREKUENSI_COMBO", attr_text=_write_combo_column(FREKUENSI_OPTIONS, "__FREKUENSI_COMBO__")
+    )
+    # Column J — one day-combination list per Frekuensi.
+    for freq, suffix in FREKUENSI_RANGE_SUFFIX.items():
+        name = f"NR_HARI_{suffix}"
+        wb.defined_names[name] = DefinedName(
+            name, attr_text=_write_combo_column(HARI_COMBOS_BY_FREKUENSI[freq], f"__HARI_{suffix}__")
+        )
+    # Column K — one Minggu (week-parity) list per Frekuensi. F1/F2 offer
+    # Ganjil/Genap; F4/F4+ offer only "Minggu Ganjil + Genap" (a one-entry
+    # list is how "automatic + locked" is expressed without VBA).
+    for freq, suffix in FREKUENSI_RANGE_SUFFIX.items():
+        name = f"NR_MINGGU_{suffix}"
+        wb.defined_names[name] = DefinedName(
+            name, attr_text=_write_combo_column(MINGGU_OPTIONS_BY_FREKUENSI[freq], f"__MINGGU_{suffix}__")
+        )
+    # Column L — one Ket. Minggu list per (Frekuensi, Minggu) pair. F1 gets
+    # a real 2-option choice (Ganjil -> 1|3, Genap -> 2|4); F2/F4/F4+ get a
+    # single automatic value.
+    for (freq, minggu), options in KET_OPTIONS_BY_FREKUENSI_MINGGU.items():
+        suffix = f"{FREKUENSI_RANGE_SUFFIX[freq]}_{MINGGU_RANGE_SUFFIX[minggu]}"
+        name = f"NR_KET_{suffix}"
+        wb.defined_names[name] = DefinedName(
+            name, attr_text=_write_combo_column(options, f"__KET_{suffix}__")
+        )
+
 
 # ─── Attach Salesman ID / Kode Toko dropdown DVs ──────────────────────────────
 
@@ -989,9 +1080,10 @@ def create_pjp_excel(
     Nama Salesman
     Kode Toko
     Nama Toko
-    Hari
-    Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap
-    Frekuensi
+    Frekuensi       (I) drives J, K, L
+    Hari            (J) day count set by Frekuensi
+    Minggu          (K) week parity; options set by Frekuensi
+    Ket. Minggu     (L) -> DB `callcycle`; options set by (I, K)
 
     Flow implemented in the sheet:
       Step 1 — user picks "Salesman ID" from a dropdown of bare salesman_id
@@ -1028,7 +1120,7 @@ def create_pjp_excel(
     LAST_DATA = 30003
 
     AUTO_COLS = set(_AUTO_FROM_SALESMAN) | set(_AUTO_FROM_STORE) | set(_DIST_CONST_COLS)
-    DROPDOWN_COLS = {"Salesman ID", "Kode Toko"}
+    DROPDOWN_COLS = {"Salesman ID", "Kode Toko", "Frekuensi", "Hari", MINGGU_COL, KET_MINGGU_COL}
 
     notes_pjp = {
         "ASM": "Otomatis terisi dari Kode Toko",
@@ -1039,9 +1131,28 @@ def create_pjp_excel(
         "Nama Salesman": "Otomatis terisi dari Salesman ID",
         "Kode Toko": "Langkah 2 - Pilih Kode Toko (dari seluruh distributor). Kepemilikan distributor divalidasi saat upload.",
         "Nama Toko": "Otomatis terisi dari Kode Toko",
-        "Hari": "Drop down dengan opsi hari",
-        "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap": "Drop down: ganjil / genap / ganjil+genap",
-        "Frekuensi": "F4+ = >1x seminggu  |  F4 = 1 minggu sekali  |  F2 = 2 minggu sekali  |  F1 = 1 bulan sekali",
+        "Frekuensi": (
+            "Langkah 3 - Pilih Frekuensi terlebih dahulu: F1 = 1x/bulan | "
+            "F2 = 2x/bulan | F4 = setiap minggu (tanpa minggu ke-5) | "
+            "F4+ = setiap minggu (+ minggu ke-5 bila ada). Menentukan pilihan "
+            "Hari dan Nomor Minggu di kolom berikutnya."
+        ),
+        "Hari": (
+            "Langkah 4 - Pilih Frekuensi (kolom I) dahulu. Jumlah hari yang "
+            "boleh dipilih: F1=1 hari, F2=2 hari, F4=1-4 hari, F4+=1-5 hari. "
+            "SENIN-SABTU saja (hari Minggu/Sunday tidak berlaku)."
+        ),
+        MINGGU_COL: (
+            "Langkah 5 - Pilih Frekuensi (kolom I) dahulu. F1/F2: pilih "
+            "Minggu Ganjil atau Minggu Genap. F4/F4+: hanya ada 1 pilihan, "
+            "Minggu Ganjil + Genap."
+        ),
+        KET_MINGGU_COL: (
+            "Langkah 6 - Terisi berdasarkan Frekuensi + Minggu. "
+            "F1 Ganjil: pilih 1 atau 3. F1 Genap: pilih 2 atau 4. "
+            "F2/F4/F4+: hanya ada 1 pilihan (otomatis). Nilai ini yang "
+            "disimpan sebagai callcycle."
+        ),
     }
 
     ws = wb.create_sheet("PJP Template")
@@ -1069,7 +1180,7 @@ def create_pjp_excel(
     ws.row_dimensions[3].height = 44
     ws.freeze_panes = "A4"
 
-    widths = [18, 18, 28, 18, 20, 30, 18, 30, 14, 42, 14]
+    widths = [18, 18, 28, 18, 20, 30, 18, 30, 12, 28, 22, 16]
     for ci, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
@@ -1081,43 +1192,221 @@ def create_pjp_excel(
 
     _attach_pjp_dvs(ws, col_names, FIRST_DATA, LAST_DATA)
 
-    for col_name, opts in [
-        ("Hari", DAY_OPTIONS),
-        ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap", WEEK_OPTIONS),
-    ]:
-        dv = DataValidation(
-            type="list",
-            formula1='"' + ",".join(opts) + '"',
-            allow_blank=True,
-            showInputMessage=True,
-            promptTitle=col_name,
-            prompt=f"Pilih {col_name}",
-            showErrorMessage=True,
-            errorTitle="Input Tidak Valid",
-            error="Pilih nilai dari daftar dropdown.",
-        )
-        ws.add_data_validation(dv)
-        dv.sqref = dr(col_name)
+    freq_cl = col_letter("Frekuensi")
+    freq_anchor = f"${freq_cl}{FIRST_DATA}"  # column fixed, row relative — see below
 
+    # Frekuensi (Column I) is the DRIVER: a plain, closed dropdown with
+    # exactly the 4 allowed values. Hari (J) and Nomor Minggu (L) are
+    # DEPENDENT dropdowns keyed off whatever Frekuensi the row's own I cell
+    # holds — errorStyle="stop" (blocking) here, unlike Hari/Minggu in the
+    # rest of this sheet, because Frekuensi has a small closed vocabulary
+    # with no legitimate free-text variant to tolerate.
     frekuensi_dv = DataValidation(
         type="list",
-        formula1='"' + ",".join(FREQUENCY_OPTIONS) + '"',
+        formula1="NR_FREKUENSI_COMBO",
         allow_blank=True,
         showInputMessage=True,
-        promptTitle="Frekuensi Kunjungan",
+        promptTitle="Langkah 3 - Frekuensi",
         prompt=(
-            "Pilih frekuensi kunjungan:\n"
-            "  F4+ = lebih dari 1 kali dalam seminggu\n"
-            "  F4  = 1 minggu sekali\n"
-            "  F2  = 2 minggu sekali\n"
-            "  F1  = 1 bulan sekali"
+            "Pilih Frekuensi terlebih dahulu — menentukan pilihan Hari dan "
+            "Nomor Minggu di kolom berikutnya.\n"
+            "  F1  = 1x per bulan\n"
+            "  F2  = 2x per bulan\n"
+            "  F4  = setiap minggu (minggu 1-4, tanpa minggu ke-5)\n"
+            "  F4+ = setiap minggu (+ minggu ke-5 bila bulan tsb memilikinya)"
         ),
         showErrorMessage=True,
         errorTitle="Input Tidak Valid",
-        error="Pilih F4+, F4, F2, atau F1.",
+        error="Pilih F1, F2, F4, atau F4+ dari daftar dropdown.",
     )
     ws.add_data_validation(frekuensi_dv)
     frekuensi_dv.sqref = dr("Frekuensi")
+
+    # Hari (Column J): the dropdown source range switches with Frekuensi via
+    # INDIRECT("NR_HARI_"&...) — NR_HARI_F1/F2/F4/F4PLUS each hold every
+    # valid day-combination for that Frekuensi (see _build_lookup_and_named_
+    # ranges()), so picking from the list always yields a Frekuensi-
+    # consistent value. "+" isn't valid inside an Excel name, hence the
+    # SUBSTITUTE("+","PLUS") to match the FREKUENSI_RANGE_SUFFIX mapping.
+    # errorStyle="warning" (not "stop") so a manually-typed variant isn't
+    # hard-blocked client-side; validate_pjp_df() on upload is the
+    # authoritative gate.
+    hari_dv = DataValidation(
+        type="list",
+        formula1=f'INDIRECT("NR_HARI_"&SUBSTITUTE({freq_anchor},"+","PLUS"))',
+        allow_blank=True,
+        showInputMessage=True,
+        promptTitle="Langkah 4 - Hari (tergantung Frekuensi)",
+        prompt=(
+            "Pilih Frekuensi (kolom I) terlebih dahulu. Jumlah hari: "
+            "F1=1, F2=2, F4=1-4, F4+=1-5. Hanya SENIN-SABTU, dipisah slash "
+            "atau koma — contoh: SENIN/SELASA. Tidak boleh duplikat."
+        ),
+        showErrorMessage=True,
+        errorStyle="warning",
+        errorTitle="Format Hari Tidak Standar",
+        error=(
+            "Invalid Hari untuk Frekuensi ini. Gunakan SENIN-SABTU (bukan "
+            "MINGGU) sesuai jumlah hari yang diizinkan Frekuensi. Nilai akan "
+            "divalidasi ulang saat upload."
+        ),
+    )
+    ws.add_data_validation(hari_dv)
+    hari_dv.sqref = dr("Hari")
+
+    # Minggu (Column K): dependent on Frekuensi via the same INDIRECT
+    # cascade. NR_MINGGU_F1/F2 hold {Ganjil, Genap}; NR_MINGGU_F4/F4PLUS
+    # hold only {Ganjil + Genap} — a one-entry list, which is how
+    # "automatically set + locked" is expressed with native Excel Data
+    # Validation and no VBA (the spec's §24 explicitly prefers this over
+    # introducing VBA). errorStyle="stop": the vocabulary is closed, there
+    # is no legitimate free-text variant to tolerate.
+    minggu_cl = col_letter(MINGGU_COL)
+    minggu_anchor = f"${minggu_cl}{FIRST_DATA}"
+    minggu_dv = DataValidation(
+        type="list",
+        formula1=f'INDIRECT("NR_MINGGU_"&SUBSTITUTE({freq_anchor},"+","PLUS"))',
+        allow_blank=True,
+        showInputMessage=True,
+        promptTitle="Langkah 5 - Minggu (tergantung Frekuensi)",
+        prompt=(
+            "Pilih Frekuensi (kolom I) terlebih dahulu.\n"
+            "  F1 / F2  -> Minggu Ganjil atau Minggu Genap\n"
+            "  F4 / F4+ -> hanya Minggu Ganjil + Genap (otomatis)"
+        ),
+        showErrorMessage=True,
+        errorStyle="stop",
+        errorTitle="Input Tidak Valid",
+        error="Pilih Minggu dari daftar dropdown yang sesuai dengan Frekuensi.",
+    )
+    ws.add_data_validation(minggu_dv)
+    minggu_dv.sqref = dr(MINGGU_COL)
+
+    # Ket. Minggu (Column L) -> DB `callcycle`. Depends on BOTH Frekuensi
+    # and Minggu: the range name is NR_KET_<FREQ>_<MINGGU>, e.g.
+    # NR_KET_F1_GANJIL = {1,3}, NR_KET_F1_GENAP = {2,4},
+    # NR_KET_F2_GANJIL = {1,3} (single, automatic),
+    # NR_KET_F4_GANJILGENAP = {1,2,3,4}, NR_KET_F4PLUS_GANJILGENAP =
+    # {1,2,3,4,5}. The nested SUBSTITUTEs turn the Minggu cell's text into
+    # that suffix: "Minggu Ganjil + Genap" -> strip "Minggu " -> drop "+"
+    # -> drop spaces -> upper -> "GANJILGENAP". This is what makes the
+    # invalid F1 combinations (Ganjil+2, Ganjil+4, Genap+1, Genap+3) not
+    # merely rejected but literally unselectable.
+    ket_source = (
+        f'INDIRECT("NR_KET_"&SUBSTITUTE({freq_anchor},"+","PLUS")&"_"'
+        f'&UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({minggu_anchor},"Minggu ",""),"+","")," ","")))'
+    )
+    ket_dv = DataValidation(
+        type="list",
+        formula1=ket_source,
+        allow_blank=True,
+        showInputMessage=True,
+        promptTitle="Langkah 6 - Ket. Minggu (tergantung Frekuensi + Minggu)",
+        prompt=(
+            "Isi Frekuensi (kolom I) dan Minggu (kolom K) terlebih dahulu.\n"
+            "  F1 + Minggu Ganjil -> pilih 1 atau 3\n"
+            "  F1 + Minggu Genap  -> pilih 2 atau 4\n"
+            "  F2  -> otomatis 1,3 (Ganjil) / 2,4 (Genap)\n"
+            "  F4  -> otomatis 1,2,3,4\n"
+            "  F4+ -> otomatis 1,2,3,4,5"
+        ),
+        showErrorMessage=True,
+        errorStyle="stop",
+        errorTitle="Input Tidak Valid",
+        error="Pilih Ket. Minggu dari daftar dropdown (tergantung Frekuensi dan Minggu).",
+    )
+    ws.add_data_validation(ket_dv)
+    ket_dv.sqref = dr(KET_MINGGU_COL)
+
+    # ── Conditional formatting ────────────────────────────────────────────
+    # Reuses the template's existing palette: FFF3CD = warning/required
+    # (same amber already used elsewhere), D6E4F0 = the informational blue
+    # used by the auto-filled columns. No new colours introduced.
+    amber_fill = _fill("FFF3CD")
+    info_fill = _fill("D6E4F0")
+    hari_cl = col_letter("Hari")
+    ket_cl = col_letter(KET_MINGGU_COL)
+
+    # Advisory: a filled Hari cell that isn't an exact match for one of its
+    # own Frekuensi's canonical combinations (e.g. "selasa/senin" — still
+    # accepted and auto-normalized on upload, just not canonical yet).
+    ws.conditional_formatting.add(
+        dr("Hari"),
+        FormulaRule(
+            formula=[
+                f'AND({hari_cl}{FIRST_DATA}<>"",'
+                f'COUNTIF(INDIRECT("NR_HARI_"&SUBSTITUTE({freq_anchor},"+","PLUS")),{hari_cl}{FIRST_DATA})=0)'
+            ],
+            fill=amber_fill,
+        ),
+    )
+
+    # Ket. Minggu status model (spec §16):
+    #   State 1 REQUIRED — Frekuensi chosen, Minggu still empty, L empty.
+    #   State 2 READY    — Frekuensi + Minggu chosen, L still empty.
+    #   State 3 VALID    — L filled: no rule fires, normal cell styling.
+    ws.conditional_formatting.add(
+        dr(KET_MINGGU_COL),
+        FormulaRule(
+            formula=[
+                f'AND({ket_cl}{FIRST_DATA}="",{freq_anchor}<>"",{minggu_anchor}="")'
+            ],
+            fill=amber_fill,
+        ),
+    )
+    ws.conditional_formatting.add(
+        dr(KET_MINGGU_COL),
+        FormulaRule(
+            formula=[
+                f'AND({ket_cl}{FIRST_DATA}="",{freq_anchor}<>"",{minggu_anchor}<>"")'
+            ],
+            fill=info_fill,
+        ),
+    )
+    # Minggu itself gets the same REQUIRED cue while Frekuensi is set but
+    # Minggu is still blank, so the chain reads left-to-right.
+    ws.conditional_formatting.add(
+        dr(MINGGU_COL),
+        FormulaRule(
+            formula=[f'AND({minggu_cl}{FIRST_DATA}="",{freq_anchor}<>"")'],
+            fill=amber_fill,
+        ),
+    )
+
+    # STALE-VALUE cue (spec §21/§6): changing Frekuensi cannot clear an
+    # already-filled Minggu / Ket. Minggu — native Excel Data Validation
+    # only constrains NEW entries, it never rewrites existing cells, and
+    # without VBA nothing can. So e.g. F2 + "Minggu Ganjil" + "1,3" that is
+    # switched to F4 leaves both cells holding values that are no longer
+    # selectable. Those rows ARE rejected on upload by validate_pjp_df(),
+    # but they would otherwise look fine on screen. These two rules flag
+    # them immediately, in the same amber warning colour, so the user fixes
+    # them in the sheet rather than discovering it at upload time.
+    #   - The Ket. Minggu rule wraps COUNTIF in IFERROR because an invalid
+    #     (Frekuensi, Minggu) pair makes INDIRECT resolve to a named range
+    #     that does not exist (e.g. NR_KET_F4_GANJIL) -> #REF!; IFERROR
+    #     turns that into 0 so the cell is still flagged rather than the
+    #     rule silently not firing.
+    ws.conditional_formatting.add(
+        dr(MINGGU_COL),
+        FormulaRule(
+            formula=[
+                f'AND({minggu_cl}{FIRST_DATA}<>"",{freq_anchor}<>"",'
+                f'IFERROR(COUNTIF(INDIRECT("NR_MINGGU_"&SUBSTITUTE({freq_anchor},"+","PLUS")),{minggu_cl}{FIRST_DATA}),0)=0)'
+            ],
+            fill=amber_fill,
+        ),
+    )
+    ws.conditional_formatting.add(
+        dr(KET_MINGGU_COL),
+        FormulaRule(
+            formula=[
+                f'AND({ket_cl}{FIRST_DATA}<>"",{freq_anchor}<>"",{minggu_anchor}<>"",'
+                f'IFERROR(COUNTIF({ket_source},{ket_cl}{FIRST_DATA}),0)=0)'
+            ],
+            fill=amber_fill,
+        ),
+    )
 
     sal_id_cl = col_letter("Salesman ID")
     kode_toko_cl = col_letter("Kode Toko")
@@ -1255,7 +1544,17 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
         unscoped dataset, not pre-filtered to one distributor).
       - kode_toko's distributor_code must equal selected_dist_code,
         otherwise: "Store does not belong to selected distributor."
-      - Hari / Minggu / Frekuensi must be one of the allowed dropdown values.
+      - Frekuensi must be one of F1/F2/F4/F4+.
+      - Hari (SENIN..SABTU, never MINGGU) must satisfy the row's Frekuensi
+        day-count rule (F1=1, F2=2, F4=1-4, F4+=1-5) — see normalize_hari().
+        Skipped if Frekuensi itself is invalid/missing (nothing to check
+        the count against).
+      - Nomor Minggu / callcycle must satisfy the row's Frekuensi rule
+        (F1: 1 of 1-4; F2: 2 unique of 1-4; F4: fixed "1,2,3,4"; F4+: fixed
+        "1,2,3,4,5") — see normalize_callcycle(). Legacy values ("Minggu
+        Ganjil" etc.) are rejected here with a hint pointing at their new
+        equivalent; use migrate_legacy_minggu() to fix already-stored
+        historical rows. Skipped if Frekuensi itself is invalid/missing.
 
     IMPORTANT: callers MUST pass the FULL, unscoped salesman_df/store_df
     here (covering all distributors), NOT a subset pre-filtered to
@@ -1323,14 +1622,74 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
                     f"bukan '{selected_dist_code}')."
                 )
 
-        for col, opts in [
-            ("Hari", DAY_OPTIONS),
-            ("Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap", WEEK_OPTIONS),
-            ("Frekuensi", FREQUENCY_OPTIONS),
-        ]:
-            val = row.get(col, "")
-            if pd.notna(val) and str(val).strip() and val not in opts:
-                errors.append(f"Baris {n}: '{col}' nilai tidak valid")
+        # ── Frekuensi validation (Column I — drives Hari & callcycle) ──────
+        freq_val = row.get("Frekuensi", "")
+        freq_str = str(freq_val).strip().upper() if pd.notna(freq_val) else ""
+        freq_present_and_valid = bool(freq_str) and freq_str in FREKUENSI_OPTIONS
+        if freq_str and not freq_present_and_valid:
+            errors.append(f"Baris {n}: 'Frekuensi' nilai tidak valid (harus F1, F2, F4, atau F4+)")
+
+        # ── Hari validation (Column J — count depends on Frekuensi) ────────
+        hari_val = row.get("Hari", "")
+        if pd.notna(hari_val) and str(hari_val).strip():
+            _, hari_err = normalize_hari(hari_val, frekuensi=freq_str if freq_present_and_valid else None)
+            if hari_err:
+                errors.append(
+                    f"Baris {n}: Invalid Hari. Gunakan SENIN-SABTU (bukan MINGGU) "
+                    f"dipisahkan dengan slash atau koma, sesuai jumlah hari yang "
+                    f"diizinkan Frekuensi (F1=1, F2=2, F4=1-4, F4+=1-5). "
+                    f"(nilai: '{hari_val}', Frekuensi: '{freq_val}')"
+                )
+
+        # ── Minggu validation (Column K — options depend on Frekuensi) ─────
+        minggu_val = row.get(MINGGU_COL, "")
+        minggu_ok = None
+        if pd.notna(minggu_val) and str(minggu_val).strip():
+            if not freq_present_and_valid:
+                errors.append(
+                    f"Baris {n}: Minggu tidak dapat divalidasi tanpa Frekuensi yang valid "
+                    f"(nilai Frekuensi: '{freq_val}')."
+                )
+            else:
+                minggu_ok, mg_err = normalize_minggu(minggu_val, freq_str)
+                if mg_err:
+                    allowed = ", ".join(minggu_options_for_frekuensi(freq_str))
+                    errors.append(
+                        f"Baris {n}: Invalid Minggu untuk Frekuensi {freq_str}. "
+                        f"Pilihan yang valid: {allowed}. (nilai: '{minggu_val}')"
+                    )
+
+        # ── Ket. Minggu / callcycle validation (Column L) ───────────────────
+        # Depends on BOTH Frekuensi and Minggu — this is what rejects the
+        # F1 mismatches (Ganjil+2, Ganjil+4, Genap+1, Genap+3) that the
+        # Excel dependent dropdown already makes unselectable.
+        ket_val = row.get(KET_MINGGU_COL, "")
+        if pd.notna(ket_val) and str(ket_val).strip():
+            if not freq_present_and_valid:
+                errors.append(
+                    f"Baris {n}: Ket. Minggu tidak dapat divalidasi tanpa Frekuensi yang valid "
+                    f"(nilai Frekuensi: '{freq_val}')."
+                )
+            elif minggu_ok is None:
+                errors.append(
+                    f"Baris {n}: Ket. Minggu tidak dapat divalidasi tanpa Minggu yang valid "
+                    f"(nilai Minggu: '{minggu_val}')."
+                )
+            else:
+                _, ket_err = normalize_callcycle(ket_val, freq_str, minggu_ok)
+                if ket_err:
+                    allowed = ", ".join(ket_minggu_options(freq_str, minggu_ok))
+                    legacy_equiv = migrate_legacy_minggu(ket_val)
+                    hint = f" Nilai lama terdeteksi — gunakan '{legacy_equiv}'." if legacy_equiv else ""
+                    auto = auto_callcycle(freq_str, minggu_ok)
+                    auto_note = (
+                        f" Untuk {freq_str} nilai ini terisi otomatis dan tidak boleh diubah manual."
+                        if auto else ""
+                    )
+                    errors.append(
+                        f"Baris {n}: Invalid Ket. Minggu untuk {freq_str} + {minggu_ok}. "
+                        f"Pilihan yang valid: {allowed}.{auto_note}{hint} (nilai: '{ket_val}')"
+                    )
 
     return errors, warnings
 
@@ -1367,23 +1726,94 @@ def read_template_sheet(
       - salesman_id      : extracted from the "Salesman ID" combo column
       - kode_toko         : extracted from the "Kode Toko" combo column
       - kode_distributor  : mirror of "Kode Distributor" for convenience
+
+    Frekuensi is normalized first (trimmed/uppercased) since it DRIVES the
+    Hari day-count rule, the Minggu options, and (with Minggu) the Ket.
+    Minggu rule. Hari / Minggu / Ket. Minggu are each re-derived through
+    their normalize_*() function rather than a blunt .str.title() — this
+    canonicalises well-formed cells (order, separator, spacing, casing) and
+    leaves malformed cells untouched (raw) so validate_pjp_df() re-derives
+    the same error and reports it with the exact offending text.
+
+    Header back-compat: Minggu is matched by MINGGU_COL_ALIASES and Ket.
+    Minggu by KET_MINGGU_COL_ALIASES, so workbooks downloaded under any
+    earlier revision's headers still import; both are renamed to the
+    current headers on the way out.
+
+    Ket. Minggu is AUTO-FILLED where it is deterministic — for F2/F4/F4+ a
+    valid (Frekuensi, Minggu) pair has exactly one legal value, so a blank
+    cell is populated rather than reported as missing. F1 is never
+    auto-filled: its two candidate weeks are a genuine user choice.
+    Conversely, if Minggu is blank but Ket. Minggu is present, Minggu is
+    back-derived from it so legacy/partial workbooks still validate.
     """
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=header_row)
     df = df.dropna(how="all")
 
-    if "Hari" in df.columns:
-        df["Hari"] = df["Hari"].astype(str).str.strip().str.title()
-
-    if "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap" in df.columns:
-        df["Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap"] = (
-            df["Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap"]
-            .astype(str)
-            .str.strip()
-            .str.title()
-        )
-
     if "Frekuensi" in df.columns:
         df["Frekuensi"] = df["Frekuensi"].astype(str).str.strip().str.upper()
+        df.loc[df["Frekuensi"] == "NAN", "Frekuensi"] = ""
+
+    def _row_freq(row):
+        f = row.get("Frekuensi") if hasattr(row, "get") else None
+        return f if f in FREKUENSI_OPTIONS else None
+
+    if "Hari" in df.columns:
+        def _norm_hari_row(row):
+            v = row["Hari"]
+            normalized, _err = normalize_hari(v, frekuensi=_row_freq(row))
+            return normalized if normalized is not None else v
+        df["Hari"] = df.apply(_norm_hari_row, axis=1)
+
+    minggu_col_found = next((c for c in MINGGU_COL_ALIASES if c in df.columns), None)
+    if minggu_col_found and minggu_col_found != MINGGU_COL:
+        df = df.rename(columns={minggu_col_found: MINGGU_COL})
+        minggu_col_found = MINGGU_COL
+
+    ket_col_found = next((c for c in KET_MINGGU_COL_ALIASES if c in df.columns), None)
+    if ket_col_found and ket_col_found != KET_MINGGU_COL:
+        df = df.rename(columns={ket_col_found: KET_MINGGU_COL})
+        ket_col_found = KET_MINGGU_COL
+
+    # Back-derive a missing Minggu from an existing Ket. Minggu so partial
+    # or older workbooks (which had no Minggu column at all) still resolve.
+    if ket_col_found and MINGGU_COL not in df.columns:
+        df[MINGGU_COL] = df[KET_MINGGU_COL].apply(derive_minggu_from_callcycle)
+    elif ket_col_found and MINGGU_COL in df.columns:
+        def _fill_minggu(row):
+            cur = row.get(MINGGU_COL)
+            if pd.notna(cur) and str(cur).strip():
+                return cur
+            return derive_minggu_from_callcycle(row.get(KET_MINGGU_COL))
+        df[MINGGU_COL] = df.apply(_fill_minggu, axis=1)
+
+    if MINGGU_COL in df.columns:
+        def _norm_minggu_row(row):
+            v = row[MINGGU_COL]
+            freq = _row_freq(row)
+            if freq is None:
+                return v
+            normalized, _err = normalize_minggu(v, freq)
+            return normalized if normalized is not None else v
+        df[MINGGU_COL] = df.apply(_norm_minggu_row, axis=1)
+
+    if MINGGU_COL in df.columns:
+        if KET_MINGGU_COL not in df.columns:
+            df[KET_MINGGU_COL] = ""
+
+        def _norm_ket_row(row):
+            v = row[KET_MINGGU_COL]
+            freq = _row_freq(row)
+            minggu = row.get(MINGGU_COL)
+            if freq is None or pd.isna(minggu) or not str(minggu).strip():
+                return v
+            blank = pd.isna(v) or str(v).strip() == ""
+            if blank:
+                # Deterministic for F2/F4/F4+; None for F1 (user must pick).
+                return auto_callcycle(freq, minggu) or v
+            normalized, _err = normalize_callcycle(v, freq, minggu)
+            return normalized if normalized is not None else v
+        df[KET_MINGGU_COL] = df.apply(_norm_ket_row, axis=1)
 
     salesman_lookup = build_salesman_lookup(salesman_df) if salesman_df is not None else {}
     store_lookup = build_store_lookup(store_df) if store_df is not None else {}
@@ -1437,6 +1867,14 @@ _SAL_COL_MAP = {
 # Requires the BigQuery migrations:
 #   ALTER TABLE gt_master_salesman_pjp ADD COLUMN salesman_id STRING;
 #   ALTER TABLE gt_master_salesman_pjp ADD COLUMN snapshot_month STRING;
+#   ALTER TABLE gt_master_salesman_pjp ADD COLUMN callcycle STRING;
+# `callcycle` is the ONE new column this template's Frekuensi/Hari/Minggu/
+# Ket. Minggu redesign adds — see backend/scripts/migrations/
+# migrate_pjp_hari_minggu_format.py in the sfa-step repo. The legacy
+# `minggu` column is intentionally NOT written here any more (frozen for
+# historical rows only). Column K "Minggu" is a template/UI input used only
+# to drive Column L — it is deliberately NOT persisted (no DB column for
+# it, per spec §2/§34: the DB gains `callcycle` and nothing else).
 _PJP_COL_MAP = {
     "salesman_id": "salesman_id",
     "ASM": "asm",
@@ -1446,9 +1884,9 @@ _PJP_COL_MAP = {
     "Nama Salesman": "nama_salesman",
     "Kode Toko": "kode_toko",
     "Nama Toko": "nama_toko",
-    "Hari": "hari",
-    "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap": "minggu",
     "Frekuensi": "frekuensi",
+    "Hari": "hari",
+    KET_MINGGU_COL: "callcycle",
     "snapshot_month": "snapshot_month",
 }
 
@@ -1460,7 +1898,15 @@ def push_to_bigquery(df, col_map, table_id) -> tuple[bool, str]:
         existing_cols = {c: col_map[c] for c in col_map if c in df.columns}
         bq_df = df[list(existing_cols.keys())].rename(columns=existing_cols).copy()
         bq_df["uploaded_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND", autodetect=True)
+        job_config = bigquery.LoadJobConfig(
+            write_disposition="WRITE_APPEND",
+            autodetect=True,
+            # `callcycle` may not exist yet on the destination table (see
+            # the ALTER TABLE note above) — without this, BQ load jobs
+            # reject any DataFrame column absent from the existing schema
+            # instead of adding it.
+            schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+        )
         job = client.load_table_from_dataframe(bq_df, table_id, job_config=job_config)
         job.result()
         return True, f"Berhasil menyimpan {len(bq_df)} baris ke Database."
@@ -2667,11 +3113,44 @@ elif PAGES[selected_page] == "pjp_template":
         else:
             st.caption(f"Menampilkan **{len(pjp_view_df)} baris** PJP · {selected_dist_name} · {selected_view_month}")
 
+            # Column order mirrors the template's own Frekuensi -> Hari ->
+            # Minggu -> Ket. Minggu flow. `callcycle` is the authoritative
+            # week pattern for anything uploaded since the redesign;
+            # `minggu` is the frozen legacy column, still shown (labelled)
+            # so rows predating that change remain readable instead of
+            # appearing to have no week pattern at all. The Minggu (week
+            # parity) shown here is back-derived from callcycle for
+            # display only — it is never a stored column.
+            if "callcycle" in pjp_view_df.columns:
+                pjp_view_df = pjp_view_df.copy()
+                pjp_view_df["minggu_kategori"] = pjp_view_df["callcycle"].apply(
+                    derive_minggu_from_callcycle
+                )
+
             display_cols = [c for c in [
                 "salesman_id", "nama_salesman", "kode_toko", "nama_toko",
-                "hari", "minggu", "frekuensi", "kode_distributor", "snapshot_month"
+                "frekuensi", "hari", "minggu_kategori", "callcycle",
+                "minggu", "kode_distributor", "snapshot_month"
             ] if c in pjp_view_df.columns]
-            st.dataframe(pjp_view_df[display_cols], use_container_width=True, hide_index=True)
+            st.dataframe(
+                pjp_view_df[display_cols],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "minggu_kategori": st.column_config.TextColumn(
+                        "Minggu (kolom K)",
+                        help="Kategori minggu — diturunkan dari callcycle untuk tampilan saja, tidak disimpan sebagai kolom database.",
+                    ),
+                    "callcycle": st.column_config.TextColumn(
+                        "callcycle (Ket. Minggu)",
+                        help="Kolom L template. F1: satu angka (1/3 bila Ganjil, 2/4 bila Genap). F2: 1,3 atau 2,4. F4: 1,2,3,4. F4+: 1,2,3,4,5.",
+                    ),
+                    "minggu": st.column_config.TextColumn(
+                        "minggu (lama/legacy)",
+                        help="Kolom lama, tidak lagi diisi oleh upload baru. Hanya untuk baris sebelum perubahan format.",
+                    ),
+                },
+            )
 
             csv_bytes = pjp_view_df[display_cols].to_csv(index=False).encode("utf-8")
             st.download_button(
