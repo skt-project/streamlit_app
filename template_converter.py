@@ -34,9 +34,12 @@ except Exception:
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "gt_schema"
     BQ_CONFIGS_TABLE = "distributor_configs"
-    credentials = service_account.Credentials.from_service_account_file(
-        GCP_CREDENTIALS_PATH
-    )
+    try:
+        credentials = service_account.Credentials.from_service_account_file(
+            GCP_CREDENTIALS_PATH
+        )
+    except Exception:
+        credentials = None
 
 # =========================
 # Master Schema
@@ -74,6 +77,215 @@ M3_DISTRIBUTOR_PREFIX = "pt mitra makmur mandiri sejahtera"
 
 # Master distributor table for BQ lookups
 BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
+
+# Columns that must remain text end-to-end (leading zeros, codes, names).
+# Never coerce these through int/float/pandas numeric inference.
+TEXT_FIELDS: Tuple[str, ...] = (
+    "Customer SKU Code",
+    "Customer SKU Name",
+    "Customer Store Code",
+    "Customer Store Name",
+    "PO Number",
+)
+
+_TEXT_FIELD_ALIASES = {
+    "customer sku code",
+    "customer_sku_code",
+    "customer sku name",
+    "customer_sku_name",
+    "customer store code",
+    "customer_store_code",
+    "customer store name",
+    "customer_store_name",
+    "po number",
+    "po_number",
+    # 3M intermediate columns that feed the master text fields
+    "product code",
+    "product name",
+    "no. transaksi",
+    "id cust distributor",
+}
+
+_BLANK_TOKENS = {"", "nan", "none", "<na>", "<nat>", "nat", "null"}
+_FLOAT_ARTIFACT_RE = re.compile(r"^-?\d+\.0+$")
+
+
+def is_text_field(col_name: object) -> bool:
+    """True when a column is one of the five string-only identity fields (or an alias)."""
+    if col_name is None:
+        return False
+    raw = str(col_name).strip()
+    if raw in TEXT_FIELDS:
+        return True
+    lowered = raw.lower()
+    snake = lowered.replace(" ", "_")
+    spaced = lowered.replace("_", " ")
+    return (
+        lowered in _TEXT_FIELD_ALIASES
+        or snake in _TEXT_FIELD_ALIASES
+        or spaced in _TEXT_FIELD_ALIASES
+    )
+
+
+def as_text(value) -> str:
+    """Coerce a cell to text without converting numeric-looking strings to numbers.
+
+    Preserves leading zeros (``00123`` stays ``00123``). Excel float artifacts
+    such as ``123.0`` become ``123`` without calling ``int()`` on a string, so
+    ``00123.0`` becomes ``00123`` rather than ``123``. Blanks / NaN become
+    ``""`` rather than ``"nan"``.
+    """
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (ValueError, TypeError):
+        pass
+
+    if isinstance(value, bool):
+        return str(value)
+
+    if isinstance(value, int):
+        return str(value)
+
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    if isinstance(value, str):
+        s = value.strip()
+        if s.lower() in _BLANK_TOKENS:
+            return ""
+        # Strip a trailing .0 on an all-digit string without going through int(),
+        # so leading zeros survive (``00123.0`` -> ``00123``).
+        if _FLOAT_ARTIFACT_RE.match(s):
+            return s.split(".")[0]
+        return s
+
+    s = str(value).strip()
+    if s.lower() in _BLANK_TOKENS:
+        return ""
+    return s
+
+
+def series_as_text(series: pd.Series) -> pd.Series:
+    """Return a pandas ``string`` dtype series with blanks as empty strings."""
+    return series.map(as_text, na_action=None).astype("string")
+
+
+def force_text_columns(
+    df: pd.DataFrame, columns: Optional[List[str]] = None
+) -> pd.DataFrame:
+    """Force identity fields (or an explicit column list) to string dtype."""
+    if df is None:
+        return df
+    df = df.copy()
+    cols = columns if columns is not None else [c for c in df.columns if is_text_field(c)]
+    for col in cols:
+        if col in df.columns:
+            df[col] = series_as_text(df[col])
+    return df
+
+
+def _excel_cell_to_text(cell) -> str:
+    """Read an openpyxl cell as text, preserving string values and leading zeros."""
+    value = cell.value
+    if value is None:
+        return ""
+
+    data_type = getattr(cell, "data_type", None)
+    if data_type in ("s", "str", "inlineStr"):
+        return as_text(value)
+
+    fmt = (getattr(cell, "number_format", None) or "").strip()
+    fmt_clean = fmt.replace("\\", "").split(";")[0]
+    if (
+        data_type == "n"
+        and isinstance(value, (int, float))
+        and re.fullmatch(r"0+", fmt_clean)
+    ):
+        try:
+            if float(value).is_integer():
+                return f"{int(value):0{len(fmt_clean)}d}"
+        except (ValueError, OverflowError, OSError):
+            pass
+
+    return as_text(value)
+
+
+def _read_excel_cells_as_text(
+    uploaded_file,
+    sheet_name=0,
+    header: Optional[int] = 0,
+) -> pd.DataFrame:
+    """Load an .xlsx workbook cell-by-cell as text (no pandas type inference)."""
+    from openpyxl import load_workbook
+
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+
+    wb = load_workbook(uploaded_file, data_only=True, read_only=True)
+    try:
+        if isinstance(sheet_name, str):
+            if sheet_name not in wb.sheetnames:
+                raise ValueError(f"Sheet {sheet_name!r} not found")
+            ws = wb[sheet_name]
+        else:
+            ws = wb.worksheets[int(sheet_name)]
+
+        all_rows: List[List[str]] = []
+        for row in ws.iter_rows():
+            all_rows.append([_excel_cell_to_text(c) for c in row])
+    finally:
+        wb.close()
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    if header is None:
+        return pd.DataFrame(all_rows)
+
+    header_idx = int(header)
+    if header_idx >= len(all_rows):
+        return pd.DataFrame()
+
+    columns = [
+        cell if cell != "" else f"Unnamed: {i}"
+        for i, cell in enumerate(all_rows[header_idx])
+    ]
+    data = all_rows[header_idx + 1 :]
+    return pd.DataFrame(data, columns=columns)
+
+
+def _read_excel_as_text(
+    uploaded_file,
+    sheet_name=0,
+    header: Optional[int] = 0,
+) -> pd.DataFrame:
+    """Read Excel as text; fall back to pandas dtype=str for .xls / engine issues."""
+    name = str(getattr(uploaded_file, "name", "") or "").lower()
+    use_openpyxl = (not name.endswith(".xls")) or name.endswith(".xlsx")
+    if use_openpyxl:
+        try:
+            return _read_excel_cells_as_text(
+                uploaded_file, sheet_name=sheet_name, header=header
+            )
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+
+    kwargs = {"dtype": str, "keep_default_na": False, "header": header}
+    if sheet_name is not None:
+        kwargs["sheet_name"] = sheet_name
+    df = pd.read_excel(uploaded_file, **kwargs)
+    return df.apply(lambda col: col.map(as_text))
+
 
 
 # =========================
@@ -212,7 +424,7 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
         Product Code | Product Name | Kuantitas | No. TRANSAKSI | PO Date |
         ID CUST DISTRIBUTOR | Customer Store Name
     """
-    df = pd.read_excel(uploaded_file, sheet_name="TEMPLATE", header=None)
+    df = _read_excel_as_text(uploaded_file, sheet_name="TEMPLATE", header=None)
 
     records = []
     current_trans = None
@@ -221,7 +433,7 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
     current_store_name = None
 
     for _, row in df.iterrows():
-        cell0 = str(row[0]).strip() if pd.notna(row[0]) else ""
+        cell0 = as_text(row[0])
 
         # ── Transaction header ────────────────────────────────────────────────
         # Pattern: "No. Trans : JL/M3-26020183 [ 09-02-2026 ] - ONE MART"
@@ -231,35 +443,44 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
                 cell0,
             )
             if match:
-                current_trans = match.group(1).strip()
+                current_trans = as_text(match.group(1))
                 # Convert DD-MM-YYYY → YYYY-MM-DD to align with master schema
                 current_po_date = pd.to_datetime(
                     match.group(2), format="%d-%m-%Y"
                 ).strftime("%Y-%m-%d")
-                current_store_name = match.group(3).strip()
+                current_store_name = as_text(match.group(3))
 
-            col7 = str(row[7]).strip() if pd.notna(row[7]) else ""
+            col7 = as_text(row[7]) if 7 in row.index else ""
             # Leave blank for unregistered stores
-            current_store_id = (
-                "" if col7 in ("Not Registered", "nan", "") else col7
-            )
+            current_store_id = "" if col7 in ("Not Registered", "") else col7
 
         # ── Product row (col 0 is a numeric barcode ≥ 10 digits) ─────────────
         elif cell0.isdigit() and len(cell0) >= 10:
             records.append(
                 {
-                    "Product Code": str(int(cell0)),
-                    "Product Name": row[1],
+                    "Product Code": cell0,  # keep as text; do not int() (strips leading zeros)
+                    "Product Name": as_text(row[1]),
                     "Kuantitas": row[2],
-                    "No. TRANSAKSI": current_trans,
+                    "No. TRANSAKSI": as_text(current_trans),
                     "PO Date": current_po_date,
-                    "ID CUST DISTRIBUTOR": current_store_id,
-                    "Customer Store Name": current_store_name,
+                    "ID CUST DISTRIBUTOR": as_text(current_store_id),
+                    "Customer Store Name": as_text(current_store_name),
                 }
             )
 
     result = pd.DataFrame(records)
-    result["Kuantitas"] = pd.to_numeric(result["Kuantitas"], errors="coerce")
+    if not result.empty:
+        result["Kuantitas"] = pd.to_numeric(result["Kuantitas"], errors="coerce")
+        result = force_text_columns(
+            result,
+            [
+                "Product Code",
+                "Product Name",
+                "No. TRANSAKSI",
+                "ID CUST DISTRIBUTOR",
+                "Customer Store Name",
+            ],
+        )
     return result
 
 
@@ -288,11 +509,11 @@ def map_3m_to_master(
 
     # ── Dynamic columns ───────────────────────────────────────────────────────
     out["PO Date"] = cleaned["PO Date"]
-    out["PO Number"] = cleaned["No. TRANSAKSI"]
-    out["Customer Store Code"] = cleaned["ID CUST DISTRIBUTOR"].astype(str)
-    out["Customer Store Name"] = cleaned["Customer Store Name"]
-    out["Customer SKU Code"] = cleaned["Product Code"]
-    out["Customer SKU Name"] = cleaned["Product Name"]
+    out["PO Number"] = series_as_text(cleaned["No. TRANSAKSI"])
+    out["Customer Store Code"] = series_as_text(cleaned["ID CUST DISTRIBUTOR"])
+    out["Customer Store Name"] = series_as_text(cleaned["Customer Store Name"])
+    out["Customer SKU Code"] = series_as_text(cleaned["Product Code"])
+    out["Customer SKU Name"] = series_as_text(cleaned["Product Name"])
     out["Qty"] = cleaned["Kuantitas"]
 
     # ── BQ lookup: Customer Name & Customer Branch Code per store prefix ───────
@@ -338,7 +559,7 @@ def map_3m_to_master(
         .tolist()
     )
 
-    out = out[MASTER_SCHEMA]
+    out = force_text_columns(out[MASTER_SCHEMA])
     return out, unregistered, bq_lookup_misses
 
 
@@ -357,12 +578,15 @@ def deduplicate_and_sum_qty(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
 
+    # Identity fields must stay text so groupby does not coerce "00123" -> 123
+    df = force_text_columns(df)
+
     result = (
         df.groupby(group_cols, as_index=False, dropna=False)["Qty"]
         .sum()
     )
 
-    return result[MASTER_SCHEMA]
+    return force_text_columns(result[MASTER_SCHEMA])
 
 
 # =========================
@@ -382,7 +606,9 @@ def intelligent_mapping(
     effective_mapping = {}
     failed_columns = []
 
+    df = df.copy()
     df.columns = [col.lower() for col in df.columns]
+    df = force_text_columns(df)
     mapping_lower = {k: v.lower() for k, v in mapping.items()}
 
     for col in FIXED_FIRST_5:
@@ -417,25 +643,28 @@ def intelligent_mapping(
                 else:
                     failed_columns.append(target)
 
+    # Coerce identity fields AFTER fuzzy matching so missing columns (all-NA)
+    # can still be filled by fuzzy match. as_text turns NA into "" (not "nan").
+    out = force_text_columns(out)
+
     # ✅ PREFIX LOGIC (SAFE)
     if distributor.upper() == "CV SINAR SAKTI":
-        out["PO Number"] = out["PO Number"].astype(str)
-        out["PO Number"] = out["PO Number"].apply(
-            lambda x: x if x.startswith("SS") else "SS" + x
+        po = series_as_text(out["PO Number"])
+        out["PO Number"] = po.map(
+            lambda x: x if (not x or x.startswith("SS")) else "SS" + x
         )
 
     branch_code_prefix = static_fields.get("Customer Branch Code", "")
     original_store_code_col = effective_mapping.get("Customer Store Code")
 
     if branch_code_prefix and original_store_code_col:
-        out["Customer Store Code"] = (
-            branch_code_prefix + out["Customer Store Code"].astype(str)
-        )
+        store = series_as_text(out["Customer Store Code"])
+        out["Customer Store Code"] = store.map(lambda x: branch_code_prefix + x)
         effective_mapping["Customer Store Code"] = (
             f"PREFIXED({branch_code_prefix}){original_store_code_col}"
         )
 
-    out = out[MASTER_SCHEMA]
+    out = force_text_columns(out[MASTER_SCHEMA])
     return out, effective_mapping, failed_columns
 
 
@@ -443,20 +672,59 @@ def intelligent_mapping(
 # Utilities
 # =========================
 def read_any_table(uploaded_file) -> pd.DataFrame:
+    """Read CSV/Excel with every column as text so leading zeros are not inferred away."""
     name = uploaded_file.name.lower()
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+
     if name.endswith(".csv"):
-        return pd.read_csv(uploaded_file)
-    elif name.endswith((".xlsx", ".xls")):
-        return pd.read_excel(uploaded_file)
+        df = pd.read_csv(
+            uploaded_file,
+            dtype=str,
+            keep_default_na=False,
+            na_filter=False,
+        )
+    elif name.endswith(".xlsx"):
+        df = _read_excel_as_text(uploaded_file, header=0)
+    elif name.endswith(".xls"):
+        df = pd.read_excel(
+            uploaded_file,
+            dtype=str,
+            keep_default_na=False,
+            engine="xlrd",
+        )
     else:
         st.error("Unsupported file type. Please upload a .csv, .xls, or .xlsx file.")
         return pd.DataFrame()
 
+    # Sanitize every column: preserve leading-zero strings, turn NaN into "".
+    df = df.apply(lambda col: col.map(as_text))
+    df = force_text_columns(df)
+    return df
+
 
 def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Data") -> bytes:
+    """Serialize a DataFrame to Excel, writing identity fields as true Excel text."""
     buf = io.BytesIO()
+    df = force_text_columns(df)
     with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, header=True, startrow=1, sheet_name=sheet_name)
+        workbook = writer.book
+        worksheet = writer.sheets[sheet_name]
+        text_fmt = workbook.add_format({"num_format": "@"})
+        # pandas startrow=1 -> header at row 1, data from row 2 (0-indexed)
+        data_start_row = 2
+        for col_idx, col_name in enumerate(df.columns):
+            if not is_text_field(col_name):
+                continue
+            worksheet.set_column(col_idx, col_idx, None, text_fmt)
+            for row_idx, value in enumerate(df[col_name].tolist()):
+                worksheet.write_string(
+                    data_start_row + row_idx,
+                    col_idx,
+                    as_text(value),
+                    text_fmt,
+                )
     buf.seek(0)
     return buf.getvalue()
 
@@ -511,6 +779,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     # ── Deduplicate rows and sum Qty ──────────────────────────────────────────
     rows_before = len(mapped)
     mapped = deduplicate_and_sum_qty(mapped)
+    mapped = force_text_columns(mapped)
     rows_after = len(mapped)
     rows_merged = rows_before - rows_after
     if rows_merged > 0:
@@ -663,6 +932,7 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     # ── Deduplicate rows and sum Qty ──────────────────────────────────────────
     rows_before = len(mapped)
     mapped = deduplicate_and_sum_qty(mapped)
+    mapped = force_text_columns(mapped)
     rows_after = len(mapped)
     rows_merged = rows_before - rows_after
     if rows_merged > 0:
