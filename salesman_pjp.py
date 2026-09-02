@@ -1575,6 +1575,29 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
         errors.append(f"Kolom wajib tidak ditemukan: {', '.join(missing)}")
         return errors, warnings
 
+    # ── Outdated-template detection ────────────────────────────────────────
+    # The column layout changed (Frekuensi moved K->I, Hari I->J, and the
+    # single old "Minggu Ganjil/Minggu Genap/Minggu Ganjil + Genap" column
+    # became Minggu (K) + Ket. Minggu (L)). A workbook saved before that
+    # change still imports field-for-field correctly — read_template_sheet()
+    # matches on HEADER TEXT, never on column position, so the swapped
+    # Frekuensi/Hari positions do not corrupt anything — but it cannot
+    # supply Column K, so every row would otherwise fail with several
+    # confusing per-row errors that never say what actually went wrong.
+    # Detect it once and give one actionable instruction instead.
+    if KET_MINGGU_COL in df.columns:
+        filled_ket = [v for v in df[KET_MINGGU_COL] if pd.notna(v) and str(v).strip()]
+        legacy_ket = [v for v in filled_ket if migrate_legacy_minggu(v)]
+        if filled_ket and len(legacy_ket) == len(filled_ket):
+            errors.append(
+                "Template lama terdeteksi — kolom 'Ket. Minggu' masih berisi nilai "
+                "format lama (mis. 'Minggu Ganjil'). Struktur template sudah berubah: "
+                "sekarang ada kolom I Frekuensi, J Hari, K Minggu, dan L Ket. Minggu. "
+                "Silakan download ulang PJP Template terbaru pada tab "
+                "'Download Template', isi ulang, lalu upload kembali."
+            )
+            return errors, warnings
+
     errors += validate_row_completeness(df, PJP_REQUIRED, "PJP")
 
     unique_dist = _get_unique_distributors(df, col="kode_distributor")
@@ -1673,9 +1696,12 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
                     f"(nilai Frekuensi: '{freq_val}')."
                 )
             elif minggu_ok is None:
+                # Show "(kosong)" rather than letting pandas' NaN reach the
+                # user as the literal string 'nan'.
+                shown = "(kosong)" if (pd.isna(minggu_val) or not str(minggu_val).strip()) else f"'{minggu_val}'"
                 errors.append(
                     f"Baris {n}: Ket. Minggu tidak dapat divalidasi tanpa Minggu yang valid "
-                    f"(nilai Minggu: '{minggu_val}')."
+                    f"(kolom K Minggu: {shown}). Isi kolom Minggu terlebih dahulu."
                 )
             else:
                 _, ket_err = normalize_callcycle(ket_val, freq_str, minggu_ok)

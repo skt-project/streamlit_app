@@ -302,3 +302,25 @@ def test_expand_f4plus_includes_week5():
     pairs = expand_hari_callcycle(hari, cc)
     assert len(pairs) == 10
     assert ("SENIN", "5") in pairs and ("SELASA", "5") in pairs
+
+
+# ─── Outdated-template detection (column layout changed) ──────────────────
+# The template's columns were reordered (Frekuensi K->I, Hari I->J) and the
+# old single "Minggu Ganjil/..." column became Minggu (K) + Ket. Minggu (L).
+# Import matches on HEADER TEXT, never on position, so an old workbook's
+# fields are still read correctly — but it cannot supply Column K. These
+# guard the legacy-value recognition that drives the single clear
+# "download the new template" message instead of many confusing per-row
+# errors. See validate_pjp_df() in salesman_pjp.py.
+
+@pytest.mark.parametrize("legacy_value", [
+    "Minggu Ganjil", "Minggu Genap", "Minggu Ganjil + Genap",
+])
+def test_legacy_ket_minggu_values_are_recognisable(legacy_value):
+    assert migrate_legacy_minggu(legacy_value) is not None
+
+
+@pytest.mark.parametrize("current_value", ["1", "3", "1,3", "2,4", "1,2,3,4", "1,2,3,4,5"])
+def test_current_ket_minggu_values_are_not_mistaken_for_legacy(current_value):
+    # A current-format workbook must never trip the outdated-template check.
+    assert migrate_legacy_minggu(current_value) is None
