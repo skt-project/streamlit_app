@@ -55,7 +55,8 @@ def new_upload_id() -> str:
 
 # ─── Row construction ─────────────────────────────────────────────────────────
 def build_noo_row(user_row, *, distributor_code=None, dist_values,
-                  store_values, when, noo_existing_label="") -> dict:
+                  store_values, when, noo_existing_label="",
+                  resolved_store_id="") -> dict:
     """One enriched `POOL NOO STREAMLIT` record, keyed by pool column.
 
     The branch comes from the row itself — MoM 31-Aug-2026 allows one file to
@@ -67,10 +68,12 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
     ``store_type`` and ``city``, whose vocabulary must be preserved exactly
     (decision B3). Master values are used only to fill a blank.
 
-    `noo_existing_label` is the integrated NOO Detector's verdict — column E
-    ("NOO/Existing") of the live 41-column pool — computed by
-    `noo_sku.noo_detector.check_reference_id` in the pipeline, never typed by
-    the admin (MoM 31-Aug-2026 §3/§4).
+    `noo_existing_label` and `resolved_store_id` are the integrated NOO
+    Detector's verdict (`noo_sku.noo_detector.classify`) — column E
+    ("NOO/Existing") and the auto-populated `store_id` respectively. Fixed
+    2026-09-03: `store_id` is now ALWAYS the master's own matched identifier,
+    never the admin's typed value — populated only when a match was found,
+    left blank otherwise so no fake/generated Store ID is ever written.
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
     branch_code = norm_key(g("Customer Branch Code")) or norm_key(
@@ -82,7 +85,7 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
         "input_time": format_input_time(when),
         "branch_name": g("Branch Name") or dist_values.get("branch_name", ""),
         "region": dist_values.get("region", ""),
-        "store_id": norm_key(g("Store ID (Opsional)")),
+        "store_id": norm_key(resolved_store_id),
         "store_name": g("Store Name"),
         "channel_name": norm_key(g("Channel (GT / MTi)")),
         "customer_code": norm_key(g("Customer Code")),

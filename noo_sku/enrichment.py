@@ -77,6 +77,11 @@ class EnrichmentResult:
     ambiguous: bool = False
     sources: dict = field(default_factory=dict)
     matched_on: str = ""
+    #: The MASTER's own store identifier (`cust_id`) for the matched record,
+    #: never the admin's typed value. Blank unless `matched` and not
+    #: `ambiguous` — the NOO Detector auto-populates the pool's `store_id` from
+    #: this, and only this.
+    resolved_store_id: str = ""
 
     @property
     def mapping_source(self) -> str:
@@ -195,24 +200,6 @@ class StoreEnricher:
         # {brand_suffix: {reference_id: [records]}}
         self._by_ref = by_reference or {}
 
-    def all_stores(self):
-        """Every store loaded for this company, for the NOO Detector's
-        candidate pool. Most rows carry both `cust_id` and a `reference_id_*`
-        and so appear in both indexes as the same dict object; a row with a
-        reference id but no `cust_id` would only be in `_by_ref`, so this
-        unions both rather than assuming `_by_cust` alone is complete."""
-        seen, out = set(), []
-        for record in self._by_cust.values():
-            seen.add(id(record))
-            out.append(record)
-        for table in self._by_ref.values():
-            for records in table.values():
-                for record in records:
-                    if id(record) not in seen:
-                        seen.add(id(record))
-                        out.append(record)
-        return out
-
     def _lookup(self, store_id, store_code, suffix):
         """Composite key: cust_id first (unique), then a UNIQUE reference id."""
         cust = self._by_cust.get(norm_key(store_id))
@@ -253,6 +240,7 @@ class StoreEnricher:
             result.sources = {k: SOURCE_NONE for k in result.values}
             return result
 
+        result.resolved_store_id = norm_key(record.get("cust_id"))
         result.values = {
             "se_kae": _pick(record, f"se_{suffix}", "se_fcr"),
             "spv": _pick(record, f"spv_{suffix}"),

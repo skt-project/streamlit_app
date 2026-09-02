@@ -107,22 +107,18 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
         result.enrichment_notes.extend(dist_result.notes)
         result.enrichment_notes.extend(store_result.notes)
 
-        # MoM 31-Aug-2026 §2-§5: the integrated NOO Detector decides whether
-        # this store already has a Reference ID. Runs against the same
-        # company-scoped candidate pool store_enricher was built from, so no
-        # extra query is needed here.
-        detection = noo_detector.check_reference_id(
-            {"store_name": row.get("Store Name", ""),
-             "address": row.get("Store Address", ""),
-             "city": row.get("City", ""),
-             "reference_id": row.get("Store ID (Opsional)", "")},
-            store_enricher.all_stores())
+        # MoM 2026-09-03 fix: the NOO Detector's verdict is a DIRECT lookup,
+        # not a fuzzy score. It reuses the exact same composite-key match
+        # store_result already performed against master_store_database_basis
+        # -- no second lookup, no scoring formula.
+        detection = noo_detector.classify(store_result)
 
         # 3. final row resolution --------------------------------------------
         pool_rows.append(writer.build_noo_row(
             row, distributor_code=row_code, dist_values=dist_result.values,
             store_values=store_result.values, when=when,
-            noo_existing_label=detection.label))
+            noo_existing_label=detection.label,
+            resolved_store_id=detection.store_id))
         numbers.append(number)
         result.row_meta.append({
             "row": number,
@@ -134,7 +130,7 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
             "ambiguous": store_result.ambiguous,
             "used_fallback": dist_result.used_fallback,
             "noo_existing_label": detection.label,
-            "noo_existing_score": detection.score,
+            "resolved_store_id": detection.store_id,
             "brand": brand,
         })
 
@@ -258,7 +254,7 @@ def mapping_sources(result: PipelineResult) -> list:
             entry["Matched On"] = meta["matched_on"]
             entry["SE"] = pool.get("se_kae", "")
             entry["NOO/Existing"] = meta.get("noo_existing_label", "")
-            entry["Detector Score"] = round(meta.get("noo_existing_score", 0), 1)
+            entry["Store ID (auto)"] = meta.get("resolved_store_id", "")
             if meta.get("ambiguous"):
                 entry["Fallback"] = "AMBIGU - PERLU DITINJAU"
         else:

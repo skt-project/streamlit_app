@@ -27,6 +27,19 @@ from .normalize import clean, norm_header
 UPLOAD_NOO = "NOO"
 UPLOAD_SKU = "SKU"
 
+#: BD Support's own reference-only sheets, present in both real templates.
+#: SKU_MAPPING_TEMPLATE 2.0.xlsx introduced "Contoh Pengisian" as a SEPARATE
+#: sheet carrying the exact same header text as the real upload sheet (moved
+#: out of the upload sheet itself, where the example row used to live inline).
+#: Its header would otherwise score an identical signature match, so without
+#: this it could win the sheet-selection tie purely by scan order rather than
+#: by being the sheet the admin actually filled in. Matched case-insensitively
+#: by name because — unlike the two real upload sheets — these are stable,
+#: BD-Support-controlled labels, not data to detect by content.
+_REFERENCE_ONLY_SHEETS = frozenset({
+    "guideline", "city & store type", "contoh pengisian",
+})
+
 
 class ParseError(Exception):
     """Raised when the file cannot be read at all. Carries user-facing text."""
@@ -109,6 +122,8 @@ def parse_upload(file_obj) -> ParsedFile:
     wb = _load_workbook(file_obj)
     best = None
     for ws in wb.worksheets:
+        if clean(ws.title).lower() in _REFERENCE_ONLY_SHEETS:
+            continue
         header_row, headers, kind = _find_header_row(ws)
         if not header_row:
             continue

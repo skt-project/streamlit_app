@@ -432,6 +432,25 @@ def load_city_reference(credentials, file_id=None) -> set:
             if len(r) > 1 and clean(r[1])}
 
 
+def load_local_sku_template() -> bytes:
+    """The bundled SKU_MAPPING_TEMPLATE 2.0.xlsx — no network call.
+
+    MoM 2026-09-03: BD Support handed over a fixed file rather than a live
+    Drive link, and it is treated as the current source template, not a
+    reference to inspect and reproduce. Raises FileNotFoundError with a clear
+    message if the asset was not shipped with this deployment, rather than
+    silently falling back to the outdated Drive-hosted template — serving the
+    wrong SKU template is worse than failing loudly.
+    """
+    path = config.SKU_TEMPLATE_LOCAL_PATH
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Template SKU tidak ditemukan di {path}. Pastikan file "
+            "SKU_MAPPING_TEMPLATE 2.0.xlsx ikut ter-deploy bersama aplikasi."
+        )
+    return path.read_bytes()
+
+
 def prepare_sku_template(raw: bytes) -> bytes:
     """Serve BD Support's SKU template without the removed gramasi column.
 

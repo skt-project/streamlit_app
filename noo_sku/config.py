@@ -8,17 +8,27 @@ for the audit that produced them.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 # ─── Spreadsheets ─────────────────────────────────────────────────────────────
 # Native Google Sheet. Read + append.
 TRACKER_SPREADSHEET_ID = "1bchAAMuXOT1lzuAB-KbrrAwpIrL1_MG3Hzcq823PAN4"
 TRACKER_TITLE = "NOO TRACKER GT"
 
-# Both of these are .xlsx files stored in Drive, NOT native Google Sheets, so
-# they must be fetched with Drive files().get_media() and opened with openpyxl.
-# gspread cannot open them. Read-only: they are BD Support's blank templates.
-SKU_TEMPLATE_FILE_ID = "1UObRQCPBB3grWvGcbe3S9F-gW8LWS_Pk"
+# NOO's template is still a BD-Support-owned .xlsx in Drive, NOT a native
+# Google Sheet, so it must be fetched with Drive files().get_media() and
+# opened with openpyxl. gspread cannot open it. Read-only: it is BD Support's
+# blank template.
 NOO_TEMPLATE_FILE_ID = "1Yt6vRRVSz2-mm59KzVsq32MrwqmzDoYB"
+
+# SKU's template as of 2026-09-03 is bundled with the application instead —
+# BD Support handed over a fixed file ("SKU_MAPPING_TEMPLATE 2.0.xlsx") rather
+# than a live Drive link, so it is served straight from disk. Kept alongside
+# this module (not in a scratch/temp location) so it ships with every
+# deployment. The old Drive-hosted template is retained only as a fallback for
+# `download_template()`, which nothing calls for SKU anymore.
+SKU_TEMPLATE_FILE_ID = "1UObRQCPBB3grWvGcbe3S9F-gW8LWS_Pk"
+SKU_TEMPLATE_LOCAL_PATH = Path(__file__).parent / "SKU_MAPPING_TEMPLATE 2.0.xlsx"
 
 # ─── Tracker tabs (verified) ──────────────────────────────────────────────────
 TAB_POOL_NOO = "POOL NOO STREAMLIT"      # gid 557889479  — existing, header fixed, append only
@@ -162,12 +172,15 @@ VOLATILE_ENRICHMENT_COLUMNS = frozenset({
     # up rather than WHAT the admin submitted.
     "se_kae", "spv", "aom", "asm_name", "asm_kam", "asm", "area", "province",
     "region",
-    # NOO/Existing — MoM 2026-08-31 §3/§4: the NOO Detector's Reference-ID
-    # verdict. Derived from master_store_database_basis at submission time, so
-    # it is exactly as volatile as se_kae/spv/etc for the same reason: another
-    # admin's upload could change what "already exists" means for this store
-    # between two uploads of otherwise-identical business data.
-    "NOO/Existing",
+    # NOO/Existing and store_id — MoM 2026-09-03: the NOO Detector's
+    # Reference-ID verdict and its auto-populated Store ID. Both are DERIVED
+    # from master_store_database_basis at submission time (store_id is no
+    # longer the admin's typed value — see writer.build_noo_row), so both are
+    # exactly as volatile as se_kae/spv/etc for the same reason: a store
+    # landing in the master between two uploads of otherwise-identical
+    # business data must not turn an unchanged resubmission into a spurious
+    # CORRECTION.
+    "NOO/Existing", "store_id",
     # The distributor's own name, rendered from master. It is constant for every
     # row of a given distributor, so it adds zero discriminating power to a hash
     # that is already scoped by distributor - while a rename in master would

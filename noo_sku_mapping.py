@@ -147,12 +147,18 @@ def _cities():
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _template_bytes(file_id):
+    """NOO's template only — still BD Support's live Drive-hosted file."""
     creds, _, _ = _clients()
-    raw = sources.download_template(creds, file_id)
-    if file_id == config.SKU_TEMPLATE_FILE_ID:
-        # MoM 31-Aug-2026 §6.1: the gramasi column is no longer collected.
-        return sources.prepare_sku_template(raw)
-    return raw
+    return sources.download_template(creds, file_id)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _sku_template_bytes():
+    """SKU's template — bundled locally as of the 2026-09-03 MoM, no Drive
+    call. `prepare_sku_template` is kept as a defensive no-op: harmless if the
+    bundled file never carries a size/gramasi column, still correct if it ever
+    does again."""
+    return sources.prepare_sku_template(sources.load_local_sku_template())
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -570,13 +576,13 @@ def render_section(kind, dist):
                 file_name=f"Panduan_{'NOO_Mapping' if is_noo else 'SKU_Mapping'}.pdf",
                 mime="application/pdf", key=f"pdf_{kind}")
 
-    file_id = (config.NOO_TEMPLATE_FILE_ID if is_noo
-               else config.SKU_TEMPLATE_FILE_ID)
     name = ("NOO_MAPPING_TEMPLATE.xlsx" if is_noo
-            else "SKU_MAPPING_TEMPLATE.xlsx")
+            else "SKU_MAPPING_TEMPLATE_2.0.xlsx")
     try:
+        template_bytes = (_template_bytes(config.NOO_TEMPLATE_FILE_ID) if is_noo
+                          else _sku_template_bytes())
         st.download_button(f"⬇ Download Template {'NOO' if is_noo else 'SKU'}",
-                           data=_template_bytes(file_id), file_name=name,
+                           data=template_bytes, file_name=name,
                            mime="application/vnd.openxmlformats-officedocument"
                                 ".spreadsheetml.sheet", key=f"tpl_{kind}")
     except Exception:

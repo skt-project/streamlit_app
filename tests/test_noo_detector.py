@@ -1,26 +1,26 @@
-"""NOO Detector integration — MoM 2026-08-31 §2-§5, §14, §15 (NOO tests 4-6).
+"""NOO Detector — direct Reference-ID lookup (fixed 2026-09-03).
 
-Two layers: the pure scoring module (`noo_sku.noo_detector`), ported from the
-standalone "Duplicate Store Checker" app rather than reimplemented; and the
-pipeline wiring that writes its verdict into POOL NOO STREAMLIT column E
-("NOO/Existing") without letting the admin type it.
+Replaces the earlier fuzzy-scoring version (Name/Address/City/GPS/NIK/NPWP,
+threshold >=70), which the 2026-09-03 MoM identified as producing wrong
+results for the common case: the real NOO template collects no GPS/NIK/NPWP,
+so a genuinely existing store with a blank Store ID could score as low as 65
+-- always under the 70 cutoff -- and misclassify as new. See
+`noo_sku/noo_detector.py`'s module docstring for the full history.
+
+The fix: reuse the SAME composite-key lookup (`enrichment.StoreEnricher`,
+already verified at 99.9% resolution on real data) that already runs for
+SE/SPV/AOM enrichment. No fuzzy matching, no second query, no threshold.
 """
 from __future__ import annotations
 
 import pytest
 
-from noo_sku import config, enrichment, noo_detector, pipeline
+from noo_sku import config, duplicates, enrichment, noo_detector, pipeline
 from noo_sku.customer_code import CustomerCodeResolver
 from noo_sku.normalize import now_business
 from tests import noo_sku_fixtures as fx
 
 DIST = "DST082"
-
-EXISTING_STORE = {
-    "cust_id": "IESL00038", "store_name": "TOKO WILDA",
-    "address": "JL MERDEKA NO 10 BANGGAI", "city": "Banggai",
-    "reference_id_skt": "IESL00038",
-}
 
 
 def _resolver():
@@ -45,143 +45,157 @@ def _noo_pipeline(rows, ledger=(frozenset(), frozenset())):
         allowed_branches={DIST: {"name": "CV CECE"}}, company_name="CV CECE")
 
 
-# ─── Pure scoring module ───────────────────────────────────────────────────
+# ─── classify() — pure, given an already-resolved StoreEnricher result ───────
 @pytest.mark.sanity
-def test_exact_name_address_city_and_reference_id_scores_above_threshold():
-    new_store = {"store_name": "TOKO WILDA", "address": "JL MERDEKA NO 10 BANGGAI",
-                "city": "Banggai", "reference_id": "IESL00038"}
-    result = noo_detector.check_reference_id(new_store, [EXISTING_STORE])
-    assert result.matched is True
-    assert result.score >= noo_detector.MATCH_THRESHOLD
-    assert result.label == noo_detector.LABEL_REFERENCE_EXISTS
-
-
-@pytest.mark.sanity
-def test_completely_different_store_scores_low_and_reads_as_new():
-    new_store = {"store_name": "TOKO SANGAT BERBEDA XYZ",
-                "address": "JL LAIN SEKALI NO 99", "city": "Kota Lain"}
-    result = noo_detector.check_reference_id(new_store, [EXISTING_STORE])
-    assert result.matched is False
-    assert result.label == noo_detector.LABEL_REFERENCE_NEW
+def test_matched_store_is_not_noo_and_carries_the_masters_own_store_id():
+    result = enrichment.EnrichmentResult(matched=True, ambiguous=False,
+                                         resolved_store_id="IESL00038")
+    verdict = noo_detector.classify(result)
+    assert verdict.matched is True
+    assert verdict.label == "Not NOO -> Reference ID not exist"
+    assert verdict.store_id == "IESL00038"
 
 
 @pytest.mark.sanity
-def test_no_candidates_always_reads_as_new():
-    result = noo_detector.check_reference_id(
-        {"store_name": "TOKO APAPUN", "address": "JL X", "city": "Y"}, [])
-    assert result.matched is False
-    assert result.score == 0
-    assert result.label == noo_detector.LABEL_REFERENCE_NEW
+def test_unmatched_store_is_noo_with_blank_store_id():
+    result = enrichment.EnrichmentResult(matched=False, ambiguous=False,
+                                         resolved_store_id="")
+    verdict = noo_detector.classify(result)
+    assert verdict.matched is False
+    assert verdict.label == "NOO -> Create ID"
+    assert verdict.store_id == ""
 
 
-def test_label_text_is_exact_and_unmodified():
-    """MoM §4/§5: 'Do not change capitalization, punctuation, spacing.'"""
+@pytest.mark.sanity
+def test_ambiguous_match_is_treated_as_not_found_never_guessed():
+    """An ambiguous reference id must never produce a store_id -- picking one
+    of several candidates would silently attach the wrong store."""
+    result = enrichment.EnrichmentResult(matched=True, ambiguous=True,
+                                         resolved_store_id="")
+    verdict = noo_detector.classify(result)
+    assert verdict.matched is False
+    assert verdict.label == "NOO -> Create ID"
+    assert verdict.store_id == ""
+
+
+def test_label_text_is_the_exact_historical_wording():
+    """Confirmed against real production data: 2,200 / 1,657 rows respectively
+    in SKINTIFIC NEW as of the 2026-08-19 audit. The fix is to the matching
+    method, not this text -- do not reword it."""
     assert noo_detector.LABEL_REFERENCE_EXISTS == "Not NOO -> Reference ID not exist"
     assert noo_detector.LABEL_REFERENCE_NEW == "NOO -> Create ID"
 
 
+def test_mapping_direction_is_not_reversed():
+    found = noo_detector.classify(enrichment.EnrichmentResult(
+        matched=True, ambiguous=False, resolved_store_id="X"))
+    not_found = noo_detector.classify(enrichment.EnrichmentResult(
+        matched=False, ambiguous=False))
+    assert found.label == "Not NOO -> Reference ID not exist"
+    assert not_found.label == "NOO -> Create ID"
+
+
+def test_classify_performs_no_lookup_of_its_own():
+    """It must only read what StoreEnricher already computed -- no new query,
+    no scoring, so it cannot reintroduce the threshold problem it fixed."""
+    import inspect
+
+    src = inspect.getsource(noo_detector.classify)
+    for forbidden in ("fuzz.", "score", "threshold", "rapidfuzz"):
+        assert forbidden not in src.lower()
+
+
+# ─── Pipeline wiring — NOO tests 1 & 2 from the 2026-09-03 MoM ───────────────
 @pytest.mark.sanity
-def test_mapping_direction_matches_the_mom_table_exactly():
-    """MoM §5 table: EXISTS -> 'Not NOO...'; DOES NOT EXIST -> 'NOO -> Create ID'.
-    A reversed mapping is the single easiest mistake to make here."""
-    match = noo_detector.check_reference_id(
-        {"store_name": "TOKO WILDA", "address": "JL MERDEKA NO 10 BANGGAI",
-         "city": "Banggai", "reference_id": "IESL00038"}, [EXISTING_STORE])
-    no_match = noo_detector.check_reference_id(
-        {"store_name": "TOKO BARU SAMA SEKALI", "address": "JL Z", "city": "W"},
-        [EXISTING_STORE])
-    assert match.label == "Not NOO -> Reference ID not exist"
-    assert no_match.label == "NOO -> Create ID"
-
-
-def test_threshold_is_unchanged_from_the_source_app():
-    assert noo_detector.MATCH_THRESHOLD == 70
-
-
-def test_max_score_without_a_store_id_is_documented_and_below_threshold():
-    """The material consequence documented in the module: without Store ID,
-    Name+Address+City alone cannot reach 70, because the source template
-    collects neither GPS nor NIK/NPWP for the distance/identity terms."""
-    perfect = noo_detector.check_reference_id(
-        {"store_name": "TOKO WILDA", "address": "JL MERDEKA NO 10 BANGGAI",
-         "city": "Banggai"},  # no reference_id supplied
-        [EXISTING_STORE])
-    assert perfect.score < noo_detector.MATCH_THRESHOLD
-    assert perfect.label == noo_detector.LABEL_REFERENCE_NEW
-
-
-def test_best_candidate_is_returned_not_just_a_boolean():
-    result = noo_detector.check_reference_id(
-        {"store_name": "TOKO WILDA", "address": "JL MERDEKA NO 10 BANGGAI",
-         "city": "Banggai", "reference_id": "IESL00038"},
-        [EXISTING_STORE, {"cust_id": "OTHER", "store_name": "TOKO LAIN",
-                          "address": "X", "city": "Y"}])
-    assert result.best["cust_id"] == "IESL00038"
-
-
-# ─── Pipeline wiring — NOO test 4/5/6 ─────────────────────────────────────
-@pytest.mark.sanity
-def test_noo_test_5_reference_id_exists_writes_the_exact_label():
-    """NOO Test 5: Reference ID found -> 'Not NOO -> Reference ID not exist'."""
+def test_noo_test_1_existing_store_is_not_noo_and_auto_populates_store_id():
+    """Reference ID resolves via master_store_database_basis (cust_id
+    IESL00038) -> Not NOO, and the pool's store_id is auto-filled from the
+    MASTER's own value, regardless of what (if anything) was typed."""
     result = _noo_pipeline([fx.noo_row(store_id="IESL00038",
                                        store_code="DST08200074",
-                                       name="TOKO WILDA",
-                                       address="JL MERDEKA NO 10 BANGGAI",
-                                       city="Banggai")])
+                                       name="TOKO APAPUN NAMANYA")])
     assert not result.errors
     row = result.pool_rows[0]
     assert row["NOO/Existing"] == "Not NOO -> Reference ID not exist"
+    assert row["store_id"] == "IESL00038"
 
 
 @pytest.mark.sanity
-def test_noo_test_6_reference_id_missing_writes_the_exact_label():
-    """NOO Test 6: Reference ID not found -> 'NOO -> Create ID'."""
+def test_noo_test_2_new_store_is_noo_with_blank_store_id():
+    """Reference ID does not resolve -> NOO, store_id stays blank -- never a
+    fake or generated identifier."""
     result = _noo_pipeline([fx.noo_row(store_id="", store_code="DST08299999",
-                                       name="TOKO BARU YANG BELUM PERNAH ADA",
-                                       address="JL BARU NO 1",
-                                       city="Kota Baru Sekali")])
+                                       name="TOKO YANG BENAR BENAR BARU")])
     assert not result.errors
+    row = result.pool_rows[0]
+    assert row["NOO/Existing"] == "NOO -> Create ID"
+    assert row["store_id"] == ""
+
+
+@pytest.mark.sanity
+def test_a_typed_store_id_that_does_not_resolve_is_not_trusted_verbatim():
+    """A wrong/nonexistent Store ID typed by the admin must NOT be copied into
+    the pool -- it is looked up, and since it does not resolve, store_id stays
+    blank rather than propagating an unverified value."""
+    result = _noo_pipeline([fx.noo_row(store_id="IEXX99999",
+                                       store_code="DST08299999",
+                                       name="TOKO DENGAN ID SALAH KETIK")])
+    assert result.pool_rows[0]["store_id"] == ""
     assert result.pool_rows[0]["NOO/Existing"] == "NOO -> Create ID"
 
 
 @pytest.mark.sanity
-def test_column_e_is_never_taken_from_the_uploaded_file():
-    """The template has no 'NOO/Existing' column at all -- confirm the value
-    written is always the detector's, never something the parser could have
-    read from user input."""
+def test_store_id_and_noo_existing_are_never_taken_from_the_uploaded_file():
+    """Neither column exists in the upload template at all."""
+    assert "store_id" not in config.NOO_COLUMNS
     assert "NOO/Existing" not in config.NOO_COLUMNS
-    result = _noo_pipeline([fx.noo_row(store_code="DST08299999")])
-    assert result.pool_rows[0]["NOO/Existing"] in (
-        noo_detector.LABEL_REFERENCE_EXISTS, noo_detector.LABEL_REFERENCE_NEW)
+    assert "Store ID (Opsional)" in config.NOO_COLUMNS  # the admin's INPUT field
 
 
 @pytest.mark.sanity
-def test_noo_existing_is_excluded_from_the_duplicate_hash():
-    """Same reasoning as se_kae/spv/etc: the verdict is derived from master
-    state at submission time and must not make an unchanged resubmission
-    look different just because master data moved between two uploads."""
-    from noo_sku import duplicates
-
+def test_store_id_and_noo_existing_are_excluded_from_the_duplicate_hash():
+    """Both are derived from master state at submission time (same reasoning
+    as se_kae/spv/etc): a store landing in the master between two uploads of
+    otherwise-identical business data must not read as a spurious CORRECTION."""
     assert "NOO/Existing" not in duplicates.NOO_CONTENT_COLUMNS
+    assert "store_id" not in duplicates.NOO_CONTENT_COLUMNS
 
 
-def test_all_stores_unions_by_cust_and_by_ref_without_duplicates():
-    """A record only reachable through _by_ref must still appear once."""
-    se = enrichment.StoreEnricher(
-        {"A": {"cust_id": "A", "store_name": "S1"}},
-        {"skt": {"R1": [{"cust_id": "", "reference_id_skt": "R1",
-                        "store_name": "S2"}]},
-         "tph": {}, "fcr": {}})
-    stores = se.all_stores()
-    assert len(stores) == 2
-    assert {s["store_name"] for s in stores} == {"S1", "S2"}
+@pytest.mark.sanity
+def test_reference_id_exists_count_reflects_the_pipeline_result():
+    result = _noo_pipeline([
+        fx.noo_row(store_id="IESL00038", store_code="DST08200074",
+                  name="TOKO SATU"),
+        fx.noo_row(store_id="", store_code="DST08299998", name="TOKO DUA"),
+    ])
+    assert result.reference_id_exists_count == 1
 
 
-def test_detector_candidate_pool_comes_from_the_authorised_company_only():
-    """Uses the same store_enricher the row's own branch enrichment used --
-    scoped to the company, matching the source app's own region-scoping
-    intent, never a national search."""
-    import inspect
+def test_ambiguous_reference_id_never_populates_store_id_end_to_end():
+    """DST08200099 is fixture-configured to resolve to two basis rows."""
+    result = _noo_pipeline([fx.noo_row(store_id="", store_code="DST08200099",
+                                       name="TOKO AMBIGU")])
+    row = result.pool_rows[0]
+    assert row["store_id"] == ""
+    assert row["NOO/Existing"] == "NOO -> Create ID"
 
-    src = inspect.getsource(pipeline.run_noo)
-    assert "store_enricher.all_stores()" in src
+
+# ─── Separation of concerns (MoM §17) ────────────────────────────────────────
+@pytest.mark.sanity
+def test_noo_detection_and_duplicate_detection_stay_independent():
+    """A row can be an EXACT_DUPLICATE (already uploaded) while its NOO
+    Detector verdict is independently computed from master data -- the two
+    checks must not be conflated into one."""
+    result = _noo_pipeline([fx.noo_row(store_id="IESL00038",
+                                       store_code="DST08200074",
+                                       name="TOKO SATU")])
+    content = duplicates.noo_content(result.pool_rows[0])
+    again = _noo_pipeline(
+        [fx.noo_row(store_id="IESL00038", store_code="DST08200074",
+                   name="TOKO SATU")],
+        ledger=(frozenset(), {content}))
+    assert again.classifications[0].bucket == duplicates.EXACT_DUPLICATE
+    # The NOO Detector still ran and still produced the correct verdict --
+    # duplicate-skipping happens later, in the writer, not by short-circuiting
+    # detection.
+    assert again.pool_rows[0]["NOO/Existing"] == "Not NOO -> Reference ID not exist"
