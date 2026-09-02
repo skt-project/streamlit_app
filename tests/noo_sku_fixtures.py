@@ -17,7 +17,7 @@ NOO_BANNER = ("1. Semua kolom WAJIB diisi sesuai ketentuan.\n"
 NOO_EXAMPLE = ["CONTOH", "TOKO JAYA KOSMETIK", "GT", "PT Anugerah Bangun Abadi",
                "11ABA", "DST123", "DST12300010", "JAKARTA BARAT",
                "RUKO BOULEVARD TAMAN PALEM LESTARI NO 1", "Cosmetic Store"]
-SKU_EXAMPLE = ["TYY114002", "TIMEPHORIA NAVI EYESHADOW PALETTE 001 ABYSS", "8g",
+SKU_EXAMPLE = ["TYY114002", "TIMEPHORIA NAVI EYESHADOW PALETTE 001 ABYSS",
                "A1/010424142D", "T114002 Navi Eyeshadow 002 Siren"]
 
 
@@ -64,9 +64,10 @@ def noo_row(store_id="", name="TOKO SUMBER REJEKI", channel="GT",
             store_code, city, address, store_type]
 
 
-def sku_row(code="SKINTIFIC-296", name="SKINTIFIC TEST PRODUCT", size="30ml",
+def sku_row(code="SKINTIFIC-296", name="SKINTIFIC TEST PRODUCT",
             db_code="SKC-296", db_name="S296 SKINTIFIC TEST"):
-    return [code, name, size, db_code, db_name]
+    """MoM 31-Aug-2026 removed the gramasi/size column from the template."""
+    return [code, name, db_code, db_name]
 
 
 PRODUCTS = {

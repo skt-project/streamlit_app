@@ -148,7 +148,11 @@ def _cities():
 @st.cache_data(ttl=86400, show_spinner=False)
 def _template_bytes(file_id):
     creds, _, _ = _clients()
-    return sources.download_template(creds, file_id)
+    raw = sources.download_template(creds, file_id)
+    if file_id == config.SKU_TEMPLATE_FILE_ID:
+        # MoM 31-Aug-2026 §6.1: the gramasi column is no longer collected.
+        return sources.prepare_sku_template(raw)
+    return raw
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -430,6 +434,10 @@ def _build_pipeline_result(kind, dist, uploaded):
     dist_enricher = enrichment.DistributorEnricher(
         master_distributor=_master_distributor(), dist_database=_distributors())
 
+    distributors = _distributors()
+    allowed = auth.authorized_branches(distributors, dist_code)
+    company = (distributors.get(dist_code) or {}).get("company", "")
+
     try:
         if expected == parsers.UPLOAD_NOO:
             by_cust, by_ref = _store_basis(dist_code)
@@ -437,8 +445,11 @@ def _build_pipeline_result(kind, dist, uploaded):
                 parsed, distributor=dist, resolver=resolver,
                 dist_enricher=dist_enricher,
                 store_enricher=enrichment.StoreEnricher(by_cust, by_ref),
-                ledger=sources.load_noo_ledger(client, dist_code),
-                known_cities=_cities(), when=now_business())
+                # Ledger spans every authorised branch so a duplicate filed
+                # earlier under a sibling branch is still caught.
+                ledger=sources.load_noo_ledger(client, set(allowed)),
+                known_cities=_cities(), when=now_business(),
+                allowed_branches=allowed, company_name=company)
 
         resolution = resolver.resolve(dist_code)
         if not resolution.resolved:
@@ -453,7 +464,8 @@ def _build_pipeline_result(kind, dist, uploaded):
             dist_enricher=dist_enricher,
             product_enricher=enrichment.ProductEnricher(_products()),
             ledger=sources.load_sku_ledger(client, dist_code),
-            product_lookup=_products(), when=now_business())
+            product_lookup=_products(), when=now_business(),
+            company_name=company)
     except Exception as exc:
         st.error("✗ Gagal memproses file. Tidak ada data yang tersimpan. "
                  "Silakan coba lagi atau hubungi BD Support.")
@@ -591,6 +603,12 @@ def render_app():
     with st.sidebar:
         st.markdown(f"### {dist['distributor_name']}")
         st.caption(f"Kode Distributor: **{dist['distributor_code']}**")
+        if dist.get("company"):
+            branches = auth.authorized_branches(_distributors(),
+                                                dist["distributor_code"])
+            st.caption(f"Perusahaan: {dist['company']}")
+            if len(branches) > 1:
+                st.caption(f"Cabang yang dapat Anda input: **{len(branches)}**")
         if dist.get("region"):
             st.caption(f"Region: {dist['region']}")
         st.divider()

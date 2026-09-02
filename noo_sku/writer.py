@@ -20,6 +20,10 @@ from . import config
 from .normalize import clean, format_input_time, norm_key
 
 
+#: Left blank for BD Support to formulate (MoM 31-Aug-2026 §5).
+POOL_NOO_BD_SUPPORT_FIELDS = ("asm_kam", "spv", "se_kae", "aom")
+
+
 class LayoutMismatch(RuntimeError):
     """The live pool header is not what this code was written against."""
 
@@ -50,48 +54,59 @@ def new_upload_id() -> str:
 
 
 # ─── Row construction ─────────────────────────────────────────────────────────
-def build_noo_row(user_row, *, distributor_code, dist_values, store_values,
-                  when) -> dict:
+def build_noo_row(user_row, *, distributor_code=None, dist_values,
+                  store_values, when) -> dict:
     """One enriched `POOL NOO STREAMLIT` record, keyed by pool column.
+
+    The branch comes from the row itself — MoM 31-Aug-2026 allows one file to
+    carry several branches of the same company, and validation has already
+    confirmed the code is inside the authorised company. `distributor_code` is
+    only a fallback for a row that somehow carries none.
 
     User input wins for the fields the admin is responsible for — notably
     ``store_type`` and ``city``, whose vocabulary must be preserved exactly
     (decision B3). Master values are used only to fill a blank.
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
+    branch_code = norm_key(g("Customer Branch Code")) or norm_key(
+        distributor_code or "")
 
     row = {column: "" for column in config.POOL_NOO_HEADERS}
     row.update({
         "asm_name": dist_values.get("asm", ""),
         "input_time": format_input_time(when),
-        "branch_name": dist_values.get("branch_name", ""),
+        "branch_name": g("Branch Name") or dist_values.get("branch_name", ""),
         "region": dist_values.get("region", ""),
         "store_id": norm_key(g("Store ID (Opsional)")),
         "store_name": g("Store Name"),
         "channel_name": norm_key(g("Channel (GT / MTi)")),
         "customer_code": norm_key(g("Customer Code")),
-        "customer_branch_code": norm_key(distributor_code),
+        "customer_branch_code": branch_code,
         "customer_store_code": norm_key(g("Customer Store Code")),
         "customer_store_name": g("Store Name"),
         # B3: keep the admin's own vocabulary; fall back to master only if blank.
         "city": g("City") or store_values.get("city", ""),
         "store_address": g("Store Address"),
         "store_type": g("Store Type") or store_values.get("store_type", ""),
-        "asm_kam": dist_values.get("asm", ""),
-        "spv": store_values.get("spv") or dist_values.get("spv", ""),
-        "se_kae": store_values.get("se_kae", ""),
-        "aom": store_values.get("aom") or dist_values.get("aom", ""),
         "area": store_values.get("area", ""),
         "province": store_values.get("province", ""),
     })
+    # MoM 31-Aug-2026 §5: BD Support formulates the hierarchy themselves.
+    # Streamlit must leave these blank - not derived from login, branch, or any
+    # existing mapping logic.
+    for column in POOL_NOO_BD_SUPPORT_FIELDS:
+        row[column] = ""
     for column in config.POOL_NOO_UNUSED:
         row[column] = ""
     return row
 
 
 def build_sku_row(user_row, *, distributor_code, customer_code, dist_values,
-                  product_values, when) -> dict:
-    """One enriched `POOL SKU STREAMLIT` record, keyed by pool column."""
+                  product_values, when, company_name="") -> dict:
+    """One enriched `POOL SKU STREAMLIT` record, keyed by pool column.
+
+    MoM 31-Aug-2026 §8: `customer_name` is the COMPANY name, not the branch.
+    """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
 
     row = {column: "" for column in config.POOL_SKU_HEADERS}
@@ -100,7 +115,7 @@ def build_sku_row(user_row, *, distributor_code, customer_code, dist_values,
         "region": dist_values.get("region", ""),
         "input_time": format_input_time(when),
         "customer_code": norm_key(customer_code),
-        "customer_name": dist_values.get("branch_name", ""),
+        "customer_name": company_name or dist_values.get("branch_name", ""),
         "product_code": g("Principal Product Code"),
         "customer_branch_code": norm_key(distributor_code),
         "product_name": product_values.get("product_name", ""),

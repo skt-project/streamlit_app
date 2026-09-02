@@ -29,11 +29,17 @@ def _store_enricher():
     return enrichment.StoreEnricher(fx.BASIS_BY_CUST, fx.BASIS_BY_REF)
 
 
-def _noo_pipeline(rows, ledger=(frozenset(), frozenset())):
+#: Two branches of one company; DST999 is used as the foreign branch.
+ALLOWED_BRANCHES = {"DST082": {"name": "CV CECE"},
+                    "DST083": {"name": "CV CECE - CABANG DUA"}}
+
+
+def _noo_pipeline(rows, ledger=(frozenset(), frozenset()), allowed=None):
     return pipeline.run_noo(
         fx.FakeParsed(rows, config.NOO_COLUMNS), distributor=fx.DISTRIBUTOR,
         resolver=_resolver(), dist_enricher=_dist_enricher(),
-        store_enricher=_store_enricher(), ledger=ledger, when=now_business())
+        store_enricher=_store_enricher(), ledger=ledger, when=now_business(),
+        allowed_branches=allowed or ALLOWED_BRANCHES, company_name="CV CECE")
 
 
 def _sku_pipeline(rows, ledger=(frozenset(), frozenset())):
@@ -245,9 +251,8 @@ def test_rows_failing_validation_never_reach_enrichment_or_the_pool():
 @pytest.mark.sanity
 def test_enrichment_runs_before_duplicate_detection():
     """Identity is computed from enriched values, not raw input."""
-    result = _noo_pipeline([fx.noo_row(branch_code="")])
+    result = _noo_pipeline([fx.noo_row()])
     identity = result.classifications[0].identity
-    # customer_branch_code was blank in the file and injected from the session.
     assert identity.startswith(DIST)
     assert result.pool_rows[0]["customer_branch_code"] == DIST
 
@@ -262,17 +267,18 @@ def test_preview_counts_match_the_classifications():
 
 # ─── §28.24–27, 29–30  Write target, ordering, safety ─────────────────────────
 @pytest.mark.sanity
-def test_noo_pool_row_matches_the_live_36_column_layout_exactly():
+def test_noo_pool_row_matches_the_live_pool_layout_exactly():
     # store_code matches the basis fixture, so enrichment resolves.
     row = _noo_pipeline([fx.noo_row(store_code="DST08200074")]).pool_rows[0]
     assert list(row) == config.POOL_NOO_HEADERS
     values = writer.to_values([row], config.POOL_NOO_HEADERS)[0]
-    assert len(values) == 36
+    assert len(values) == len(config.POOL_NOO_HEADERS) == 41
     named = dict(zip(config.POOL_NOO_HEADERS, values))
     assert named["customer_branch_code"] == DIST
     assert named["branch_name"] == "CV CECE"
-    assert named["se_kae"] == "Mohammad Fikram Dam"
     assert named["area"] == "BANGGAI"
+    # MoM 31-Aug-2026 §5: BD Support formulates the hierarchy themselves.
+    assert named["se_kae"] == ""
     assert named["input_time"]
 
 
@@ -337,7 +343,7 @@ def test_write_mode_appends_once_to_the_correct_pool():
     assert write.ok and not write.dry_run
     assert len(client.appended) == 1
     assert client.appended[0][0] == config.TAB_POOL_NOO
-    assert len(client.appended[0][1][0]) == 36
+    assert len(client.appended[0][1][0]) == len(config.POOL_NOO_HEADERS)
 
 
 @pytest.mark.sanity
@@ -457,7 +463,8 @@ def test_preview_exposes_mapping_source_and_fallback_per_row():
     rows = pipeline.mapping_sources(result)
     assert rows[0]["Mapping Source (Store)"] == enrichment.SOURCE_BASIS
     assert rows[0]["Matched On"] == "reference_id_skt"
-    assert rows[0]["SE"] == "Mohammad Fikram Dam"
+    # The store matched, but SE is deliberately not written (MoM §5).
+    assert rows[0]["SE"] == ""
 
 
 @pytest.mark.sanity
@@ -507,3 +514,130 @@ def test_verification_fails_when_nothing_was_written():
         result.eligible_rows, input_time="01-Jan-2030 00:00:00",
         distributor_code=DIST)
     assert not check["passed"] and check["verified"] == 0
+
+
+# ─── MoM 31-Aug-2026 §17 — NOO multi-branch ───────────────────────────────────
+@pytest.mark.sanity
+def test_mom_1_multiple_valid_branches_pass():
+    """Test 1: several branches of the same company in one file."""
+    result = _noo_pipeline([
+        fx.noo_row(branch_code="DST082", store_code="DST082CS00001"),
+        fx.noo_row(branch_code="DST083", customer_code="11WRM",
+                   store_code="DST083CS00002", branch="CV CECE - CABANG DUA"),
+    ])
+    assert not result.errors, [i.as_text() for i in result.errors]
+    assert len(result.eligible_rows) == 2
+    assert {r["customer_branch_code"] for r in result.pool_rows} == {
+        "DST082", "DST083"}
+
+
+@pytest.mark.sanity
+def test_mom_2_branch_of_another_company_is_rejected():
+    """Test 2: a code outside the authorised company fails validation."""
+    result = _noo_pipeline([fx.noo_row(branch_code="DST999",
+                                       store_code="DST999CS00001")])
+    assert result.has_errors
+    bad = [i for i in result.errors if i.column == "Customer Branch Code"]
+    assert bad and "DST999" in bad[0].problem
+    assert result.eligible_rows == []
+
+
+@pytest.mark.sanity
+def test_mom_3_mixed_valid_and_unauthorised_does_not_silently_accept():
+    """Test 3: 2 valid + 1 unauthorised - the bad row never reaches the pool."""
+    result = _noo_pipeline([
+        fx.noo_row(branch_code="DST082", store_code="DST082CS00001"),
+        fx.noo_row(branch_code="DST083", customer_code="11WRM",
+                   store_code="DST083CS00002", branch="CV CECE - CABANG DUA"),
+        fx.noo_row(branch_code="DST999", store_code="DST999CS00003"),
+    ])
+    assert result.has_errors
+    assert result.summary["error"] == 1
+    assert len(result.pool_rows) == 2
+    assert "DST999" not in {r["customer_branch_code"] for r in result.pool_rows}
+
+
+@pytest.mark.sanity
+def test_mom_4_pool_hierarchy_fields_are_left_blank():
+    """Test 4: asm_kam / spv / se_kae / aom are BD Support's to formulate."""
+    result = _noo_pipeline([fx.noo_row(store_code="DST08200074")])
+    row = result.pool_rows[0]
+    for column in ("asm_kam", "spv", "se_kae", "aom"):
+        assert row[column] == "", f"{column} must be blank"
+    assert row["branch_name"] and row["region"] and row["asm_name"]
+
+
+def test_store_code_must_match_the_branch_named_on_the_same_row():
+    result = _noo_pipeline([fx.noo_row(branch_code="DST083",
+                                       customer_code="11WRM",
+                                       store_code="DST082CS00001")])
+    assert any("tidak diawali kode cabang" in i.problem for i in result.errors)
+
+
+# ─── MoM 31-Aug-2026 §17 — SKU ────────────────────────────────────────────────
+@pytest.mark.sanity
+def test_mom_6_valid_principal_sku_passes():
+    result = _sku_pipeline([fx.sku_row()])
+    assert not result.errors
+    assert len(result.eligible_rows) == 1
+
+
+@pytest.mark.sanity
+def test_mom_7_invalid_principal_sku_is_blocked():
+    """Test 7: a non-existent Principal SKU must never reach the tracker."""
+    result = _sku_pipeline([fx.sku_row(code="SKU999-TIDAK-ADA")])
+    assert result.has_errors
+    bad = [i for i in result.errors if i.column == "Principal Product Code"]
+    assert bad and "tidak ditemukan" in bad[0].problem
+    assert result.eligible_rows == []
+
+
+@pytest.mark.sanity
+def test_mom_8_size_column_is_absent_from_the_template_contract():
+    assert "Product Size (ml/g)" not in config.SKU_COLUMNS
+    assert len(config.SKU_COLUMNS) == 4
+
+
+@pytest.mark.sanity
+def test_mom_9_customer_name_is_the_company_not_the_branch():
+    """Test 9: SKU pool customer_name carries the COMPANY name."""
+    result = pipeline.run_sku(
+        fx.FakeParsed([fx.sku_row()], config.SKU_COLUMNS, first_row=6),
+        distributor=fx.DISTRIBUTOR, resolver=_resolver(),
+        dist_enricher=_dist_enricher(),
+        product_enricher=enrichment.ProductEnricher(fx.PRODUCTS),
+        ledger=(frozenset(), frozenset()), product_lookup=fx.PRODUCTS,
+        when=now_business(), company_name="CV CECE MANDIRI SEJAHTERA")
+    assert result.pool_rows[0]["customer_name"] == "CV CECE MANDIRI SEJAHTERA"
+
+
+def test_specification_still_comes_from_master_not_from_the_upload():
+    result = _sku_pipeline([fx.sku_row()])
+    assert result.pool_rows[0]["specification"] == "30ml"
+
+
+# ─── MoM 31-Aug-2026 §17 Test 5 / 10 — guideline content ─────────────────────
+@pytest.mark.sanity
+@pytest.mark.parametrize("kind", ["NOO", "SKU"])
+def test_mom_5_and_10_removed_guideline_wording_is_gone(kind):
+    from noo_sku import guideline
+
+    text = guideline.as_markdown(kind)
+    for banned in ("Diisi otomatis oleh sistem", "Toko benar-benar baru",
+                   "data masuk ke pool tracker"):
+        assert banned not in text, f"{banned!r} still in the {kind} guideline"
+
+
+@pytest.mark.sanity
+def test_noo_guideline_tells_admins_to_confirm_with_bd_support():
+    from noo_sku import guideline
+
+    assert "konfirmasi ke BD Support" in guideline.as_markdown("NOO")
+
+
+@pytest.mark.sanity
+def test_bd_support_processing_columns_are_never_written():
+    """Added to the pool 2026-09-01; BD Support fills them, not Streamlit."""
+    row = _noo_pipeline([fx.noo_row(store_code="DST08200074")]).pool_rows[0]
+    for column in ("DMS", "BASIS", "RSA Name", "BD Support", "NOO/Existing"):
+        assert row[column] == "", f"{column} must stay blank"

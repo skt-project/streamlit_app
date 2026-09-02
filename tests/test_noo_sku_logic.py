@@ -192,13 +192,13 @@ def test_unknown_city_warns_but_does_not_block():
 
 
 @pytest.mark.sanity
-def test_distributor_code_in_file_that_differs_from_login_is_rejected():
-    """Brief §4: login DST121 + file DST082 must ERROR, never silently switch."""
-    issues, cleaned = _noo([fx.noo_row(branch_code="DST999")])
+def test_branch_outside_the_authorised_company_is_rejected():
+    """MoM 31-Aug-2026: the file may name several branches, but only ones
+    inside the logged-in company. A foreign code is a hard error."""
+    issues, _ = _noo([fx.noo_row(branch_code="DST999")])
     mismatch = [i for i in issues if i.column == "Customer Branch Code"]
     assert mismatch and mismatch[0].severity == validators.ERROR
-    # Session identity still wins on the cleaned row — never the file's value.
-    assert cleaned[0]["Customer Branch Code"] == DIST
+    assert "tidak terdaftar" in mismatch[0].problem
 
 
 @pytest.mark.sanity
@@ -207,12 +207,12 @@ def test_matching_distributor_code_in_file_passes():
     assert not [i for i in issues if i.column == "Customer Branch Code"]
 
 
-def test_branch_name_mismatch_is_a_hard_error_and_never_silently_accepted():
-    """Decision B: Branch Name is system-authoritative. A disagreeing value in
-    the file is rejected, and the written value still comes from the session."""
+def test_branch_name_mismatch_warns_and_is_corrected_from_master():
+    """MoM 31-Aug-2026: the branch is chosen per row, so a wrong Branch Name is
+    a correctable warning; the authoritative name still comes from master."""
     issues, cleaned = _noo([fx.noo_row(branch="PT PENYUSUP")])
-    err = [i for i in issues if i.column == "Branch Name"]
-    assert err and err[0].severity == validators.ERROR
+    warn = [i for i in issues if i.column == "Branch Name"]
+    assert warn and warn[0].severity == validators.WARNING
     assert cleaned[0]["Branch Name"] == NAME
 
 
@@ -249,8 +249,7 @@ def test_unknown_principal_sku_is_an_error():
 
 
 def test_out_of_scope_brand_sku_is_rejected():
-    issues, _ = _sku([fx.sku_row(code="G2G-74", name="GLAD2GLOW TEST",
-                                 size="300g")])
+    issues, _ = _sku([fx.sku_row(code="G2G-74", name="GLAD2GLOW TEST")])
     assert any("di luar cakupan" in i.problem for i in issues)
 
 
@@ -260,9 +259,17 @@ def test_missing_db_columns_are_errors():
     assert {"Customer Product Code", "Customer Product Name"} <= cols
 
 
-def test_name_and_size_mismatches_warn_by_default_and_can_be_made_strict():
-    rows = [fx.sku_row(name="NAMA SALAH", size="99ml")]
+def test_name_mismatch_warns_by_default_and_can_be_made_strict():
+    rows = [fx.sku_row(name="NAMA SALAH")]
     issues, _ = _sku(rows)
     assert all(i.severity == validators.WARNING for i in issues)
-    strict, _ = _sku(rows, strict_names=True, strict_size=True)
+    strict, _ = _sku(rows, strict_names=True)
     assert all(i.severity == validators.ERROR for i in strict)
+
+
+@pytest.mark.sanity
+def test_size_column_is_gone_so_it_can_never_be_required():
+    """MoM 31-Aug-2026 §6.1: gramasi removed from the template entirely."""
+    assert "Product Size (ml/g)" not in config.SKU_COLUMNS
+    issues, _ = _sku([fx.sku_row()])
+    assert not [i for i in issues if "Size" in i.column]

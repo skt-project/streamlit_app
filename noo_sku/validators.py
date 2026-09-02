@@ -41,21 +41,53 @@ def _require(value, row, column, issues, suggestion="Wajib diisi."):
 
 
 def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
-                 expected_suffix, known_cities=None, store_types=None):
-    """Validate NOO rows against the session's distributor context.
+                 expected_suffix=None, known_cities=None, store_types=None,
+                 allowed_branches=None, company_name="", suffix_for=None):
+    """Validate NOO rows against the admin's authorised COMPANY scope.
 
-    Returns ``(issues, cleaned_rows)``. Cleaned rows carry system-owned fields
-    overwritten with session values, so a file can never smuggle in another
-    distributor's identity.
+    MoM 31-Aug-2026: a single admin handles every branch of their company, so
+    one file may carry several branches. Each row therefore names its own
+    ``Customer Branch Code``, and that code must belong to the same company as
+    the logged-in account. A code outside the company is a hard error — login
+    sets the boundary, the file chooses a branch inside it.
+
+    ``allowed_branches`` maps ``code -> {"name": ...}``; ``suffix_for(code)``
+    returns that branch's Customer Code abbreviation.
+
+    Returns ``(issues, cleaned_rows)``.
     """
     issues: list[Issue] = []
     cleaned = []
     known_cities = {norm_key(c) for c in (known_cities or [])}
     store_types = store_types or config.STORE_TYPES_BY_CHANNEL
     dist_code = norm_key(distributor_code)
+    allowed = {norm_key(k): v for k, v in (allowed_branches or {}).items()}
+    if not allowed:
+        allowed = {dist_code: {"name": distributor_name}}
+    suffix_for = suffix_for or (lambda _code: expected_suffix)
 
     for row, sheet_row in zip(rows, row_numbers):
         g = lambda name: clean(row.get(name, ""))  # noqa: E731
+
+        # --- Which branch is this row for? Company scope is the boundary. ---
+        row_code = norm_key(g("Customer Branch Code")) or dist_code
+        if not norm_key(g("Customer Branch Code")):
+            issues.append(Issue(
+                sheet_row, "Customer Branch Code", "Kolom ini kosong.",
+                f"Isi dengan kode cabang (contoh: {dist_code}). Satu file "
+                "boleh berisi beberapa cabang dalam perusahaan yang sama.",
+            ))
+        elif row_code not in allowed:
+            company_label = company_name or "perusahaan Anda"
+            issues.append(Issue(
+                sheet_row, "Customer Branch Code",
+                f'Kode distributor "{row_code}" tidak terdaftar di '
+                f'{company_label}.',
+                "Gunakan kode cabang yang berada di bawah perusahaan Anda. "
+                f"Cabang yang diizinkan: {', '.join(sorted(allowed)[:8])}"
+                + (" ..." if len(allowed) > 8 else "") + ".",
+            ))
+        row_suffix = suffix_for(row_code)
 
         store_id = g("Store ID (Opsional)")
         if store_id and not re.match(config.STORE_ID_PATTERN, norm_key(store_id)):
@@ -84,7 +116,7 @@ def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
         if not cust_code:
             issues.append(Issue(
                 sheet_row, "Customer Code", "Kolom ini kosong.",
-                _suffix_hint(expected_suffix),
+                _suffix_hint(row_suffix),
             ))
         else:
             prefix, suffix = split_customer_code(cust_code)
@@ -92,13 +124,13 @@ def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
                 issues.append(Issue(
                     sheet_row, "Customer Code",
                     f'"{cust_code}" tidak diawali kode brand yang valid.',
-                    _suffix_hint(expected_suffix),
+                    _suffix_hint(row_suffix),
                 ))
-            elif expected_suffix and suffix != expected_suffix:
+            elif row_suffix and suffix != row_suffix:
                 issues.append(Issue(
                     sheet_row, "Customer Code",
-                    f'"{cust_code}" bukan milik {dist_code}.',
-                    _suffix_hint(expected_suffix),
+                    f'"{cust_code}" bukan milik cabang {row_code}.',
+                    _suffix_hint(row_suffix),
                 ))
 
         # --- Customer Store Code: must carry this distributor's code ---
@@ -106,15 +138,16 @@ def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
         if not store_code:
             issues.append(Issue(
                 sheet_row, "Customer Store Code", "Kolom ini kosong.",
-                f"Isi dengan {dist_code} + customer ID toko "
-                f"(contoh: {dist_code}00010).",
+                f"Isi dengan {row_code} + customer ID toko "
+                f"(contoh: {row_code}00010).",
             ))
-        elif not store_code.startswith(dist_code):
+        elif not store_code.startswith(row_code):
             issues.append(Issue(
                 sheet_row, "Customer Store Code",
-                f'"{store_code}" tidak diawali kode distributor Anda.',
-                f"Tambahkan {dist_code} di depan customer ID "
-                f"(contoh: {dist_code}00010).",
+                f'"{store_code}" tidak diawali kode cabang pada baris ini '
+                f'({row_code}).',
+                f"Tambahkan {row_code} di depan customer ID "
+                f"(contoh: {row_code}00010).",
             ))
 
         city = g("City")
@@ -135,51 +168,36 @@ def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
 
         # --- Store Type must be legal for the chosen channel ---
         stype = g("Store Type")
-        allowed = store_types.get(channel, set())
+        allowed_types = store_types.get(channel, set())
         if not stype:
             issues.append(Issue(
                 sheet_row, "Store Type", "Kolom ini kosong.",
-                f"Pilih salah satu: {', '.join(sorted(allowed))}."
-                if allowed else "Isi sesuai sheet 'City & Store Type'.",
+                f"Pilih salah satu: {', '.join(sorted(allowed_types))}."
+                if allowed_types else "Isi sesuai sheet 'City & Store Type'.",
             ))
-        elif allowed and norm_key(stype) not in {norm_key(s) for s in allowed}:
+        elif allowed_types and norm_key(stype) not in {norm_key(s)
+                                                       for s in allowed_types}:
             issues.append(Issue(
                 sheet_row, "Store Type",
                 f'"{stype}" tidak berlaku untuk channel {channel}.',
-                f"Pilih salah satu: {', '.join(sorted(allowed))}.",
+                f"Pilih salah satu: {', '.join(sorted(allowed_types))}.",
             ))
 
-        # --- System-owned columns: warn, then overwrite. Never trust the file.
-        # Decision B: Branch Name and Customer Branch Code stay in the template
-        # but are SYSTEM-AUTHORITATIVE. A value that disagrees with the
-        # authenticated distributor is a hard error - never silently accepted,
-        # and never allowed to override the session identity.
+        # --- Branch: chosen per row, but only from within the company ------
         out = dict(row)
+        branch_name = allowed.get(row_code, {}).get("name", "")
         typed_branch = g("Branch Name")
-        if typed_branch and norm_key(typed_branch) != norm_key(distributor_name):
+        if typed_branch and branch_name and \
+                norm_key(typed_branch) != norm_key(branch_name):
             issues.append(Issue(
                 sheet_row, "Branch Name",
-                f'"{typed_branch}" tidak sama dengan nama distributor pada '
-                f'akun yang login ({distributor_name}).',
-                f'Perbaiki kolom ini menjadi "{distributor_name}", atau login '
-                "menggunakan akun distributor yang sesuai.",
-                severity=ERROR,
+                f'"{typed_branch}" tidak sama dengan nama cabang {row_code} '
+                f'({branch_name}).',
+                f'Akan diisi otomatis menjadi "{branch_name}".',
+                severity=WARNING,
             ))
-        # A distributor code in the file that disagrees with the session is a
-        # hard error, never a silent substitution: the file is claiming to be
-        # somebody else's data and the admin must resolve that deliberately.
-        typed_code = norm_key(g("Customer Branch Code"))
-        if typed_code and typed_code != dist_code:
-            issues.append(Issue(
-                sheet_row, "Customer Branch Code",
-                f'Kode distributor "{typed_code}" pada file tidak sama dengan '
-                f'akun yang login ({dist_code}).',
-                f"Perbaiki kolom ini menjadi {dist_code}, atau login "
-                "menggunakan akun distributor yang sesuai.",
-                severity=ERROR,
-            ))
-        out["Branch Name"] = distributor_name
-        out["Customer Branch Code"] = dist_code
+        out["Branch Name"] = branch_name or distributor_name
+        out["Customer Branch Code"] = row_code
         out["Channel (GT / MTi)"] = channel or g("Channel (GT / MTi)")
         cleaned.append(out)
 
@@ -194,12 +212,16 @@ def _suffix_hint(expected_suffix) -> str:
 
 
 def validate_sku(rows, row_numbers, *, distributor_code, product_lookup,
-                 strict_names=False, strict_size=False):
+                 strict_names=False):
     """Validate SKU rows against the principal product master.
 
     ``product_lookup`` maps normalised SKU code -> ``{"brand", "product_name",
-    "pack_size"}``. An unknown code is always an error: without it the brand —
-    and therefore the Customer Code — cannot be derived.
+    "pack_size"}``. An unknown Principal Product Code is ALWAYS a hard error
+    (MoM 31-Aug-2026 §7): the row must not reach the tracker, and without the
+    code the brand — and therefore the Customer Code — cannot be derived.
+
+    The gramasi column was removed from the template on 31-Aug-2026;
+    `specification` is filled from master_product instead of being validated.
     """
     issues: list[Issue] = []
     cleaned = []
@@ -244,21 +266,6 @@ def validate_sku(rows, row_numbers, *, distributor_code, product_lookup,
                     f'"{name}" berbeda dari nama di master prinsipal.',
                     f'Nama yang benar: "{product["product_name"]}".',
                     severity=ERROR if strict_names else WARNING,
-                ))
-
-        size = g("Product Size (ml/g)")
-        if not size:
-            issues.append(Issue(
-                sheet_row, "Product Size (ml/g)", "Kolom ini kosong.",
-                "Isi sesuai spesifikasi prinsipal (contoh: 8g, 30ml).",
-            ))
-        elif product and product.get("pack_size"):
-            if norm_key(size) != norm_key(product["pack_size"]):
-                issues.append(Issue(
-                    sheet_row, "Product Size (ml/g)",
-                    f'"{size}" berbeda dari spesifikasi prinsipal.',
-                    f'Spesifikasi yang benar: "{product["pack_size"]}".',
-                    severity=ERROR if strict_size else WARNING,
                 ))
 
         _require(g("Customer Product Code ( Di isi oleh Distributor)"),

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from noo_sku import auth, guideline
+from noo_sku import auth, guideline, validators
 
 DIST_A = {"distributor_code": "DST082", "distributor_name": "CV CECE",
           "active": True, "status": "Active"}
@@ -203,14 +203,18 @@ def test_every_write_and_query_derives_from_the_session_code():
                 inspect.getsource(pipeline.run_sku)):
         assert 'distributor["distributor_code"]' in src
 
-    for src in (inspect.getsource(writer.build_noo_row),
-                inspect.getsource(writer.build_sku_row)):
-        assert "norm_key(distributor_code)" in src, \
-            "the pool row must be stamped from the session, not the file"
+    # SKU stays login-bound. NOO takes the branch from the row — but only after
+    # validate_noo has confirmed that code sits inside the authorised company,
+    # so the file still cannot reach another company's data.
+    assert "norm_key(distributor_code)" in inspect.getsource(
+        writer.build_sku_row)
+    assert "Customer Branch Code" in inspect.getsource(writer.build_noo_row)
+    assert "row_code not in allowed" in inspect.getsource(
+        validators.validate_noo), "branch must be checked against the company"
 
 
 @pytest.mark.sanity
-def test_ledger_reads_are_scoped_to_one_distributor():
+def test_ledger_reads_are_scoped_to_the_authorised_codes():
     import inspect
 
     from noo_sku import sources
@@ -218,7 +222,7 @@ def test_ledger_reads_are_scoped_to_one_distributor():
     for fn in (sources.load_noo_ledger, sources.load_sku_ledger):
         src = inspect.getsource(fn)
         assert "distributor_code" in src
-        assert "norm_key(distributor_code)" in src, "filtered at the data layer"
+        assert "_as_code_set(distributor_code)" in src,             "filtered at the data layer, across every authorised branch"
 
 
 def test_account_lookup_is_parameterised_and_active_only():

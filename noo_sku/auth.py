@@ -120,6 +120,40 @@ def session_distributor_code(state):
     return (state.get("distributor") or {}).get("distributor_code")
 
 
+def company_of(distributors, distributor_code):
+    """The company a branch belongs to, from DIST DATABASE col B."""
+    record = (distributors or {}).get(str(distributor_code).strip().upper())
+    return (record or {}).get("company", "").strip().upper()
+
+
+def authorized_branches(distributors, distributor_code):
+    """Every branch code the logged-in admin may upload for.
+
+    MoM 31-Aug-2026: one admin handles all branches of their company, so the
+    upload may name several branches. Authorization is therefore company-level
+    while identity stays branch-level — the login never widens beyond the
+    company, and a code outside it is rejected.
+
+    Returns ``{code: {"name": ..., "company": ...}}``, always including the
+    logged-in code itself so a distributor with a blank company is not locked
+    out of its own uploads.
+    """
+    code = str(distributor_code).strip().upper()
+    company = company_of(distributors, code)
+    allowed = {}
+    for other_code, record in (distributors or {}).items():
+        if not record.get("active"):
+            continue
+        if company and record.get("company", "").strip().upper() == company:
+            allowed[other_code] = {"name": record.get("distributor_name", ""),
+                                   "company": record.get("company", "")}
+    if code in (distributors or {}):
+        allowed.setdefault(code, {
+            "name": distributors[code].get("distributor_name", ""),
+            "company": distributors[code].get("company", "")})
+    return allowed
+
+
 def assert_owns(state, distributor_code) -> bool:
     """Guard for any data path that names a distributor explicitly.
 

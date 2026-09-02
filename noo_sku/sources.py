@@ -432,6 +432,38 @@ def load_city_reference(credentials, file_id=None) -> set:
             if len(r) > 1 and clean(r[1])}
 
 
+def prepare_sku_template(raw: bytes) -> bytes:
+    """Serve BD Support's SKU template without the removed gramasi column.
+
+    MoM 31-Aug-2026 §6.1 removed "Product Size (ml/g)" from the SKU template,
+    but the master file on Drive still carries it and belongs to BD Support, so
+    we strip the column on the way out rather than editing their file. Keeps the
+    downloadable template in step with the upload parser instead of asking
+    admins for a field that is no longer used.
+
+    Returns the original bytes unchanged if the column is already gone.
+    """
+    import openpyxl
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(raw))
+        if config.SKU_SHEET_NAME not in wb.sheetnames:
+            return raw
+        ws = wb[config.SKU_SHEET_NAME]
+        header = [clean(c.value) for c in ws[config.SKU_HEADER_ROW]]
+        target = next((i for i, h in enumerate(header, start=1)
+                       if h and "size" in h.lower()), None)
+        if target is None:
+            return raw
+        ws.delete_cols(target)
+        out = io.BytesIO()
+        wb.save(out)
+        return out.getvalue()
+    except Exception:
+        # A template we cannot rewrite is still better than no template.
+        return raw
+
+
 def download_template(credentials, file_id) -> bytes:
     """Fetch a template .xlsx from Drive so the app can serve it unchanged."""
     from googleapiclient.discovery import build
@@ -460,12 +492,22 @@ def _pool_rows_as_dicts(client, tab, headers):
     return out
 
 
+def _as_code_set(codes):
+    """Accept a single code or an iterable of them."""
+    if isinstance(codes, str):
+        return {norm_key(codes)}
+    return {norm_key(c) for c in (codes or []) if norm_key(c)}
+
+
 def _ledger_from_pool(client, tab, headers, distributor_code, identity_fn,
                       content_fn):
-    want = norm_key(distributor_code)
+    # A NOO upload may span several branches of one company, so the ledger has
+    # to cover all of them - scoping to the login alone would miss a duplicate
+    # submitted earlier under a sibling branch.
+    want = _as_code_set(distributor_code)
     identities, contents = set(), set()
     for row in _pool_rows_as_dicts(client, tab, headers):
-        if norm_key(row.get("customer_branch_code")) != want:
+        if norm_key(row.get("customer_branch_code")) not in want:
             continue
         identities.add(identity_fn(row))
         contents.add(content_fn(row))
@@ -483,7 +525,7 @@ def load_noo_ledger(client, distributor_code) -> tuple:
         client, config.TAB_POOL_NOO, config.POOL_NOO_HEADERS, distributor_code,
         duplicates.noo_identity, duplicates.noo_content)
 
-    want = norm_key(distributor_code)
+    want = _as_code_set(distributor_code)
     # Columns N and O of every brand tracker: Customer Branch Code, Customer
     # Store Code. Read-only.
     ranges = [f"'{t}'!N2:O10000" for t in config.TAB_NOO_MAIN.values()]
@@ -491,8 +533,15 @@ def load_noo_ledger(client, distributor_code) -> tuple:
         for row in block:
             branch = norm_key(row[0]) if len(row) > 0 else ""
             store = norm_key(row[1]) if len(row) > 1 else ""
-            if store and (branch == want or store.startswith(want)):
-                identities.add(f"{want}|{store}")
+            if not store:
+                continue
+            if branch in want:
+                identities.add(f"{branch}|{store}")
+            else:
+                for code in want:
+                    if store.startswith(code):
+                        identities.add(f"{code}|{store}")
+                        break
     return identities, contents
 
 
@@ -508,12 +557,13 @@ def load_sku_ledger(client, distributor_code) -> tuple:
         client, config.TAB_POOL_SKU, config.POOL_SKU_HEADERS, distributor_code,
         duplicates.sku_identity, duplicates.sku_content)
 
-    want = norm_key(distributor_code)
+    want = _as_code_set(distributor_code)
     # F:L covers Customer Code .. Customer Product Name. Offsets within it:
     # 2 = H Product, 3 = I Distributor Code, 5 = K Customer Product Code.
     for row in client.read_values(config.TAB_SKU_MAPPING, "F2:L20000"):
         get = lambda i: clean(row[i]) if i < len(row) else ""  # noqa: E731
-        if norm_key(get(3)) != want:
+        code = norm_key(get(3))
+        if code not in want:
             continue
-        identities.add("|".join([want, norm_key(get(2)), norm_key(get(5))]))
+        identities.add("|".join([code, norm_key(get(2)), norm_key(get(5))]))
     return identities, contents

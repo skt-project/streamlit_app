@@ -18,10 +18,9 @@ TITLE_SKU = "Panduan Penginputan — SKU Mapping"
 #: Applies to both functions. Kept short on purpose.
 GENERAL = [
     ("Umum", [
-        "Login menggunakan Kode Distributor (DSTxxx) dan password Anda. "
-        "Seluruh data yang Anda upload otomatis terikat ke distributor ini.",
-        "Anda hanya dapat melihat dan mengirim data milik distributor Anda "
-        "sendiri.",
+        "Login menggunakan Kode Distributor (DSTxxx) dan password Anda.",
+        "Akun Anda menentukan **perusahaan** yang boleh Anda input. Anda tidak "
+        "dapat mengirim data milik perusahaan lain.",
         "Jangan mengubah nama kolom, urutan kolom, atau menghapus sheet di "
         "dalam file template.",
         "Baris CONTOH tidak perlu dihapus — sistem otomatis mengabaikannya.",
@@ -52,22 +51,14 @@ NOO = [
     ("Aturan mapping", [
         "Jika satu toko dengan Customer Store Code yang sama belum terdaftar "
         "di lebih dari satu brand, cukup **diinput satu kali**.",
-        "**Branch Name** dan **Customer Branch Code** diisi otomatis oleh "
-        "sistem dari akun yang Anda pakai login. Jika isian pada file berbeda "
-        "dengan akun Anda, upload akan ditolak.",
-    ]),
-    ("Diisi otomatis oleh sistem", [
-        "input_time — waktu upload, zona waktu Asia/Jakarta (WIB).",
-        "Nama distributor, region, dan ASM.",
-        "SE, SPV, AOM, Area, dan Province — diambil dari master toko bila "
-        "tersedia.",
-    ]),
-    ("Toko benar-benar baru", [
-        "Untuk toko baru, data SE / SPV / AOM / Area / Province memang belum "
-        "ada di master. Ini **wajar dan tidak menggagalkan upload**.",
-        "Kolom tersebut dikosongkan dan dilengkapi oleh BD Support.",
-        "Yang menggagalkan upload hanyalah kolom input wajib yang kosong atau "
-        "tidak valid.",
+        "**Satu file boleh berisi beberapa cabang.** Isi **Customer Branch "
+        "Code** pada setiap baris dengan kode cabang (DSTxxx) yang sesuai "
+        "untuk toko tersebut.",
+        "Seluruh cabang yang Anda input harus berada di bawah **perusahaan "
+        "yang sama** dengan akun Anda. Baris dengan kode cabang di luar "
+        "perusahaan Anda akan ditolak dan upload dibatalkan.",
+        "**Customer Store Code** harus diawali kode cabang pada baris yang "
+        "sama, bukan kode cabang lain.",
     ]),
     ("Validasi & hasil", [
         "Error ditampilkan per baris: nomor baris, kolom, masalah, dan saran "
@@ -77,8 +68,8 @@ NOO = [
         "Jika toko sudah pernah diupload tetapi ada isi yang berubah, baris "
         "tersebut dianggap KOREKSI dan tetap dimasukkan sebagai baris baru. "
         "Data lama tidak diubah.",
-        "Setelah upload, data masuk ke pool tracker dan diperiksa BD Support "
-        "setiap hari.",
+        "Setelah upload, mohon konfirmasi ke BD Support masing-masing "
+        "distributor (Intan / Surti).",
     ]),
 ]
 
@@ -88,26 +79,17 @@ SKU = [
         "produk milik distributor Anda.",
     ]),
     ("Kolom yang Anda isi", [
-        "**Principal Product Code** — wajib, harus ada di master produk "
-        "prinsipal dan ditulis sama persis.",
+        "**Principal Product Code** — wajib, **harus terdaftar di master produk prinsipal**. Kode yang tidak ditemukan akan menggagalkan upload.",
         "**Principal Product Name** — wajib, nama produk prinsipal.",
-        "**Product Size (ml/g)** — wajib, mengikuti ketentuan prinsipal. "
-        "Tidak diperbolehkan membuat spesifikasi sendiri.",
         "**Customer Product Code** — wajib, kode produk milik distributor.",
         "**Customer Product Name** — wajib, nama produk milik distributor.",
     ]),
     ("Aturan mapping", [
         "Mapping ini hanya untuk brand **SKINTIFIC, TIMEPHORIA, dan "
         "FACERINNA**. Produk brand lain akan ditolak.",
-        "Nama dan spesifikasi produk mengikuti master prinsipal. Jika isian "
-        "Anda berbeda, sistem memberi peringatan dan memakai data master.",
-    ]),
-    ("Diisi otomatis oleh sistem", [
-        "input_time — waktu upload, zona waktu Asia/Jakarta (WIB).",
-        "**Customer Code** — kode brand (11/13/1A) + singkatan distributor "
-        "Anda. Tidak perlu diisi di template.",
-        "Nama distributor, region, dan ASM.",
-        "Nama dan spesifikasi produk dari master prinsipal.",
+        "Nama produk mengikuti master prinsipal. Jika isian Anda berbeda, "
+        "sistem memberi peringatan dan memakai data master.",
+        "Ukuran / gramasi produk **tidak perlu diisi** — kolom tersebut sudah dihapus dari template.",
     ]),
     ("Validasi & hasil", [
         "Kode produk yang tidak ditemukan di master prinsipal akan ditolak "

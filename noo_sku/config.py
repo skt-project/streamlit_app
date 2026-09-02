@@ -96,10 +96,12 @@ NOO_SYSTEM_OWNED = ("Branch Name", "Customer Branch Code")
 SKU_SHEET_NAME = "SKU TEMPLATE FOR STREAMLIT"
 SKU_HEADER_ROW = 3
 SKU_EXAMPLE_ROW = 5
+# MoM 31-Aug-2026 removed the gramasi / specification column: admins no longer
+# enter a product size. The pool still has a `specification` column, which is now
+# filled from master_product rather than from the upload.
 SKU_COLUMNS = [
     "Principal Product Code",
     "Principal Product Name",
-    "Product Size (ml/g)",
     "Customer Product Code ( Di isi oleh Distributor)",
     "Customer Product Name  ( Di isi oleh Distributor)",
 ]
@@ -113,7 +115,11 @@ SKU_SIGNATURE = {"principal product code", "principal product name"}
 # already exist and already carry these headers. The application adapts to them:
 # no column may be added, removed, renamed or reordered. writer.assert_layout()
 # re-reads the live header before every write and refuses on any mismatch.
+# Re-verified 2026-09-01: BD Support prepended five processing columns, so the
+# tab is now 41 wide. The original 36 follow unchanged, shifted right by five.
 POOL_NOO_HEADERS = [
+    # BD Support's own processing columns — Streamlit never writes these.
+    "DMS", "BASIS", "RSA Name", "BD Support", "NOO/Existing",
     "asm_name", "input_time", "branch_name", "region", "store_id", "store_name",
     "channel_name", "customer_code", "customer_branch_code",
     "customer_store_code", "customer_store_name", "city", "store_address",
@@ -136,6 +142,9 @@ POOL_NOO_UNUSED = frozenset({
     "longitude", "latitude", "visibility_rating", "location_rating", "tl", "pm",
     "md/smd", "ba1", "ba2", "ba3", "ba4", "group_branch_blank", "group_name",
     "nik", "npwp", "remark",
+    # BD Support's processing columns, added 2026-09-01. Theirs to fill, and
+    # excluded from the content hash for the same reason as the rest.
+    "DMS", "BASIS", "RSA Name", "BD Support", "NOO/Existing",
 })
 POOL_SKU_UNUSED = frozenset({"barcode", "description"})
 

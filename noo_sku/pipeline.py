@@ -58,20 +58,30 @@ def _rows_with_errors(issues) -> set:
 
 
 def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
-            ledger, known_cities=None, when=None):
-    """Validate, enrich and classify a NOO upload."""
+            ledger, known_cities=None, when=None, allowed_branches=None,
+            company_name=""):
+    """Validate, enrich and classify a NOO upload.
+
+    MoM 31-Aug-2026: the file may carry several branches. Authorisation is
+    company-level (``allowed_branches``); each row's own Customer Branch Code
+    decides which branch it belongs to, and enrichment follows that branch
+    rather than the login.
+    """
     when = when or now_business()
     result = PipelineResult(kind="NOO", upload_id=writer.new_upload_id(),
                             when=when)
     dist_code = distributor["distributor_code"]
-    suffix = resolver.resolve(dist_code).suffix
 
     # 1. validation ----------------------------------------------------------
     issues, cleaned = validators.validate_noo(
         parsed.rows, parsed.row_numbers,
         distributor_code=dist_code,
         distributor_name=distributor["distributor_name"],
-        expected_suffix=suffix, known_cities=known_cities)
+        expected_suffix=resolver.resolve(dist_code).suffix,
+        known_cities=known_cities,
+        allowed_branches=allowed_branches,
+        company_name=company_name,
+        suffix_for=lambda code: resolver.resolve(code).suffix)
     result.errors, result.warnings = validators.split_severity(issues)
 
     bad = _rows_with_errors(result.errors)
@@ -82,7 +92,9 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
     pool_rows, numbers = [], []
     for row, number in good:
         brand = _brand_of_customer_code(row.get("Customer Code"))
-        dist_result = dist_enricher.resolve(dist_code, brand, row=number)
+        # Enrich from the branch this row names, not from the login.
+        row_code = norm_key(row.get("Customer Branch Code")) or dist_code
+        dist_result = dist_enricher.resolve(row_code, brand, row=number)
         store_result = store_enricher.resolve(
             store_id=row.get("Store ID (Opsional)", ""),
             store_code=row.get("Customer Store Code", ""),
@@ -92,11 +104,12 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
 
         # 3. final row resolution --------------------------------------------
         pool_rows.append(writer.build_noo_row(
-            row, distributor_code=dist_code, dist_values=dist_result.values,
+            row, distributor_code=row_code, dist_values=dist_result.values,
             store_values=store_result.values, when=when))
         numbers.append(number)
         result.row_meta.append({
             "row": number,
+            "branch": row_code,
             "distributor_source": dist_result.mapping_source,
             "store_source": store_result.mapping_source,
             "matched_on": store_result.matched_on or "-",
@@ -118,7 +131,7 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
 
 
 def run_sku(parsed, *, distributor, resolver, dist_enricher, product_enricher,
-            ledger, product_lookup, when=None):
+            ledger, product_lookup, when=None, company_name=""):
     """Validate, enrich and classify a SKU upload."""
     when = when or now_business()
     result = PipelineResult(kind="SKU", upload_id=writer.new_upload_id(),
@@ -136,10 +149,11 @@ def run_sku(parsed, *, distributor, resolver, dist_enricher, product_enricher,
 
     pool_rows, numbers = [], []
     for row, number in good:
+        # No size fallback: the gramasi column was removed from the template on
+        # 31-Aug-2026, so `specification` comes from master_product alone.
         product = product_enricher.resolve(
             row.get("Principal Product Code", ""),
-            fallback_name=row.get("Principal Product Name", ""),
-            fallback_size=row.get("Product Size (ml/g)", ""), row=number)
+            fallback_name=row.get("Principal Product Name", ""), row=number)
         result.enrichment_notes.extend(product.notes)
 
         brand = product.values.get("brand") or row.get("_brand", "")
@@ -150,7 +164,7 @@ def run_sku(parsed, *, distributor, resolver, dist_enricher, product_enricher,
         pool_rows.append(writer.build_sku_row(
             row, distributor_code=dist_code, customer_code=customer_code,
             dist_values=dist_result.values, product_values=product.values,
-            when=when))
+            when=when, company_name=company_name))
         numbers.append(number)
         result.row_meta.append({
             "row": number,
@@ -213,6 +227,7 @@ def mapping_sources(result: PipelineResult) -> list:
         entry = {
             "Baris": meta["row"],
             "Brand": meta.get("brand") or "-",
+            "Cabang": pool.get("customer_branch_code", ""),
             "Distributor": pool.get("branch_name") or pool.get("customer_name", ""),
             "ASM": pool.get("asm_name") or pool.get("asm", ""),
             "SPV": pool.get("spv", ""),
