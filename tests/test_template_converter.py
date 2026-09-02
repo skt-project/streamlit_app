@@ -434,3 +434,34 @@ class TestSmokeSyntax:
     def test_template_converter_parses(self):
         source = (REPO_ROOT / "template_converter.py").read_text(encoding="utf-8")
         ast.parse(source, filename="template_converter.py")
+
+
+class TestDuplicateHeaders:
+    @pytest.mark.sanity
+    def test_excel_duplicate_type_columns_are_uniquified(self):
+        data = _xlsx_bytes(
+            ["DIVISI", "TYPE", "CHANNEL", "TYPE", "KODE TOKO", "po_number"],
+            [("Bali", "GT", "A", "B", "00045", "000789")],
+        )
+        uploaded = FakeUpload(data, "dupes.xlsx")
+        df = tc.read_any_table(uploaded)
+        lowered = tc.uniquify_column_names([c.lower() for c in df.columns])
+        assert lowered.count("type") == 1
+        assert "type.1" in lowered
+        assert len(lowered) == len(set(lowered))
+        # Identity values still preserved
+        assert list(df["po_number"]) == ["000789"] or list(df["PO Number" if "PO Number" in df.columns else "po_number"]) == ["000789"]
+
+    def test_denpasar_file_reads_without_duplicate_name_error(self):
+        path = REPO_ROOT / "RAW DATA CLOSING DENPASAR SKINTIFIC.xlsx"
+        if not path.exists():
+            pytest.skip("local sample file not present")
+        uploaded = FakeUpload(path.read_bytes(), path.name)
+        df = tc.read_any_table(uploaded)
+        df.columns = tc.uniquify_column_names([c.lower() for c in df.columns])
+        assert df.columns.duplicated().sum() == 0
+        assert "type" in df.columns
+        assert "type.1" in df.columns
+        # PyArrow (used by st.dataframe) rejects duplicate column names
+        import pyarrow as pa
+        pa.Table.from_pandas(df.head())

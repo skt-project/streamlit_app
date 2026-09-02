@@ -175,6 +175,22 @@ def series_as_text(series: pd.Series) -> pd.Series:
     return series.map(as_text, na_action=None).astype("string")
 
 
+def uniquify_column_names(columns) -> List[str]:
+    """Make headers unique the way pandas mangles duplicates (name, name.1, name.2).
+
+    Distributor files often repeat labels such as TYPE. Duplicate names later
+    crash Streamlit preview via PyArrow: 'Duplicate column names found'.
+    """
+    seen: Dict[str, int] = {}
+    unique: List[str] = []
+    for raw in columns:
+        name = "" if raw is None else str(raw)
+        count = seen.get(name, 0)
+        unique.append(name if count == 0 else f"{name}.{count}")
+        seen[name] = count + 1
+    return unique
+
+
 def force_text_columns(
     df: pd.DataFrame, columns: Optional[List[str]] = None
 ) -> pd.DataFrame:
@@ -251,10 +267,12 @@ def _read_excel_cells_as_text(
     if header_idx >= len(all_rows):
         return pd.DataFrame()
 
-    columns = [
-        cell if cell != "" else f"Unnamed: {i}"
-        for i, cell in enumerate(all_rows[header_idx])
-    ]
+    columns = uniquify_column_names(
+        [
+            cell if cell != "" else f"Unnamed: {i}"
+            for i, cell in enumerate(all_rows[header_idx])
+        ]
+    )
     data = all_rows[header_idx + 1 :]
     return pd.DataFrame(data, columns=columns)
 
@@ -607,7 +625,7 @@ def intelligent_mapping(
     failed_columns = []
 
     df = df.copy()
-    df.columns = [col.lower() for col in df.columns]
+    df.columns = uniquify_column_names([col.lower() for col in df.columns])
     df = force_text_columns(df)
     mapping_lower = {k: v.lower() for k, v in mapping.items()}
 
@@ -698,6 +716,7 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
         return pd.DataFrame()
 
     # Sanitize every column: preserve leading-zero strings, turn NaN into "".
+    df.columns = uniquify_column_names(df.columns)
     df = df.apply(lambda col: col.map(as_text))
     df = force_text_columns(df)
     return df
@@ -903,7 +922,7 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     st.write("Preview of uploaded data:")
     try:
         df = read_any_table(uploaded)
-        df.columns = [col.lower() for col in df.columns]
+        df.columns = uniquify_column_names([col.lower() for col in df.columns])
         st.dataframe(df.head())
     except Exception as e:
         st.error(f"Error reading the uploaded file: {e}")
