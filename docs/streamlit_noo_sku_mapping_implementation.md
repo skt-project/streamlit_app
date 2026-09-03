@@ -360,7 +360,7 @@ Verified ledger sizes for `DST082`: NOO 88 identities, SKU 240 identities.
 | `Customer Store Code` must be prefixed with the session's DST code | `validators.validate_noo` |
 | Ledger reads filtered to the session's DB — no cross-DB visibility | `sources.load_*_ledger` |
 | Passwords in `st.secrets`, never in source | `noo_sku_mapping.py:_passwords` |
-| `valueInputOption="RAW"` blocks formula injection and numeric coercion | `sources.SheetsClient.append_values` |
+| `valueInputOption="RAW"` blocks formula injection and numeric coercion | `sources.SheetsClient.append_column_span` |
 | Exceptions never surface as tracebacks | `noo_sku_mapping.py:_handle_upload` |
 
 Verified in the live dry run: a row claiming `PT PENYUSUP` / `DST999` while

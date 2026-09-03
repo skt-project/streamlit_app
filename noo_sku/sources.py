@@ -89,7 +89,14 @@ def load_credentials(secrets=None, scopes=None):
 
 # ─── Sheets ───────────────────────────────────────────────────────────────────
 class SheetsClient:
-    """Thin wrapper over the Sheets v4 API. Append is the only write verb."""
+    """Thin wrapper over the Sheets v4 API.
+
+    `append_column_span` is the only write verb. Both pool tabs are structured
+    trackers BD Support pre-fills with live formulas far ahead of any real
+    data (confirmed to row 900+ of POOL NOO STREAMLIT, long before any upload
+    reached it), so a plain full-row append was never the right model — see
+    noo_sku.writer for the column-scoped design this method exists to serve.
+    """
 
     def __init__(self, credentials, spreadsheet_id):
         from googleapiclient.discovery import build
@@ -111,13 +118,30 @@ class SheetsClient:
         ).execute()
         return [vr.get("values", []) for vr in res.get("valueRanges", [])]
 
-    def append_values(self, tab: str, rows) -> dict:
-        """Append rows to the end of a tab. Never overwrites existing cells."""
+    def append_column_span(self, tab: str, start_col: str, end_col: str,
+                           rows) -> dict:
+        """Fill the next available row(s) within ONE column span only.
+
+        `insertDataOption="OVERWRITE"`, deliberately not `INSERT_ROWS`: the
+        target is the next row that is blank WITHIN `start_col:end_col` —
+        reusing a pre-existing, already-formula-equipped row — never a brand
+        new row inserted into the sheet, which would shift every pre-filled
+        formula row below it down by one and defeat the entire point of
+        writing a bounded column range. The range is left open-ended
+        (`f"{start_col}1:{end_col}"`, no row number on the end) so the API
+        searches the WHOLE column span for the existing table, not just its
+        first row.
+
+        Columns outside `start_col:end_col` — every BD Support manual flag
+        and every live formula column — are structurally absent from `range`,
+        so there is nothing in this request that could touch them, blank or
+        otherwise.
+        """
         return self._svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
-            range=f"'{tab}'!A1",
+            range=f"'{tab}'!{start_col}1:{end_col}",
             valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS",
+            insertDataOption="OVERWRITE",
             body={"values": rows},
         ).execute()
 

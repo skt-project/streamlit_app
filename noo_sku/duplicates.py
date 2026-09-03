@@ -42,22 +42,25 @@ SKU_IDENTITY_COLUMNS = ("customer_branch_code", "product_code",
                         "customer_product_code")
 
 
-def _content_columns(headers, unused):
+def _content_columns(headers, not_owned):
     """Business columns of a pool layout, in header order.
 
-    Drops the timestamp, the volatile enrichment set, and the columns that are
-    deliberately never populated — a permanently blank column contributes
-    nothing but would silently change every hash if it were ever filled.
+    Drops the timestamp, the volatile enrichment set, and everything
+    Streamlit does not own — BD Support's manual flags, live spreadsheet
+    formulas, and columns deliberately never populated. None of these reflect
+    what the admin submitted, so none may affect duplicate classification: a
+    formula recalculating, or a permanently blank column being filled in
+    later, must never change a stored hash.
     """
     skip = (set(config.TIMESTAMP_COLUMNS)
-            | set(config.VOLATILE_ENRICHMENT_COLUMNS) | set(unused))
+            | set(config.VOLATILE_ENRICHMENT_COLUMNS) | set(not_owned))
     return tuple(c for c in headers if c not in skip)
 
 
 NOO_CONTENT_COLUMNS = _content_columns(config.POOL_NOO_HEADERS,
-                                       config.POOL_NOO_UNUSED)
+                                       config.POOL_NOO_NOT_OWNED)
 SKU_CONTENT_COLUMNS = _content_columns(config.POOL_SKU_HEADERS,
-                                       config.POOL_SKU_UNUSED)
+                                       config.POOL_SKU_NOT_OWNED)
 
 
 @dataclass(frozen=True)

@@ -83,12 +83,25 @@ PRODUCTS = {
 }
 
 
+def _col_index(letters: str) -> int:
+    """Inverse of writer._col_letter: 'A' -> 0, 'E' -> 4, 'AA' -> 26."""
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
 class FakeSheetsClient:
-    """Records appends instead of performing them."""
+    """In-memory pool tab that emulates values.append(OVERWRITE) for real,
+    not just records the call — so tests can verify that a formula-bearing
+    column sitting outside the written span is genuinely left untouched, and
+    that the correct pre-existing row is reused rather than a new one always
+    being added at the bottom.
+    """
 
     def __init__(self, values=None):
         self._values = values or {}
-        self.appended = []
+        self.appended = []  # (tab, rows) exactly as sent to append_column_span
 
     def read_values(self, tab, a1="A1:BZ"):
         return self._values.get(tab, [])
@@ -96,8 +109,35 @@ class FakeSheetsClient:
     def batch_read(self, ranges):
         return [[] for _ in ranges]
 
-    def append_values(self, tab, rows):
+    def append_column_span(self, tab, start_col, end_col, rows):
         self.appended.append((tab, rows))
+        start, end = _col_index(start_col), _col_index(end_col)
+        data = self._values.setdefault(tab, [[]])
+        header, body = data[0], list(data[1:])
+
+        # Mirrors OVERWRITE's own table-detection within the given column
+        # range: the next row goes right after the last existing row with ANY
+        # non-blank cell in [start, end] - a formula-pre-filled row whose
+        # OWNED columns are still blank is exactly the "next available row"
+        # this must find and reuse, never a brand new one appended past it.
+        table_end = 0
+        for i, existing in enumerate(body):
+            if any(str(c).strip() for c in existing[start:end + 1]):
+                table_end = i + 1
+
+        for offset, new_row in enumerate(rows):
+            target = table_end + offset
+            if target < len(body):
+                row = body[target]
+            else:
+                row = []
+                body.append(row)
+            if len(row) < end + 1:
+                row.extend([""] * (end + 1 - len(row)))
+            for i, value in enumerate(new_row):
+                row[start + i] = value
+
+        self._values[tab] = [header] + body
         return {"updates": {"updatedRows": len(rows)}}
 
 

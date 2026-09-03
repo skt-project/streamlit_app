@@ -283,7 +283,7 @@ def test_noo_pool_row_matches_the_live_pool_layout_exactly():
 
 
 @pytest.mark.sanity
-def test_pool_row_for_an_unmatched_new_store_still_has_the_full_36_columns():
+def test_pool_row_for_an_unmatched_new_store_still_has_the_full_41_columns():
     row = _noo_pipeline([fx.noo_row(store_code="DST08299999")]).pool_rows[0]
     assert list(row) == config.POOL_NOO_HEADERS
     assert row["se_kae"] == "" and row["area"] == ""
@@ -291,12 +291,15 @@ def test_pool_row_for_an_unmatched_new_store_still_has_the_full_36_columns():
 
 
 @pytest.mark.sanity
-def test_sku_pool_row_matches_the_live_13_column_layout_exactly():
+def test_sku_pool_row_matches_the_live_15_column_layout_exactly():
+    """2026-09-03: BD Support prepended DMS/RSA, growing the pool from 13 to
+    15 columns. Both are formula/manual columns Streamlit never writes."""
     row = _sku_pipeline([fx.sku_row()]).pool_rows[0]
     assert list(row) == config.POOL_SKU_HEADERS
     values = writer.to_values([row], config.POOL_SKU_HEADERS)[0]
-    assert len(values) == 13
+    assert len(values) == 15
     named = dict(zip(config.POOL_SKU_HEADERS, values))
+    assert named["DMS"] == "" and named["RSA"] == ""
     assert named["customer_code"] == "11CEC"
     assert named["customer_branch_code"] == DIST
     assert named["product_name"] == "SKINTIFIC TEST PRODUCT"
@@ -332,6 +335,9 @@ def test_dry_run_validates_and_checks_layout_but_never_appends():
 
 @pytest.mark.sanity
 def test_write_mode_appends_once_to_the_correct_pool():
+    """The write is scoped to the owned span (E:W, 19 columns), never the
+    full 41-column header - formula and BD-manual columns are structurally
+    absent from the payload, not merely blanked."""
     settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
     client = fx.FakeSheetsClient(
         {config.TAB_POOL_NOO: [config.POOL_NOO_HEADERS]})
@@ -343,7 +349,9 @@ def test_write_mode_appends_once_to_the_correct_pool():
     assert write.ok and not write.dry_run
     assert len(client.appended) == 1
     assert client.appended[0][0] == config.TAB_POOL_NOO
-    assert len(client.appended[0][1][0]) == len(config.POOL_NOO_HEADERS)
+    _, _, span_columns = writer.owned_span_for("NOO", config.POOL_NOO_HEADERS)
+    assert len(span_columns) == 19
+    assert len(client.appended[0][1][0]) == len(span_columns)
 
 
 @pytest.mark.sanity
@@ -393,6 +401,190 @@ def test_nothing_is_written_when_every_row_is_ineligible():
                                headers=config.POOL_NOO_HEADERS,
                                settings=settings, upload_id="x")
     assert not write.ok and client.appended == []
+
+
+# ─── Formula-safe, column-scoped write (2026-09-03 fix) ───────────────────────
+# POOL NOO/SKU STREAMLIT are structured trackers, not append-only tables: BD
+# Support pre-fills every row with live XLOOKUP formulas far ahead of any real
+# upload (confirmed to row 900+ of the live NOO pool). These tests build a
+# fake pool in exactly that shape - formula cells already populated, the
+# Streamlit-owned span still blank - and verify the write reuses those rows
+# and never disturbs a formula cell, rather than trusting it by construction.
+def _row_dict(headers, row):
+    """Same ragged-row handling production code uses: a real Sheets API
+    response trims trailing empty cells, so a short row means blank, not
+    missing."""
+    return {h: (row[i] if i < len(row) else "") for i, h in enumerate(headers)}
+
+
+def _prefilled_noo_pool(n_rows):
+    sheet = [config.POOL_NOO_HEADERS]
+    for r in range(2, 2 + n_rows):
+        row = ["" for _ in config.POOL_NOO_HEADERS]
+        for column in config.POOL_NOO_FORMULA_COLUMNS:
+            row[config.POOL_NOO_HEADERS.index(column)] = f"=FORMULA_{column}_{r}"
+        sheet.append(row)
+    return sheet
+
+
+def _prefilled_sku_pool(n_rows):
+    sheet = [config.POOL_SKU_HEADERS]
+    for r in range(2, 2 + n_rows):
+        row = ["" for _ in config.POOL_SKU_HEADERS]
+        for column in config.POOL_SKU_FORMULA_COLUMNS:
+            row[config.POOL_SKU_HEADERS.index(column)] = f"=FORMULA_{column}_{r}"
+        sheet.append(row)
+    return sheet
+
+
+@pytest.mark.sanity
+def test_owned_span_excludes_every_formula_and_manual_noo_column():
+    _, _, span = writer.owned_span_for("NOO", config.POOL_NOO_HEADERS)
+    touched = set(span)
+    assert not touched & config.POOL_NOO_BD_MANUAL
+    assert not touched & config.POOL_NOO_FORMULA_COLUMNS
+    assert "store_type" in touched       # real, user-submitted field
+    assert "location_rating" in touched  # unused-but-safe, sandwiched inside
+
+
+@pytest.mark.sanity
+def test_owned_span_excludes_every_formula_and_manual_sku_column():
+    _, _, span = writer.owned_span_for("SKU", config.POOL_SKU_HEADERS)
+    touched = set(span)
+    assert not touched & config.POOL_SKU_BD_MANUAL
+    assert not touched & config.POOL_SKU_FORMULA_COLUMNS
+    assert "specification" in touched
+    # Trailing, never-populated columns with nothing owned beyond them:
+    # correctly excluded from the write entirely, not merely blanked.
+    assert "barcode" not in touched and "description" not in touched
+
+
+@pytest.mark.sanity
+def test_single_submission_fills_the_preexisting_formula_row_not_a_new_one():
+    settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
+    client = fx.FakeSheetsClient({config.TAB_POOL_NOO: _prefilled_noo_pool(3)})
+    before = len(client._values[config.TAB_POOL_NOO])
+    result = _noo_pipeline([fx.noo_row(store_code="DST08200074")])
+    writer.append_rows(client, config.TAB_POOL_NOO, result.eligible_rows,
+                       headers=config.POOL_NOO_HEADERS, settings=settings,
+                       upload_id="x")
+    sheet = client._values[config.TAB_POOL_NOO]
+    assert len(sheet) == before          # reused row 2 - the sheet did not grow
+    named = _row_dict(config.POOL_NOO_HEADERS, sheet[1])
+    assert named["store_name"] == "TOKO SUMBER REJEKI"
+    assert named["store_id"] == "IESL00038"
+    # Every formula cell in that same row is exactly what BD Support put
+    # there - untouched, not recalculated, not blanked.
+    for column in config.POOL_NOO_FORMULA_COLUMNS:
+        assert named[column] == f"=FORMULA_{column}_2"
+
+
+@pytest.mark.sanity
+def test_multiple_submissions_preserve_formulas_and_leave_other_rows_untouched():
+    """Test case: 5 records in one upload - correct target rows, formulas
+    preserved, no shifting/duplicating/corrupting existing rows."""
+    settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
+    client = fx.FakeSheetsClient({config.TAB_POOL_NOO: _prefilled_noo_pool(5)})
+    rows = [fx.noo_row(store_code=f"DST082CS0{i:04d}") for i in range(5)]
+    result = _noo_pipeline(rows)
+    assert len(result.eligible_rows) == 5
+    writer.append_rows(client, config.TAB_POOL_NOO, result.eligible_rows,
+                       headers=config.POOL_NOO_HEADERS, settings=settings,
+                       upload_id="x")
+    sheet = client._values[config.TAB_POOL_NOO]
+    assert len(sheet) == 6                # header + the 5 pre-filled rows, no more
+    for r in range(2, 7):
+        named = _row_dict(config.POOL_NOO_HEADERS, sheet[r - 1])
+        assert named["store_name"]        # every owned span got filled
+        for column in config.POOL_NOO_FORMULA_COLUMNS:
+            assert named[column] == f"=FORMULA_{column}_{r}"
+
+
+@pytest.mark.sanity
+def test_a_second_upload_never_touches_a_row_written_by_an_earlier_one():
+    settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
+    client = fx.FakeSheetsClient({config.TAB_POOL_NOO: _prefilled_noo_pool(3)})
+    first = _noo_pipeline([fx.noo_row(store_code="DST082CS00001",
+                                      name="TOKO PERTAMA")])
+    writer.append_rows(client, config.TAB_POOL_NOO, first.eligible_rows,
+                       headers=config.POOL_NOO_HEADERS, settings=settings,
+                       upload_id="x")
+    second = _noo_pipeline([fx.noo_row(store_code="DST082CS00002",
+                                       name="TOKO KEDUA")])
+    writer.append_rows(client, config.TAB_POOL_NOO, second.eligible_rows,
+                       headers=config.POOL_NOO_HEADERS, settings=settings,
+                       upload_id="y")
+    sheet = client._values[config.TAB_POOL_NOO]
+    assert len(sheet) == 4                # header + 3 pre-filled rows - no growth
+    row2 = _row_dict(config.POOL_NOO_HEADERS, sheet[1])
+    row3 = _row_dict(config.POOL_NOO_HEADERS, sheet[2])
+    assert row2["store_name"] == "TOKO PERTAMA"
+    assert row3["store_name"] == "TOKO KEDUA"
+    for column in config.POOL_NOO_FORMULA_COLUMNS:
+        assert row2[column] == f"=FORMULA_{column}_2"
+        assert row3[column] == f"=FORMULA_{column}_3"
+
+
+@pytest.mark.sanity
+def test_sku_submission_preserves_its_preexisting_formula():
+    settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
+    client = fx.FakeSheetsClient({config.TAB_POOL_SKU: _prefilled_sku_pool(2)})
+    result = _sku_pipeline([fx.sku_row()])
+    writer.append_rows(client, config.TAB_POOL_SKU, result.eligible_rows,
+                       headers=config.POOL_SKU_HEADERS, settings=settings,
+                       upload_id="x")
+    sheet = client._values[config.TAB_POOL_SKU]
+    assert len(sheet) == 3
+    named = _row_dict(config.POOL_SKU_HEADERS, sheet[1])
+    assert named["product_name"] == "SKINTIFIC TEST PRODUCT"
+    assert named["RSA"] == "=FORMULA_RSA_2"
+    assert named["barcode"] == "" and named["description"] == ""
+
+
+@pytest.mark.sanity
+def test_write_past_the_prefilled_rows_still_never_touches_a_formula_column():
+    """A row beyond BD Support's pre-filled range starts with no formula at
+    all. This app does not copy formulas down itself - that is Sheets'/BD
+    Support's mechanism, not this application's - it only guarantees it never
+    writes INTO a formula column, pre-filled or not."""
+    settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
+    client = fx.FakeSheetsClient({config.TAB_POOL_NOO: _prefilled_noo_pool(1)})
+    for i in range(3):
+        result = _noo_pipeline([fx.noo_row(store_code=f"DST082CS000{i:02d}")])
+        writer.append_rows(client, config.TAB_POOL_NOO, result.eligible_rows,
+                           headers=config.POOL_NOO_HEADERS, settings=settings,
+                           upload_id=str(i))
+    sheet = client._values[config.TAB_POOL_NOO]
+    assert len(sheet) == 4      # 1 pre-filled row + 2 brand-new rows
+    for row in sheet[2:]:
+        named = _row_dict(config.POOL_NOO_HEADERS, row)
+        for column in config.POOL_NOO_FORMULA_COLUMNS:
+            assert named[column] == ""
+
+
+@pytest.mark.sanity
+def test_noo_and_not_noo_classification_survive_the_scoped_write_end_to_end():
+    settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
+    client = fx.FakeSheetsClient({config.TAB_POOL_NOO: _prefilled_noo_pool(2)})
+    result = _noo_pipeline([
+        fx.noo_row(store_code="DST08200074", name="TOKO ADA"),   # resolves
+        fx.noo_row(store_code="DST08299999", name="TOKO BARU"),  # unresolved
+    ])
+    writer.append_rows(client, config.TAB_POOL_NOO, result.eligible_rows,
+                       headers=config.POOL_NOO_HEADERS, settings=settings,
+                       upload_id="x")
+    check = writer.verify_written(
+        client, config.TAB_POOL_NOO, config.POOL_NOO_HEADERS,
+        result.eligible_rows,
+        input_time=result.pool_rows[0]["input_time"], distributor_code=DIST)
+    assert check["passed"] and check["verified"] == 2
+    sheet = client._values[config.TAB_POOL_NOO]
+    not_noo = _row_dict(config.POOL_NOO_HEADERS, sheet[1])
+    is_noo = _row_dict(config.POOL_NOO_HEADERS, sheet[2])
+    assert not_noo["NOO/Existing"] == "Not NOO -> Reference ID not exist"
+    assert not_noo["store_id"] == "IESL00038"
+    assert is_noo["NOO/Existing"] == "NOO -> Create ID"
+    assert is_noo["store_id"] == ""
 
 
 # ─── Guideline ────────────────────────────────────────────────────────────────
@@ -496,9 +688,9 @@ def test_post_write_verification_confirms_the_appended_rows():
     writer.append_rows(client, config.TAB_POOL_NOO, result.eligible_rows,
                        headers=config.POOL_NOO_HEADERS, settings=st,
                        upload_id="x")
-    # Replay what was appended back into the fake sheet, as the live sheet would.
-    written = client.appended[0][1]
-    client._values[config.TAB_POOL_NOO] = [config.POOL_NOO_HEADERS] + written
+    # FakeSheetsClient.append_column_span already wrote the row for real -
+    # no manual replay needed, unlike the old append_values-based fake, which
+    # only recorded the call.
     check = writer.verify_written(
         client, config.TAB_POOL_NOO, config.POOL_NOO_HEADERS,
         result.eligible_rows,

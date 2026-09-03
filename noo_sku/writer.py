@@ -1,15 +1,38 @@
-"""Enriched pool-row construction and the guarded append.
+"""Enriched pool-row construction and the guarded, column-scoped write.
 
 Write safety rules enforced here:
 
-* **Append only.** Nothing in this module deletes, clears, sorts or overwrites.
-  The only Sheets call is ``values.append``.
+* **Column-scoped, never a blind full-row append.** Fixed 2026-09-03: both
+  pools are structured trackers, not append-only tables — BD Support pre-fills
+  every row (confirmed down to row 900+ of the NOO pool, long before any
+  upload ever reached it) with live spreadsheet formulas in specific columns,
+  and owns a couple of manual processing flags outright. The write path here
+  computes the single contiguous span of columns Streamlit actually owns (see
+  `_owned_write_span`) and writes ONLY to that span — formula and BD-manual
+  columns are never included in any request, not even as an explicit blank.
+* **Reuses the pre-existing formula row, never a fresh one.** The actual
+  Sheets call (`SheetsClient.append_column_span`) uses
+  `insertDataOption="OVERWRITE"`, not `INSERT_ROWS` — it targets the next row
+  that is blank WITHIN the owned span, which BD Support's pre-filled sheet
+  already has waiting, rather than inserting a brand new row and shifting
+  every formula row below it down.
 * **Layout assert.** ``assert_layout`` re-reads the live header before every
   write and refuses if it differs from the expected layout by even one column.
   The pool headers are owned by BD Support; the app adapts, never the reverse.
 * **Dry run by default.** ``Settings.write_enabled`` must be explicitly true.
 * **RAW input**, so Sheets cannot reinterpret codes or execute a leading "=".
 * **Identity from the session**, never from the uploaded file.
+
+Why a scoped write rather than relying on how Sheets happened to behave so
+far: every row written by the previous (full-row) implementation DID keep its
+formulas intact, because inserting a row via `INSERT_ROWS` next to a
+consistent formula pattern causes Sheets to carry that pattern into the new
+row. That is real, observed behaviour — but it is Sheets' own row-insertion
+mechanic, not anything this application explicitly requests or controls, and
+it would stop protecting the data the moment that pattern breaks for any
+reason. The fix here does not depend on it: formula columns are structurally
+absent from the write payload, so there is nothing for a favourable coincidence
+to save.
 """
 from __future__ import annotations
 
@@ -19,9 +42,15 @@ from dataclasses import dataclass, field
 from . import config
 from .normalize import clean, format_input_time, norm_key
 
-
-#: Left blank for BD Support to formulate (MoM 31-Aug-2026 §5).
+#: Left blank for BD Support to formulate (MoM 31-Aug-2026 §5) — now covered
+#: by `config.POOL_NOO_FORMULA_COLUMNS`, kept as an alias for readability at
+#: the row-construction call sites below.
 POOL_NOO_BD_SUPPORT_FIELDS = ("asm_kam", "spv", "se_kae", "aom")
+
+#: The column every pool row always has, used to anchor the owned-write span
+#: (see `_owned_write_span`) and to detect where a batch landed for
+#: verification. Present in both pools, always inside the safe span.
+ANCHOR_COLUMN = "input_time"
 
 
 class LayoutMismatch(RuntimeError):
@@ -74,6 +103,12 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
     2026-09-03: `store_id` is now ALWAYS the master's own matched identifier,
     never the admin's typed value — populated only when a match was found,
     left blank otherwise so no fake/generated Store ID is ever written.
+
+    The returned dict still carries a value for every pool column, including
+    `area`/`province`/`asm_kam`/`spv`/`se_kae`/`aom` — useful context for the
+    preview, showing what the system expects — but those specific keys are
+    NEVER part of what actually reaches the sheet (see `_owned_write_span`):
+    the live cells there are spreadsheet formulas, not Streamlit's to set.
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
     branch_code = norm_key(g("Customer Branch Code")) or norm_key(
@@ -96,13 +131,11 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
         "city": g("City") or store_values.get("city", ""),
         "store_address": g("Store Address"),
         "store_type": g("Store Type") or store_values.get("store_type", ""),
+        # Reference only — the live cell is a formula (see module docstring).
         "area": store_values.get("area", ""),
         "province": store_values.get("province", ""),
         "NOO/Existing": noo_existing_label,
     })
-    # MoM 31-Aug-2026 §5: BD Support formulates the hierarchy themselves.
-    # Streamlit must leave these blank - not derived from login, branch, or any
-    # existing mapping logic.
     for column in POOL_NOO_BD_SUPPORT_FIELDS:
         row[column] = ""
     for column in config.POOL_NOO_UNUSED:
@@ -115,6 +148,8 @@ def build_sku_row(user_row, *, distributor_code, customer_code, dist_values,
     """One enriched `POOL SKU STREAMLIT` record, keyed by pool column.
 
     MoM 31-Aug-2026 §8: `customer_name` is the COMPANY name, not the branch.
+    `asm`/`region` are reference-only in the returned dict for the same reason
+    as NOO's `area`/`province` — the live `RSA` cell is a formula.
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
 
@@ -138,8 +173,85 @@ def build_sku_row(user_row, *, distributor_code, customer_code, dist_values,
 
 
 def to_values(rows, headers) -> list:
-    """Dict rows -> list-of-lists in exact pool column order."""
+    """Dict rows -> list-of-lists in exact pool column order.
+
+    For preview/reporting/testing — shows the FULL conceptual row, including
+    columns that are never actually sent to the sheet. The real write uses
+    `_scoped_values`, not this.
+    """
     return [[clean(row.get(column, "")) for column in headers] for row in rows]
+
+
+# ─── Column-span ownership ────────────────────────────────────────────────────
+def _col_letter(index: int) -> str:
+    """0-based column index -> A1-style letters (0 -> 'A', 26 -> 'AA')."""
+    letters = ""
+    n = index + 1
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def _owned_write_span(headers, hard_boundary, unused, anchor=ANCHOR_COLUMN):
+    """The contiguous run of columns Streamlit writes. Returns
+    (start_index, end_index), both inclusive, 0-based.
+
+    Two different "not mine" sets are needed here, not one:
+
+    * `hard_boundary` (manual flags + live formulas) is what actually stops
+      the expansion outward from `anchor`. Using the broader
+      config.POOL_*_NOT_OWNED here instead would be wrong: NOO's
+      longitude/latitude/visibility_rating/location_rating sit BETWEEN
+      store_address and store_type, both genuinely owned columns, so folding
+      them into the stop-set would truncate the span at store_address and
+      silently drop store_type — a real user-submitted field — from every
+      write.
+    * `unused` only trims a LEADING or TRAILING run once an edge has run off
+      the end of the header array rather than being stopped by a real
+      boundary column — e.g. SKU's trailing barcode/description, which sit
+      past every genuinely owned column with no formula column to stop at,
+      so nothing is lost by excluding them. An edge stopped by an actual
+      hard_boundary column is never trimmed: NOO's longitude/.../
+      location_rating stay IN the span because they're sandwiched before the
+      next hard boundary (asm_kam), and skipping them would need a
+      non-contiguous write for no benefit — writing "" there is harmless,
+      there being no formula in any of them.
+    """
+    if anchor not in headers:
+        raise ValueError(f"Anchor column {anchor!r} not found in header.")
+    i = headers.index(anchor)
+    start = i
+    while start > 0 and headers[start - 1] not in hard_boundary:
+        start -= 1
+    end = i
+    while end < len(headers) - 1 and headers[end + 1] not in hard_boundary:
+        end += 1
+    if start == 0:
+        while start < end and headers[start] in unused:
+            start += 1
+    if end == len(headers) - 1:
+        while end > start and headers[end] in unused:
+            end -= 1
+    return start, end
+
+
+def owned_span_for(kind: str, headers) -> tuple:
+    """(start_index, end_index, column_names) of the span Streamlit writes."""
+    if kind == "NOO":
+        hard_boundary = config.POOL_NOO_HARD_NEVER_TOUCH
+        unused = config.POOL_NOO_UNUSED
+    else:
+        hard_boundary = config.POOL_SKU_HARD_NEVER_TOUCH
+        unused = config.POOL_SKU_UNUSED
+    start, end = _owned_write_span(headers, hard_boundary, unused)
+    return start, end, headers[start:end + 1]
+
+
+def _scoped_values(rows, span_columns) -> list:
+    """Dict rows -> list-of-lists covering ONLY the owned span, in order."""
+    return [[clean(row.get(column, "")) for column in span_columns]
+           for row in rows]
 
 
 # ─── Write guards ─────────────────────────────────────────────────────────────
@@ -151,8 +263,10 @@ def read_live_headers(client, tab) -> list:
 def assert_layout(client, tab, expected):
     """Refuse to write unless the live header matches `expected` exactly.
 
-    Guards against the pool being restructured underneath us — which has already
-    happened once: both pools gained a header between two passes of this project.
+    Checks the WHOLE header, not just the owned span — if BD Support changes
+    anything about this tab, including a column this app doesn't touch, that
+    must stop every write and force a re-audit, because it may mean this
+    module's understanding of which columns are safe is now stale.
     """
     live = read_live_headers(client, tab)
     trimmed = live[:len(expected)]
@@ -169,8 +283,18 @@ def assert_layout(client, tab, expected):
     return True
 
 
-def append_rows(client, tab, rows, *, headers, settings, upload_id) -> WriteResult:
-    """Append enriched rows to a pool tab, honouring dry-run mode."""
+def append_rows(client, tab, rows, *, headers, settings, upload_id,
+                kind=None) -> WriteResult:
+    """Append enriched rows to a pool tab, honouring dry-run mode.
+
+    Writes ONLY to the contiguous span of columns Streamlit owns for this pool
+    (see `owned_span_for`) — BD Support's manual flags and every live
+    spreadsheet formula column are structurally excluded from the request,
+    never merely set to blank.
+
+    `kind` selects which pool's not-owned set applies ("NOO" or "SKU"); if
+    omitted it is inferred from `tab`.
+    """
     if not rows:
         return WriteResult(False, settings.dry_run, 0, upload_id, tab,
                            "Tidak ada baris yang memenuhi syarat untuk diupload.")
@@ -185,34 +309,47 @@ def append_rows(client, tab, rows, *, headers, settings, upload_id) -> WriteResu
             f"tetapi {len(rows)} baris diberikan. Kurangi jumlah baris atau "
             "gunakan mode production setelah UAT disetujui.")
 
-    values = to_values(rows, headers)
+    kind = kind or ("NOO" if tab == config.TAB_POOL_NOO else "SKU")
 
     # Checked in every mode so a dry run still surfaces a layout drift.
     assert_layout(client, tab, headers)
 
+    start, end, span_columns = owned_span_for(kind, headers)
+    scoped = _scoped_values(rows, span_columns)
+    full_rows = to_values(rows, headers)  # for reporting/preview only
+
     if settings.dry_run:
         return WriteResult(
-            True, True, len(values), upload_id, tab,
-            f"DRY RUN — {len(values)} baris tervalidasi, ter-enrich dan siap "
+            True, True, len(scoped), upload_id, tab,
+            f"DRY RUN — {len(scoped)} baris tervalidasi, ter-enrich dan siap "
             "diupload, tetapi TIDAK ditulis ke spreadsheet "
             "(WRITE_ENABLED=false).",
-            rows=values)
+            rows=full_rows)
 
-    client.append_values(tab, values)
-    return WriteResult(True, False, len(values), upload_id, tab,
-                       f"{len(values)} baris berhasil ditambahkan ke {tab} "
-                       f"(mode {settings.mode}).",
-                       rows=values)
+    start_letter, end_letter = _col_letter(start), _col_letter(end)
+    client.append_column_span(tab, start_letter, end_letter, scoped)
+    return WriteResult(True, False, len(scoped), upload_id, tab,
+                       f"{len(scoped)} baris berhasil ditambahkan ke {tab} "
+                       f"(kolom {start_letter}:{end_letter}, mode "
+                       f"{settings.mode}).",
+                       rows=full_rows)
 
 
 def verify_written(client, tab, headers, expected_rows, *, input_time,
-                   distributor_code):
+                   distributor_code, kind=None):
     """Read the pool back and confirm the rows we just appended are there.
 
-    Matches on the batch's `input_time` plus the distributor, which is the only
-    batch key the existing pool supports - there is no upload_id column and
-    adding one was explicitly out of scope.
+    Matches on the batch's `input_time` plus the distributor, which is the
+    only batch key the existing pool supports - there is no upload_id column
+    and adding one was explicitly out of scope.
+
+    Compares only the OWNED span (what Streamlit actually wrote) — the
+    formula columns' live values are computed by the sheet from data this
+    module never sent, and would never match a preview-derived expectation.
     """
+    kind = kind or ("NOO" if tab == config.TAB_POOL_NOO else "SKU")
+    start, end, span_columns = owned_span_for(kind, headers)
+
     live = client.read_values(tab, "A2:BZ20000")
     index = {h: i for i, h in enumerate(headers)}
     ti, di = index.get("input_time"), index.get("customer_branch_code")
@@ -224,13 +361,15 @@ def verify_written(client, tab, headers, expected_rows, *, input_time,
              if cell(r, ti) == input_time
              and norm_key(cell(r, di)) == norm_key(distributor_code)]
 
-    expected = to_values(expected_rows, headers)
+    expected = _scoped_values(expected_rows, span_columns)
     matched = 0
-    remaining = [list(r) for r in found]
+    remaining = []
+    for r in found:
+        segment = [clean(r[i]) if i < len(r) else "" for i in range(start, end + 1)]
+        remaining.append(segment)
     for want in expected:
         for i, got in enumerate(remaining):
-            padded = got + [""] * (len(want) - len(got))
-            if padded[:len(want)] == want:
+            if got == want:
                 matched += 1
                 remaining.pop(i)
                 break

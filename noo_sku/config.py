@@ -125,8 +125,11 @@ SKU_SIGNATURE = {"principal product code", "principal product name"}
 # already exist and already carry these headers. The application adapts to them:
 # no column may be added, removed, renamed or reordered. writer.assert_layout()
 # re-reads the live header before every write and refuses on any mismatch.
-# Re-verified 2026-09-01: BD Support prepended five processing columns, so the
-# tab is now 41 wide. The original 36 follow unchanged, shifted right by five.
+# Re-verified 2026-09-01: BD Support prepended five processing columns to NOO,
+# making it 41 wide. Re-verified 2026-09-03 (formula-preservation audit): SKU
+# gained two of its own ("DMS", "RSA"), making it 15 wide — assert_layout was
+# already correctly refusing every SKU write since that change; see
+# docs/streamlit_noo_sku_mapping_write_mechanism.md for the full audit.
 POOL_NOO_HEADERS = [
     # BD Support's own processing columns — Streamlit never writes these.
     "DMS", "BASIS", "RSA Name", "BD Support", "NOO/Existing",
@@ -139,23 +142,64 @@ POOL_NOO_HEADERS = [
     "npwp", "remark", "area", "province",
 ]
 POOL_SKU_HEADERS = [
-    "asm", "region", "input_time", "customer_code", "customer_name",
-    "product_code", "customer_branch_code", "product_name",
+    "DMS", "RSA", "asm", "region", "input_time", "customer_code",
+    "customer_name", "product_code", "customer_branch_code", "product_name",
     "customer_product_code", "customer_product_name", "specification",
     "barcode", "description",
 ]
 
-# Columns measured at <=0.1% fill across 3,859 rows of SKINTIFIC NEW, the pool's
-# direct precedent. Left deliberately blank: populating them would push data BD
-# Support neither expects nor uses into an operational sheet.
+# ─── Write ownership — 2026-09-03 formula-preservation fix ───────────────────
+# POOL NOO STREAMLIT and POOL SKU STREAMLIT are NOT append-only tables: BD
+# Support pre-fills every row (confirmed down to row 900+ of NOO, before any
+# upload ever reached it) with live XLOOKUP formulas in specific columns, and
+# owns a couple of manual processing flags outright. Streamlit's write path
+# must NEVER include these columns in any request — not even as an explicit
+# blank — because the only thing that has kept those formulas alive so far is
+# Google Sheets' own row-insertion behaviour (copying the formula pattern from
+# the row above into a newly inserted row), which is real and has been
+# verified against every row written so far, but is not something this
+# application explicitly controls or should depend on for something this
+# important. See writer._owned_write_span for how this is enforced.
+#
+# BD Support's manual processing flags — never derived, never touched.
+POOL_NOO_BD_MANUAL = frozenset({"DMS", "BASIS"})
+#: Confirmed live spreadsheet formulas (XLOOKUP against 'DIST DATABASE' /
+#: 'ASM/SPV/SE', keyed on that row's own customer_branch_code or branch_name).
+POOL_NOO_FORMULA_COLUMNS = frozenset({
+    "RSA Name", "BD Support", "asm_kam", "spv", "se_kae", "aom", "area",
+    "province",
+})
+POOL_SKU_BD_MANUAL = frozenset({"DMS"})
+#: Confirmed live spreadsheet formula (XLOOKUP against 'DIST DATABASE').
+POOL_SKU_FORMULA_COLUMNS = frozenset({"RSA"})
+
+# Columns measured at <=0.1% fill across 3,859 rows of SKINTIFIC NEW, the NOO
+# pool's direct precedent. Streamlit writes blank here (safe: none of these
+# carry a formula), rather than every column BD Support doesn't manually own.
 POOL_NOO_UNUSED = frozenset({
     "longitude", "latitude", "visibility_rating", "location_rating", "tl", "pm",
     "md/smd", "ba1", "ba2", "ba3", "ba4", "group_branch_blank", "group_name",
     "nik", "npwp", "remark",
-    # BD Support's processing columns, added 2026-09-01. Theirs to fill.
-    "DMS", "BASIS", "RSA Name", "BD Support",
 })
 POOL_SKU_UNUSED = frozenset({"barcode", "description"})
+
+#: Never written by Streamlit, for any reason — the union used everywhere a
+#: "not Streamlit's to touch" check is needed (duplicate-hash exclusion, etc).
+POOL_NOO_NOT_OWNED = (POOL_NOO_BD_MANUAL | POOL_NOO_FORMULA_COLUMNS
+                     | POOL_NOO_UNUSED)
+POOL_SKU_NOT_OWNED = (POOL_SKU_BD_MANUAL | POOL_SKU_FORMULA_COLUMNS
+                     | POOL_SKU_UNUSED)
+
+#: Deliberately narrower than POOL_*_NOT_OWNED — manual flags and live
+#: formulas only, NOT the merely-unused columns. This is the boundary
+#: writer._owned_write_span expands outward from the anchor until it hits, so
+#: an unused-but-harmless column sitting BETWEEN two genuinely owned columns
+#: (e.g. NOO's longitude/latitude sit between store_address and store_type)
+#: does not falsely truncate the span before a real owned column beyond it —
+#: unlike POOL_NOO_UNUSED, which folding in here would cut the span off at
+#: store_address and silently drop store_type from every write.
+POOL_NOO_HARD_NEVER_TOUCH = POOL_NOO_BD_MANUAL | POOL_NOO_FORMULA_COLUMNS
+POOL_SKU_HARD_NEVER_TOUCH = POOL_SKU_BD_MANUAL | POOL_SKU_FORMULA_COLUMNS
 
 # System-generated; never part of any comparison (brief 11 and 13).
 TIMESTAMP_COLUMNS = frozenset({"input_time"})
