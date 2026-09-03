@@ -545,11 +545,22 @@ def _handle_section(kind, dist):
     except writer.LayoutMismatch as exc:
         st.error(f"✗ {exc}")
         return
+    except writer.PilotLimitExceeded as exc:
+        st.error(f"✗ {exc}")
+        return
     except Exception as exc:
+        # Nothing was written: append_rows only calls the Sheets API after
+        # assert_layout/PilotLimitExceeded have already passed, so a failure
+        # past that point is a single all-or-nothing API call, not a partial
+        # write. Logged in full server-side (Streamlit Cloud captures
+        # stderr) so a failure can be diagnosed without asking the admin to
+        # transcribe a stack trace by hand.
+        import traceback
+        traceback.print_exc()
         st.error("✗ Upload gagal saat menulis ke tracker. Tidak ada data "
                  "sebagian yang tersimpan. Silakan coba lagi atau hubungi "
                  "BD Support.")
-        st.caption(f"Referensi teknis: {type(exc).__name__}")
+        st.caption(f"Referensi teknis: {type(exc).__name__}: {exc}")
         return
 
     _render_result(result, write_result, dist, kind)

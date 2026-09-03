@@ -118,6 +118,11 @@ class SheetsClient:
         ).execute()
         return [vr.get("values", []) for vr in res.get("valueRanges", [])]
 
+    #: Bottom of every bounded range this module reads or writes (matches
+    #: `_pool_rows_as_dicts`/`load_noo_ledger`/etc.'s existing "A2:BZ20000"
+    #: convention) — comfortably past any pool tab's real row count.
+    MAX_ROW = 20000
+
     def append_column_span(self, tab: str, start_col: str, end_col: str,
                            rows) -> dict:
         """Fill the next available row(s) within ONE column span only.
@@ -127,10 +132,14 @@ class SheetsClient:
         reusing a pre-existing, already-formula-equipped row — never a brand
         new row inserted into the sheet, which would shift every pre-filled
         formula row below it down by one and defeat the entire point of
-        writing a bounded column range. The range is left open-ended
-        (`f"{start_col}1:{end_col}"`, no row number on the end) so the API
-        searches the WHOLE column span for the existing table, not just its
-        first row.
+        writing a bounded column range.
+
+        The range is fully bounded (`f"{start_col}1:{end_col}{MAX_ROW}"`),
+        not left open-ended on the end row: A1 notation only supports an
+        open-ended side when BOTH ends name the same column (Google's own
+        documented example is `Sheet1!A5:A`) — an asymmetric range with a row
+        on one side and a *different* column on the other, e.g. `E1:W`, is
+        not a representable A1 string and is rejected outright by the API.
 
         Columns outside `start_col:end_col` — every BD Support manual flag
         and every live formula column — are structurally absent from `range`,
@@ -139,7 +148,7 @@ class SheetsClient:
         """
         return self._svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
-            range=f"'{tab}'!{start_col}1:{end_col}",
+            range=f"'{tab}'!{start_col}1:{end_col}{self.MAX_ROW}",
             valueInputOption="RAW",
             insertDataOption="OVERWRITE",
             body={"values": rows},
