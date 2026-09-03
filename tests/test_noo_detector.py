@@ -199,3 +199,200 @@ def test_noo_detection_and_duplicate_detection_stay_independent():
     # duplicate-skipping happens later, in the writer, not by short-circuiting
     # detection.
     assert again.pool_rows[0]["NOO/Existing"] == "Not NOO -> Reference ID not exist"
+
+
+# ─── Regression: multi-branch store-basis scoping (2026-09-03) ───────────────
+# Root cause: `_store_basis()` / `load_store_basis()` were scoped to only the
+# LOGGED-IN admin's own branch code, not every branch they are authorised for.
+# A multi-branch upload naming a SIBLING branch could therefore never find
+# that branch's stores in master_store_database_basis at all -- the detector
+# then correctly reported "not found" for data it was never given. Confirmed
+# live against the two reported reference ids (DST333KLK8500100,
+# DST332DPS3200142, both real rows of PT SINAR MAYURI, branches DST333/DST332)
+# before any code changed; the fixtures below reproduce the same shape.
+KLUNGKUNG_STORE = {
+    "cust_id": "IEBU00061", "store_name": "IRMA TOKO",
+    "address": "JL. KLUNGKUNG", "city": "Klungkung",
+    "reference_id_skt": "DST333KLK8500100", "reference_id_tph": "DST333KLK8500100",
+}
+DENPASAR_STORE = {
+    "cust_id": "IEBD00039", "store_name": "RAHMA TOKO",
+    "address": "JL. BATUKARU, TABANAN", "city": "Tabanan",
+    "reference_id_skt": "DST332DPS3200142", "reference_id_tph": "DST332DPS3200142",
+}
+
+# Scoped to ONLY the login branch (DST334) -- reproduces the bug: neither
+# sibling store is present, exactly as `load_store_basis(..., [login])` used
+# to return before the fix.
+_LOGIN_ONLY_BY_CUST = {}
+_LOGIN_ONLY_BY_REF = {"skt": {}, "tph": {}, "fcr": {}}
+
+# Scoped to the FULL company (DST332/333/334/335) -- what the fixed callers
+# now pass through.
+_COMPANY_WIDE_BY_CUST = {"IEBU00061": KLUNGKUNG_STORE, "IEBD00039": DENPASAR_STORE}
+_COMPANY_WIDE_BY_REF = {
+    "skt": {"DST333KLK8500100": [KLUNGKUNG_STORE],
+           "DST332DPS3200142": [DENPASAR_STORE]},
+    "tph": {"DST333KLK8500100": [KLUNGKUNG_STORE],
+           "DST332DPS3200142": [DENPASAR_STORE]},
+    "fcr": {},
+}
+
+
+def _sinar_mayuri_pipeline(rows, by_cust, by_ref, login="DST334"):
+    allowed = {c: {"name": f"PT SINAR MAYURI - {c}"}
+              for c in ("DST332", "DST333", "DST334", "DST335")}
+    distributor = {"distributor_code": login,
+                  "distributor_name": f"PT SINAR MAYURI - {login}"}
+    return pipeline.run_noo(
+        fx.FakeParsed(rows, config.NOO_COLUMNS), distributor=distributor,
+        resolver=CustomerCodeResolver(dist_database={login: "SMI"}),
+        dist_enricher=enrichment.DistributorEnricher(
+            master_distributor={}, dist_database={login: distributor}),
+        store_enricher=enrichment.StoreEnricher(by_cust, by_ref),
+        ledger=(frozenset(), frozenset()), when=now_business(),
+        allowed_branches=allowed, company_name="PT SINAR MAYURI")
+
+
+@pytest.mark.sanity
+def test_bug_reproduced_with_login_only_scoped_basis_data():
+    """Confirms the FAILURE MODE itself: when the store-basis data is scoped
+    to only the login branch (the pre-fix behaviour), a sibling branch's
+    genuinely-existing store is misclassified as NOO with no store_id --
+    proving the defect was in what data was FETCHED, not in the lookup or
+    classification logic, both of which are exercised here unchanged."""
+    result = _sinar_mayuri_pipeline(
+        [fx.noo_row(branch_code="DST333", customer_code="11SMI",
+                   store_code="DST333KLK8500100", name="TOKO KLUNGKUNG",
+                   branch="PT SINAR MAYURI - DST333")],
+        _LOGIN_ONLY_BY_CUST, _LOGIN_ONLY_BY_REF)
+    assert not result.errors
+    row = result.pool_rows[0]
+    assert row["NOO/Existing"] == "NOO -> Create ID"
+    assert row["store_id"] == ""
+
+
+@pytest.mark.sanity
+def test_a_dst333_klungkung_reference_id_resolves_to_not_noo():
+    """Test A (user-specified): DST333KLK8500100 -> Not NOO, store_id
+    populated with the master's own matched identifier."""
+    result = _sinar_mayuri_pipeline(
+        [fx.noo_row(branch_code="DST333", customer_code="11SMI",
+                   store_code="DST333KLK8500100", name="TOKO KLUNGKUNG",
+                   branch="PT SINAR MAYURI - DST333")],
+        _COMPANY_WIDE_BY_CUST, _COMPANY_WIDE_BY_REF)
+    assert not result.errors
+    row = result.pool_rows[0]
+    assert row["NOO/Existing"] == "Not NOO -> Reference ID not exist"
+    assert row["store_id"] == "IEBU00061"
+
+
+@pytest.mark.sanity
+def test_b_dst332_denpasar_reference_id_resolves_to_not_noo():
+    """Test B (user-specified): DST332DPS3200142 -> Not NOO, store_id
+    populated with the master's own matched identifier."""
+    result = _sinar_mayuri_pipeline(
+        [fx.noo_row(branch_code="DST332", customer_code="11SMI",
+                   store_code="DST332DPS3200142", name="TOKO DENPASAR",
+                   branch="PT SINAR MAYURI - DST332")],
+        _COMPANY_WIDE_BY_CUST, _COMPANY_WIDE_BY_REF)
+    assert not result.errors
+    row = result.pool_rows[0]
+    assert row["NOO/Existing"] == "Not NOO -> Reference ID not exist"
+    assert row["store_id"] == "IEBD00039"
+
+
+@pytest.mark.sanity
+def test_c_genuine_new_store_still_reads_as_noo_with_blank_store_id():
+    """Test C (user-specified): a reference id that genuinely does not exist
+    anywhere in the company-wide data must still classify as NOO."""
+    result = _sinar_mayuri_pipeline(
+        [fx.noo_row(branch_code="DST335", customer_code="11SMI",
+                   store_code="DST335NEG9999999", name="TOKO BENAR BARU",
+                   branch="PT SINAR MAYURI - DST335")],
+        _COMPANY_WIDE_BY_CUST, _COMPANY_WIDE_BY_REF)
+    assert not result.errors
+    row = result.pool_rows[0]
+    assert row["NOO/Existing"] == "NOO -> Create ID"
+    assert row["store_id"] == ""
+
+
+@pytest.mark.sanity
+def test_d_whitespace_and_case_variants_still_resolve():
+    """Test D (user-specified): the lookup must be tolerant of formatting
+    noise around an otherwise-correct reference id."""
+    result = _sinar_mayuri_pipeline(
+        [fx.noo_row(branch_code=" dst333 ", customer_code="11SMI",
+                   store_code="  dst333klk8500100  ", name="TOKO KLUNGKUNG",
+                   branch="PT SINAR MAYURI - DST333")],
+        _COMPANY_WIDE_BY_CUST, _COMPANY_WIDE_BY_REF)
+    assert not result.errors
+    row = result.pool_rows[0]
+    assert row["NOO/Existing"] == "Not NOO -> Reference ID not exist"
+    assert row["store_id"] == "IEBU00061"
+
+
+@pytest.mark.sanity
+def test_both_reported_reference_ids_together_in_one_multi_branch_upload():
+    """The exact user-reported scenario: one file, both branches, one admin
+    logged in as neither of them."""
+    result = _sinar_mayuri_pipeline([
+        fx.noo_row(branch_code="DST333", customer_code="11SMI",
+                  store_code="DST333KLK8500100", name="TOKO KLUNGKUNG",
+                  branch="PT SINAR MAYURI - DST333"),
+        fx.noo_row(branch_code="DST332", customer_code="11SMI",
+                  store_code="DST332DPS3200142", name="TOKO DENPASAR",
+                  branch="PT SINAR MAYURI - DST332"),
+    ], _COMPANY_WIDE_BY_CUST, _COMPANY_WIDE_BY_REF)
+    assert not result.errors
+    by_code = {r["customer_store_code"]: r for r in result.pool_rows}
+    assert by_code["DST333KLK8500100"]["NOO/Existing"] == \
+        "Not NOO -> Reference ID not exist"
+    assert by_code["DST333KLK8500100"]["store_id"] == "IEBU00061"
+    assert by_code["DST332DPS3200142"]["NOO/Existing"] == \
+        "Not NOO -> Reference ID not exist"
+    assert by_code["DST332DPS3200142"]["store_id"] == "IEBD00039"
+
+
+# ─── Regression: query no longer narrows to a single prefix code ────────────
+def test_load_store_basis_query_checks_every_authorised_code_not_just_the_first():
+    """The secondary bug in the same function: STARTS_WITH used only
+    codes[0] as its prefix, silently narrowing the reference-id fallback to
+    one branch. Must now check every authorised code."""
+    import inspect
+
+    from noo_sku import sources
+
+    src = inspect.getsource(sources.load_store_basis)
+    # The comment explaining the old bug legitimately says "codes[0]"; only
+    # the executable line matters here.
+    code_lines = [l for l in src.splitlines() if not l.strip().startswith("#")]
+    code_only = "\n".join(code_lines)
+    assert "codes[0]" not in code_only, "must not single out the first code"
+    assert 'ScalarQueryParameter("prefix"' not in code_only
+    assert 'ArrayQueryParameter("codes"' in code_only
+    assert "UNNEST(@codes)" in code_only
+
+
+def test_store_basis_caller_is_scoped_to_every_authorised_branch():
+    """Source-level guard against the exact regression: the Streamlit caller
+    must pass the full authorised set, never a single login code, into the
+    store-basis loader."""
+    from pathlib import Path
+
+    app = (Path(__file__).resolve().parents[1] / "noo_sku_mapping.py").read_text(
+        encoding="utf-8")
+    assert "_store_basis(tuple(sorted(allowed)))" in app
+    assert "_store_basis(dist_code)" not in app
+
+
+def test_uat_script_caller_is_also_scoped_to_every_authorised_branch():
+    """The standalone UAT/production script must not diverge from the
+    Streamlit app's behaviour -- it had the identical single-code bug."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "scripts"
+          / "run_noo_sku_uat.py").read_text(encoding="utf-8")
+    assert "authorized_branches" in src
+    assert "allowed_branches=allowed" in src
+    assert "load_store_basis, creds, project, [code]" not in src

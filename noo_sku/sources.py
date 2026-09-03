@@ -380,15 +380,19 @@ def load_store_basis(credentials, project, distributor_codes=None) -> tuple:
     client = bigquery.Client(credentials=credentials, project=project)
     where, params = "", []
     if distributor_codes:
+        # 2026-09-03 fix: a store's reference_id can start with ANY of the
+        # caller's authorised branch codes, not just the first one. Using a
+        # single @prefix (codes[0]) here silently excluded matches for every
+        # other branch and was the second half of the multi-branch NOO
+        # Detector bug — see the EXISTS/UNNEST rewrite below.
         where = ("WHERE UPPER(TRIM(dst_id_skt)) IN UNNEST(@codes) "
                  "OR UPPER(TRIM(dst_id_tph)) IN UNNEST(@codes) "
-                 "OR STARTS_WITH(UPPER(TRIM(reference_id_skt)), @prefix) "
-                 "OR STARTS_WITH(UPPER(TRIM(reference_id_tph)), @prefix)")
+                 "OR EXISTS(SELECT 1 FROM UNNEST(@codes) AS c "
+                 "          WHERE STARTS_WITH(UPPER(TRIM(reference_id_skt)), c)) "
+                 "OR EXISTS(SELECT 1 FROM UNNEST(@codes) AS c "
+                 "          WHERE STARTS_WITH(UPPER(TRIM(reference_id_tph)), c))")
         codes = [norm_key(c) for c in distributor_codes]
-        params = [
-            bigquery.ArrayQueryParameter("codes", "STRING", codes),
-            bigquery.ScalarQueryParameter("prefix", "STRING", codes[0]),
-        ]
+        params = [bigquery.ArrayQueryParameter("codes", "STRING", codes)]
     query = f"SELECT {', '.join(_BASIS_FIELDS)} "             f"FROM `skintific-data-warehouse.gt_schema.master_store_database_basis` {where}"
     job = client.query(query, job_config=bigquery.QueryJobConfig(
         query_parameters=params)) if params else client.query(query)

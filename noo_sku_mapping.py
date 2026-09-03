@@ -113,10 +113,19 @@ def _master_distributor():
 
 
 @st.cache_data(ttl=1800, show_spinner="Memuat master toko...")
-def _store_basis(distributor_code):
+def _store_basis(distributor_codes):
+    """`distributor_codes` must be every branch the admin is authorised for,
+    not just their own login code (see `auth.authorized_branches`).
+
+    2026-09-03 fix: this used to receive only the login code, so a
+    multi-branch upload naming a sibling branch could never find that
+    branch's stores in master_store_database_basis — the NOO Detector then
+    correctly reported "not found" for data it was never given. `codes` must
+    be a tuple/frozenset, not a list, so Streamlit can cache on it.
+    """
     creds, project, _ = _clients()
     try:
-        return sources.load_store_basis(creds, project, [distributor_code])
+        return sources.load_store_basis(creds, project, distributor_codes)
     except Exception:
         return {}, {"skt": {}, "tph": {}, "fcr": {}}
 
@@ -446,7 +455,7 @@ def _build_pipeline_result(kind, dist, uploaded):
 
     try:
         if expected == parsers.UPLOAD_NOO:
-            by_cust, by_ref = _store_basis(dist_code)
+            by_cust, by_ref = _store_basis(tuple(sorted(allowed)))
             return pipeline.run_noo(
                 parsed, distributor=dist, resolver=resolver,
                 dist_enricher=dist_enricher,

@@ -43,8 +43,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from noo_sku import (config, enrichment, parsers, pipeline, sources,  # noqa: E402
-                     validators, writer)
+from noo_sku import (auth, config, enrichment, parsers, pipeline,  # noqa: E402
+                     sources, validators, writer)
 from noo_sku.customer_code import CustomerCodeResolver  # noqa: E402
 from noo_sku.normalize import norm_key, now_business  # noqa: E402
 
@@ -134,15 +134,24 @@ def run_pipeline(args, settings, creds, project, client, distributor,
     code = distributor["distributor_code"]
 
     if parsed.kind == parsers.UPLOAD_NOO:
-        by_cust, by_ref = _safe(sources.load_store_basis, creds, project, [code],
-                                default=({}, {"skt": {}, "tph": {}, "fcr": {}}))
+        # Scope to every branch the admin is authorised for, not just their
+        # own login code -- a single-code scope was the exact 2026-09-03 bug:
+        # a multi-branch upload naming a sibling branch could never find that
+        # branch's stores in master_store_database_basis, so the NOO Detector
+        # correctly reported "not found" for data it was never given.
+        allowed = auth.authorized_branches(distributors, code)
+        company_name = distributor.get("company", "")
+        by_cust, by_ref = _safe(
+            sources.load_store_basis, creds, project, tuple(sorted(allowed)),
+            default=({}, {"skt": {}, "tph": {}, "fcr": {}}))
         return pipeline.run_noo(
             parsed, distributor=distributor, resolver=resolver,
             dist_enricher=dist_enricher,
             store_enricher=enrichment.StoreEnricher(by_cust, by_ref),
-            ledger=sources.load_noo_ledger(client, code),
+            ledger=sources.load_noo_ledger(client, set(allowed)),
             known_cities=_safe(sources.load_city_reference, creds, default=set()),
-            when=now_business())
+            when=now_business(), allowed_branches=allowed,
+            company_name=company_name)
 
     if not resolver.resolve(code).resolved:
         raise SystemExit(
