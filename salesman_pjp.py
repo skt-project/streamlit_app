@@ -1141,7 +1141,7 @@ def create_pjp_excel(
         ),
         "Hari": (
             "Langkah 4 - Pilih Frekuensi (kolom I) dahulu. Jumlah hari yang "
-            "boleh dipilih: F1=1 hari, F2=2 hari, F4=1-4 hari, F4+=1-5 hari. "
+            "boleh dipilih: F1=1 hari, F2=1-2 hari, F4=1-4 hari, F4+=1-5 hari. "
             "SENIN-SABTU saja (hari Minggu/Sunday tidak berlaku)."
         ),
         MINGGU_COL: (
@@ -1241,7 +1241,7 @@ def create_pjp_excel(
         promptTitle="Langkah 4 - Hari (tergantung Frekuensi)",
         prompt=(
             "Pilih Frekuensi (kolom I) terlebih dahulu. Jumlah hari: "
-            "F1=1, F2=2, F4=1-4, F4+=1-5. Hanya SENIN-SABTU, dipisah slash "
+            "F1=1, F2=1-2, F4=1-4, F4+=1-5. Hanya SENIN-SABTU, dipisah slash "
             "atau koma — contoh: SENIN/SELASA. Tidak boleh duplikat."
         ),
         showErrorMessage=True,
@@ -1548,7 +1548,7 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
         otherwise: "Store does not belong to selected distributor."
       - Frekuensi must be one of F1/F2/F4/F4+.
       - Hari (SENIN..SABTU, never MINGGU) must satisfy the row's Frekuensi
-        day-count rule (F1=1, F2=2, F4=1-4, F4+=1-5) — see normalize_hari().
+        day-count rule (F1=1, F2=1-2, F4=1-4, F4+=1-5) — see normalize_hari().
         Skipped if Frekuensi itself is invalid/missing (nothing to check
         the count against).
       - Nomor Minggu / callcycle must satisfy the row's Frekuensi rule
@@ -1662,7 +1662,7 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
                 errors.append(
                     f"Baris {n}: Invalid Hari. Gunakan SENIN-SABTU (bukan MINGGU) "
                     f"dipisahkan dengan slash atau koma, sesuai jumlah hari yang "
-                    f"diizinkan Frekuensi (F1=1, F2=2, F4=1-4, F4+=1-5). "
+                    f"diizinkan Frekuensi (F1=1, F2=1-2, F4=1-4, F4+=1-5). "
                     f"(nilai: '{hari_val}', Frekuensi: '{freq_val}')"
                 )
 

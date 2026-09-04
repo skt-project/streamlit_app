@@ -26,7 +26,7 @@ RULES (the single source of truth for the whole feature):
            Genap  -> Ket. Minggu is a dropdown of  2 | 4   (user picks ONE)
            callcycle = that single chosen week
 
-    F2  -> exactly 2 unique days
+    F2  -> 1 or 2 unique days
            Minggu = Ganjil or Genap  (never Ganjil + Genap)
            Ganjil -> callcycle = "1,3"   (automatic)
            Genap  -> callcycle = "2,4"   (automatic)
@@ -61,9 +61,14 @@ import pandas as pd
 FREKUENSI_OPTIONS = ["F1", "F2", "F4", "F4+"]
 
 # (min_days, max_days) allowed in Column J for each Frekuensi.
+#
+# F2 accepts ONE or TWO days. The week pattern is what makes F2 "twice a
+# month" (callcycle 1,3 or 2,4 — unchanged), so a single day is a complete,
+# valid assignment on its own: F2 + SENIN + Minggu Ganjil visits Senin in
+# week 1 and again in week 3. Two days remain supported exactly as before.
 FREKUENSI_HARI_DAY_COUNT = {
     "F1": (1, 1),
-    "F2": (2, 2),
+    "F2": (1, 2),
     "F4": (1, 4),
     "F4+": (1, 5),
 }
@@ -87,7 +92,7 @@ def _hari_combos(min_days: int, max_days: int) -> list[str]:
 
 # Every valid day-combination per Frekuensi, pre-rendered canonically —
 # this is exactly what Column J's dependent dropdown offers.
-#   F1 ->  6   F2 -> 15   F4 -> 56   F4+ -> 62
+#   F1 ->  6   F2 -> 21   F4 -> 56   F4+ -> 62
 HARI_COMBOS_BY_FREKUENSI = {
     f: _hari_combos(*FREKUENSI_HARI_DAY_COUNT[f]) for f in FREKUENSI_OPTIONS
 }
@@ -211,7 +216,7 @@ def normalize_hari(raw, frekuensi: str | None = None) -> tuple[str | None, str |
     "/"-joined, de-duplicated and ordered Monday->Saturday.
 
     If `frekuensi` is given, the day COUNT is also checked against
-    FREKUENSI_HARI_DAY_COUNT (F1=1, F2=2, F4=1-4, F4+=1-5).
+    FREKUENSI_HARI_DAY_COUNT (F1=1, F2=1-2, F4=1-4, F4+=1-5).
     """
     text = _clean(raw)
     if not text:

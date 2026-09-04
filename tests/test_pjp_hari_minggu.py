@@ -63,6 +63,9 @@ def test_hari_sunday_rejected_with_specific_message():
 @pytest.mark.parametrize("frekuensi,raw", [
     ("F1", "SENIN"), ("F1", "SABTU"),
     ("F2", "SENIN/SELASA"), ("F2", "SENIN/RABU"),
+    # F2 also accepts a SINGLE day: the week pattern (1,3 / 2,4) is what
+    # makes it twice-monthly, so one day is a complete assignment.
+    ("F2", "SENIN"), ("F2", "SELASA"), ("F2", "JUMAT"), ("F2", "SABTU"),
     ("F4", "SENIN"), ("F4", "SENIN/SELASA/RABU/KAMIS"),
     ("F4+", "SENIN"), ("F4+", "SENIN/SELASA/RABU/KAMIS/JUMAT"),
 ])
@@ -73,7 +76,6 @@ def test_hari_day_count_valid(frekuensi, raw):
 
 @pytest.mark.parametrize("frekuensi,raw", [
     ("F1", "SENIN/SELASA"),
-    ("F2", "SENIN"),
     ("F2", "SENIN/SELASA/RABU"),
     ("F4", "SENIN/SELASA/RABU/KAMIS/JUMAT"),
     ("F4+", "SENIN/SELASA/RABU/KAMIS/JUMAT/SABTU"),
@@ -85,7 +87,7 @@ def test_hari_day_count_invalid(frekuensi, raw):
 
 def test_hari_combo_counts_and_no_sunday():
     assert len(HARI_COMBOS_BY_FREKUENSI["F1"]) == 6
-    assert len(HARI_COMBOS_BY_FREKUENSI["F2"]) == 15
+    assert len(HARI_COMBOS_BY_FREKUENSI["F2"]) == 21  # 6 single + 15 pairs
     assert len(HARI_COMBOS_BY_FREKUENSI["F4"]) == 56
     assert len(HARI_COMBOS_BY_FREKUENSI["F4+"]) == 62
     assert "MINGGU" not in HARI_CANONICAL_ORDER
@@ -324,3 +326,61 @@ def test_legacy_ket_minggu_values_are_recognisable(legacy_value):
 def test_current_ket_minggu_values_are_not_mistaken_for_legacy(current_value):
     # A current-format workbook must never trip the outdated-template check.
     assert migrate_legacy_minggu(current_value) is None
+
+
+# ─── F2 single-day support ─────────────────────────────────────────────────
+# F2 means two visit OCCURRENCES per month, which the week pattern (1,3 or
+# 2,4) already provides. So a single day is a complete F2 assignment:
+# SENIN + Minggu Ganjil = Senin in week 1 and Senin in week 3. Two days
+# remain valid and behave exactly as before.
+
+@pytest.mark.parametrize("day", ["SENIN", "SELASA", "RABU", "KAMIS", "JUMAT", "SABTU"])
+def test_f2_accepts_any_single_day(day):
+    got, err = normalize_hari(day, frekuensi="F2")
+    assert err is None and got == day
+
+
+@pytest.mark.parametrize("day", ["SENIN", "SELASA", "JUMAT"])
+def test_f2_single_day_appears_in_dropdown(day):
+    # Must be selectable in Column J, not merely accepted on import.
+    assert day in HARI_COMBOS_BY_FREKUENSI["F2"]
+
+
+@pytest.mark.parametrize("minggu,expected_cc", [(GANJIL, "1,3"), (GENAP, "2,4")])
+def test_f2_single_day_keeps_normal_callcycle(minggu, expected_cc):
+    # The callcycle rule is untouched by the day-count change.
+    assert auto_callcycle("F2", minggu) == expected_cc
+    got, err = normalize_callcycle(expected_cc, "F2", minggu)
+    assert err is None and got == expected_cc
+
+
+def test_f2_single_day_expands_to_exactly_two_visits():
+    hari, _ = normalize_hari("SENIN", frekuensi="F2")
+    cc = auto_callcycle("F2", GANJIL)
+    pairs = expand_hari_callcycle(hari, cc)
+    assert pairs == [("SENIN", "1"), ("SENIN", "3")]
+    assert len(pairs) == 2  # matches "F2 = 2x per month"
+
+
+def test_f2_two_day_behaviour_unchanged():
+    # Regression guard: the pre-existing two-day form still expands the
+    # same way it always did (2 days x 2 weeks = 4 rows).
+    hari, _ = normalize_hari("SENIN/SELASA", frekuensi="F2")
+    cc = auto_callcycle("F2", GANJIL)
+    assert expand_hari_callcycle(hari, cc) == [
+        ("SENIN", "1"), ("SENIN", "3"), ("SELASA", "1"), ("SELASA", "3"),
+    ]
+
+
+def test_f2_still_rejects_three_or_more_days():
+    assert normalize_hari("SENIN/SELASA/RABU", frekuensi="F2")[0] is None
+
+
+@pytest.mark.parametrize("frekuensi,raw,ok", [
+    ("F1", "SENIN", True), ("F1", "SENIN/SELASA", False),   # F1 untouched
+    ("F4", "SENIN", True), ("F4", "SENIN/SELASA/RABU/KAMIS/JUMAT", False),
+    ("F4+", "SENIN/SELASA/RABU/KAMIS/JUMAT", True),
+])
+def test_other_frequencies_unaffected_by_f2_change(frekuensi, raw, ok):
+    got, _ = normalize_hari(raw, frekuensi=frekuensi)
+    assert (got is not None) is ok
