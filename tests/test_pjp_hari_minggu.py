@@ -23,6 +23,7 @@ from pjp_hari_minggu import (
     ket_minggu_options,
     migrate_legacy_minggu,
     minggu_options_for_frekuensi,
+    to_minggu_pattern,
     normalize_callcycle,
     normalize_hari,
     normalize_minggu,
@@ -384,3 +385,30 @@ def test_f2_still_rejects_three_or_more_days():
 def test_other_frequencies_unaffected_by_f2_change(frekuensi, raw, ok):
     got, _ = normalize_hari(raw, frekuensi=frekuensi)
     assert (got is not None) is ok
+
+# ─── DB minggu week-pattern mapping ────────────────────────────────────────
+# Column K "Minggu Ganjil" must become DB minggu "Ganjil", never NULL and
+# never a hard-coded default.
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Minggu Ganjil", "Ganjil"),
+    ("Minggu Genap", "Genap"),
+    ("Minggu Ganjil + Genap", "Ganjil + Genap"),
+    ("Ganjil", "Ganjil"),
+    ("Genap", "Genap"),
+    ("Ganjil + Genap", "Ganjil + Genap"),
+    ("ganjil", "Ganjil"),
+    ("  Minggu   Genap ", "Genap"),
+    ("Minggu Ganjil+Genap", "Ganjil + Genap"),
+    ("", None),
+    (None, None),
+    ("Minggu Ketiga", None),
+])
+def test_to_minggu_pattern(raw, expected):
+    assert to_minggu_pattern(raw) == expected
+
+
+def test_to_minggu_pattern_never_hardcodes_a_default():
+    # Unrecognised / blank must stay empty — not "Ganjil".
+    assert to_minggu_pattern("") is None
+    assert to_minggu_pattern("Setiap Minggu") is None

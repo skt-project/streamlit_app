@@ -735,6 +735,7 @@ from pjp_hari_minggu import (  # noqa: E402
     ket_minggu_options,
     migrate_legacy_minggu,
     minggu_options_for_frekuensi,
+    to_minggu_pattern,
     normalize_callcycle,
     normalize_hari,
     normalize_minggu,
@@ -1812,6 +1813,8 @@ def read_template_sheet(
       - salesman_id      : extracted from the "Salesman ID" combo column
       - kode_toko         : extracted from the "Kode Toko" combo column
       - kode_distributor  : mirror of "Kode Distributor" for convenience
+      - minggu            : week pattern for DB (Ganjil / Genap /
+                            Ganjil + Genap), derived from Column K
 
     Frekuensi is normalized first (trimmed/uppercased) since it DRIVES the
     Hari day-count rule, the Minggu options, and (with Minggu) the Ket.
@@ -1945,6 +1948,11 @@ def read_template_sheet(
         df["Kode Distributor"] = df["kode_toko"].apply(lambda k: store_lookup.get(k, {}).get("kode_distributor", ""))
         df["kode_distributor"] = df["Kode Distributor"]
 
+    if MINGGU_COL in df.columns:
+        # DB `minggu` is the week pattern (Ganjil / Genap / Ganjil + Genap),
+        # taken from the user's Column K selection — not a hard-coded default.
+        df["minggu"] = df[MINGGU_COL].apply(to_minggu_pattern)
+
     if "No. HP" in df.columns:
         df["No. HP"] = df["No. HP"].apply(normalize_phone_id)
 
@@ -1982,13 +1990,10 @@ _SAL_COL_MAP = {
 #   ALTER TABLE gt_master_salesman_pjp ADD COLUMN salesman_id STRING;
 #   ALTER TABLE gt_master_salesman_pjp ADD COLUMN snapshot_month STRING;
 #   ALTER TABLE gt_master_salesman_pjp ADD COLUMN callcycle STRING;
-# `callcycle` is the ONE new column this template's Frekuensi/Hari/Minggu/
-# Ket. Minggu redesign adds — see backend/scripts/migrations/
-# migrate_pjp_hari_minggu_format.py in the sfa-step repo. The legacy
-# `minggu` column is intentionally NOT written here any more (frozen for
-# historical rows only). Column K "Minggu" is a template/UI input used only
-# to drive Column L — it is deliberately NOT persisted (no DB column for
-# it, per spec §2/§34: the DB gains `callcycle` and nothing else).
+# `callcycle` holds the week NUMBERS from Column L (Ket. Minggu).
+# `minggu` holds the week PATTERN from Column K: Ganjil / Genap /
+# Ganjil + Genap. Both are written. Omitting `minggu` from this map is
+# what made new uploads store NULL in the existing BigQuery column.
 _PJP_COL_MAP = {
     "salesman_id": "salesman_id",
     "ASM": "asm",
@@ -2000,6 +2005,7 @@ _PJP_COL_MAP = {
     "Nama Toko": "nama_toko",
     "Frekuensi": "frekuensi",
     "Hari": "hari",
+    "minggu": "minggu",
     KET_MINGGU_COL: "callcycle",
     "snapshot_month": "snapshot_month",
 }
@@ -3228,13 +3234,10 @@ elif PAGES[selected_page] == "pjp_template":
             st.caption(f"Menampilkan **{len(pjp_view_df)} baris** PJP · {selected_dist_name} · {selected_view_month}")
 
             # Column order mirrors the template's own Frekuensi -> Hari ->
-            # Minggu -> Ket. Minggu flow. `callcycle` is the authoritative
-            # week pattern for anything uploaded since the redesign;
-            # `minggu` is the frozen legacy column, still shown (labelled)
-            # so rows predating that change remain readable instead of
-            # appearing to have no week pattern at all. The Minggu (week
-            # parity) shown here is back-derived from callcycle for
-            # display only — it is never a stored column.
+            # Minggu -> Ket. Minggu flow. `minggu` is the stored week
+            # pattern (Ganjil / Genap / Ganjil + Genap). `callcycle` is
+            # the stored week numbers. `minggu_kategori` is back-derived
+            # from callcycle for display only.
             if "callcycle" in pjp_view_df.columns:
                 pjp_view_df = pjp_view_df.copy()
                 pjp_view_df["minggu_kategori"] = pjp_view_df["callcycle"].apply(
@@ -3252,16 +3255,16 @@ elif PAGES[selected_page] == "pjp_template":
                 hide_index=True,
                 column_config={
                     "minggu_kategori": st.column_config.TextColumn(
-                        "Minggu (kolom K)",
-                        help="Kategori minggu — diturunkan dari callcycle untuk tampilan saja, tidak disimpan sebagai kolom database.",
+                        "Minggu (dari callcycle)",
+                        help="Kategori minggu diturunkan dari callcycle untuk tampilan saja.",
                     ),
                     "callcycle": st.column_config.TextColumn(
                         "callcycle (Ket. Minggu)",
                         help="Kolom L template. F1: satu angka (1/3 bila Ganjil, 2/4 bila Genap). F2: 1,3 atau 2,4. F4: 1,2,3,4. F4+: 1,2,3,4,5.",
                     ),
                     "minggu": st.column_config.TextColumn(
-                        "minggu (lama/legacy)",
-                        help="Kolom lama, tidak lagi diisi oleh upload baru. Hanya untuk baris sebelum perubahan format.",
+                        "minggu",
+                        help="Pola minggu yang dipilih: Ganjil / Genap / Ganjil + Genap.",
                     ),
                 },
             )

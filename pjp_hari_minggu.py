@@ -16,7 +16,9 @@ USER FLOW (each column constrains the next):
     L — Ket. Minggu the concrete week number(s)   user picks for F1;
           |                                       AUTOMATIC for F2/F4/F4+
           v
-    DB: callcycle   the ONLY new database column
+    DB: callcycle   week numbers from Column L
+    DB: minggu      week pattern from Column K:
+                    Ganjil | Genap | Ganjil + Genap
 
 RULES (the single source of truth for the whole feature):
 
@@ -48,8 +50,11 @@ Hari is SENIN..SABTU only; "MINGGU" (Sunday) is never a valid visit day
 for this template (note the deliberate name collision with Column K's
 "Minggu" = week-parity, which is a different concept entirely).
 
-Only `callcycle` is persisted. Column K is a template/UI input used to
-derive L; it is never written to the database.
+`callcycle` (week numbers) and `minggu` (week pattern) are both
+persisted. Column K's Excel label includes the word "Minggu"
+("Minggu Ganjil"); the DB `minggu` column stores the pattern without
+that prefix (Ganjil / Genap / Ganjil + Genap) so it matches the
+business vocabulary. Column K still drives Column L.
 """
 import itertools
 import re
@@ -150,8 +155,16 @@ KET_OPTIONS_BY_FREKUENSI_MINGGU = {
     ("F4+", MINGGU_GANJIL_GENAP): ["1,2,3,4,5"],
 }
 
-MINGGU_COL = "Minggu"          # Column K — UI input only, never persisted
+MINGGU_COL = "Minggu"          # Column K — Excel label; maps to DB `minggu`
 KET_MINGGU_COL = "Ket. Minggu"  # Column L — maps 1:1 to DB `callcycle`
+
+# DB `minggu` stores the week pattern, not a week number and not the
+# Excel "Minggu …" prefix. Derived from the canonical Column K label.
+MINGGU_PATTERN_BY_LABEL = {
+    MINGGU_GANJIL: "Ganjil",
+    MINGGU_GENAP: "Genap",
+    MINGGU_GANJIL_GENAP: "Ganjil + Genap",
+}
 
 # Header spellings used by earlier iterations of this template. Accepted on
 # import so already-downloaded workbooks keep working; always renamed to
@@ -387,6 +400,47 @@ def derive_minggu_from_callcycle(callcycle) -> str | None:
     if has_even:
         return MINGGU_GENAP
     return None
+
+
+def to_minggu_pattern(raw) -> str | None:
+    """
+    Column K label -> DB `minggu` week-pattern value.
+
+    The Excel/UI value is "Minggu Ganjil" / "Minggu Genap" /
+    "Minggu Ganjil + Genap". The persisted column is the pattern alone:
+
+        Minggu Ganjil           -> Ganjil
+        Minggu Genap            -> Genap
+        Minggu Ganjil + Genap   -> Ganjil + Genap
+
+    Already-short values ("Ganjil", "Genap", "Ganjil + Genap") pass
+    through. Blank/unrecognised input returns None — never a hard-coded
+    default. Frequency rules (which patterns F1/F2/F4 may use) are
+    enforced by normalize_minggu(), not here.
+    """
+    text = _clean(raw)
+    if not text:
+        return None
+    if text in MINGGU_PATTERN_BY_LABEL.values():
+        return text
+    key = (
+        re.sub(r"\s+", " ", text)
+        .upper()
+        .replace(" + ", "+")
+        .replace("+ ", "+")
+        .replace(" +", "+")
+    )
+    canon = {
+        "MINGGU GANJIL": MINGGU_GANJIL,
+        "MINGGU GENAP": MINGGU_GENAP,
+        "MINGGU GANJIL+GENAP": MINGGU_GANJIL_GENAP,
+        "GANJIL": MINGGU_GANJIL,
+        "GENAP": MINGGU_GENAP,
+        "GANJIL+GENAP": MINGGU_GANJIL_GENAP,
+    }.get(key)
+    if canon is None:
+        return None
+    return MINGGU_PATTERN_BY_LABEL[canon]
 
 
 def migrate_legacy_minggu(raw) -> str | None:

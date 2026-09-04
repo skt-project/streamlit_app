@@ -235,13 +235,64 @@ def test_old_headers_are_read_by_name_not_position():
 
 # ─── BigQuery mapping ──────────────────────────────────────────────────────
 
-def test_only_callcycle_is_persisted_for_week_data():
-    df = _import([_row(**BASE, Frekuensi="F4", Hari="SENIN")])
+def _bq_payload(df):
+    df = df.copy()
     df["snapshot_month"] = "2026-09"
     col_map = SP["_PJP_COL_MAP"]
     present = {c: col_map[c] for c in col_map if c in df.columns}
-    bq_cols = set(pd.DataFrame(df[list(present.keys())]).rename(columns=present).columns)
+    return pd.DataFrame(df[list(present.keys())]).rename(columns=present)
+
+
+def test_callcycle_and_minggu_are_persisted():
+    df = _import([_row(**BASE, Frekuensi="F4", Hari="SENIN")])
+    bq = _bq_payload(df)
+    bq_cols = set(bq.columns)
     assert "callcycle" in bq_cols
-    for banned in ("minggu", "hari_minggu", "nomor_minggu", "ket_minggu", "week_number"):
+    assert "minggu" in bq_cols
+    assert bq["minggu"].iloc[0] == "Ganjil + Genap"
+    assert bq["callcycle"].iloc[0] == "1,2,3,4"
+    for banned in ("hari_minggu", "nomor_minggu", "ket_minggu", "week_number"):
         assert banned not in bq_cols, banned
     assert SP["_EXCEL_ROW_COL"] not in bq_cols, "internal helper column must not be written"
+
+
+@pytest.mark.parametrize("hari,minggu,expected_pattern,expected_cc", [
+    ("SENIN", M.MINGGU_GANJIL, "Ganjil", "1,3"),
+    ("SENIN", M.MINGGU_GENAP, "Genap", "2,4"),
+    ("SENIN/SELASA", M.MINGGU_GANJIL, "Ganjil", "1,3"),
+])
+def test_f2_persists_user_minggu_pattern(hari, minggu, expected_pattern, expected_cc):
+    df = _import([_row(**BASE, Frekuensi="F2", Hari=hari, **{M.MINGGU_COL: minggu})])
+    errors, _ = _validate(df)
+    assert errors == []
+    assert df["minggu"][0] == expected_pattern
+    bq = _bq_payload(df)
+    assert bq["minggu"].iloc[0] == expected_pattern
+    assert bq["callcycle"].iloc[0] == expected_cc
+    assert bq["hari"].iloc[0] == hari
+
+
+def test_f2_ganjil_plus_genap_still_rejected():
+    # Existing F2 rule: Ganjil + Genap is not a valid F2 Minggu choice.
+    df = _import([_row(**BASE, Frekuensi="F2", Hari="SENIN",
+                       **{M.MINGGU_COL: M.MINGGU_GANJIL_GENAP})])
+    errors, _ = _validate(df)
+    assert errors, "F2 + Ganjil + Genap must still be rejected"
+
+
+def test_f1_persists_user_minggu_pattern():
+    df = _import([_row(**BASE, Frekuensi="F1", Hari="SENIN",
+                       **{M.MINGGU_COL: M.MINGGU_GANJIL, M.KET_MINGGU_COL: "3"})])
+    errors, _ = _validate(df)
+    assert errors == []
+    bq = _bq_payload(df)
+    assert bq["minggu"].iloc[0] == "Ganjil"
+    assert bq["callcycle"].iloc[0] == "3"
+
+
+def test_f4_persists_ganjil_plus_genap():
+    df = _import([_row(**BASE, Frekuensi="F4", Hari="SENIN/SELASA")])
+    errors, _ = _validate(df)
+    assert errors == []
+    bq = _bq_payload(df)
+    assert bq["minggu"].iloc[0] == "Ganjil + Genap"
