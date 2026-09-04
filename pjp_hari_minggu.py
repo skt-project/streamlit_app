@@ -56,6 +56,8 @@ persisted. Column K's Excel label includes the word "Minggu"
 that prefix (Ganjil / Genap / Ganjil + Genap) so it matches the
 business vocabulary. Column K still drives Column L.
 """
+from __future__ import annotations
+
 import itertools
 import re
 

@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+from pathlib import Path
 import re
+import sys
 import unicodedata
 from google.oauth2 import service_account
 from google.cloud import bigquery
@@ -712,6 +714,9 @@ EDUCATION_OPTIONS = ["SD", "SMP", "SMA", "S1", "S2"]
 # Frekuensi DRIVES both Hari's allowed day-count and callcycle's allowed
 # values — see that module's docstring for the full rule table. Hari is
 # SENIN..SABTU only ("MINGGU"/Sunday is never valid for this template).
+_APP_DIR = Path(__file__).resolve().parent
+if str(_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(_APP_DIR))
 from pjp_hari_minggu import (  # noqa: E402
     FREKUENSI_OPTIONS,
     FREKUENSI_RANGE_SUFFIX,
