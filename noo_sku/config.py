@@ -249,6 +249,12 @@ VALID_CHANNELS = tuple(STORE_TYPES_BY_CHANNEL)
 
 # ─── Limits ───────────────────────────────────────────────────────────────────
 MAX_UPLOAD_ROWS = 5000
+#: Bottom row of every bounded range this module reads or writes against a
+#: pool tab (matches the "A2:BZ20000"-style convention already used by
+#: verify_written/_pool_rows_as_dicts/etc.) — comfortably past any pool's real
+#: row count, and shared so writer.py's pre-write read and sources.py's other
+#: bounded reads never drift apart.
+POOL_MAX_ROW = 20000
 STORE_ID_PATTERN = r"^IE[A-Z]{2}\d{3,6}$"
 DIST_CODE_PATTERN = r"^DST[A-Z0-9]{2,6}$"
 

@@ -330,7 +330,7 @@ def test_dry_run_validates_and_checks_layout_but_never_appends():
                                headers=config.POOL_NOO_HEADERS,
                                settings=settings, upload_id="abcd1234")
     assert write.ok and write.dry_run
-    assert client.appended == []
+    assert client.written == []
 
 
 @pytest.mark.sanity
@@ -347,11 +347,11 @@ def test_write_mode_appends_once_to_the_correct_pool():
                                headers=config.POOL_NOO_HEADERS,
                                settings=settings, upload_id="abcd1234")
     assert write.ok and not write.dry_run
-    assert len(client.appended) == 1
-    assert client.appended[0][0] == config.TAB_POOL_NOO
+    assert len(client.written) == 1
+    assert client.written[0][0] == config.TAB_POOL_NOO
     _, _, span_columns = writer.owned_span_for("NOO", config.POOL_NOO_HEADERS)
     assert len(span_columns) == 19
-    assert len(client.appended[0][1][0]) == len(span_columns)
+    assert len(client.written[0][1][0]) == len(span_columns)
 
 
 @pytest.mark.sanity
@@ -365,7 +365,7 @@ def test_write_is_refused_when_the_live_header_does_not_match():
         writer.append_rows(client, config.TAB_POOL_NOO, result.eligible_rows,
                            headers=config.POOL_NOO_HEADERS, settings=settings,
                            upload_id="x")
-    assert client.appended == []
+    assert client.written == []
 
 
 @pytest.mark.sanity
@@ -382,7 +382,7 @@ def test_no_write_targets_any_tracker_sheet():
                        _sku_pipeline([fx.sku_row()]).eligible_rows,
                        headers=config.POOL_SKU_HEADERS, settings=settings,
                        upload_id="y")
-    targets = {tab for tab, _ in client.appended}
+    targets = {tab for tab, _, _ in client.written}
     assert targets == {config.TAB_POOL_NOO, config.TAB_POOL_SKU}
     forbidden = set(config.TAB_NOO_MAIN.values()) | {
         config.TAB_SKU_MAPPING, config.TAB_DIST_DATABASE}
@@ -400,7 +400,7 @@ def test_nothing_is_written_when_every_row_is_ineligible():
     write = writer.append_rows(client, config.TAB_POOL_NOO, [],
                                headers=config.POOL_NOO_HEADERS,
                                settings=settings, upload_id="x")
-    assert not write.ok and client.appended == []
+    assert not write.ok and client.written == []
 
 
 # ─── Formula-safe, column-scoped write (2026-09-03 fix) ───────────────────────
@@ -457,6 +457,25 @@ def test_owned_span_excludes_every_formula_and_manual_sku_column():
     # Trailing, never-populated columns with nothing owned beyond them:
     # correctly excluded from the write entirely, not merely blanked.
     assert "barcode" not in touched and "description" not in touched
+
+
+@pytest.mark.sanity
+def test_next_target_row_reuses_a_formula_row_whose_owned_span_is_blank():
+    """2026-09-04: this used to live only inside FakeSheetsClient's own
+    approximation of Sheets' behavior - a total blind spot, since the real
+    write path never called anything equivalent. It is now a real function
+    writer.append_rows actually calls."""
+    existing = [["", "", ""], ["", "", ""], ["", "", ""]]  # 3 blank rows
+    assert writer._next_target_row(existing) == 0
+
+
+def test_next_target_row_skips_past_already_filled_rows():
+    existing = [["a", "b", "c"], ["d", "", ""], ["", "", ""]]
+    assert writer._next_target_row(existing) == 2
+
+
+def test_next_target_row_is_zero_when_nothing_exists_yet():
+    assert writer._next_target_row([]) == 0
 
 
 @pytest.mark.sanity
@@ -622,7 +641,7 @@ def test_pilot_refuses_more_rows_than_its_ceiling():
         writer.append_rows(client, config.TAB_POOL_NOO, rows,
                            headers=config.POOL_NOO_HEADERS, settings=st,
                            upload_id="x")
-    assert client.appended == []
+    assert client.written == []
 
 
 @pytest.mark.sanity
@@ -635,7 +654,7 @@ def test_pilot_writes_when_within_its_ceiling():
     result = writer.append_rows(client, config.TAB_POOL_NOO, rows,
                                 headers=config.POOL_NOO_HEADERS, settings=st,
                                 upload_id="x")
-    assert result.ok and not result.dry_run and len(client.appended) == 1
+    assert result.ok and not result.dry_run and len(client.written) == 1
 
 
 def test_invalid_mode_is_rejected():

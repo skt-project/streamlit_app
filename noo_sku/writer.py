@@ -10,12 +10,18 @@ Write safety rules enforced here:
   computes the single contiguous span of columns Streamlit actually owns (see
   `_owned_write_span`) and writes ONLY to that span — formula and BD-manual
   columns are never included in any request, not even as an explicit blank.
-* **Reuses the pre-existing formula row, never a fresh one.** The actual
-  Sheets call (`SheetsClient.append_column_span`) uses
-  `insertDataOption="OVERWRITE"`, not `INSERT_ROWS` — it targets the next row
-  that is blank WITHIN the owned span, which BD Support's pre-filled sheet
-  already has waiting, rather than inserting a brand new row and shifting
-  every formula row below it down.
+* **Reuses the pre-existing formula row, never a fresh one.** This module
+  reads the owned span back first (`_next_target_row`) to find the row right
+  after the last non-blank one WITHIN that span — a formula-pre-filled row
+  whose owned columns are still blank counts as available — then writes
+  there with a plain `values.update` (`SheetsClient.update_range`) against
+  that exact row. Deliberately not `values.append`: its `range` argument only
+  narrows table *detection*, not where values land — once BD Support's header
+  row spans the whole sheet, `append` aligns new data to the detected
+  table's own first column (A) regardless of a narrower range, which is
+  exactly what broke every live upload on 2026-09-04. `update` has no
+  detection step at all: it writes to precisely the cells named, nothing
+  else.
 * **Layout assert.** ``assert_layout`` re-reads the live header before every
   write and refuses if it differs from the expected layout by even one column.
   The pool headers are owned by BD Support; the app adapts, never the reverse.
@@ -254,6 +260,24 @@ def _scoped_values(rows, span_columns) -> list:
            for row in rows]
 
 
+def _next_target_row(existing_span_rows) -> int:
+    """0-based index, relative to the first data row (sheet row 2), of the
+    next row Streamlit should write to: the row right after the last one
+    with ANY non-blank cell in the owned span.
+
+    `existing_span_rows` must already be sliced to ONLY the owned-span
+    columns (e.g. via `client.read_values(tab, "E2:W20000")`) — a row whose
+    OTHER columns hold a live formula but whose owned span is still blank is
+    exactly the "next available row" this must find and reuse, never a brand
+    new row appended past the very end of the sheet.
+    """
+    target = 0
+    for i, row in enumerate(existing_span_rows):
+        if any(str(c).strip() for c in row):
+            target = i + 1
+    return target
+
+
 # ─── Write guards ─────────────────────────────────────────────────────────────
 def read_live_headers(client, tab) -> list:
     values = client.read_values(tab, "A1:BZ1")
@@ -327,11 +351,17 @@ def append_rows(client, tab, rows, *, headers, settings, upload_id,
             rows=full_rows)
 
     start_letter, end_letter = _col_letter(start), _col_letter(end)
-    client.append_column_span(tab, start_letter, end_letter, scoped)
+    existing = client.read_values(
+        tab, f"{start_letter}2:{end_letter}{config.POOL_MAX_ROW}")
+    target_index = _next_target_row(existing)
+    target_row = target_index + 2       # sheet row 2 = existing[0]
+    end_row = target_row + len(scoped) - 1
+    client.update_range(tab, f"{start_letter}{target_row}:{end_letter}{end_row}",
+                       scoped)
     return WriteResult(True, False, len(scoped), upload_id, tab,
                        f"{len(scoped)} baris berhasil ditambahkan ke {tab} "
-                       f"(kolom {start_letter}:{end_letter}, mode "
-                       f"{settings.mode}).",
+                       f"(baris {target_row}-{end_row}, kolom "
+                       f"{start_letter}:{end_letter}, mode {settings.mode}).",
                        rows=full_rows)
 
 

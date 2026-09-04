@@ -91,11 +91,14 @@ def load_credentials(secrets=None, scopes=None):
 class SheetsClient:
     """Thin wrapper over the Sheets v4 API.
 
-    `append_column_span` is the only write verb. Both pool tabs are structured
-    trackers BD Support pre-fills with live formulas far ahead of any real
-    data (confirmed to row 900+ of POOL NOO STREAMLIT, long before any upload
-    reached it), so a plain full-row append was never the right model — see
-    noo_sku.writer for the column-scoped design this method exists to serve.
+    `update_range` is the only write verb — a plain `values.update` against an
+    exact, caller-computed cell range. Both pool tabs are structured trackers
+    BD Support pre-fills with live formulas far ahead of any real data
+    (confirmed to row 900+ of POOL NOO STREAMLIT, long before any upload
+    reached it), so `values.append` was never the right primitive: its table
+    detection aligns new data to the detected table's own first column, not
+    to a narrowed `range` — see noo_sku.writer for how the target row is
+    determined and why `update` replaced it.
     """
 
     def __init__(self, credentials, spreadsheet_id):
@@ -118,39 +121,27 @@ class SheetsClient:
         ).execute()
         return [vr.get("values", []) for vr in res.get("valueRanges", [])]
 
-    #: Bottom of every bounded range this module reads or writes (matches
-    #: `_pool_rows_as_dicts`/`load_noo_ledger`/etc.'s existing "A2:BZ20000"
-    #: convention) — comfortably past any pool tab's real row count.
-    MAX_ROW = 20000
+    def update_range(self, tab: str, a1: str, rows) -> dict:
+        """Write `rows` to EXACTLY `a1` — no table search, no ambiguity.
 
-    def append_column_span(self, tab: str, start_col: str, end_col: str,
-                           rows) -> dict:
-        """Fill the next available row(s) within ONE column span only.
-
-        `insertDataOption="OVERWRITE"`, deliberately not `INSERT_ROWS`: the
-        target is the next row that is blank WITHIN `start_col:end_col` —
-        reusing a pre-existing, already-formula-equipped row — never a brand
-        new row inserted into the sheet, which would shift every pre-filled
-        formula row below it down by one and defeat the entire point of
-        writing a bounded column range.
-
-        The range is fully bounded (`f"{start_col}1:{end_col}{MAX_ROW}"`),
-        not left open-ended on the end row: A1 notation only supports an
-        open-ended side when BOTH ends name the same column (Google's own
-        documented example is `Sheet1!A5:A`) — an asymmetric range with a row
-        on one side and a *different* column on the other, e.g. `E1:W`, is
-        not a representable A1 string and is rejected outright by the API.
-
-        Columns outside `start_col:end_col` — every BD Support manual flag
-        and every live formula column — are structurally absent from `range`,
-        so there is nothing in this request that could touch them, blank or
-        otherwise.
+        2026-09-04 fix: `values.append`'s `range` argument only narrows which
+        rows/columns are scanned to find an existing "table" to append after;
+        it does NOT restrict which columns the appended values land in. Once
+        BD Support's header row spans the whole sheet (a single row of
+        non-blank cells from column A to the last pool column), `append`
+        detects the table as starting at column A regardless of a narrower
+        `range` — every write landed at the sheet's own first column instead
+        of the intended owned span. `values.update` has no such detection:
+        it writes to precisely the cells named in `range`, nothing else,
+        which is what a column-scoped write actually requires. The caller
+        (`writer.append_rows`) is responsible for determining the correct
+        target row itself (see `writer._next_target_row`) — this method no
+        longer has any "find the next blank row" behavior of its own.
         """
-        return self._svc.spreadsheets().values().append(
+        return self._svc.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
-            range=f"'{tab}'!{start_col}1:{end_col}{self.MAX_ROW}",
+            range=f"'{tab}'!{a1}",
             valueInputOption="RAW",
-            insertDataOption="OVERWRITE",
             body={"values": rows},
         ).execute()
 
