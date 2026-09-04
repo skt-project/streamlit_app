@@ -772,8 +772,9 @@ SALESMAN_COLS = [
 # directly from the selected distributor rather than looked up per row.
 # Step 1: user picks Salesman ID -> Step 2: Nama Salesman auto-fills (read-only)
 # Step 3: user picks Kode Toko   -> Step 4: Nama Toko auto-fills (read-only)
-# Step 5: user picks Frekuensi (I) -> drives which Hari (J) / Nomor Minggu (L)
-#         options are offered; Hari Minggu (K) is derived/display-only from L.
+# Step 5: user picks Frekuensi (I) -> drives which Hari (J) and Minggu (K)
+#         options are offered; Minggu (K) then drives Ket. Minggu (L),
+#         which is what gets stored as `callcycle`.
 PJP_COLS = [
     ("ASM", False, "auto"),
     ("Region", False, "auto"),
@@ -825,6 +826,19 @@ def _fill(hex_color):
     return PatternFill("solid", fgColor=hex_color)
 
 
+def _cf_fill(hex_color):
+    """
+    Fill for a CONDITIONAL format (differential format / dxf).
+
+    _fill() sets only fgColor, which is right for an ordinary cell but
+    wrong here: Excel paints a dxf's visible background from bgColor, so a
+    fgColor-only dxf renders with the wrong colour or none at all — the
+    status cues would silently not appear. Setting both is what openpyxl's
+    own conditional-formatting examples do.
+    """
+    return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
+
+
 def _header_font():
     return Font(bold=True, color="FFFFFF", size=10, name="Calibri")
 
@@ -852,6 +866,11 @@ def _vcenter(wrap=False):
 # templates write the bare key (Salesman ID / Kode Toko) directly, with no
 # separator, so this is a fallback path only.
 _COMBO_SEP = " - "
+
+# Internal helper column carrying each row's TRUE Excel row number.
+# read_template_sheet() stamps it before any row is dropped, so error
+# messages stay accurate after callers filter blanks and reset_index().
+_EXCEL_ROW_COL = "__excel_row__"
 
 
 def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
@@ -940,8 +959,8 @@ def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
     # ── Frekuensi-dependent Hari / Nomor Minggu (callcycle) dropdowns ───────
     # Column J (Hari) and Column L (Nomor Minggu) are DEPENDENT dropdowns
     # keyed off Column I (Frekuensi) — see FREKUENSI_RANGE_SUFFIX below and
-    # _attach_pjp_dvs()'s INDIRECT("NR_HARI_"&...) / INDIRECT("NR_CALLCYCLE_"
-    # &...) formulas. Every valid combination for each Frekuensi is
+    # the INDIRECT("NR_HARI_"&...) / INDIRECT("NR_KET_"&...) formulas built
+    # in create_pjp_excel(). Every valid combination for each Frekuensi is
     # pre-rendered here in canonical form, so picking from the dropdown
     # always yields an already-correctly-formatted, Frekuensi-consistent
     # value — for F4/F4+ the "dropdown" has exactly one option (the fixed
@@ -1324,8 +1343,8 @@ def create_pjp_excel(
     # Reuses the template's existing palette: FFF3CD = warning/required
     # (same amber already used elsewhere), D6E4F0 = the informational blue
     # used by the auto-filled columns. No new colours introduced.
-    amber_fill = _fill("FFF3CD")
-    info_fill = _fill("D6E4F0")
+    amber_fill = _cf_fill("FFF3CD")
+    info_fill = _cf_fill("D6E4F0")
     hari_cl = col_letter("Hari")
     ket_cl = col_letter(KET_MINGGU_COL)
 
@@ -1337,7 +1356,7 @@ def create_pjp_excel(
         FormulaRule(
             formula=[
                 f'AND({hari_cl}{FIRST_DATA}<>"",'
-                f'COUNTIF(INDIRECT("NR_HARI_"&SUBSTITUTE({freq_anchor},"+","PLUS")),{hari_cl}{FIRST_DATA})=0)'
+                f'IFERROR(COUNTIF(INDIRECT("NR_HARI_"&SUBSTITUTE({freq_anchor},"+","PLUS")),{hari_cl}{FIRST_DATA}),0)=0)'
             ],
             fill=amber_fill,
         ),
@@ -1517,10 +1536,42 @@ def _get_unique_distributors(df, col="Kode Distributor") -> list:
     )
 
 
+def _show(val) -> str:
+    """
+    Render a cell value for an error message. Excel stores a single-digit
+    entry as a number, so the raw value arrives as 2.0 — showing that back
+    to the user is confusing when they typed 2.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "(kosong)"
+    if isinstance(val, bool):
+        return str(val)
+    if isinstance(val, float) and float(val).is_integer():
+        return str(int(val))
+    text = str(val).strip()
+    return text if text else "(kosong)"
+
+
+def _excel_row_of(row, fallback_index) -> int:
+    """
+    The row's real Excel line number for "Baris N" messages. Prefers the
+    value stamped by read_template_sheet() before any filtering; falls
+    back to the positional index for callers that build a DataFrame
+    directly (tests, ad-hoc frames).
+    """
+    val = row.get(_EXCEL_ROW_COL) if hasattr(row, "get") else None
+    if val is not None and not pd.isna(val):
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            pass
+    return fallback_index + 4
+
+
 def validate_row_completeness(df, required_cols, sheet_label) -> list:
     errors = []
     for i, row in df.iterrows():
-        n = i + 4
+        n = _excel_row_of(row, i)
         values = {c: row.get(c, "") for c in required_cols}
         non_empty = [c for c, v in values.items() if not _is_empty(v)]
         empty = [c for c, v in values.items() if _is_empty(v)]
@@ -1588,7 +1639,14 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
     if KET_MINGGU_COL in df.columns:
         filled_ket = [v for v in df[KET_MINGGU_COL] if pd.notna(v) and str(v).strip()]
         legacy_ket = [v for v in filled_ket if migrate_legacy_minggu(v)]
-        if filled_ket and len(legacy_ket) == len(filled_ket):
+        # ANY legacy value is enough. Requiring ALL of them missed the two
+        # commonest real cases: a workbook someone part-corrected by hand,
+        # and an old workbook whose week column was left blank for the SPV
+        # to fill (filled_ket empty) — both fell through to the confusing
+        # per-row errors this check exists to replace. A current-format
+        # workbook can never trip it: migrate_legacy_minggu() only matches
+        # the three retired phrases, never "1,3" / "1,2,3,4" / etc.
+        if legacy_ket:
             errors.append(
                 "Template lama terdeteksi — kolom 'Ket. Minggu' masih berisi nilai "
                 "format lama (mis. 'Minggu Ganjil'). Struktur template sudah berubah: "
@@ -1615,7 +1673,7 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
     store_lookup = build_store_lookup(store_df) if store_df is not None else {}
 
     for i, row in df.iterrows():
-        n = i + 4
+        n = _excel_row_of(row, i)
 
         # ── Salesman ID validation ──────────────────────────────────────────
         sal_id = str(row.get("salesman_id", "")).strip()
@@ -1663,7 +1721,7 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
                     f"Baris {n}: Invalid Hari. Gunakan SENIN-SABTU (bukan MINGGU) "
                     f"dipisahkan dengan slash atau koma, sesuai jumlah hari yang "
                     f"diizinkan Frekuensi (F1=1, F2=1-2, F4=1-4, F4+=1-5). "
-                    f"(nilai: '{hari_val}', Frekuensi: '{freq_val}')"
+                    f"(nilai: '{_show(hari_val)}', Frekuensi: '{_show(freq_val)}')"
                 )
 
         # ── Minggu validation (Column K — options depend on Frekuensi) ─────
@@ -1681,7 +1739,7 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
                     allowed = ", ".join(minggu_options_for_frekuensi(freq_str))
                     errors.append(
                         f"Baris {n}: Invalid Minggu untuk Frekuensi {freq_str}. "
-                        f"Pilihan yang valid: {allowed}. (nilai: '{minggu_val}')"
+                        f"Pilihan yang valid: {allowed}. (nilai: '{_show(minggu_val)}')"
                     )
 
         # ── Ket. Minggu / callcycle validation (Column L) ───────────────────
@@ -1716,7 +1774,7 @@ def validate_pjp_df(df, distributor_map, store_df=None, salesman_df=None, select
                     )
                     errors.append(
                         f"Baris {n}: Invalid Ket. Minggu untuk {freq_str} + {minggu_ok}. "
-                        f"Pilihan yang valid: {allowed}.{auto_note}{hint} (nilai: '{ket_val}')"
+                        f"Pilihan yang valid: {allowed}.{auto_note}{hint} (nilai: '{_show(ket_val)}')"
                     )
 
     return errors, warnings
@@ -1776,11 +1834,27 @@ def read_template_sheet(
     back-derived from it so legacy/partial workbooks still validate.
     """
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=header_row)
+
+    # Record the TRUE Excel row number before any row is dropped. Callers
+    # filter blank rows and then reset_index(), so a positional index can
+    # no longer be turned back into a sheet row — every "Baris N" message
+    # would point at the wrong line. header_row is 0-indexed and data
+    # starts on the line after it, so pandas index 0 == Excel row
+    # header_row + 2.
+    df[_EXCEL_ROW_COL] = df.index + header_row + 2
+
     df = df.dropna(how="all")
 
     if "Frekuensi" in df.columns:
-        df["Frekuensi"] = df["Frekuensi"].astype(str).str.strip().str.upper()
-        df.loc[df["Frekuensi"] == "NAN", "Frekuensi"] = ""
+        # Guard NaN BEFORE astype(str): on pandas >= 3 astype(str) leaves a
+        # real NaN in place rather than the string "NAN", so a post-hoc
+        # == "NAN" comparison never matches and the literal 'nan' leaks
+        # into user-facing messages.
+        df["Frekuensi"] = (
+            df["Frekuensi"].where(df["Frekuensi"].notna(), "")
+            .astype(str).str.strip().str.upper()
+        )
+        df.loc[df["Frekuensi"].isin(["NAN", "NONE", "NAT"]), "Frekuensi"] = ""
 
     def _row_freq(row):
         f = row.get("Frekuensi") if hasattr(row, "get") else None
@@ -1821,6 +1895,18 @@ def read_template_sheet(
             freq = _row_freq(row)
             if freq is None:
                 return v
+            # AUTO-FILL: for F4/F4+ there is exactly one legal Minggu
+            # ("Minggu Ganjil + Genap"), so it is fully determined by
+            # Frekuensi — the same "one legal value, fill it" rule
+            # auto_callcycle() applies to Ket. Minggu. The template's own
+            # prompts describe K and L as automatic for F4/F4+; without
+            # this, leaving both blank (exactly what "automatic" invites)
+            # fails as "kolom wajib belum terisi", and because the Ket.
+            # Minggu auto-fill needs a resolved Minggu it fails too.
+            # F1/F2 have two real options, so they are never auto-filled.
+            if pd.isna(v) or not str(v).strip():
+                options = minggu_options_for_frekuensi(freq)
+                return options[0] if len(options) == 1 else v
             normalized, _err = normalize_minggu(v, freq)
             return normalized if normalized is not None else v
         df[MINGGU_COL] = df.apply(_norm_minggu_row, axis=1)
