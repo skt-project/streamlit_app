@@ -146,6 +146,9 @@ DISTRIBUTOR_PASSWORDS = {
     "DST351": "12345678",
     "DST352": "12345678",
     "DST356": "1a2b3c4d",
+    "DST358": "83d715f2",
+    "DST360": "1da3f16e",
+    "DST362": "af08fc40",
     "DST363": "2b3c4d5e"
 }
 

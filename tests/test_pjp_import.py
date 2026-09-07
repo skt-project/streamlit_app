@@ -39,7 +39,7 @@ _WANTED = {
     "build_salesman_lookup", "build_store_lookup", "_is_empty",
     "_get_unique_distributors", "validate_row_completeness", "validate_pjp_df",
     "_extract_combo_key", "read_template_sheet", "normalize_phone_id",
-    "_PJP_COL_MAP",
+    "_PJP_COL_MAP", "DISTRIBUTOR_PASSWORDS", "_get_password_for_distributor",
 }
 
 
