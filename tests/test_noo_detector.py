@@ -39,7 +39,8 @@ def _store_enricher():
 
 def _noo_pipeline(rows, ledger=(frozenset(), frozenset())):
     return pipeline.run_noo(
-        fx.FakeParsed(rows, config.NOO_COLUMNS), distributor=fx.DISTRIBUTOR,
+        fx.FakeParsed(rows, config.NOO_INTERNAL_COLUMNS),
+        distributor=fx.DISTRIBUTOR,
         resolver=_resolver(), dist_enricher=_dist_enricher(),
         store_enricher=_store_enricher(), ledger=ledger, when=now_business(),
         allowed_branches={DIST: {"name": "CV CECE"}}, company_name="CV CECE")
@@ -111,8 +112,7 @@ def test_noo_test_1_existing_store_is_not_noo_and_auto_populates_store_id():
     """Reference ID resolves via master_store_database_basis (cust_id
     IESL00038) -> Not NOO, and the pool's store_id is auto-filled from the
     MASTER's own value, regardless of what (if anything) was typed."""
-    result = _noo_pipeline([fx.noo_row(store_id="IESL00038",
-                                       store_code="DST08200074",
+    result = _noo_pipeline([fx.noo_row(store_code="DST08200074",
                                        name="TOKO APAPUN NAMANYA")])
     assert not result.errors
     row = result.pool_rows[0]
@@ -124,7 +124,7 @@ def test_noo_test_1_existing_store_is_not_noo_and_auto_populates_store_id():
 def test_noo_test_2_new_store_is_noo_with_blank_store_id():
     """Reference ID does not resolve -> NOO, store_id stays blank -- never a
     fake or generated identifier."""
-    result = _noo_pipeline([fx.noo_row(store_id="", store_code="DST08299999",
+    result = _noo_pipeline([fx.noo_row(store_code="DST08299999",
                                        name="TOKO YANG BENAR BENAR BARU")])
     assert not result.errors
     row = result.pool_rows[0]
@@ -133,23 +133,17 @@ def test_noo_test_2_new_store_is_noo_with_blank_store_id():
 
 
 @pytest.mark.sanity
-def test_a_typed_store_id_that_does_not_resolve_is_not_trusted_verbatim():
-    """A wrong/nonexistent Store ID typed by the admin must NOT be copied into
-    the pool -- it is looked up, and since it does not resolve, store_id stays
-    blank rather than propagating an unverified value."""
-    result = _noo_pipeline([fx.noo_row(store_id="IEXX99999",
-                                       store_code="DST08299999",
-                                       name="TOKO DENGAN ID SALAH KETIK")])
-    assert result.pool_rows[0]["store_id"] == ""
-    assert result.pool_rows[0]["NOO/Existing"] == "NOO -> Create ID"
-
-
-@pytest.mark.sanity
 def test_store_id_and_noo_existing_are_never_taken_from_the_uploaded_file():
-    """Neither column exists in the upload template at all."""
+    """2026-09-07: Store ID was removed from the template entirely -- it was
+    never a genuine admin input to begin with (writer.build_noo_row always
+    sourced the pool's store_id from the NOO Detector, never from the upload),
+    and now there is no column left for an admin to even type one into.
+    NOO/Existing never existed in the template either -- it is the
+    Detector's own output column in the pool."""
     assert "store_id" not in config.NOO_COLUMNS
     assert "NOO/Existing" not in config.NOO_COLUMNS
-    assert "Store ID (Opsional)" in config.NOO_COLUMNS  # the admin's INPUT field
+    assert not any("store id" in c.lower() for c in config.NOO_COLUMNS)
+    assert not any("store id" in c.lower() for c in config.NOO_INTERNAL_COLUMNS)
 
 
 @pytest.mark.sanity
@@ -164,16 +158,16 @@ def test_store_id_and_noo_existing_are_excluded_from_the_duplicate_hash():
 @pytest.mark.sanity
 def test_reference_id_exists_count_reflects_the_pipeline_result():
     result = _noo_pipeline([
-        fx.noo_row(store_id="IESL00038", store_code="DST08200074",
+        fx.noo_row(store_code="DST08200074",
                   name="TOKO SATU"),
-        fx.noo_row(store_id="", store_code="DST08299998", name="TOKO DUA"),
+        fx.noo_row(store_code="DST08299998", name="TOKO DUA"),
     ])
     assert result.reference_id_exists_count == 1
 
 
 def test_ambiguous_reference_id_never_populates_store_id_end_to_end():
     """DST08200099 is fixture-configured to resolve to two basis rows."""
-    result = _noo_pipeline([fx.noo_row(store_id="", store_code="DST08200099",
+    result = _noo_pipeline([fx.noo_row(store_code="DST08200099",
                                        name="TOKO AMBIGU")])
     row = result.pool_rows[0]
     assert row["store_id"] == ""
@@ -186,12 +180,11 @@ def test_noo_detection_and_duplicate_detection_stay_independent():
     """A row can be an EXACT_DUPLICATE (already uploaded) while its NOO
     Detector verdict is independently computed from master data -- the two
     checks must not be conflated into one."""
-    result = _noo_pipeline([fx.noo_row(store_id="IESL00038",
-                                       store_code="DST08200074",
+    result = _noo_pipeline([fx.noo_row(store_code="DST08200074",
                                        name="TOKO SATU")])
     content = duplicates.noo_content(result.pool_rows[0])
     again = _noo_pipeline(
-        [fx.noo_row(store_id="IESL00038", store_code="DST08200074",
+        [fx.noo_row(store_code="DST08200074",
                    name="TOKO SATU")],
         ledger=(frozenset(), {content}))
     assert again.classifications[0].bucket == duplicates.EXACT_DUPLICATE
@@ -245,7 +238,8 @@ def _sinar_mayuri_pipeline(rows, by_cust, by_ref, login="DST334"):
     distributor = {"distributor_code": login,
                   "distributor_name": f"PT SINAR MAYURI - {login}"}
     return pipeline.run_noo(
-        fx.FakeParsed(rows, config.NOO_COLUMNS), distributor=distributor,
+        fx.FakeParsed(rows, config.NOO_INTERNAL_COLUMNS),
+        distributor=distributor,
         resolver=CustomerCodeResolver(dist_database={login: "SMI"}),
         dist_enricher=enrichment.DistributorEnricher(
             master_distributor={}, dist_database={login: distributor}),

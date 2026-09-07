@@ -1,8 +1,16 @@
-"""In-memory .xlsx builders that reproduce BD Support's real template layouts.
+"""In-memory .xlsx builders that reproduce BD Support's real template layouts
+(2026-09-07 REVISI — Indonesian headers, Store ID removed from NOO, Nama
+Produk Prinsipal removed from SKU).
 
 Kept faithful to the originals — including the instruction banner above the
-header, the blank row in the SKU template, and the CONTOH example row — because
-those are exactly the things a naive parser gets wrong.
+header and the blank row in the SKU template — because those are exactly the
+things a naive parser gets wrong. `sku_workbook`'s inline CONTOH-marker rows
+are the one deliberate exception: the REAL revised SKU template moved its
+worked example out to a separate "Contoh Pengisian" sheet entirely (nothing
+inline to skip any more), but the marker-skip mechanism in parsers.py is kept
+as backward compatibility for an admin who still has an old-shaped file, so
+this fixture keeps exercising it — see test_sku_template_2_0.py for coverage
+of the actual current bundled file's (no-inline-example) shape.
 """
 from __future__ import annotations
 
@@ -15,11 +23,18 @@ from noo_sku import config
 
 NOO_BANNER = ("1. Semua kolom WAJIB diisi sesuai ketentuan.\n"
               "2. Dimohon untuk TIDAK MENGUBAH URUTAN TEMPLATE")
-NOO_EXAMPLE = ["CONTOH", "TOKO JAYA KOSMETIK", "GT", "PT Anugerah Bangun Abadi",
-               "11ABA", "DST123", "DST12300010", "JAKARTA BARAT",
-               "RUKO BOULEVARD TAMAN PALEM LESTARI NO 1", "Cosmetic Store"]
-SKU_EXAMPLE = ["TYY114002", "TIMEPHORIA NAVI EYESHADOW PALETTE 001 ABYSS",
-               "A1/010424142D", "T114002 Navi Eyeshadow 002 Siren"]
+#: BD Support's own worked example (Template sheet, row 3). Unlike the old
+#: template it carries no "CONTOH" marker cell — that marker used to occupy
+#: the now-removed Store ID column — so it is recognised by content instead
+#: (config.NOO_BUILTIN_EXAMPLE); kept identical to the real file so that
+#: detection is exercised for real, not assumed.
+NOO_EXAMPLE = ["TOKO JAYA KOSMETIK", "GT",
+              "PT Anugerah Bangun Abadi - Jakarta Barat", "11ABA", "DST123",
+              "DST12300010", "Jakarta Barat",
+              "Ruko Boulevard Taman Palem Lestari No 1 Blok C Cengkareng "
+              "Jakarta Barat", "Cosmetic Store"]
+SKU_EXAMPLE = ["TYY114002", "A1/010424142D",
+              "T114002 Navi Eyeshadow 002 Siren"]
 
 
 def _save(wb) -> io.BytesIO:
@@ -30,7 +45,8 @@ def _save(wb) -> io.BytesIO:
 
 
 def noo_workbook(rows, *, headers=None, sheet_name=None) -> io.BytesIO:
-    """NOO template: banner on row 1, header row 2, CONTOH row 3, data row 4+."""
+    """NOO template: banner on row 1, header row 2, worked example row 3
+    (unmarked, matching the real REVISI file), data row 4+."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = sheet_name or config.NOO_SHEET_NAME
@@ -43,7 +59,10 @@ def noo_workbook(rows, *, headers=None, sheet_name=None) -> io.BytesIO:
 
 
 def sku_workbook(rows, *, headers=None, sheet_name=None) -> io.BytesIO:
-    """SKU template: banner row 1, blank row 2, header row 3, CONTOH rows 4-5."""
+    """A legacy-shaped SKU upload: banner row 1, blank row 2, header row 3,
+    CONTOH marker row 4, example row 5, data row 6+ — the shape the template
+    had before its worked example moved to its own sheet. Exercises
+    parsers.py's marker-skip backward-compat path deliberately."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = sheet_name or config.SKU_SHEET_NAME
@@ -57,18 +76,25 @@ def sku_workbook(rows, *, headers=None, sheet_name=None) -> io.BytesIO:
     return _save(wb)
 
 
-def noo_row(store_id="", name="TOKO SUMBER REJEKI", channel="GT",
-            branch="CV CECE", customer_code="11CEC", branch_code="DST082",
+def noo_row(name="TOKO SUMBER REJEKI", channel="GT", branch="CV CECE",
+            customer_code="11CEC", branch_code="DST082",
             store_code="DST08200011", city="Banggai",
             address="JL. MERDEKA NO 10, BANGGAI", store_type="Cosmetic Store"):
-    return [store_id, name, channel, branch, customer_code, branch_code,
-            store_code, city, address, store_type]
+    """9 values in the revised template's own column order — Store ID was
+    removed from the template entirely (2026-09-07); it is never collected
+    from the admin (writer.build_noo_row always sources it from the NOO
+    Detector, never from the upload — see noo_sku/writer.py)."""
+    return [name, channel, branch, customer_code, branch_code, store_code,
+           city, address, store_type]
 
 
-def sku_row(code="SKINTIFIC-296", name="SKINTIFIC TEST PRODUCT",
-            db_code="SKC-296", db_name="S296 SKINTIFIC TEST"):
-    """MoM 31-Aug-2026 removed the gramasi/size column from the template."""
-    return [code, name, db_code, db_name]
+def sku_row(code="SKINTIFIC-296", db_code="SKC-296",
+           db_name="S296 SKINTIFIC TEST"):
+    """3 values in the revised template's own column order. MoM 31-Aug-2026
+    removed the gramasi/size column; 2026-09-07 removed Principal Product
+    Name too — both are now derived from master_product, never collected
+    from the admin (see noo_sku/writer.py:build_sku_row)."""
+    return [code, db_code, db_name]
 
 
 PRODUCTS = {
@@ -195,6 +221,7 @@ class FakeParsed:
         self.kind = None
         self.headers = list(columns)
         self.header_row = first_row - 1
+        self.sheet_name = "Template"
 
 
 DISTRIBUTOR = {"distributor_code": "DST082", "distributor_name": "CV CECE",

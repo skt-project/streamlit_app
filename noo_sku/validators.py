@@ -10,7 +10,6 @@ issues. No Streamlit, no network.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from . import config
@@ -89,15 +88,6 @@ def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
             ))
         row_suffix = suffix_for(row_code)
 
-        store_id = g("Store ID (Opsional)")
-        if store_id and not re.match(config.STORE_ID_PATTERN, norm_key(store_id)):
-            issues.append(Issue(
-                sheet_row, "Store ID",
-                f'Format "{store_id}" tidak valid.',
-                "Gunakan format seperti IEBB01234, atau kosongkan "
-                "(kolom ini opsional).",
-            ))
-
         _require(g("Store Name"), sheet_row, "Store Name", issues,
                  "Isi dengan nama toko lengkap.")
 
@@ -157,7 +147,7 @@ def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
         elif known_cities and norm_key(city) not in known_cities:
             issues.append(Issue(
                 sheet_row, "City", f'"{city}" tidak ada di daftar acuan.',
-                "Periksa ejaan pada sheet 'City & Store Type'. Jika kota "
+                "Periksa ejaan pada sheet 'Kota & Tipe Toko'. Jika kota "
                 "memang belum terdaftar, data tetap bisa diproses.",
                 severity=WARNING,
             ))
@@ -173,7 +163,7 @@ def validate_noo(rows, row_numbers, *, distributor_code, distributor_name,
             issues.append(Issue(
                 sheet_row, "Store Type", "Kolom ini kosong.",
                 f"Pilih salah satu: {', '.join(sorted(allowed_types))}."
-                if allowed_types else "Isi sesuai sheet 'City & Store Type'.",
+                if allowed_types else "Isi sesuai sheet 'Kota & Tipe Toko'.",
             ))
         elif allowed_types and norm_key(stype) not in {norm_key(s)
                                                        for s in allowed_types}:
@@ -211,8 +201,7 @@ def _suffix_hint(expected_suffix) -> str:
     return f"Gunakan salah satu: {codes}."
 
 
-def validate_sku(rows, row_numbers, *, distributor_code, product_lookup,
-                 strict_names=False):
+def validate_sku(rows, row_numbers, *, distributor_code, product_lookup):
     """Validate SKU rows against the principal product master.
 
     ``product_lookup`` maps normalised SKU code -> ``{"brand", "product_name",
@@ -220,8 +209,14 @@ def validate_sku(rows, row_numbers, *, distributor_code, product_lookup,
     (MoM 31-Aug-2026 §7): the row must not reach the tracker, and without the
     code the brand — and therefore the Customer Code — cannot be derived.
 
-    The gramasi column was removed from the template on 31-Aug-2026;
-    `specification` is filled from master_product instead of being validated.
+    The gramasi column was removed from the template on 31-Aug-2026, and
+    "Nama Produk Prinsipal" (Principal Product Name) was removed from the
+    template entirely on 2026-09-07: `specification` and `product_name` are
+    both filled from master_product instead of being collected from — or
+    validated against — the upload (see writer.build_sku_row /
+    ProductEnricher.resolve). An unmapped Principal Product Code is still
+    rejected outright above, so a row that reaches the pool always has a
+    genuine master match behind its product_name — nothing here ever guesses.
     """
     issues: list[Issue] = []
     cleaned = []
@@ -251,21 +246,6 @@ def validate_sku(rows, row_numbers, *, distributor_code, product_lookup,
                     "di luar cakupan mapping ini.",
                     "Mapping ini hanya untuk SKINTIFIC, TIMEPHORIA, dan "
                     "FACERINNA.",
-                ))
-
-        name = g("Principal Product Name")
-        if not name:
-            issues.append(Issue(
-                sheet_row, "Principal Product Name", "Kolom ini kosong.",
-                "Isi dengan nama produk prinsipal.",
-            ))
-        elif product and product.get("product_name"):
-            if norm_key(name) != norm_key(product["product_name"]):
-                issues.append(Issue(
-                    sheet_row, "Principal Product Name",
-                    f'"{name}" berbeda dari nama di master prinsipal.',
-                    f'Nama yang benar: "{product["product_name"]}".',
-                    severity=ERROR if strict_names else WARNING,
                 ))
 
         _require(g("Customer Product Code ( Di isi oleh Distributor)"),

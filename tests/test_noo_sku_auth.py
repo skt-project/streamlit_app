@@ -239,33 +239,37 @@ def test_account_lookup_is_parameterised_and_active_only():
 @pytest.mark.sanity
 def test_noo_guideline_contains_no_sku_instructions():
     text = guideline.as_markdown(guideline.UPLOAD_NOO)
-    assert "Customer Store Code" in text
-    assert "Principal Product Code" not in text
+    assert "Kode Toko Pelanggan" in text
+    assert "Kode SKU Prinsipal" not in text
     assert "SKU Mapping dipakai" not in text
 
 
 @pytest.mark.sanity
 def test_sku_guideline_contains_no_noo_instructions():
     text = guideline.as_markdown(guideline.UPLOAD_SKU)
-    assert "Principal Product Code" in text
-    assert "Customer Store Code" not in text
-    assert "Store Type" not in text
+    assert "Kode SKU Prinsipal" in text
+    assert "Kode Toko Pelanggan" not in text
+    assert "Tipe Toko" not in text
 
 
 def test_shared_rules_live_only_in_the_general_section():
     noo = guideline.as_markdown(guideline.UPLOAD_NOO)
     sku = guideline.as_markdown(guideline.UPLOAD_SKU)
     assert "Umum" in noo and "Umum" in sku
-    assert len(guideline.GENERAL) == 1, "General stays short and separate"
+    assert "Cara Login" in noo and "Cara Login" in sku
+    # 2026-09-07: General grew from 1 heading to 2 (Cara Login + Umum) when
+    # the PPTX's own login walkthrough was added - still short, still
+    # genuinely shared, still rendered into both NOO and SKU.
+    assert len(guideline.GENERAL) == 2, "General stays short and shared"
 
 
-def test_each_function_gets_its_own_titled_pdf():
-    noo, sku = (guideline.build_pdf(guideline.UPLOAD_NOO),
-                guideline.build_pdf(guideline.UPLOAD_SKU))
-    assert noo[:4] == b"%PDF" and sku[:4] == b"%PDF"
-    assert noo != sku
+def test_both_functions_share_one_guide_title_and_source():
+    """2026-09-07: the guide is no longer per-function PDFs generated from
+    text alone - both functions' guide content, including screenshots,
+    comes from the SAME bundled PPTX (see guideline.load_guide_pptx)."""
     assert "NOO" in guideline.title_for("NOO")
     assert "SKU" in guideline.title_for("SKU")
+    assert guideline.load_guide_pptx()[:2] == b"PK"
 
 
 # ─── Login surface ────────────────────────────────────────────────────────────

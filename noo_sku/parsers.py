@@ -1,19 +1,25 @@
-"""Upload-file parsing for BD Support's real templates.
+"""Upload-file parsing for BD Support's real templates (2026-09-07 REVISI).
 
 Both templates put decoration above the header, so neither can be read with a
 plain ``pd.read_excel``:
 
-  NOO  ("Template" sheet)          SKU  ("SKU TEMPLATE FOR STREAMLIT" sheet)
+  NOO  ("Template" sheet)          SKU  ("Template" sheet)
     row 1  instruction banner        row 1  instruction banner
     row 2  HEADER                    row 2  (blank)
-    row 3  "CONTOH" example          row 3  HEADER
-    row 4+ data                      row 4  "CONTOH" marker
-                                     row 5  example values
-                                     row 6+ data
+    row 3  worked example            row 3  HEADER
+    row 4+ data                      row 4+ data — the worked example moved
+                                              out to its own "Contoh
+                                              Pengisian" sheet entirely
 
 Parsing is deliberately tolerant about *where* the header is — admins add and
 remove rows — so we locate it by signature instead of trusting a fixed offset,
 then treat everything after it as data and drop the example rows.
+
+Row dicts come back keyed by the template's own Indonesian header text (see
+config.NOO_COLUMNS / SKU_COLUMNS) — call translate_to_internal() to re-key
+onto the existing internal canonical names (config.NOO_TEMPLATE_TO_INTERNAL /
+SKU_TEMPLATE_TO_INTERNAL) before handing rows to validators/pipeline, which
+were not changed and still expect those names.
 """
 from __future__ import annotations
 
@@ -22,22 +28,25 @@ from dataclasses import dataclass, field
 import openpyxl
 
 from . import config
-from .normalize import clean, norm_header
+from .normalize import clean, norm_header, norm_key
 
 UPLOAD_NOO = "NOO"
 UPLOAD_SKU = "SKU"
 
 #: BD Support's own reference-only sheets, present in both real templates.
-#: SKU_MAPPING_TEMPLATE 2.0.xlsx introduced "Contoh Pengisian" as a SEPARATE
-#: sheet carrying the exact same header text as the real upload sheet (moved
-#: out of the upload sheet itself, where the example row used to live inline).
-#: Its header would otherwise score an identical signature match, so without
-#: this it could win the sheet-selection tie purely by scan order rather than
-#: by being the sheet the admin actually filled in. Matched case-insensitively
-#: by name because — unlike the two real upload sheets — these are stable,
+#: Both the Indonesian (2026-09-07 REVISI) and the older English labels are
+#: listed — old files admins already have on disk must keep working. The
+#: REVISI SKU template introduced "Contoh Pengisian" as a SEPARATE sheet
+#: carrying the exact same header text as the real upload sheet (moved out of
+#: the upload sheet itself, where the example row used to live inline). Its
+#: header would otherwise score an identical signature match, so without this
+#: it could win the sheet-selection tie purely by scan order rather than by
+#: being the sheet the admin actually filled in. Matched case-insensitively by
+#: name because — unlike the two real upload sheets — these are stable,
 #: BD-Support-controlled labels, not data to detect by content.
 _REFERENCE_ONLY_SHEETS = frozenset({
-    "guideline", "city & store type", "contoh pengisian",
+    "guideline", "panduan", "city & store type", "kota & tipe toko",
+    "contoh pengisian",
 })
 
 
@@ -112,6 +121,21 @@ def _is_marker_only_row(values) -> bool:
     return len(populated) == 1 and populated[0].upper() == "CONTOH"
 
 
+def _is_builtin_noo_example(headers, cells) -> bool:
+    """BD Support's own worked example on the REVISI NOO template's row 3.
+
+    It carries no literal "CONTOH" marker any more — that marker used to sit
+    in the Store ID column, removed in the 2026-09-07 revision — so it is
+    recognised by its own fixed content instead (see
+    config.NOO_BUILTIN_EXAMPLE). `headers`/`cells` are the row already
+    re-keyed onto the Indonesian template header text at this point in
+    parse_upload, matching how NOO_BUILTIN_EXAMPLE is keyed.
+    """
+    row = dict(zip(headers, cells))
+    return all(norm_key(row.get(k, "")) == norm_key(v)
+              for k, v in config.NOO_BUILTIN_EXAMPLE.items())
+
+
 def parse_upload(file_obj) -> ParsedFile:
     """Read an uploaded workbook and detect which template it is.
 
@@ -167,6 +191,8 @@ def parse_upload(file_obj) -> ParsedFile:
         if skip_next_as_example:
             skip_next_as_example = False
             continue
+        if kind == UPLOAD_NOO and _is_builtin_noo_example(headers, cells):
+            continue
         rows.append({h: (cells[i] if i < len(cells) else "")
                      for i, h in enumerate(headers) if h})
         row_numbers.append(sheet_row)
@@ -205,3 +231,30 @@ def column_lookup(parsed: ParsedFile, expected_kind: str) -> dict:
     by_norm = {norm_header(h): h for h in parsed.headers if h}
     return {c: by_norm[norm_header(c)] for c in expected
             if norm_header(c) in by_norm}
+
+
+def translate_to_internal(parsed: ParsedFile, expected_kind: str) -> ParsedFile:
+    """Re-key a parsed upload from the Indonesian template header onto the
+    existing internal canonical names validators/pipeline/writer expect.
+
+    This is the ONLY place the template's display language and the internal
+    processing language meet. Call it once, right after `missing_columns`
+    confirms the file has every required Indonesian column, and BEFORE the
+    rows reach `pipeline.run_noo`/`run_sku` — everything downstream of this
+    call (validation, enrichment, duplicate detection, pool-row construction)
+    is unchanged by the template revision and still addresses columns by
+    their old internal names (e.g. "Store Name", "Principal Product Code").
+
+    A column the template contract has but the internal mapping does not
+    (nothing today) passes through under its own name unchanged, rather than
+    silently vanishing.
+    """
+    mapping = (config.NOO_TEMPLATE_TO_INTERNAL if expected_kind == UPLOAD_NOO
+              else config.SKU_TEMPLATE_TO_INTERNAL)
+    new_rows = [{mapping.get(h, h): v for h, v in row.items()}
+               for row in parsed.rows]
+    new_headers = [mapping.get(h, h) for h in parsed.headers]
+    return ParsedFile(kind=parsed.kind, sheet_name=parsed.sheet_name,
+                      headers=new_headers, rows=new_rows,
+                      header_row=parsed.header_row,
+                      row_numbers=parsed.row_numbers)

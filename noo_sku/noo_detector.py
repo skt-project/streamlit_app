@@ -12,11 +12,12 @@ formula it replaced: the classification does not need fuzzy matching at all.
 
 CORRECTED LOGIC
 ----------------
-The Reference ID the admin supplies (`Store ID (Opsional)`, and `Customer
-Store Code` as the composite fallback) is looked up DIRECTLY against
-`master_store_database_basis` -- the exact same composite key
-(`enrichment.StoreEnricher`) already used for SE/SPV/AOM enrichment, verified
-at 99.9% resolution on real data. No scoring, no threshold:
+`Customer Store Code` (the reference id, the only lookup key the template
+still carries as of the 2026-09-07 revision, which removed Store ID from the
+upload entirely) is looked up DIRECTLY against `master_store_database_basis`
+-- the exact same composite key (`enrichment.StoreEnricher`) already used for
+SE/SPV/AOM enrichment, verified at 99.9% resolution on real data. No scoring,
+no threshold:
 
     Reference ID resolves to a Store ID in master_store_database_basis
         -> "Not NOO -> Reference ID not exist"    (this row already exists)

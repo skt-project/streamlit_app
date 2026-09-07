@@ -15,20 +15,18 @@ from pathlib import Path
 TRACKER_SPREADSHEET_ID = "1bchAAMuXOT1lzuAB-KbrrAwpIrL1_MG3Hzcq823PAN4"
 TRACKER_TITLE = "NOO TRACKER GT"
 
-# NOO's template is still a BD-Support-owned .xlsx in Drive, NOT a native
-# Google Sheet, so it must be fetched with Drive files().get_media() and
-# opened with openpyxl. gspread cannot open it. Read-only: it is BD Support's
-# blank template.
+# Both templates are bundled with the application as of the 2026-09-07
+# revision (BD Support handed over fixed files rather than live Drive links),
+# so they are served straight from disk. Kept alongside this module (not in a
+# scratch/temp location) so they ship with every deployment. The old
+# Drive-hosted NOO file and file ID are retained only as a defensive fallback
+# for `download_template()`, which nothing calls for either template anymore.
 NOO_TEMPLATE_FILE_ID = "1Yt6vRRVSz2-mm59KzVsq32MrwqmzDoYB"
-
-# SKU's template as of 2026-09-03 is bundled with the application instead —
-# BD Support handed over a fixed file ("SKU_MAPPING_TEMPLATE 2.0.xlsx") rather
-# than a live Drive link, so it is served straight from disk. Kept alongside
-# this module (not in a scratch/temp location) so it ships with every
-# deployment. The old Drive-hosted template is retained only as a fallback for
-# `download_template()`, which nothing calls for SKU anymore.
+NOO_TEMPLATE_LOCAL_PATH = (Path(__file__).parent
+                          / "NOO_MAPPING_TEMPLATE (REVISI).xlsx")
 SKU_TEMPLATE_FILE_ID = "1UObRQCPBB3grWvGcbe3S9F-gW8LWS_Pk"
-SKU_TEMPLATE_LOCAL_PATH = Path(__file__).parent / "SKU_MAPPING_TEMPLATE 2.0.xlsx"
+SKU_TEMPLATE_LOCAL_PATH = (Path(__file__).parent
+                          / "SKU_MAPPING_TEMPLATE_2.0 (REVISI).xlsx")
 
 # ─── Tracker tabs (verified) ──────────────────────────────────────────────────
 TAB_POOL_NOO = "POOL NOO STREAMLIT"      # gid 557889479  — existing, header fixed, append only
@@ -79,46 +77,107 @@ BRAND_PREFIX = {
 IN_SCOPE_BRANDS = tuple(BRAND_PREFIX)
 VALID_PREFIXES = tuple(BRAND_PREFIX.values())
 
-# ─── Upload template layouts (verified against BD Support's real .xlsx) ───────
-# NOO: row 1 is an instruction banner, header on row 2, row 3 is the "CONTOH"
-# example row, real data starts on row 4.
+# ─── Upload template layouts (verified against the 2026-09-07 REVISI files) ───
+# Two distinct layers, deliberately kept separate (see NOO_TEMPLATE_TO_INTERNAL
+# below):
+#
+#   *_COLUMNS           the user-facing Excel template contract — Indonesian
+#                        headers, exact text/order verified against
+#                        NOO_MAPPING_TEMPLATE (REVISI).xlsx /
+#                        SKU_MAPPING_TEMPLATE_2.0 (REVISI).xlsx. Used for
+#                        template generation, signature detection and
+#                        "missing column" error text.
+#   *_INTERNAL_COLUMNS  the existing internal canonical field names
+#                        validators.py/pipeline.py/writer.py already address
+#                        by string (e.g. "Store Name", "Principal Product
+#                        Code") — UNCHANGED by this revision. Every row is
+#                        re-keyed from the Indonesian template name to one of
+#                        these via parsers.translate_to_internal() immediately
+#                        after parsing, so the rest of the pipeline never has
+#                        to know the template's display language.
+#
+# NOO: row 1 is an instruction banner, header on row 2, row 3 is BD Support's
+# own worked example, real data starts on row 4. Store ID was removed from the
+# template entirely in the 2026-09-07 revision — it is no longer collected
+# from the admin at all (still auto-populated internally by the NOO Detector,
+# see writer.build_noo_row / noo_detector.py, which never read it from here).
 NOO_SHEET_NAME = "Template"
 NOO_HEADER_ROW = 2
 NOO_EXAMPLE_ROW = 3
 NOO_COLUMNS = [
-    "Store ID (Opsional)",
+    "Nama Toko",
+    "Channel (GT / MTI)",
+    "Nama Cabang",
+    "Kode Brand",
+    "Kode Cabang",
+    "Kode Toko Pelanggan",
+    "Kota",
+    "Alamat Toko",
+    "Tipe Toko",
+]
+NOO_INTERNAL_COLUMNS = [
     "Store Name",
     "Channel (GT / MTi)",
     "Branch Name",
-    "Customer Code",          # sheet has a trailing space; we normalise on read
+    "Customer Code",
     "Customer Branch Code",
     "Customer Store Code",
     "City",
     "Store Address",
     "Store Type",
 ]
+#: Indonesian template header -> existing internal canonical name. The ONLY
+#: place the template's display language and the internal processing
+#: language meet — see parsers.translate_to_internal.
+NOO_TEMPLATE_TO_INTERNAL = dict(zip(NOO_COLUMNS, NOO_INTERNAL_COLUMNS))
+
 # Columns the system owns. Whatever the file contains here is IGNORED and
-# replaced with session/master-derived values (see §Security).
+# replaced with session/master-derived values (see §Security). Internal
+# canonical names — validators.py runs on the row AFTER translation.
 NOO_SYSTEM_OWNED = ("Branch Name", "Customer Branch Code")
 
-# SKU: row 1 instruction banner, row 2 blank, header on row 3, row 4 "CONTOH",
-# row 5 example, real data from row 6.
-SKU_SHEET_NAME = "SKU TEMPLATE FOR STREAMLIT"
+#: The revised template's row 3 (right after the header) is BD Support's own
+#: worked example. Unlike the old template it carries no literal "CONTOH"
+#: marker cell any more — that marker used to sit in the Store ID column,
+#: now removed — so parsers._is_builtin_noo_example recognises it by its own
+#: fixed content instead. Keyed by the Indonesian template header, since that
+#: is what parse_upload's row dict uses at the point this check runs (before
+#: translate_to_internal). Not a silent risk if a future BD Support edit ever
+#: changes this content and the check stops matching: "DST123" is not a real
+#: distributor's branch code, so validators.validate_noo's company-scope
+#: check rejects the row anyway if it is ever read as real data.
+NOO_BUILTIN_EXAMPLE = {
+    "Kode Cabang": "DST123",
+    "Kode Toko Pelanggan": "DST12300010",
+}
+
+# SKU: row 1 instruction banner, row 2 blank, header on row 3, NOTHING below
+# it — the 2026-09-07 revision moved BD Support's worked example out to its
+# own "Contoh Pengisian" sheet (already excluded from header scanning, see
+# parsers._REFERENCE_ONLY_SHEETS), so real data now starts immediately on
+# row 4. "Nama Produk Prinsipal" (Principal Product Name) was removed from
+# the template entirely in the same revision — it is no longer collected from
+# the admin; the pool's `product_name` is derived from master_product instead
+# (unchanged — writer.build_sku_row never read it from the upload either).
+SKU_SHEET_NAME = "Template"
 SKU_HEADER_ROW = 3
-SKU_EXAMPLE_ROW = 5
-# MoM 31-Aug-2026 removed the gramasi / specification column: admins no longer
-# enter a product size. The pool still has a `specification` column, which is now
-# filled from master_product rather than from the upload.
 SKU_COLUMNS = [
+    "Kode SKU Prinsipal",
+    "Kode SKU Distributor",
+    "Nama SKU Distributor",
+]
+SKU_INTERNAL_COLUMNS = [
     "Principal Product Code",
-    "Principal Product Name",
     "Customer Product Code ( Di isi oleh Distributor)",
     "Customer Product Name  ( Di isi oleh Distributor)",
 ]
+#: Indonesian template header -> existing internal canonical name.
+SKU_TEMPLATE_TO_INTERNAL = dict(zip(SKU_COLUMNS, SKU_INTERNAL_COLUMNS))
 
 # Header signatures for wrong-template detection. Normalised (see normalize.py).
-NOO_SIGNATURE = {"store name", "customer store code", "store address"}
-SKU_SIGNATURE = {"principal product code", "principal product name"}
+NOO_SIGNATURE = {"nama toko", "kode toko pelanggan", "alamat toko"}
+SKU_SIGNATURE = {"kode sku prinsipal", "kode sku distributor",
+                 "nama sku distributor"}
 
 # ─── Pool tab layouts — READ FROM THE LIVE SHEET, DO NOT CHANGE ──────────────
 # Verified 2026-08-19 against gid 557889479 and gid 654605989. These worksheets
@@ -255,7 +314,6 @@ MAX_UPLOAD_ROWS = 5000
 #: row count, and shared so writer.py's pre-write read and sources.py's other
 #: bounded reads never drift apart.
 POOL_MAX_ROW = 20000
-STORE_ID_PATTERN = r"^IE[A-Z]{2}\d{3,6}$"
 DIST_CODE_PATTERN = r"^DST[A-Z0-9]{2,6}$"
 
 

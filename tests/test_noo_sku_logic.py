@@ -127,7 +127,7 @@ def test_business_time_is_jakarta_not_utc():
 
 # ─── NOO validation ───────────────────────────────────────────────────────────
 def _noo(rows, suffix="CEC", cities=None):
-    parsed = [dict(zip(config.NOO_COLUMNS, r)) for r in rows]
+    parsed = [dict(zip(config.NOO_INTERNAL_COLUMNS, r)) for r in rows]
     numbers = list(range(4, 4 + len(rows)))
     return validators.validate_noo(parsed, numbers, distributor_code=DIST,
                                    distributor_name=NAME,
@@ -139,17 +139,6 @@ def _noo(rows, suffix="CEC", cities=None):
 def test_valid_noo_row_passes():
     issues, _ = _noo([fx.noo_row()])
     assert validators.split_severity(issues)[0] == []
-
-
-@pytest.mark.sanity
-def test_blank_store_id_is_allowed_because_the_column_is_optional():
-    issues, _ = _noo([fx.noo_row(store_id="")])
-    assert not [i for i in issues if i.column == "Store ID"]
-
-
-def test_malformed_store_id_is_flagged_but_blank_is_not():
-    issues, _ = _noo([fx.noo_row(store_id="IEBB1")])
-    assert any(i.column == "Store ID" for i in issues)
 
 
 def test_missing_customer_store_code_is_an_error_with_a_row_number():
@@ -229,7 +218,7 @@ def test_unresolved_suffix_produces_a_helpful_hint():
 
 # ─── SKU validation ───────────────────────────────────────────────────────────
 def _sku(rows, **kw):
-    parsed = [dict(zip(config.SKU_COLUMNS, r)) for r in rows]
+    parsed = [dict(zip(config.SKU_INTERNAL_COLUMNS, r)) for r in rows]
     numbers = list(range(6, 6 + len(rows)))
     return validators.validate_sku(parsed, numbers, distributor_code=DIST,
                                    product_lookup=fx.PRODUCTS, **kw)
@@ -249,7 +238,7 @@ def test_unknown_principal_sku_is_an_error():
 
 
 def test_out_of_scope_brand_sku_is_rejected():
-    issues, _ = _sku([fx.sku_row(code="G2G-74", name="GLAD2GLOW TEST")])
+    issues, _ = _sku([fx.sku_row(code="G2G-74")])
     assert any("di luar cakupan" in i.problem for i in issues)
 
 
@@ -259,17 +248,21 @@ def test_missing_db_columns_are_errors():
     assert {"Customer Product Code", "Customer Product Name"} <= cols
 
 
-def test_name_mismatch_warns_by_default_and_can_be_made_strict():
-    rows = [fx.sku_row(name="NAMA SALAH")]
-    issues, _ = _sku(rows)
-    assert all(i.severity == validators.WARNING for i in issues)
-    strict, _ = _sku(rows, strict_names=True)
-    assert all(i.severity == validators.ERROR for i in strict)
-
-
 @pytest.mark.sanity
 def test_size_column_is_gone_so_it_can_never_be_required():
     """MoM 31-Aug-2026 §6.1: gramasi removed from the template entirely."""
     assert "Product Size (ml/g)" not in config.SKU_COLUMNS
     issues, _ = _sku([fx.sku_row()])
     assert not [i for i in issues if "Size" in i.column]
+
+
+@pytest.mark.sanity
+def test_principal_product_name_is_gone_so_it_can_never_be_required():
+    """2026-09-07: Nama Produk Prinsipal removed from the template entirely —
+    product_name is now always derived from master_product (see
+    writer.build_sku_row), never collected from or validated against the
+    upload."""
+    assert "Principal Product Name" not in config.SKU_COLUMNS
+    assert "Principal Product Name" not in config.SKU_INTERNAL_COLUMNS
+    issues, _ = _sku([fx.sku_row()])
+    assert not [i for i in issues if "Principal Product Name" in i.column]

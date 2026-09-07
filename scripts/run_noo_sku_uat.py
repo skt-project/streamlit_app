@@ -149,7 +149,9 @@ def run_pipeline(args, settings, creds, project, client, distributor,
             dist_enricher=dist_enricher,
             store_enricher=enrichment.StoreEnricher(by_cust, by_ref),
             ledger=sources.load_noo_ledger(client, set(allowed)),
-            known_cities=_safe(sources.load_city_reference, creds, default=set()),
+            known_cities=_safe(sources.load_city_reference,
+                              sources.load_local_noo_template(),
+                              default=set()),
             when=now_business(), allowed_branches=allowed,
             company_name=company_name)
 
@@ -333,6 +335,11 @@ def main(argv=None):
     if not parsed.rows:
         print("REFUSED: file tidak berisi data.")
         return EXIT_VALIDATION
+
+    # The only place the Indonesian template header and the existing internal
+    # (English) field names meet — mirrors noo_sku_mapping.py exactly so this
+    # script's behaviour cannot diverge from the Streamlit app's.
+    parsed = parsers.translate_to_internal(parsed, parsed.kind)
 
     tab = writer.pool_tab_for(parsed.kind)
     headers = writer.pool_headers_for(parsed.kind)

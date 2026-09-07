@@ -100,9 +100,12 @@ def run_noo(parsed, *, distributor, resolver, dist_enricher, store_enricher,
         # Enrich from the branch this row names, not from the login.
         row_code = norm_key(row.get("Customer Branch Code")) or dist_code
         dist_result = dist_enricher.resolve(row_code, brand, row=number)
+        # Store ID was removed from the template entirely on 2026-09-07 and
+        # is never supplied by the admin - Customer Store Code (the
+        # reference id) is the only lookup key StoreEnricher ever actually
+        # receives from here now.
         store_result = store_enricher.resolve(
-            store_id=row.get("Store ID (Opsional)", ""),
-            store_code=row.get("Customer Store Code", ""),
+            store_id="", store_code=row.get("Customer Store Code", ""),
             brand=brand, row=number)
         result.enrichment_notes.extend(dist_result.notes)
         result.enrichment_notes.extend(store_result.notes)
@@ -164,11 +167,13 @@ def run_sku(parsed, *, distributor, resolver, dist_enricher, product_enricher,
 
     pool_rows, numbers = [], []
     for row, number in good:
-        # No size fallback: the gramasi column was removed from the template on
-        # 31-Aug-2026, so `specification` comes from master_product alone.
+        # No size or name fallback: the gramasi column was removed from the
+        # template on 31-Aug-2026, and Principal Product Name on 2026-09-07 -
+        # `specification` and `product_name` both come from master_product
+        # alone (an unmapped Principal Product Code is already a hard
+        # validation error above, so a row never reaches here without one).
         product = product_enricher.resolve(
-            row.get("Principal Product Code", ""),
-            fallback_name=row.get("Principal Product Name", ""), row=number)
+            row.get("Principal Product Code", ""), row=number)
         result.enrichment_notes.extend(product.notes)
 
         brand = product.values.get("brand") or row.get("_brand", "")

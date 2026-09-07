@@ -147,18 +147,20 @@ def _resolver():
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _cities():
-    creds, _, _ = _clients()
+    """Reads the bundled NOO template's own 'Kota & Tipe Toko' sheet — no
+    network call, and no risk of drifting from the template actually served
+    (see `_noo_template_bytes`)."""
     try:
-        return sources.load_city_reference(creds)
+        return sources.load_city_reference(sources.load_local_noo_template())
     except Exception:
         return set()
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def _template_bytes(file_id):
-    """NOO's template only — still BD Support's live Drive-hosted file."""
-    creds, _, _ = _clients()
-    return sources.download_template(creds, file_id)
+def _noo_template_bytes():
+    """NOO's template — bundled locally as of the 2026-09-07 revision, no
+    Drive call. Mirrors the SKU template's own 2026-09-03 move."""
+    return sources.load_local_noo_template()
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -171,9 +173,11 @@ def _sku_template_bytes():
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def _guideline_pdf(kind):
-    """PDF for the selected function only — never a combined document."""
-    return guideline.build_pdf(kind)
+def _guide_pptx_bytes():
+    """The bundled Panduan Penggunaan PPTX — the single source of truth for
+    the user guide, served unchanged so what's downloaded always matches
+    what's shown on screen."""
+    return guideline.load_guide_pptx()
 
 
 # ─── Login ────────────────────────────────────────────────────────────────────
@@ -435,13 +439,19 @@ def _build_pipeline_result(kind, dist, uploaded):
                  + "**. Gunakan template resmi tanpa mengubah urutan kolom.")
         return None
     if not parsed.rows:
-        st.error("✗ File tidak berisi data. Isi minimal satu baris di bawah "
-                 "baris CONTOH.")
+        st.error("✗ File tidak berisi data. Isi minimal satu baris data "
+                 "pada template, di bawah baris header.")
         return None
     if len(parsed.rows) > config.MAX_UPLOAD_ROWS:
         st.error(f"✗ File berisi {len(parsed.rows)} baris, melebihi batas "
                  f"{config.MAX_UPLOAD_ROWS} baris per upload.")
         return None
+
+    # The only place the Indonesian template header and the existing internal
+    # (English) field names meet — everything below this line, unchanged by
+    # the 2026-09-07 template revision, still addresses columns by their old
+    # internal names (e.g. "Store Name", "Principal Product Code").
+    parsed = parsers.translate_to_internal(parsed, expected)
 
     _, _, client = _clients()
     resolver = _resolver()
@@ -569,6 +579,35 @@ def _handle_section(kind, dist):
 
 
 # ─── Sections ─────────────────────────────────────────────────────────────────
+def _render_guide_section(heading, items):
+    """One (heading, [GuideItem]) block. Consecutive plain bullets are
+    grouped into a single markdown list; a step that carries a screenshot
+    gets its own paragraph + image, in the same order the PPTX shows them."""
+    st.markdown(f"**{heading}**")
+    bullets = []
+
+    def _flush():
+        if bullets:
+            st.markdown("\n".join(f"- {b}" for b in bullets))
+            bullets.clear()
+
+    for item in items:
+        if not item.image:
+            bullets.append(item.text)
+            continue
+        _flush()
+        st.markdown(item.text)
+        image_path = Path(__file__).parent / item.image
+        if image_path.is_file():
+            st.image(str(image_path), use_container_width=True)
+    _flush()
+
+
+def _render_guide(kind_key):
+    for heading, items in guideline.sections_for(kind_key):
+        _render_guide_section(heading, items)
+
+
 def render_section(kind, dist):
     is_noo = kind == SECTION_NOO
     st.subheader(kind)
@@ -579,7 +618,7 @@ def render_section(kind, dist):
     with st.expander(label, expanded=False):
         st.caption("Panduan di bawah ini hanya berisi ketentuan untuk "
                    f"**{kind}**.")
-        st.markdown(guideline.as_markdown(kind_key))
+        _render_guide(kind_key)
         resolution = _resolver().resolve(dist["distributor_code"])
         if resolution.resolved:
             codes = ", ".join(f"`{c}`"
@@ -588,23 +627,33 @@ def render_section(kind, dist):
         else:
             st.warning("Singkatan distributor Anda belum terdaftar di master. "
                        "Hubungi BD Support sebelum upload SKU.")
-        pdf = _guideline_pdf(kind_key)
-        if pdf:
+        try:
+            pptx = _guide_pptx_bytes()
             st.download_button(
-                f"⬇ Download Panduan PDF ({'NOO' if is_noo else 'SKU'})",
-                data=pdf,
-                file_name=f"Panduan_{'NOO_Mapping' if is_noo else 'SKU_Mapping'}.pdf",
-                mime="application/pdf", key=f"pdf_{kind}")
+                "⬇ Download Panduan Penggunaan (PPTX)", data=pptx,
+                file_name=guideline.GUIDE_PPTX_FILENAME,
+                mime="application/vnd.openxmlformats-officedocument"
+                     ".presentationml.presentation", key=f"pptx_{kind}")
+        except FileNotFoundError:
+            st.caption("Panduan PPTX belum tersedia untuk diunduh saat ini.")
 
     name = ("NOO_MAPPING_TEMPLATE.xlsx" if is_noo
             else "SKU_MAPPING_TEMPLATE_2.0.xlsx")
     try:
-        template_bytes = (_template_bytes(config.NOO_TEMPLATE_FILE_ID) if is_noo
+        template_bytes = (_noo_template_bytes() if is_noo
                           else _sku_template_bytes())
         st.download_button(f"⬇ Download Template {'NOO' if is_noo else 'SKU'}",
                            data=template_bytes, file_name=name,
                            mime="application/vnd.openxmlformats-officedocument"
                                 ".spreadsheetml.sheet", key=f"tpl_{kind}")
+        if is_noo:
+            st.caption("Template ini tidak lagi memiliki kolom **Store ID** — "
+                       "cukup isi 9 kolom yang tersedia.")
+        else:
+            st.caption("Template ini hanya berisi **3 kolom** yang perlu Anda "
+                       "isi. Kolom **Nama Produk Prinsipal** tidak perlu "
+                       "diisi — sistem akan melengkapinya secara otomatis "
+                       "dari master produk berdasarkan Kode SKU Prinsipal.")
     except Exception:
         st.warning("Template belum bisa diunduh saat ini. Hubungi BD Support.")
 

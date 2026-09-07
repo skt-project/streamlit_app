@@ -437,31 +437,49 @@ def load_store_basis(credentials, project, distributor_codes=None) -> tuple:
 
 
 # ─── City reference (from the NOO template's own reference sheet) ─────────────
-def load_city_reference(credentials, file_id=None) -> set:
-    """Cities from the 'City & Store Type' sheet of BD Support's NOO template."""
-    import openpyxl
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaIoBaseDownload
+def load_city_reference(raw: bytes) -> set:
+    """Cities from the 'Kota & Tipe Toko' sheet of the bundled NOO template.
 
-    drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
-    buf = io.BytesIO()
-    downloader = MediaIoBaseDownload(
-        buf, drive.files().get_media(fileId=file_id or config.NOO_TEMPLATE_FILE_ID,
-                                     supportsAllDrives=True))
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    buf.seek(0)
-    wb = openpyxl.load_workbook(buf, data_only=True, read_only=True)
-    if "City & Store Type" not in wb.sheetnames:
+    2026-09-07: reads the bundled REVISI file's own bytes instead of a
+    separate Drive fetch — the same file is already the authoritative source
+    for the template contract, so a second, independently-fetched copy could
+    silently drift from it. Falls back to the old English sheet name
+    ('City & Store Type') for a caller that ever hands in an older file.
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+    name = next((n for n in wb.sheetnames
+                if n in ("Kota & Tipe Toko", "City & Store Type")), None)
+    if name is None:
         return set()
-    ws = wb["City & Store Type"]
+    ws = wb[name]
     return {clean(r[1]) for r in ws.iter_rows(min_row=2, values_only=True)
             if len(r) > 1 and clean(r[1])}
 
 
+def load_local_noo_template() -> bytes:
+    """The bundled NOO_MAPPING_TEMPLATE (REVISI).xlsx — no network call.
+
+    2026-09-07: BD Support handed over a fixed file rather than the previous
+    live Drive link, mirroring the same move already made for SKU on
+    2026-09-03. Raises FileNotFoundError with a clear message if the asset
+    was not shipped with this deployment, rather than silently falling back
+    to the outdated Drive-hosted template — serving the wrong NOO template is
+    worse than failing loudly.
+    """
+    path = config.NOO_TEMPLATE_LOCAL_PATH
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Template NOO tidak ditemukan di {path}. Pastikan file "
+            "NOO_MAPPING_TEMPLATE (REVISI).xlsx ikut ter-deploy bersama "
+            "aplikasi."
+        )
+    return path.read_bytes()
+
+
 def load_local_sku_template() -> bytes:
-    """The bundled SKU_MAPPING_TEMPLATE 2.0.xlsx — no network call.
+    """The bundled SKU_MAPPING_TEMPLATE_2.0 (REVISI).xlsx — no network call.
 
     MoM 2026-09-03: BD Support handed over a fixed file rather than a live
     Drive link, and it is treated as the current source template, not a
@@ -474,7 +492,8 @@ def load_local_sku_template() -> bytes:
     if not path.is_file():
         raise FileNotFoundError(
             f"Template SKU tidak ditemukan di {path}. Pastikan file "
-            "SKU_MAPPING_TEMPLATE 2.0.xlsx ikut ter-deploy bersama aplikasi."
+            "SKU_MAPPING_TEMPLATE_2.0 (REVISI).xlsx ikut ter-deploy bersama "
+            "aplikasi."
         )
     return path.read_bytes()
 

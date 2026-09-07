@@ -36,7 +36,8 @@ ALLOWED_BRANCHES = {"DST082": {"name": "CV CECE"},
 
 def _noo_pipeline(rows, ledger=(frozenset(), frozenset()), allowed=None):
     return pipeline.run_noo(
-        fx.FakeParsed(rows, config.NOO_COLUMNS), distributor=fx.DISTRIBUTOR,
+        fx.FakeParsed(rows, config.NOO_INTERNAL_COLUMNS),
+        distributor=fx.DISTRIBUTOR,
         resolver=_resolver(), dist_enricher=_dist_enricher(),
         store_enricher=_store_enricher(), ledger=ledger, when=now_business(),
         allowed_branches=allowed or ALLOWED_BRANCHES, company_name="CV CECE")
@@ -44,7 +45,7 @@ def _noo_pipeline(rows, ledger=(frozenset(), frozenset()), allowed=None):
 
 def _sku_pipeline(rows, ledger=(frozenset(), frozenset())):
     return pipeline.run_sku(
-        fx.FakeParsed(rows, config.SKU_COLUMNS, first_row=6),
+        fx.FakeParsed(rows, config.SKU_INTERNAL_COLUMNS, first_row=6),
         distributor=fx.DISTRIBUTOR, resolver=_resolver(),
         dist_enricher=_dist_enricher(),
         product_enricher=enrichment.ProductEnricher(fx.PRODUCTS),
@@ -607,13 +608,37 @@ def test_noo_and_not_noo_classification_survive_the_scoped_write_end_to_end():
 
 
 # ─── Guideline ────────────────────────────────────────────────────────────────
-def test_guideline_pdf_renders_per_function():
+def test_guideline_renders_per_function():
     from noo_sku import guideline
 
     for kind in (guideline.UPLOAD_NOO, guideline.UPLOAD_SKU):
-        assert guideline.build_pdf(kind)[:4] == b"%PDF"
         assert "Panduan" in guideline.title_for(kind)
         assert "Umum" in guideline.as_markdown(kind)
+
+
+def test_guide_pptx_is_bundled_and_readable():
+    """2026-09-07: the guide's single source of truth — served for download
+    unchanged, never a separately regenerated document."""
+    from noo_sku import guideline
+
+    raw = guideline.load_guide_pptx()
+    assert raw[:2] == b"PK", "must be a real .pptx (zip) file"
+    assert len(raw) > 1000
+
+
+def test_guide_screenshot_assets_referenced_by_the_walkthrough_all_exist():
+    """Every GuideItem.image path must resolve to a real bundled file — a
+    dangling reference would silently show a broken image in the app."""
+    from pathlib import Path
+
+    from noo_sku import guideline
+
+    repo_root = Path(__file__).resolve().parents[1]
+    for kind in (guideline.UPLOAD_NOO, guideline.UPLOAD_SKU):
+        for _, items in guideline.sections_for(kind):
+            for item in items:
+                if item.image:
+                    assert (repo_root / item.image).is_file(), item.image
 
 
 # ─── Write modes (brief §14/§15) ──────────────────────────────────────────────
@@ -806,14 +831,14 @@ def test_mom_7_invalid_principal_sku_is_blocked():
 @pytest.mark.sanity
 def test_mom_8_size_column_is_absent_from_the_template_contract():
     assert "Product Size (ml/g)" not in config.SKU_COLUMNS
-    assert len(config.SKU_COLUMNS) == 4
+    assert len(config.SKU_COLUMNS) == 3
 
 
 @pytest.mark.sanity
 def test_mom_9_customer_name_is_the_company_not_the_branch():
     """Test 9: SKU pool customer_name carries the COMPANY name."""
     result = pipeline.run_sku(
-        fx.FakeParsed([fx.sku_row()], config.SKU_COLUMNS, first_row=6),
+        fx.FakeParsed([fx.sku_row()], config.SKU_INTERNAL_COLUMNS, first_row=6),
         distributor=fx.DISTRIBUTOR, resolver=_resolver(),
         dist_enricher=_dist_enricher(),
         product_enricher=enrichment.ProductEnricher(fx.PRODUCTS),
