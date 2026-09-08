@@ -580,9 +580,11 @@ def _handle_section(kind, dist):
 
 # ─── Sections ─────────────────────────────────────────────────────────────────
 def _render_guide_section(heading, items):
-    """One (heading, [GuideItem]) block. Consecutive plain bullets are
-    grouped into a single markdown list; a step that carries a screenshot
-    gets its own paragraph + image, in the same order the PPTX shows them."""
+    """One (heading, [GuideItem]) block. Consecutive reference bullets are
+    grouped into a single markdown list; a numbered walkthrough step gets
+    its own plain paragraph (+ image, when it has one) — never bullet
+    styling, even for a step with no screenshot, so it still matches the
+    rest of its own walkthrough."""
     st.markdown(f"**{heading}**")
     bullets = []
 
@@ -592,11 +594,13 @@ def _render_guide_section(heading, items):
             bullets.clear()
 
     for item in items:
-        if not item.image:
+        if not item.is_step:
             bullets.append(item.text)
             continue
         _flush()
         st.markdown(item.text)
+        if not item.image:
+            continue
         image_path = Path(__file__).parent / item.image
         if image_path.is_file():
             st.image(str(image_path), use_container_width=True)
