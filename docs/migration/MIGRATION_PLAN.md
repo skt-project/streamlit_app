@@ -1,5 +1,17 @@
 # Migration Plan — Streamlit Portfolio → Cloud Run / GCS / BigQuery
 
+> **Execution update, 2026-09-08**: GCP infrastructure preparation and 3 pilot deployments
+> (`visit_validator`, `template_converter`, `noo_detector`) have actually been built and
+> validated — see [EXECUTION_LOG.md](EXECUTION_LOG.md) for what's live, resource IDs, and a
+> real finding that changes §11 below: **Cloud Run's native `--no-allow-unauthenticated` IAM
+> auth cannot be used by a normal browser against a WebSocket-driven app like Streamlit** (a
+> browser can't attach an Authorization header to a native WebSocket handshake, confirmed via
+> a live 403 on `_stcore/stream`). Every "authenticated access" recommendation in this plan
+> that assumed Cloud Run's built-in auth would work for real end users needs revisiting —
+> the actual options are Identity-Aware Proxy (cookie-based, WebSocket-compatible) or the
+> app's own login. This does not change the plan's overall direction, only the specific
+> mechanism for "internal apps should require authentication."
+
 **Status: AUDIT + PLAN ONLY. No production code, data, or infrastructure was modified to produce this document.**
 **Scope: the entire `D:\GitHub\streamlit_app` repository (github.com/skt-project/streamlit_app) — not one app.**
 Audited 2026-08-26. GCP project: `skintific-data-warehouse`.
