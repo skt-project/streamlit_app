@@ -7,10 +7,22 @@ from difflib import get_close_matches
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 from google.oauth2 import service_account
+import google.auth
 
 # =========================
 # Environment / Secrets
 # =========================
+# MIGRATION NOTE (deploy/template_converter): the original fallback here loaded
+# a service-account key from a hardcoded local Windows path
+# (C:\script\skintific-data-warehouse-ea77119e2e7a.json), which does not exist
+# on Cloud Run and left `credentials = None` (a latent bug: bigquery.Client()
+# below calls `credentials.project_id`, which would crash on None). When no
+# st.secrets are present (e.g. running in a container with no
+# .streamlit/secrets.toml), this now falls back to Application Default
+# Credentials, which Cloud Run provides automatically for the service
+# account attached to the service (no key file needed). Local dev behavior
+# with a real secrets.toml is unchanged. See docs/migration/MIGRATION_PLAN.md
+# section 12 for the before/after/validation record of this change.
 try:
     gcp_secrets = st.secrets["connections"]["bigquery"]
     private_key = gcp_secrets["private_key"].replace("\\n", "\n")
@@ -30,16 +42,10 @@ try:
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
 except Exception:
-    GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "gt_schema"
     BQ_CONFIGS_TABLE = "distributor_configs"
-    try:
-        credentials = service_account.Credentials.from_service_account_file(
-            GCP_CREDENTIALS_PATH
-        )
-    except Exception:
-        credentials = None
+    credentials, _adc_project = google.auth.default()
 
 # =========================
 # Master Schema
@@ -311,7 +317,11 @@ def _read_excel_as_text(
 # =========================
 @st.cache_resource(show_spinner=False)
 def get_bq_client() -> bigquery.Client:
-    return bigquery.Client(credentials=credentials, project=credentials.project_id)
+    # MIGRATION NOTE: was `project=credentials.project_id`, which crashes if
+    # `credentials` is ever the ADC fallback above (those credential objects
+    # don't all expose .project_id) or was None (the original dead-code path
+    # this replaced). GCP_PROJECT_ID is always set by both branches above.
+    return bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
 
 
 # =========================

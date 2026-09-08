@@ -2,10 +2,21 @@ import streamlit as st
 import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import google.auth
 from rapidfuzz import fuzz
 from haversine import haversine, Unit
 from io import BytesIO
 import re
+
+# MIGRATION NOTE (deploy/noo_detector): GCP_PROJECT_ID and the two default
+# table paths below are the same values st.secrets provides in production
+# (confirmed live via `bq show` against skintific-data-warehouse) and are not
+# secret material themselves (they are fully-qualified table pointers, not
+# credentials). They only take effect when no .streamlit/secrets.toml is
+# present, i.e. running as a container with no secrets file mounted.
+GCP_PROJECT_ID = "skintific-data-warehouse"
+DEFAULT_MASTER_STORE_TABLE = "skintific-data-warehouse.gt_schema.master_store_database_basis"
+DEFAULT_FACT_SELL_THROUGH_TABLE = "skintific-data-warehouse.pbi_gt_dataset.fact_sell_through_all"
 
 # Define required columns for the Excel template
 REQUIRED_COLUMNS = [
@@ -40,16 +51,22 @@ def load_existing_data(brand_filter):
             "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
         })
     except Exception:
-        # Fallback to local key file
-        SERVICE_ACCOUNT_FILE = r'C:\script\skintific-data-warehouse-ea77119e2e7a.json'
-        credentials = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE
-        )
+        # MIGRATION NOTE: the original fallback loaded a service-account key
+        # from a hardcoded local Windows path (C:\script\...json), which does
+        # not exist on Cloud Run. Falls back to Application Default
+        # Credentials instead, which Cloud Run provides automatically for
+        # this service's attached service account (no key file needed).
+        credentials, _adc_project = google.auth.default()
 
-    client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+    # MIGRATION NOTE: was `project=credentials.project_id`, which crashes for
+    # the ADC fallback above. GCP_PROJECT_ID is always set (module level).
+    client = bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
 
     # 1. Fetch master store data from store basis
-    master_store_table_path = st.secrets["bigquery_tables"]["master_store_database"]
+    try:
+        master_store_table_path = st.secrets["bigquery_tables"]["master_store_database"]
+    except Exception:
+        master_store_table_path = DEFAULT_MASTER_STORE_TABLE
     query = f"""
         SELECT
             cust_id,
@@ -70,7 +87,10 @@ def load_existing_data(brand_filter):
     existing_df = client.query(query).to_dataframe()
 
     # 2. Fetch last 6 months sell-through data
-    sell_through_table_path = st.secrets["bigquery_tables"]["fact_sell_through"]
+    try:
+        sell_through_table_path = st.secrets["bigquery_tables"]["fact_sell_through"]
+    except Exception:
+        sell_through_table_path = DEFAULT_FACT_SELL_THROUGH_TABLE
 
     # --- Brand Filter Logic ---
     brand_where_clause = ""

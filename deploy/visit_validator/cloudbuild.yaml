@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'deploy/visit_validator/Dockerfile'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/visit-validator:pilot-1'
+      - '.'
+images:
+  - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/visit-validator:pilot-1'

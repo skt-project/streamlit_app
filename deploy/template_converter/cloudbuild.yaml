@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'deploy/template_converter/Dockerfile'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/template-converter:pilot-1'
+      - '.'
+images:
+  - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/template-converter:pilot-1'
