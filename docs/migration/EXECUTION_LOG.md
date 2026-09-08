@@ -37,7 +37,7 @@ Companion to [MIGRATION_PLAN.md](MIGRATION_PLAN.md). Records exactly what was cr
 | `gs://skintific-streamlit-migration-uploads` | Signed-URL upload target for migration pilots | Delete after 2 days |
 | `gs://skintific-streamlit-migration-exports` | Generated export target for migration pilots | Delete after 1 day |
 
-Both private (uniform bucket-level access, no `allUsers`/`allAuthenticatedUsers` binding). Neither pilot app currently uses GCS (per FEATURE_MIGRATION_MATRIX.md, `visit_validator`/`template_converter`/`noo_detector` are all BigQuery-only or fully local) — these buckets are provisioned ahead of the next pilot wave (`smart_coverage.py`, `stock_opname_ssjabo.py`), not yet wired into any deployed service.
+Both private (uniform bucket-level access, no `allUsers`/`allAuthenticatedUsers` binding). `stock_opname_ssjabo.py`'s ADC fallback now points its (optional, not yet exercised in the validation run — no file was attached during the test submit) document upload at `skintific-streamlit-migration-uploads`; the other 3 pilots don't use GCS.
 
 ## 4. BigQuery — CREATED
 
@@ -45,8 +45,9 @@ Both private (uniform bucket-level access, no `allUsers`/`allAuthenticatedUsers`
 |---|---|
 | Dataset | `streamlit_migration_staging` (location `US`, matching every production dataset this portfolio touches) |
 | Access | `streamlit-migration-runtime@...` granted `WRITER` |
+| Table | `streamlit_migration_staging.stock_opname_ssjabo_pilot` (11-column schema matching `stock_opname_ssjabo.py`'s insert payload) — created for the 4th pilot's write-path test, contains 1 real test row as of 2026-09-08 |
 
-No production dataset, table, schema, or ACL was modified. All three deployed pilots are read-only against production data (`gt_schema.master_distributor`, `gt_schema.distributor_configs`, `gt_schema.master_store_database_basis`, `pbi_gt_dataset.fact_sell_through_all`) via the runtime SA's project-wide `dataViewer` role — no write path exists in any of the three pilot apps, so the staging dataset is not yet exercised by anything live; it is provisioned for the next wave of pilots that do write (`smart_coverage.py`, `stock_opname_ssjabo.py`, etc., per DUPLICATION_PLAN.md §4).
+No production dataset, table, schema, or ACL was modified. Three of the four deployed pilots are read-only against production data (`gt_schema.master_distributor`, `gt_schema.distributor_configs`, `gt_schema.master_store_database_basis`, `pbi_gt_dataset.fact_sell_through_all`) via the runtime SA's project-wide `dataViewer` role. The 4th pilot (`stock_opname_ssjabo.py`) is the first to write, and does so into this staging dataset only — see §7 for the validated write-path test.
 
 ## 5. Code changes — on branch `migration/cloud-run` only, NOT on `main`
 
@@ -77,6 +78,7 @@ Built via my own gcloud identity (not yet via `streamlit-migration-build@` — t
 | `visit-validator-migration` | `https://visit-validator-migration-141828905128.asia-southeast1.run.app` | asia-southeast1 | 512Mi / 1 | 1 | 0 / 3 | Authenticated only | `streamlit-migration-runtime@` |
 | `template-converter-migration` | `https://template-converter-migration-141828905128.asia-southeast1.run.app` | asia-southeast1 | 1Gi / 1 | 1 | 0 / 3 | Authenticated only | `streamlit-migration-runtime@` |
 | `noo-detector-migration` | `https://noo-detector-migration-141828905128.asia-southeast1.run.app` | asia-southeast1 | 1Gi / 1 | 1 | 0 / 3 | Authenticated only | `streamlit-migration-runtime@` |
+| `stock-opname-ssjabo-migration` | `https://stock-opname-ssjabo-migration-141828905128.asia-southeast1.run.app` | asia-southeast1 | 512Mi / 1 | 1 | 0 / 3 | Authenticated only | `streamlit-migration-runtime@` |
 
 Concurrency is pinned to 1 on all three per Streamlit's own session model (one WebSocket session per Streamlit process instance — a higher concurrency setting would let Cloud Run route multiple users' sessions into one container, which Streamlit does not support safely). `--no-allow-unauthenticated` deliberately chosen for this pilot/internal-testing phase — `noo-detector` specifically returns NIK/NPWP (PII) with zero app-level auth, and none of the three should be reachable by an unauthenticated caller before a real auth layer or an explicit pilot-user decision (MIGRATION_PLAN.md §7 roadmap Phase 6 vs 7).
 
@@ -116,6 +118,22 @@ what most of these apps will need anyway per FEATURE_MIGRATION_MATRIX.md). `gclo
 services proxy` (used above) is a valid *developer-only* workaround, not something real
 end users can be asked to run. This needs to be decided per app before Phase 7 (pilot
 users) — flagged as a new open decision in MIGRATION_PLAN.md's roadmap.
+
+**4th pilot, stock-opname-ssjabo-migration, fully validated including its WRITE path
+(2026-09-08)**: this app was chosen specifically because it performs a real BigQuery
+`insert_rows_json()` and a GCS upload — the first pilot to exercise a write. This machine's
+local `.streamlit/secrets.toml` has no config for this app at all (never configured here),
+so rather than guess at the real production output table/bucket, the ADC fallback routes
+writes to this migration's own `streamlit_migration_staging.stock_opname_ssjabo_pilot`
+table (pre-created with a matching schema) and `skintific-streamlit-migration-uploads`
+bucket — never the real production targets. Drove the full UI via `gcloud run services
+proxy` + Playwright: Region → SPV → Store cascading selects all populated with real
+production data (confirming `load_store_data()`/`load_product_data()` work), set a SKU
+quantity, clicked Submit, got "✅ Stock opname berhasil disubmit untuk MISS GLAM", then
+independently confirmed via a direct `bq query` that the exact row (submission_id,
+region=Southern Sumatera 1, spv=Eka Susanti, cust_id=IWSP04038, store_name=MISS GLAM,
+sku=SKINTIFIC-153, quantity=1) landed in the staging table. This is the strongest evidence
+yet that the ADC-credential pattern works identically for both reads and writes.
 
 ## 8. Observability — CREATED (baseline)
 
