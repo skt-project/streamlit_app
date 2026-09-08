@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'deploy/stock_opname_ssjabo/Dockerfile'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/stock-opname-ssjabo:pilot-1'
+      - '.'
+images:
+  - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/stock-opname-ssjabo:pilot-1'

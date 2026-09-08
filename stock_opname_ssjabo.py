@@ -3,6 +3,7 @@ import pandas as pd
 import uuid
 from datetime import datetime
 from google.oauth2 import service_account
+import google.auth
 from google.cloud import bigquery, storage
 from pendulum import timezone, now
 
@@ -15,6 +16,23 @@ jakarta_tz = timezone("Asia/Jakarta")
 # ---------------------------
 # Setup GCP Connections
 # ---------------------------
+# MIGRATION NOTE (deploy/stock_opname_ssjabo): the original code had no
+# fallback at all - a missing secrets.toml called st.stop(), which is
+# correct for Streamlit Cloud but leaves nothing to run in a container with
+# no secrets file mounted. When st.secrets is absent, this now falls back
+# to Application Default Credentials (Cloud Run's attached service
+# account). The READ-only table names (STORE_TABLE/PRODUCT_TABLE) fall
+# back to their known real names (verified via `bq show` against
+# skintific-data-warehouse - not secret material, just table pointers).
+# The WRITE path (OUTPUT_TABLE) and the upload bucket deliberately do NOT
+# fall back to a guessed production name - this pilot has no configured
+# secrets on this machine to confirm the real output table, and guessing
+# wrong on an insert_rows_json() destination is a data-safety risk, not
+# just an inconvenience. Instead they fall back to this migration's own
+# isolated staging dataset/bucket (see docs/migration/DUPLICATION_PLAN.md
+# section 4). See docs/migration/EXECUTION_LOG.md for the validation
+# record of this change - local dev with a real secrets.toml is
+# unaffected either way.
 try:
     # --- BigQuery Credentials ---
     gcp_secrets = st.secrets["connections"]["bigquery"]
@@ -30,14 +48,22 @@ try:
     STORE_TABLE = st.secrets["bigquery"]["store_table"]
     PRODUCT_TABLE = st.secrets["bigquery"]["product_table"]
     OUTPUT_TABLE = st.secrets["bigquery"]["output_table"]
+    OUTPUT_DATASET = DATASET  # unchanged from production behavior
 
     # --- GCS Config ---
     BUCKET_NAME = st.secrets["gcs"]["bucket_name"]
     FOLDER_PREFIX = st.secrets["gcs"].get("folder_prefix", "stock_opname")
 
-except Exception as e:
-    st.error(f"Gagal membaca secrets.toml: {e}")
-    st.stop()
+except Exception:
+    credentials, _adc_project = google.auth.default()
+    PROJECT_ID = "skintific-data-warehouse"
+    DATASET = "gt_schema"
+    STORE_TABLE = "master_store_database_basis"
+    PRODUCT_TABLE = "master_product"
+    OUTPUT_DATASET = "streamlit_migration_staging"
+    OUTPUT_TABLE = "stock_opname_ssjabo_pilot"
+    BUCKET_NAME = "skintific-streamlit-migration-uploads"
+    FOLDER_PREFIX = "stock_opname_pilot"
 
 # Initialize clients
 bq_client = bigquery.Client(credentials=credentials, project=PROJECT_ID)
@@ -182,7 +208,12 @@ if all([
                 ]
 
                 # Insert to BigQuery
-                table_id = f"{PROJECT_ID}.{DATASET}.{OUTPUT_TABLE}"
+                # MIGRATION NOTE: was f"{PROJECT_ID}.{DATASET}.{OUTPUT_TABLE}" - split
+                # into its own OUTPUT_DATASET (see top of file) so the migration's ADC
+                # fallback can route writes to an isolated staging dataset without
+                # touching the read-path DATASET. No behavior change when secrets.toml
+                # is present (OUTPUT_DATASET == DATASET in that branch).
+                table_id = f"{PROJECT_ID}.{OUTPUT_DATASET}.{OUTPUT_TABLE}"
                 errors = bq_client.insert_rows_json(table_id, records)
                 if errors:
                     raise RuntimeError(errors)
