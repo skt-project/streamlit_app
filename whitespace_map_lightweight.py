@@ -5,6 +5,7 @@ import geopandas as gpd
 import folium
 from google.cloud import storage
 from google.oauth2 import service_account
+import google.auth
 from folium import GeoJsonTooltip
 from streamlit_folium import st_folium
 from io import BytesIO
@@ -50,14 +51,22 @@ def get_gcs_client():
             "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
         })
         BUCKET_NAME = st.secrets["gcs"]["data"]
-    except Exception as e:
-        # Local fallback with environment variable
-        credentials = service_account.Credentials.from_service_account_file(
-            r"C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json"
-        )
+    except Exception:
+        # MIGRATION NOTE: original fallback loaded a service-account key
+        # from a hardcoded local Windows path, which does not exist on
+        # Cloud Run. Falls back to Application Default Credentials instead.
+        # BUCKET_NAME here is the REAL production bucket, kept as-is (not
+        # redirected to a migration bucket) because this whole app is
+        # GCS-read-only - confirmed via grep, no upload/blob-write call
+        # exists anywhere in this file - so there is no write-safety
+        # concern the way there is for apps that write.
+        credentials, _adc_project = google.auth.default()
         BUCKET_NAME = "public_skintific_storage"
     
-    return storage.Client(credentials=credentials), BUCKET_NAME
+    # MIGRATION NOTE: added explicit project= - ADC credentials don't
+    # always let storage.Client() infer the project the way a
+    # service_account.Credentials object does.
+    return storage.Client(credentials=credentials, project="skintific-data-warehouse"), BUCKET_NAME
 
 # --- Load Region Index ---
 @st.cache_data(ttl=86400)  # Cache for 24 hours
