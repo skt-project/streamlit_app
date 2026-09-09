@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'deploy/skt_area_execution_capability_v2/Dockerfile'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/skt-area-execution-capability-v2:pilot-1'
+      - '.'
+images:
+  - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/skt-area-execution-capability-v2:pilot-1'

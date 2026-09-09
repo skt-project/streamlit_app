@@ -4,7 +4,6 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
-screenshots/
 po_portal_mockup/
 po_portal_mockup.zip
 *.pptx

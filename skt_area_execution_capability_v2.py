@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from pendulum import now as pendulum_now
 from google.oauth2 import service_account
+import google.auth
 from google.cloud import bigquery
 from openpyxl.worksheet.datavalidation import DataValidation
 from assessment_logic import (
@@ -262,12 +263,34 @@ label[data-baseweb="radio"] > div:has(~ input:checked) {
 # =====================================================
 # BIGQUERY CONNECTION (same pattern as skt_area_execution_capability.py)
 # =====================================================
-gcp_secrets = dict(st.secrets["connections"]["bigquery"])
-gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
-credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
+# MIGRATION NOTE: original code had no fallback at all - a missing
+# secrets.toml crashed immediately. When st.secrets is absent, falls back
+# to Application Default Credentials instead (Cloud Run's attached
+# service account, no key file needed). ASSESSMENT_DATASET is new: reads
+# from master_distributor/pbi_gt_dataset.fact_sell_in_all stay pointed at
+# the real gt_schema (read-only, safe), but every table this app WRITES
+# to (distributor_assessment, assessment_users, distributor_sku_allocation
+# - see ALLOCATION_TABLE below) is high-risk to write into without
+# confirmed production config (assessment_users holds real people's
+# plaintext passwords; the allocation table has zero dedup guard per this
+# migration's own audit), so those are redirected to this migration's own
+# isolated streamlit_migration_staging dataset instead of guessing at
+# production. No behavior change when a real secrets.toml is present
+# (ASSESSMENT_DATASET == DATASET in that branch).
+try:
+    gcp_secrets = dict(st.secrets["connections"]["bigquery"])
+    gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
+    credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
 
-PROJECT_ID   = st.secrets["bigquery"]["project"]
-DATASET      = st.secrets["bigquery"]["dataset"]
+    PROJECT_ID   = st.secrets["bigquery"]["project"]
+    DATASET      = st.secrets["bigquery"]["dataset"]
+    ASSESSMENT_DATASET = DATASET
+except Exception:
+    credentials, _adc_project = google.auth.default()
+    PROJECT_ID = "skintific-data-warehouse"
+    DATASET = "gt_schema"
+    ASSESSMENT_DATASET = "streamlit_migration_staging"
+
 TABLE        = "distributor_assessment"
 USERS_TABLE  = "assessment_users"
 
@@ -504,7 +527,7 @@ def check_login(username, password):
     column too) so a legacy/mixed-case row still matches a lowercase login attempt."""
     query = f"""
         SELECT username, password, full_name, role, region
-        FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}`
         WHERE LOWER(username) = @username AND is_active = TRUE
         LIMIT 1
     """
@@ -529,7 +552,7 @@ def verify_and_change_password(username, old_password, new_password):
     then updates it. Returns (True, None) on success or (False, error_message).
     No audit-log hook here — this app has no audit logging system to feed."""
     query = f"""
-        SELECT password FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        SELECT password FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}`
         WHERE LOWER(username) = @username AND is_active = TRUE
         LIMIT 1
     """
@@ -543,7 +566,7 @@ def verify_and_change_password(username, old_password, new_password):
         return False, "Old password is incorrect."
 
     update_query = f"""
-        UPDATE `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        UPDATE `{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}`
         SET password = @new_password
         WHERE LOWER(username) = @username
     """
@@ -585,7 +608,7 @@ def filtered_categories(role):
 def get_combined_progress(distributor_name, period):
     query = f"""
         SELECT metric, ANY_VALUE(point) AS points, ANY_VALUE(submitted_role) AS submitted_role
-        FROM `{PROJECT_ID}.{DATASET}.{TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{TABLE}`
         WHERE distributor = @distributor AND assessment_period = @period
         GROUP BY metric
     """
@@ -614,7 +637,7 @@ def get_role_bulk_progress(role, period):
 
     query = f"""
         SELECT DISTINCT distributor
-        FROM `{PROJECT_ID}.{DATASET}.{TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{TABLE}`
         WHERE submitted_role = @role AND assessment_period = @period AND metric = @metric
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
@@ -633,7 +656,7 @@ def check_role_already_submitted(role, distributor_name, period):
     """Live (uncached) check used right before allowing a new submission."""
     query = f"""
         SELECT 1
-        FROM `{PROJECT_ID}.{DATASET}.{TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{TABLE}`
         WHERE submitted_role = @role AND distributor = @distributor AND assessment_period = @period
         LIMIT 1
     """
@@ -657,7 +680,7 @@ def get_ass_missing_distributors(period):
 
     query = f"""
         SELECT DISTINCT distributor
-        FROM `{PROJECT_ID}.{DATASET}.{TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{TABLE}`
         WHERE submitted_role = 'Area Sales Supervisor' AND assessment_period = @period
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
@@ -678,14 +701,14 @@ def get_ass_users_not_submitted(period):
     alone would incorrectly mark them as done."""
     query = f"""
         SELECT u.username, u.full_name, u.region, u.email
-        FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}` u
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}` u
         JOIN `{PROJECT_ID}.{DATASET}.master_distributor` m
           ON m.status = 'Active'
           AND m.region = u.region
           AND (UPPER(m.spv_skt) = UPPER(u.full_name) OR UPPER(m.spv_tph) = UPPER(u.full_name))
         WHERE u.role = 'Area Sales Supervisor' AND u.is_active = TRUE
           AND NOT EXISTS (
-            SELECT 1 FROM `{PROJECT_ID}.{DATASET}.{TABLE}` da
+            SELECT 1 FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{TABLE}` da
             WHERE da.submitted_role = 'Area Sales Supervisor'
               AND da.assessment_period = @period
               AND da.distributor = m.distributor
@@ -704,7 +727,7 @@ def get_total_ass_users():
     ratio in the Reporting panel."""
     query = f"""
         SELECT COUNT(*) AS total
-        FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}`
         WHERE role = 'Area Sales Supervisor' AND is_active = TRUE
     """
     df = bq_client.query(query).to_dataframe()
@@ -718,7 +741,7 @@ def get_other_stakeholder_cc_emails():
     submissions."""
     query = f"""
         SELECT DISTINCT email
-        FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}`
         WHERE role IN ('Distributor Manager', 'Admin RSA', 'Account Receivable')
           AND is_active = TRUE
           AND email IS NOT NULL AND TRIM(email) != ''
@@ -732,7 +755,7 @@ def check_bulk_already_submitted(role, distributor_names, period, metric):
         return set()
     query = f"""
         SELECT DISTINCT distributor
-        FROM `{PROJECT_ID}.{DATASET}.{TABLE}`
+        FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{TABLE}`
         WHERE submitted_role = @role AND assessment_period = @period AND metric = @metric
           AND distributor IN UNNEST(@distributor_names)
     """
@@ -749,7 +772,7 @@ def insert_assessment_rows(rows_to_insert):
     """Single batched insert_rows_json call — same pattern as the original
     single-role app. Works for 1 row (Area Sales Supervisor's bad stock row)
     or many rows (a bulk Excel upload) without any chunking needed."""
-    table_id = f"{PROJECT_ID}.{DATASET}.{TABLE}"
+    table_id = f"{PROJECT_ID}.{ASSESSMENT_DATASET}.{TABLE}"
     return bq_client.insert_rows_json(table_id, rows_to_insert)
 
 # =====================================================
@@ -868,7 +891,7 @@ def parse_allocation_upload(df_upload, master_df):
     return preview_rows, row_errors
 
 def insert_allocation_rows(rows_to_insert):
-    table_id = f"{PROJECT_ID}.{DATASET}.{ALLOCATION_TABLE}"
+    table_id = f"{PROJECT_ID}.{ASSESSMENT_DATASET}.{ALLOCATION_TABLE}"
     return bq_client.insert_rows_json(table_id, rows_to_insert)
 
 # =====================================================
@@ -880,7 +903,7 @@ def username_exists(username):
     """Case-insensitive existence check — LOWER() on the stored column so a
     legacy/mixed-case row still collides with a new lowercase username."""
     query = f"""
-        SELECT 1 FROM `{PROJECT_ID}.{DATASET}.{USERS_TABLE}`
+        SELECT 1 FROM `{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}`
         WHERE LOWER(username) = @username
         LIMIT 1
     """
@@ -891,7 +914,7 @@ def username_exists(username):
     return not df.empty
 
 def create_user(username, password, full_name, new_role, region, email):
-    table_id = f"{PROJECT_ID}.{DATASET}.{USERS_TABLE}"
+    table_id = f"{PROJECT_ID}.{ASSESSMENT_DATASET}.{USERS_TABLE}"
     row = {
         "username": normalize_username(username),
         "password": password,
