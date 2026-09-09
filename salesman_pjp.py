@@ -999,8 +999,9 @@ def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
         wb.defined_names[name] = DefinedName(
             name, attr_text=_write_combo_column(HARI_COMBOS_BY_FREKUENSI[freq], f"__HARI_{suffix}__")
         )
-    # Column K — one Minggu (week-parity) list per Frekuensi. F1/F2 offer
-    # Ganjil/Genap; F4/F4+ offer only "Minggu Ganjil + Genap" (a one-entry
+    # Column K — one Minggu (week-parity) list per Frekuensi. F1 offers
+    # Ganjil/Genap; F2 adds "Minggu Ganjil + Genap" for its mixed-parity
+    # week pairs; F4/F4+ offer only "Minggu Ganjil + Genap" (a one-entry
     # list is how "automatic + locked" is expressed without VBA).
     for freq, suffix in FREKUENSI_RANGE_SUFFIX.items():
         name = f"NR_MINGGU_{suffix}"
@@ -1173,14 +1174,20 @@ def create_pjp_excel(
             "SENIN-SABTU saja (hari Minggu/Sunday tidak berlaku)."
         ),
         MINGGU_COL: (
-            "Langkah 5 - Pilih Frekuensi (kolom I) dahulu. F1/F2: pilih "
-            "Minggu Ganjil atau Minggu Genap. F4/F4+: hanya ada 1 pilihan, "
+            "Langkah 5 - Pilih Frekuensi (kolom I) dahulu. F1: Minggu Ganjil "
+            "atau Minggu Genap. F2: Minggu Ganjil (1,3), Minggu Genap (2,4), "
+            "atau Minggu Ganjil + Genap untuk kombinasi campuran "
+            "(1,2 / 1,4 / 2,3 / 3,4). F4/F4+: hanya ada 1 pilihan, "
             "Minggu Ganjil + Genap."
         ),
         KET_MINGGU_COL: (
-            "Langkah 6 - Terisi berdasarkan Frekuensi + Minggu. "
+            "Langkah 6 - Minggu ke berapa PJP dijalankan. F1 pilih 1 minggu, "
+            "F2 pilih 2 minggu (1,2 / 1,3 / 1,4 / 2,3 / 2,4 / 3,4). Sebagian "
+            "terisi otomatis berdasarkan Frekuensi + Minggu. "
             "F1 Ganjil: pilih 1 atau 3. F1 Genap: pilih 2 atau 4. "
-            "F2/F4/F4+: hanya ada 1 pilihan (otomatis). Nilai ini yang "
+            "F2 Ganjil: 1,3 dan F2 Genap: 2,4 (otomatis). "
+            "F2 Ganjil + Genap: pilih 1,2 / 1,4 / 2,3 / 3,4. "
+            "F4/F4+: hanya ada 1 pilihan (otomatis). Nilai ini yang "
             "disimpan sebagai callcycle."
         ),
     }
@@ -1300,8 +1307,11 @@ def create_pjp_excel(
         showInputMessage=True,
         promptTitle="Langkah 5 - Minggu (tergantung Frekuensi)",
         prompt=(
-            "Pilih Frekuensi (kolom I) terlebih dahulu.\n"
-            "  F1 / F2  -> Minggu Ganjil atau Minggu Genap\n"
+            "Pilih Frekuensi (kolom I) terlebih dahulu. Kolom ini menentukan "
+            "kelompok minggu yang bisa dipilih di kolom L (Ket. Minggu).\n"
+            "  F1       -> Minggu Ganjil atau Minggu Genap\n"
+            "  F2       -> Minggu Ganjil (1,3), Minggu Genap (2,4), atau\n"
+            "              Minggu Ganjil + Genap (1,2 / 1,4 / 2,3 / 3,4)\n"
             "  F4 / F4+ -> hanya Minggu Ganjil + Genap (otomatis)"
         ),
         showErrorMessage=True,
@@ -1316,6 +1326,8 @@ def create_pjp_excel(
     # and Minggu: the range name is NR_KET_<FREQ>_<MINGGU>, e.g.
     # NR_KET_F1_GANJIL = {1,3}, NR_KET_F1_GENAP = {2,4},
     # NR_KET_F2_GANJIL = {1,3} (single, automatic),
+    # NR_KET_F2_GENAP = {2,4} (single, automatic),
+    # NR_KET_F2_GANJILGENAP = {1,2 | 1,4 | 2,3 | 3,4} (a real choice),
     # NR_KET_F4_GANJILGENAP = {1,2,3,4}, NR_KET_F4PLUS_GANJILGENAP =
     # {1,2,3,4,5}. The nested SUBSTITUTEs turn the Minggu cell's text into
     # that suffix: "Minggu Ganjil + Genap" -> strip "Minggu " -> drop "+"
@@ -1333,10 +1345,13 @@ def create_pjp_excel(
         showInputMessage=True,
         promptTitle="Langkah 6 - Ket. Minggu (tergantung Frekuensi + Minggu)",
         prompt=(
+            "Minggu ke berapa dalam bulan PJP ini dijalankan.\n"
             "Isi Frekuensi (kolom I) dan Minggu (kolom K) terlebih dahulu.\n"
-            "  F1 + Minggu Ganjil -> pilih 1 atau 3\n"
-            "  F1 + Minggu Genap  -> pilih 2 atau 4\n"
-            "  F2  -> otomatis 1,3 (Ganjil) / 2,4 (Genap)\n"
+            "  F1 + Minggu Ganjil        -> pilih 1 atau 3\n"
+            "  F1 + Minggu Genap         -> pilih 2 atau 4\n"
+            "  F2 + Minggu Ganjil        -> 1,3 (otomatis)\n"
+            "  F2 + Minggu Genap         -> 2,4 (otomatis)\n"
+            "  F2 + Minggu Ganjil+Genap  -> pilih 1,2 / 1,4 / 2,3 / 3,4\n"
             "  F4  -> otomatis 1,2,3,4\n"
             "  F4+ -> otomatis 1,2,3,4,5"
         ),
@@ -1914,7 +1929,8 @@ def read_template_sheet(
             # this, leaving both blank (exactly what "automatic" invites)
             # fails as "kolom wajib belum terisi", and because the Ket.
             # Minggu auto-fill needs a resolved Minggu it fails too.
-            # F1/F2 have two real options, so they are never auto-filled.
+            # F1 (2 options) and F2 (3, since its mixed-parity pairs make
+            # "Ganjil + Genap" reachable) are real choices, never auto-filled.
             if pd.isna(v) or not str(v).strip():
                 options = minggu_options_for_frekuensi(freq)
                 return options[0] if len(options) == 1 else v
@@ -2926,7 +2942,14 @@ elif PAGES[selected_page] == "pjp_template":
             ### ✅ FORMAT DATA YANG BENAR:
             - **Frekuensi PJP**: F4+ / F4 / F2 / F1
             - **Hari**: Pilih dari dropdown
-            - **Minggu**: Pilih Ganjil / Genap / Ganjil+Genap
+            - **Minggu (kolom K)**: kelompok minggu — Ganjil / Genap / Ganjil+Genap
+              (F1 hanya Ganjil atau Genap; F4/F4+ hanya Ganjil+Genap)
+            - **Ket. Minggu (kolom L)**: minggu ke berapa PJP dijalankan
+                - F1 = 1 minggu → 1 / 2 / 3 / 4
+                - F2 = 2 minggu → 1,2 / 1,3 / 1,4 / 2,3 / 2,4 / 3,4.
+                  Ganjil→1,3 dan Genap→2,4 terisi otomatis; untuk kombinasi
+                  campuran (1,2 / 1,4 / 2,3 / 3,4) pilih Minggu Ganjil+Genap di kolom K
+                - F4 = 1,2,3,4 dan F4+ = 1,2,3,4,5 (otomatis)
 
             ### 📞 BUTUH BANTUAN?
             Hubungi tim support G2G

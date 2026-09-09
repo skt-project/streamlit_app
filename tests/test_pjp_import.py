@@ -272,12 +272,114 @@ def test_f2_persists_user_minggu_pattern(hari, minggu, expected_pattern, expecte
     assert bq["hari"].iloc[0] == hari
 
 
-def test_f2_ganjil_plus_genap_still_rejected():
-    # Existing F2 rule: Ganjil + Genap is not a valid F2 Minggu choice.
+def test_f2_ganjil_plus_genap_needs_an_explicit_week_pair():
+    # Ganjil + Genap IS a valid F2 Column K choice now (it is how the mixed
+    # pairs are reached), but unlike Ganjil/Genap it does not determine the
+    # weeks — four pairs share that label. So it must NOT be auto-filled,
+    # and a blank Ket. Minggu must be reported rather than defaulted.
     df = _import([_row(**BASE, Frekuensi="F2", Hari="SENIN",
                        **{M.MINGGU_COL: M.MINGGU_GANJIL_GENAP})])
+    assert df[M.MINGGU_COL][0] == M.MINGGU_GANJIL_GENAP
+    ket = df[M.KET_MINGGU_COL][0]
+    assert pd.isna(ket) or not str(ket).strip(), "must not invent a week pair"
     errors, _ = _validate(df)
-    assert errors, "F2 + Ganjil + Genap must still be rejected"
+    assert errors, "blank F2 Ket. Minggu must be reported, not defaulted"
+
+
+# ─── F2 specific week combinations, end to end ────────────────────────────
+# Streamlit input -> read_template_sheet -> validate -> DataFrame ->
+# BigQuery payload. Spec Tests A-E plus the NULL guard (§10).
+
+F2_PAIRS = ["1,2", "1,3", "1,4", "2,3", "2,4", "3,4"]
+
+
+@pytest.mark.parametrize("weeks", F2_PAIRS)
+def test_f2_every_pair_survives_to_the_bq_payload(weeks):
+    minggu = M.parity_label(weeks)
+    df = _import([_row(**BASE, Frekuensi="F2", Hari="SENIN",
+                       **{M.MINGGU_COL: minggu, M.KET_MINGGU_COL: weeks})])
+    errors, _ = _validate(df)
+    assert errors == []
+    bq = _bq_payload(df)
+    # The user's selection, unchanged and non-NULL, at the DB boundary.
+    assert bq["callcycle"].iloc[0] == weeks
+    assert pd.notna(bq["minggu"].iloc[0]) and bq["minggu"].iloc[0]
+    assert bq["minggu"].iloc[0] == M.to_minggu_pattern(minggu)
+    assert bq["hari"].iloc[0] == "SENIN"
+
+
+@pytest.mark.parametrize("day,weeks,expected_days,expected_weeks", [
+    ("SENIN", "1,2", ["SENIN"], ["1", "2"]),   # Test A
+    ("SENIN", "1,3", ["SENIN"], ["1", "3"]),   # Test B
+    ("SENIN", "2,4", ["SENIN"], ["2", "4"]),   # Test C
+    ("RABU",  "3,4", ["RABU"],  ["3", "4"]),   # Test D
+    ("SELASA", "1,4", ["SELASA"], ["1", "4"]),  # Test E
+    ("KAMIS",  "2,3", ["KAMIS"],  ["2", "3"]),  # Test E
+])
+def test_f2_generation_matches_selected_weeks(day, weeks, expected_days, expected_weeks):
+    """Spec §8: the stored value must actually drive the generated schedule,
+    not just appear in the table. expand_hari_callcycle() is the reference
+    implementation of the hari x callcycle fan-out that sync_sfa_web.py
+    performs in SQL (SPLIT + LEFT JOIN UNNEST)."""
+    minggu = M.parity_label(weeks)
+    df = _import([_row(**BASE, Frekuensi="F2", Hari=day,
+                       **{M.MINGGU_COL: minggu, M.KET_MINGGU_COL: weeks})])
+    assert _validate(df)[0] == []
+    bq = _bq_payload(df)
+    pairs = M.expand_hari_callcycle(bq["hari"].iloc[0], bq["callcycle"].iloc[0])
+    assert pairs == [(d, w) for d in expected_days for w in expected_weeks]
+
+
+@pytest.mark.parametrize("weeks", F2_PAIRS)
+def test_f2_minggu_back_derived_when_column_k_left_blank(weeks):
+    """A workbook that fills only Ket. Minggu (or an older one with no
+    Minggu column) must still resolve Column K — otherwise `minggu` reaches
+    BigQuery as NULL, which is the exact regression this guards."""
+    df = _import([_row(**BASE, Frekuensi="F2", Hari="SENIN",
+                       **{M.KET_MINGGU_COL: weeks})])
+    assert df[M.MINGGU_COL][0] == M.parity_label(weeks)
+    assert _validate(df)[0] == []
+    bq = _bq_payload(df)
+    assert pd.notna(bq["minggu"].iloc[0]) and bq["minggu"].iloc[0]
+    assert bq["callcycle"].iloc[0] == weeks
+
+
+@pytest.mark.parametrize("weeks,minggu", [
+    ("1,2", M.MINGGU_GANJIL),          # mixed pair under a parity label
+    ("1,3", M.MINGGU_GANJIL_GENAP),    # purely-odd pair under "both"
+])
+def test_f2_parity_mismatch_rejected_on_import(weeks, minggu):
+    df = _import([_row(**BASE, Frekuensi="F2", Hari="SENIN",
+                       **{M.MINGGU_COL: minggu, M.KET_MINGGU_COL: weeks})])
+    assert _validate(df)[0], "Ket. Minggu must match its Minggu label"
+
+
+@pytest.mark.parametrize("weeks", ["1", "1,2,3", "1,5"])
+def test_f2_structurally_invalid_weeks_rejected_on_import(weeks):
+    df = _import([_row(**BASE, Frekuensi="F2", Hari="SENIN",
+                       **{M.MINGGU_COL: M.MINGGU_GANJIL_GENAP, M.KET_MINGGU_COL: weeks})])
+    assert _validate(df)[0], weeks
+
+
+def test_f2_mixed_pair_is_not_rewritten_to_a_parity_pair():
+    """Spec §2/§11: the selection is preserved verbatim; it is never
+    collapsed to 1,3 / 2,4 and never replaced by a default."""
+    df = _import([_row(**BASE, Frekuensi="F2", Hari="RABU",
+                       **{M.MINGGU_COL: M.MINGGU_GANJIL_GENAP, M.KET_MINGGU_COL: "1,4"})])
+    assert _validate(df)[0] == []
+    assert _bq_payload(df)["callcycle"].iloc[0] == "1,4"
+
+
+def test_legacy_f2_rows_still_import_unchanged():
+    """Spec §12/Test H: the two pre-existing F2 configurations (66k stored
+    rows) behave exactly as before — auto-filled from Column K alone."""
+    for minggu, expected in [(M.MINGGU_GANJIL, "1,3"), (M.MINGGU_GENAP, "2,4")]:
+        df = _import([_row(**BASE, Frekuensi="F2", Hari="SENIN/SELASA",
+                           **{M.MINGGU_COL: minggu})])
+        assert _validate(df)[0] == []
+        bq = _bq_payload(df)
+        assert bq["callcycle"].iloc[0] == expected
+        assert bq["minggu"].iloc[0] == M.to_minggu_pattern(minggu)
 
 
 def test_f1_persists_user_minggu_pattern():
