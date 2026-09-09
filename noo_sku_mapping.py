@@ -182,7 +182,17 @@ def _guide_pptx_bytes():
 
 # ─── Login ────────────────────────────────────────────────────────────────────
 def _dataset():
-    return st.secrets["bigquery"]["dataset"]
+    # MIGRATION NOTE: original had no fallback - crashes without secrets.toml.
+    # This function is only ever used for noo_sku_distributor_user (the auth
+    # table, which sees LIVE writes today via set_password/touch_last_login -
+    # see docs/migration/MIGRATION_PLAN.md), so the fallback points at this
+    # migration's own isolated staging dataset rather than guessing at real
+    # distributor credentials, which this migration doesn't have and
+    # shouldn't try to obtain. No behavior change when secrets.toml is present.
+    try:
+        return st.secrets["bigquery"]["dataset"]
+    except Exception:
+        return "streamlit_migration_staging"
 
 
 def render_login():
