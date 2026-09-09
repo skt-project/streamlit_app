@@ -20,12 +20,23 @@ import pandas as pd
 import pytz
 import logging
 import sys
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 from google.oauth2 import service_account
+import google.auth
 from google.cloud import bigquery
 from google.api_core import exceptions as google_exceptions
 import io
+
+# MIGRATION NOTE: guards the auto-triggered `CALL rsa.inventory_buffer_sp()`
+# (see check_and_execute_sp() below) - this stored procedure mutates the
+# real production rsa.inventory_buffer table and cannot be safely
+# redirected to a staging copy the way a simple table write can (it's a
+# shared, named stored procedure, not a table this app controls). Default
+# is "false" everywhere except this migration pilot's own Cloud Run env
+# var, so production/local behavior is completely unchanged.
+MIGRATION_DISABLE_AUTO_SP = os.environ.get("MIGRATION_DISABLE_AUTO_SP", "false").lower() == "true"
 from reportlab.lib.pagesizes import A4, portrait
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib import colors
@@ -216,10 +227,15 @@ def get_bigquery_client() -> bigquery.Client:
     logger.info("Initializing BigQuery client...")
     
     # Try multiple credential sources in order of preference
+    # MIGRATION NOTE: added "Application Default Credentials" as a 4th
+    # source - Cloud Run's attached service account, no key file needed.
+    # The first 3 sources are unchanged and still tried first, so local
+    # dev / Streamlit Cloud behavior is identical to before.
     credential_sources = [
         ("Streamlit secrets (connections.bigquery)", lambda: _load_from_streamlit_secrets("connections")),
         ("Streamlit secrets (bigquery)", lambda: _load_from_streamlit_secrets("bigquery")),
         ("Local credentials file", _load_from_local_file),
+        ("Application Default Credentials", _load_from_adc),
     ]
     
     for source_name, loader_func in credential_sources:
@@ -284,8 +300,13 @@ def _load_from_local_file() -> Tuple:
     
     credentials = service_account.Credentials.from_service_account_file(credentials_path)
     project_id = Config.BQ_PROJECT
-    
+
     return credentials, project_id
+
+def _load_from_adc() -> Tuple:
+    """Load Application Default Credentials (Cloud Run's attached service account)"""
+    credentials, _adc_project = google.auth.default()
+    return credentials, Config.BQ_PROJECT
 
 # ============================================================================
 # TIME UTILITIES
@@ -704,7 +725,12 @@ def check_and_execute_sp() -> Optional[datetime]:
     """
     now_jkt = get_jkt_now()
     last_updated_jkt = get_inventory_last_updated_jkt()
-    
+
+    if MIGRATION_DISABLE_AUTO_SP:
+        if last_updated_jkt is None:
+            logger.warning("MIGRATION_DISABLE_AUTO_SP=true: skipping first-time CALL %s", Config.BQ_STORED_PROC)
+        return last_updated_jkt
+
     # First-time initialization
     if last_updated_jkt is None:
         logger.info("First-time initialization detected")
@@ -714,11 +740,11 @@ def check_and_execute_sp() -> Optional[datetime]:
                 st.toast("Inventory initialized", icon="✅")
                 return get_inventory_last_updated_jkt()
         return None
-    
+
     # Check if refresh needed
     time_diff = now_jkt - last_updated_jkt
     should_refresh = time_diff.total_seconds() >= Config.REFRESH_INTERVAL_SECONDS
-    
+
     if should_refresh:
         logger.info(f"Auto-refresh triggered (last update: {format_jkt_time(last_updated_jkt)})")
         with st.spinner("🔄 Updating inventory buffer (scheduled refresh)..."):
@@ -726,7 +752,7 @@ def check_and_execute_sp() -> Optional[datetime]:
                 st.cache_data.clear()
                 st.toast("Inventory refreshed", icon="✅")
                 return get_inventory_last_updated_jkt()
-    
+
     return last_updated_jkt
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
@@ -1021,15 +1047,39 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
             df_filtered_stores["distributor_g2g"] == selected_distributor
         ]
     
+    # MIGRATION NOTE: found via real production data during pilot validation
+    # (unrelated to the ADC credential fix). The original `.drop_duplicates()`
+    # deduped on the (store_code, store_name) PAIR, not on store_code alone -
+    # if the real data has the same store_code appearing with more than one
+    # store_name (a data-quality issue, not something this migration should
+    # silently paper over further than necessary), multiple rows survive
+    # with the same store_code. format_func below does
+    # `store_options.set_index("store_code").loc[x, "label"]`, which then
+    # returns a pandas Series (2+ matches) instead of a single string for
+    # that store_code, and passing that into st.multiselect crashes with
+    # "TypeError: bad argument type for built-in operation" on newer
+    # Streamlit (requirements.txt is unpinned repo-wide - see
+    # MIGRATION_PLAN.md section 5, F6 - so this container resolved a much
+    # newer Streamlit than whatever is cached on Streamlit Community Cloud).
+    # Fix: dedupe on store_code alone (keep first label seen) so the lookup
+    # is always 1:1, and drop null/NaN codes. A second, related gap: a NULL
+    # store_name (not just store_code) makes `store_code + " - " + store_name`
+    # evaluate to NaN (a float) for that row's label, which is what actually
+    # triggered this crash in production data - fixed by filling NaN
+    # store_name with a placeholder before concatenation, so format_func
+    # always returns a real string. This does not change which distinct
+    # stores are selectable - only the fallback label shown when the
+    # underlying data is missing a name.
     store_options = (
     df_filtered_stores[["store_code", "store_name"]]
-    .drop_duplicates()
+    .dropna(subset=["store_code"])
+    .drop_duplicates(subset=["store_code"], keep="first")
+    .assign(store_name=lambda x: x["store_name"].fillna("(no name)"))
     .assign(label=lambda x: x["store_code"] + " - " + x["store_name"])
     .sort_values("label")
     )
-    
-    # ✅ Filter out invalid store codes from session state
-    valid_store_codes = store_options["store_code"].tolist()
+
+    valid_store_codes = [str(s) for s in store_options["store_code"].tolist()]
     
     # Update session state directly if needed
     if st.session_state.store_select:

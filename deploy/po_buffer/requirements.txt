@@ -1,0 +1,8 @@
+streamlit>=1.36.0
+pandas>=2.0.0
+pytz>=2024.1
+google-cloud-bigquery>=3.11.0
+google-auth>=2.20.0
+db-dtypes>=1.1.0
+pyarrow>=14.0.0
+reportlab>=3.5.53,<4
