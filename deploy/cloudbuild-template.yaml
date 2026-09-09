@@ -1,0 +1,24 @@
+# Shared Cloud Build config for every migration pilot - do not fork per app.
+# Invoke via deploy/deploy_pilot.sh, or directly:
+#   gcloud builds submit --config=deploy/cloudbuild-template.yaml \
+#     --substitutions=_ENTRYPOINT_FILE=app.py,_REQUIREMENTS_PATH=deploy/app/requirements.txt,_IMAGE=asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/app:pilot-1 \
+#     .
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'deploy/_template/Dockerfile'
+      - '--build-arg'
+      - 'ENTRYPOINT_FILE=${_ENTRYPOINT_FILE}'
+      - '--build-arg'
+      - 'REQUIREMENTS_PATH=${_REQUIREMENTS_PATH}'
+      - '-t'
+      - '${_IMAGE}'
+      - '.'
+images:
+  - '${_IMAGE}'
+substitutions:
+  _ENTRYPOINT_FILE: ''
+  _REQUIREMENTS_PATH: ''
+  _IMAGE: ''
