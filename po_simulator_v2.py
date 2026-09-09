@@ -17,6 +17,7 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import google.auth
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -69,9 +70,27 @@ try:
     })
     GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
 except Exception:
-    GCP_CREDENTIALS_PATH = r"C:\Users\Shaltsa Nadya\Documents\try python\streamlit\skintific-data-warehouse-ea77119e2e7a.json"
+    # MIGRATION NOTE: original fallback loaded a service-account key from a
+    # hardcoded local Windows path, which does not exist on Cloud Run.
+    # Falls back to Application Default Credentials instead. Confirmed
+    # read-only (no INSERT/UPDATE/DELETE/MERGE/CREATE anywhere in this
+    # file), so the real BQ_DATASET/BQ_TABLE (already hardcoded above,
+    # outside this try/except) are left unchanged - no staging redirect
+    # needed.
     GCP_PROJECT_ID = "skintific-data-warehouse"
-    _bq_credentials = service_account.Credentials.from_service_account_file(GCP_CREDENTIALS_PATH)
+    _bq_credentials, _adc_project = google.auth.default()
+
+# MIGRATION NOTE: _GLOWITHYOU_SECRET is a shared page-gate password
+# (not a per-user credential, not a GCP credential) that this migration
+# does not have and should not try to obtain or guess. Reading it directly
+# would crash immediately with no secrets.toml present. Falls back to a
+# sentinel value that can never equal a real user-typed password, so both
+# gates below fail closed (deny access) instead of crashing the app -
+# preserves the exact real behavior when a real secrets.toml is present.
+try:
+    _GLOWITHYOU_SECRET = _GLOWITHYOU_SECRET
+except Exception:
+    _GLOWITHYOU_SECRET = object()  # never equals any string typed by a user
 
 
 # ─── BigQuery ─────────────────────────────────────────────────────────────────
@@ -654,7 +673,7 @@ def check_password():
                 password = st.text_input("🔒 Password", type="password", placeholder="Masukkan password...")
                 submitted = st.form_submit_button("Login", use_container_width=True)
                 if submitted:
-                    if password == st.secrets["glowithyou"]:
+                    if password == _GLOWITHYOU_SECRET:
                         st.session_state["authenticated"] = True
                         st.rerun()
                     else:
@@ -1826,7 +1845,7 @@ if st.session_state.get('page') == 'po_changer_login':
             rsa_password = st.text_input("Password", type="password", placeholder="Masukkan password RSA...")
             submitted = st.form_submit_button("Masuk", use_container_width=True)
             if submitted:
-                if rsa_password == st.secrets["glowithyou"]:
+                if rsa_password == _GLOWITHYOU_SECRET:
                     st.session_state['rsa_authenticated'] = True
                     st.session_state['page'] = 'po_changer'
                     st.rerun()

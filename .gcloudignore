@@ -7,7 +7,6 @@ htmlcov/
 po_portal_mockup/
 po_portal_mockup.zip
 *.pptx
-*.ttf
 .venv/
 .devcontainer/
 .vscode/

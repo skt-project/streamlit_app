@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'deploy/po_simulator_v2/Dockerfile'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/po-simulator-v2:pilot-1'
+      - '.'
+images:
+  - 'asia-southeast1-docker.pkg.dev/skintific-data-warehouse/streamlit-migration/po-simulator-v2:pilot-1'
