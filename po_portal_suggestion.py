@@ -5,6 +5,7 @@ from io import BytesIO
 from pendulum import now
 from datetime import datetime
 from google.oauth2 import service_account
+import google.auth
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 
@@ -16,13 +17,34 @@ st.set_page_config(page_title="PO Portal Suggestion", layout="wide")
 # --------------------------------------------------
 # BigQuery Client
 # --------------------------------------------------
-gcp_secrets = dict(st.secrets["connections"]["bigquery"])
-gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
-
-credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
-
-PROJECT_ID = st.secrets["bigquery"]["project"]
-DATASET = st.secrets["bigquery"]["dataset"]
+# MIGRATION NOTE: original code had no fallback at all - a missing
+# secrets.toml crashed immediately. When st.secrets is absent, falls back
+# to ADC instead. AUTH_DATASET and OUTPUT_DATASET are new: PO_TABLE and
+# the matrix tables stay pointed at the real gt_schema (read-only, safe -
+# and this is the LIVE production app for this domain, so its read data
+# should reflect reality). USER_TABLE (po_portal_distributor_users) is
+# redirected to this migration's own staging copy instead - not because
+# reading it is risky, but because there is no way to test the
+# login-gated workflow without a real distributor password, which this
+# migration does not have and should not try to obtain. FEEDBACK_TABLE
+# and FEEDBACK_MATRIX_TABLE are genuine write targets (122k+ real rows
+# per this migration's own audit) and are redirected for the usual
+# write-safety reason. No behavior change when a real secrets.toml is
+# present (AUTH_DATASET == OUTPUT_DATASET == DATASET in that branch).
+try:
+    gcp_secrets = dict(st.secrets["connections"]["bigquery"])
+    gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
+    credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
+    PROJECT_ID = st.secrets["bigquery"]["project"]
+    DATASET = st.secrets["bigquery"]["dataset"]
+    AUTH_DATASET = DATASET
+    OUTPUT_DATASET = DATASET
+except Exception:
+    credentials, _adc_project = google.auth.default()
+    PROJECT_ID = "skintific-data-warehouse"
+    DATASET = "gt_schema"
+    AUTH_DATASET = "streamlit_migration_staging"
+    OUTPUT_DATASET = "streamlit_migration_staging"
 
 PO_TABLE = "po_portal_suggestion"
 FEEDBACK_TABLE = "po_portal_feedback"
@@ -60,7 +82,7 @@ def check_login(username, password):
 
     query = f"""
         SELECT distributor_company, password_hash
-        FROM `{PROJECT_ID}.{DATASET}.{USER_TABLE}`
+        FROM `{PROJECT_ID}.{AUTH_DATASET}.{USER_TABLE}`
         WHERE username = @username
           AND is_active = TRUE
         LIMIT 1
@@ -407,7 +429,7 @@ def submit_feedback_dynamic(cleaned_df, matrix_cols, display_cols, logged_compan
         records.append(rec)
 
     try:
-        table_id = f"{PROJECT_ID}.{DATASET}.{FEEDBACK_MATRIX_TABLE}"
+        table_id = f"{PROJECT_ID}.{OUTPUT_DATASET}.{FEEDBACK_MATRIX_TABLE}"
         desired_schema = FEEDBACK_MATRIX_FIXED_SCHEMA + [
             bigquery.SchemaField(mcol, "STRING") for mcol in matrix_cols
         ]
@@ -936,7 +958,7 @@ if uploaded_file:
         # --------------------------------------------------
         if st.button("Submit Feedback"):
             errors = bq_client.insert_rows_json(
-                f"{PROJECT_ID}.{DATASET}.{FEEDBACK_TABLE}",
+                f"{PROJECT_ID}.{OUTPUT_DATASET}.{FEEDBACK_TABLE}",
                 records,
                 row_ids=[None] * len(records),
                 skip_invalid_rows=True
