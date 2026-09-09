@@ -9,11 +9,19 @@
 #     deploy/skt_top_20_store_list_stock/requirements.txt 512Mi 1
 #
 # Fixed, non-negotiable settings across every pilot (see docs/migration/
-# DEPLOYMENT_TEMPLATE.md for why): region asia-southeast1, the
+# DEPLOYMENT_TEMPLATE.md section 10 for why): region asia-southeast1, the
 # streamlit-migration-runtime service account, --no-allow-unauthenticated
 # (internal-testing phase only, per MIGRATION_PLAN.md's WebSocket/IAM-auth
-# finding), and concurrency=1 (Streamlit's session model does not support
-# more than one session per container instance).
+# finding), --session-affinity (keeps one session's WebSocket + file-upload
+# + static-asset requests on the same container instance), and a real
+# concurrency value (80, Cloud Run's own default) - NOT 1. concurrency=1
+# was an earlier mistake in this template: it forced Cloud Run to serve
+# only one HTTP request at a time per instance, which starved the dozens
+# of small static JS chunks a Streamlit page fetches in parallel on first
+# load, surfacing as real HTTP 500s on those requests (confirmed live on
+# noo-detector-migration, 2026-09-09) - not a proxy artifact as first
+# assumed. Session affinity (not a low concurrency number) is the correct
+# mechanism for "one session's requests stay on one instance."
 set -euo pipefail
 
 APP_SLUG="$1"
@@ -44,8 +52,9 @@ gcloud run deploy "${SERVICE}" \
   --service-account="${SA}" \
   --no-allow-unauthenticated \
   --memory="${MEMORY}" --cpu="${CPU}" \
-  --concurrency=1 --min-instances=0 --max-instances=3 \
+  --concurrency=80 --min-instances=0 --max-instances=3 \
   --session-affinity \
+  --update-env-vars="STREAMLIT_THEME_BASE=light,STREAMLIT_THEME_BACKGROUND_COLOR=#FFFFFF,STREAMLIT_THEME_SECONDARY_BACKGROUND_COLOR=#F5F7FA,STREAMLIT_THEME_TEXT_COLOR=#262730" \
   --timeout=300 \
   --project="${PROJECT}"
 
