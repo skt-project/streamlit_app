@@ -23,9 +23,9 @@ def get_app_url() -> str:
     """Falls back to a placeholder if no secrets.toml exists at all (e.g. local
     mock testing) — st.secrets raises on first access in that case, even via .get()."""
     try:
-        return st.secrets.get("app", {}).get("url", "https://your-app.streamlit.app").rstrip("/")
+        return st.secrets.get("app", {}).get("url", "https://skt-distributor-assessment.streamlit.app/").rstrip("/")
     except Exception:
-        return "https://your-app.streamlit.app"
+        return "https://skt-distributor-assessment.streamlit.app/"
 
 
 def send_email(to_list, subject, html_body, cc_list=None) -> bool:
