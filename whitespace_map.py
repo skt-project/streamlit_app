@@ -5,6 +5,7 @@ import folium
 from google.cloud import bigquery
 from google.cloud import storage
 from google.oauth2 import service_account
+import google.auth
 from folium.plugins import MarkerCluster
 from folium import GeoJsonTooltip
 import streamlit as st
@@ -65,8 +66,11 @@ def get_google_client():
         POTENTIAL_STORES_TABLE = st.secrets["bigquery"]["potential_stores"]
         BUCKET_NAME = st.secrets["gcs"]["data"]
     except Exception:
-        # --- Local fallback for development ---
-        GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
+        # MIGRATION NOTE: original fallback loaded a service-account key from
+        # a hardcoded local Windows path, which does not exist on Cloud Run.
+        # Falls back to Application Default Credentials instead. Confirmed
+        # read-only against both BigQuery and GCS (no write call anywhere in
+        # this file), so the real table/dataset/bucket names are kept as-is.
         GCP_PROJECT_ID = "skintific-data-warehouse"
         BQ_DATASET = "gt_schema"
         REPSLY_DATASET = "repsly"
@@ -75,9 +79,7 @@ def get_google_client():
         REPSLY_TABLE = "ind_dim_clients"
         POTENTIAL_STORES_TABLE = "indonesia_cosmetic_stores"
         BUCKET_NAME = "public_skintific_storage"
-        credentials = service_account.Credentials.from_service_account_file(
-            GCP_CREDENTIALS_PATH
-        )
+        credentials, _adc_project = google.auth.default()
 
     # Initialize both clients
     bq_client = bigquery.Client(credentials=credentials, project=GCP_PROJECT_ID)
