@@ -5,6 +5,7 @@ import re
 import time
 from datetime import datetime, timezone
 from google.oauth2 import service_account
+import google.auth
 from google.cloud import bigquery, storage
 import gspread
 from pendulum import timezone, now
@@ -17,6 +18,20 @@ st.set_page_config(page_title="TPH Smart Coverage", page_icon="📤", layout="wi
 # ---------------------------
 # Config & Auth
 # ---------------------------
+# MIGRATION NOTE (deploy/smart_coverage): the original fallback loaded a
+# service-account key from a hardcoded local Windows path
+# (D:\script\...json), which does not exist on Cloud Run. Falls back to
+# Application Default Credentials instead (Cloud Run's attached service
+# account, no key file needed) - the existing gspread fallback below
+# (credentials.with_scopes(...)) already anticipated exactly this case, no
+# change needed there. SPREADSHEET_KEY is unchanged (not a secret, a Sheet
+# ID - requires that Sheet to be explicitly shared with
+# streamlit-migration-runtime@..., a Google Sheets ACL, not GCP IAM - see
+# docs/migration/EXECUTION_LOG.md for the hands-on request). BQ_DATASET/
+# BQ_TABLE and the bucket are WRITE targets this pilot has no configured
+# secrets to confirm, so they fall back to this migration's own isolated
+# staging dataset/bucket instead of the real gt_schema.smart_coverage
+# table and the real public_skintific_storage bucket.
 try:
     gcp_secrets = st.secrets["connections"]["bigquery"]
     if "private_key" in gcp_secrets:
@@ -30,13 +45,12 @@ try:
     SPREADSHEET_KEY = st.secrets["spreadsheet"]["url"]
     _bucket_raw = st.secrets["bigquery"].get("public_skintific_storage", "public_skintific_storage/smart_coverage")
 except Exception:
-    GCP_CREDENTIALS_PATH = r"D:\script\skintific-data-warehouse-ea77119e2e7a.json"
-    credentials = service_account.Credentials.from_service_account_file(GCP_CREDENTIALS_PATH)
+    credentials, _adc_project = google.auth.default()
     GCP_PROJECT_ID = "skintific-data-warehouse"
-    BQ_DATASET = "gt_schema"
-    BQ_TABLE = "smart_coverage"
+    BQ_DATASET = "streamlit_migration_staging"
+    BQ_TABLE = "smart_coverage_pilot"
     SPREADSHEET_KEY = "1E90Ogzx7VeD9E68Qq5OHqqf31T9scqIqE3QzyobdcbU"
-    _bucket_raw = "public_skintific_storage/smart_coverage"
+    _bucket_raw = "skintific-streamlit-migration-uploads/smart_coverage_pilot"
 
 if "/" in _bucket_raw:
     BUCKET_NAME, BUCKET_PREFIX = _bucket_raw.split("/", 1)
