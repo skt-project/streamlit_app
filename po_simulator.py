@@ -11,6 +11,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 from google.oauth2 import service_account
+import google.auth
 
 # =========================
 # BigQuery Configuration
@@ -37,14 +38,15 @@ try:
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_TABLE = st.secrets["bigquery"]["stock_analysis_table"]
 except Exception:
-    # Fallback for local testing if secrets are not configured
-    GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
+    # MIGRATION NOTE: original fallback loaded a service-account key from a
+    # hardcoded local Windows path, which does not exist on Cloud Run.
+    # Falls back to Application Default Credentials instead. Read-only app
+    # (confirmed via audit - no INSERT/UPDATE/DELETE/MERGE/CREATE anywhere),
+    # so the real table names are kept as-is, no staging redirect needed.
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "rsa"
     BQ_TABLE = "stock_analysis"
-    credentials = service_account.Credentials.from_service_account_file(
-        GCP_CREDENTIALS_PATH
-    )
+    credentials, _adc_project = google.auth.default()
 
 
 @st.cache_resource(show_spinner=False)
