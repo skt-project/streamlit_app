@@ -45,6 +45,7 @@ gcloud run deploy "${SERVICE}" \
   --no-allow-unauthenticated \
   --memory="${MEMORY}" --cpu="${CPU}" \
   --concurrency=1 --min-instances=0 --max-instances=3 \
+  --session-affinity \
   --timeout=300 \
   --project="${PROJECT}"
 

@@ -39,6 +39,8 @@ non-negotiable settings established across all 4 pilots:
 - `--no-allow-unauthenticated` (internal-testing phase only — see the WebSocket/IAM-auth
   finding in MIGRATION_PLAN.md; this is not the final answer for real pilot users)
 - `--concurrency=1` (Streamlit's session model — never raise this)
+- `--session-affinity` (added after Pilot 6 — see §9; needed for any app with a
+  `st.file_uploader`, and cheap enough to apply to every pilot regardless)
 - `--min-instances=0 --max-instances=3` (tune per app only if load testing says otherwise)
 
 **When to deviate from the shared Dockerfile**: an app with a local helper package/subfolder
@@ -155,6 +157,40 @@ always clears it.** This is specific to the local `gcloud run services proxy` tu
 static-asset handling, not a real production issue (nothing suggests this would happen for a
 real user hitting the actual Cloud Run URL directly) — but budget for it in every validation
 script: `goto` → wait → `reload` → wait → *then* interact.
+
+## 9. File uploads need `--session-affinity`, and the local proxy can't fully test them
+
+**Real finding, Pilot 6 (`store_channelization.py`)**: `st.file_uploader` uploads go over a
+**separate HTTP PUT** to `_stcore/upload_file/<session_id>/<file_id>` — not the main
+WebSocket. If that PUT lands on a different Cloud Run container instance than the one
+holding the session in memory, Streamlit rejects it with `Invalid session_id... multi-replica
+deployment without sticky sessions`. Fixed at the infrastructure level with
+`--session-affinity` (now in `deploy_pilot.sh` for every future pilot) — this costs nothing
+for apps without uploads and is required for apps with them, so it's applied everywhere.
+
+**Even with session affinity on, `gcloud run services proxy` + Playwright could not complete
+a real file-upload test** — the PUT still came back "Invalid session_id" through the local
+tunnel specifically (confirmed the error persists identically with and without the fix,
+strongly suggesting the local proxy itself doesn't preserve whatever session context the PUT
+needs, separate from the Cloud-Run-side routing issue that `--session-affinity` does fix).
+**This is a tooling gap in how internal testing is done, not a defect in the pilot.** For any
+future app with `st.file_uploader`:
+- The **read path and the export/generation path can still be fully validated** through the
+  proxy (confirmed for `store_channelization.py` — region/distributor selects, the real
+  23-store lookup, correct DST ID derivation, all proven working).
+- The **actual upload+write step needs a different validation method** until a real
+  browser-based pilot-user access path exists (IAP or app-level auth, per the WebSocket/
+  auth finding elsewhere in this doc set). What actually closed this out for
+  `store_channelization.py`: granted my own account a *temporary*
+  `roles/iam.serviceAccountTokenCreator` (project-level — the only scope my account can set;
+  see EXECUTION_LOG.md §1 for the same resource-vs-project-level ceiling hit before),
+  impersonated `streamlit-migration-runtime@` directly from a throwaway local script using
+  `google.auth.impersonated_credentials`, called the app's exact `load_table_from_dataframe`
+  code path with the exact schema, confirmed via `bq query` that the row landed correctly,
+  then immediately revoked the temporary grant. This is the go-to pattern for validating a
+  write path when the UI itself can't be driven through the proxy — it tests the real
+  credential + real BigQuery API call the SAME way the deployed app does, without needing
+  browser access at all.
 
 ## 8. Security non-negotiables (apply to every future pilot without exception)
 

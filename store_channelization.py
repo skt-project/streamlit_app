@@ -2,11 +2,23 @@ import streamlit as st
 import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import google.auth
 from io import BytesIO
 from datetime import datetime
 
 STORE_CHANNEL_OPTIONS = ["Cosmetic Store", "Retail", "Pharmacy", "ATC"]
 
+# MIGRATION NOTE (deploy/store_channelization): the original fallback loaded
+# a service-account key from a hardcoded local Windows path
+# (C:\Users\Bella Chelsea\...json), which does not exist on Cloud Run. Falls
+# back to Application Default Credentials instead (Cloud Run's attached
+# service account, no key file needed). The table-path fallbacks were
+# ALREADY safe as written - this app's own author had already designed a
+# dedicated staging.* fallback pair for exactly this scenario (confirmed
+# both tables exist via `bq show`), so they're left unchanged. Every call
+# site below also used `project=credentials.project_id`, which does not
+# exist on ADC credential objects - replaced with the literal project id
+# (this app never uses any project other than skintific-data-warehouse).
 def get_credentials():
     try:
         gcp_secrets = st.secrets["connections"]["bigquery"]
@@ -21,10 +33,7 @@ def get_credentials():
         master_store_table_path = st.secrets["bigquery_tables"]["master_store_database"]
         staging_table_path = st.secrets["bigquery_tables"]["staging_table"]
     except Exception:
-        SERVICE_ACCOUNT_FILE = r'C:\Users\Bella Chelsea\Documents\skintific-data-warehouse-ea77119e2e7a.json'
-        credentials = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE
-            )
+        credentials, _adc_project = google.auth.default()
         master_store_table_path = "skintific-data-warehouse.staging.master_store_database_basis_for_channelization"
         staging_table_path = "skintific-data-warehouse.staging.gt_store_channel_staging"
     return credentials, master_store_table_path, staging_table_path
@@ -33,7 +42,7 @@ def get_credentials():
 def load_store_data(region_filter, distributor_filter):
     credentials, master_store_table_path, _ = get_credentials()
     # FIX: Define client BEFORE using it
-    client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+    client = bigquery.Client(credentials=credentials, project="skintific-data-warehouse")
     
     # Base query with parameterized WHERE clause
     base_query = f"""
@@ -76,7 +85,7 @@ def load_store_data(region_filter, distributor_filter):
 @st.cache_data(ttl=3600)
 def get_available_regions():
     credentials, master_store_table_path, _ = get_credentials()
-    client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+    client = bigquery.Client(credentials=credentials, project="skintific-data-warehouse")
     query = f"""
         SELECT DISTINCT region FROM `{master_store_table_path}`
         WHERE (customer_category = 'GT' OR customer_category IS NULL) AND region IS NOT NULL
@@ -88,7 +97,7 @@ def get_available_regions():
 @st.cache_data(ttl=3600)
 def get_available_distributors(region_filter=None):
     credentials, master_store_table_path, _ = get_credentials()
-    client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+    client = bigquery.Client(credentials=credentials, project="skintific-data-warehouse")
     
     where_clause = "WHERE (customer_category = 'GT' OR customer_category IS NULL) AND distributor_g2g IS NOT NULL"
     if region_filter and region_filter != "Semua Region":
@@ -257,7 +266,7 @@ def check_internal_duplicates(df):
 def check_duplicate_cust_ids(df, credentials, staging_table_path):
     """Check if any cust_id from the dataframe already exists in staging table"""
     try:
-        client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+        client = bigquery.Client(credentials=credentials, project="skintific-data-warehouse")
         
         # Get all cust_ids from the upload dataframe
         upload_cust_ids = df['cust_id'].tolist()
@@ -286,7 +295,7 @@ def check_duplicate_cust_ids(df, credentials, staging_table_path):
 
 def insert_to_bigquery(df, credentials, table_name, dst_id):
     try:
-        client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+        client = bigquery.Client(credentials=credentials, project="skintific-data-warehouse")
         schema = [
             bigquery.SchemaField("cust_id", "STRING"), 
             bigquery.SchemaField("reference_id", "STRING"),
