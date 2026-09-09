@@ -3,6 +3,7 @@ import pandas as pd
 import uuid
 from datetime import datetime
 from google.oauth2 import service_account
+import google.auth
 from google.cloud import bigquery, storage
 from pendulum import timezone, now
 from io import BytesIO
@@ -17,31 +18,54 @@ jakarta_tz = timezone("Asia/Jakarta")
 # ------------------------------------
 # Secrets & Client
 # ------------------------------------
-gcp_secrets = dict(st.secrets["connections"]["bigquery"])
+# MIGRATION NOTE (deploy/skt_top_20_store_list_stock): the original code had
+# NO fallback at all - a missing secrets.toml crashed immediately. When
+# st.secrets is absent, this now falls back to Application Default
+# Credentials (Cloud Run's attached service account, no key file needed).
+# STORE_TABLE falls back to its confirmed real name (gt_schema.
+# skt_top_20_store_list, verified via INFORMATION_SCHEMA.COLUMNS - a table
+# pointer, not secret material). OUTPUT_TABLE and BUCKET_NAME are WRITE
+# targets this pilot has no configured secrets to confirm, so they fall
+# back to this migration's own isolated staging dataset/bucket instead of a
+# guess - see docs/migration/DEPLOYMENT_TEMPLATE.md section 4. Local dev
+# with a real secrets.toml is unaffected either way.
+try:
+    gcp_secrets = dict(st.secrets["connections"]["bigquery"])
 
-# 🔑 normalize private key (Cloud-safe)
-gcp_secrets = dict(st.secrets["connections"]["bigquery"])
+    # normalize private key (Cloud-safe)
+    gcp_secrets["private_key"] = (
+        "\n".join(
+            line.lstrip() for line in gcp_secrets["private_key"].splitlines()
+        ).strip()
+        + "\n"
+    )
 
-gcp_secrets["private_key"] = (
-    "\n".join(
-        line.lstrip() for line in gcp_secrets["private_key"].splitlines()
-    ).strip()
-    + "\n"
-)
+    credentials = service_account.Credentials.from_service_account_info(
+        gcp_secrets
+    )
 
-credentials = service_account.Credentials.from_service_account_info(
-    gcp_secrets
-)
+    PROJECT_ID = st.secrets["bigquery"]["project"]
+    DATASET = st.secrets["bigquery"]["dataset"]
+    STORE_TABLE = st.secrets["bigquery"]["store_table"]
+    OUTPUT_DATASET = DATASET  # unchanged from production behavior
+    OUTPUT_TABLE = st.secrets["bigquery"]["output_table"]
 
-PROJECT_ID = st.secrets["bigquery"]["project"]
-DATASET = st.secrets["bigquery"]["dataset"]
-STORE_TABLE = st.secrets["bigquery"]["store_table"]
-OUTPUT_TABLE = st.secrets["bigquery"]["output_table"]
+    BUCKET_NAME = st.secrets["gcs"]["bucket_name"]
+    FOLDER_PREFIX = st.secrets["gcs"]["folder_prefix"]
+except Exception:
+    credentials, _adc_project = google.auth.default()
+    PROJECT_ID = "skintific-data-warehouse"
+    DATASET = "gt_schema"
+    STORE_TABLE = "skt_top_20_store_list"
+    OUTPUT_DATASET = "streamlit_migration_staging"
+    OUTPUT_TABLE = "skt_top20_stock_pilot"
+    BUCKET_NAME = "skintific-streamlit-migration-uploads"
+    FOLDER_PREFIX = "skt_top20_stock_pilot"
+
 PO_SUGGESTION_TABLE = "skt_top20_po_suggestion"
 
-BUCKET_NAME = st.secrets["gcs"]["bucket_name"]
-FOLDER_PREFIX = st.secrets["gcs"]["folder_prefix"]
-
+# Unlike the other pilots, this file already used the PROJECT_ID constant
+# here (not credentials.project_id), so no change was needed on this line.
 bq_client = bigquery.Client(credentials=credentials, project=PROJECT_ID)
 gcs_client = storage.Client(credentials=credentials, project=PROJECT_ID)
 
@@ -239,8 +263,13 @@ if store_select != "-":
                     "docs": ", ".join(doc_urls) if doc_urls else None
                 })
 
+            # MIGRATION NOTE: was f"{PROJECT_ID}.{DATASET}.{OUTPUT_TABLE}" -
+            # split into OUTPUT_DATASET (see top of file) so the ADC fallback
+            # routes writes to the isolated staging dataset without touching
+            # the read-path DATASET. No behavior change when secrets.toml is
+            # present (OUTPUT_DATASET == DATASET in that branch).
             errors = bq_client.insert_rows_json(
-                f"{PROJECT_ID}.{DATASET}.{OUTPUT_TABLE}",
+                f"{PROJECT_ID}.{OUTPUT_DATASET}.{OUTPUT_TABLE}",
                 records
             )
 
