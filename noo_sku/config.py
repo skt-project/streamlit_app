@@ -232,14 +232,18 @@ POOL_SKU_HEADERS = [
 POOL_NOO_BD_MANUAL = frozenset({"DMS", "BASIS", "Brand"})
 #: Confirmed live spreadsheet formulas (XLOOKUP against 'DIST DATABASE' /
 #: 'ASM/SPV/SE', keyed on that row's own customer_branch_code or branch_name).
-#: "NOO/Existing" was added 2026-09-10 per explicit instruction — column E
-#: is now BD Support's to compute, not Streamlit's; unlike the other seven
-#: entries this one has not been independently re-verified via a live
-#: FORMULA-render inspection, but the write-side handling is identical
-#: either way: the column is simply never part of the write payload.
+#:
+#: "NOO/Existing" briefly lived here (2026-09-10, one commit) on the
+#: assumption BD Support had taken over computing it, matching RSA
+#: Name/BD Support. A live read the same day disproved that: rows written
+#: after the exclusion show RSA Name/BD Support populated by BD Support's
+#: own process as expected, but NOO/Existing sitting genuinely blank — no
+#: formula, no manual fill, nothing. It is the NOO Detector's own verdict
+#: (noo_sku.noo_detector.classify) and always has been; Streamlit remains
+#: the only thing that ever populates it. Reverted same day.
 POOL_NOO_FORMULA_COLUMNS = frozenset({
     "RSA Name", "BD Support", "asm_kam", "spv", "se_kae", "aom", "area",
-    "province", "NOO/Existing",
+    "province",
 })
 POOL_SKU_BD_MANUAL = frozenset({"DMS"})
 #: Confirmed live spreadsheet formula (XLOOKUP against 'DIST DATABASE').

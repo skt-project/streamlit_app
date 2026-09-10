@@ -111,18 +111,23 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
     otherwise so no fake/generated Store ID is ever written.
 
     The returned dict still carries a value for every pool column, including
-    `area`/`province`/`asm_kam`/`spv`/`se_kae`/`aom`/`NOO/Existing` — useful
-    context for the preview (`pipeline.mapping_sources` shows the label there
-    regardless), showing what the system expects — but those specific keys
-    are NEVER part of what actually reaches the sheet (see
-    `_owned_write_span`): the live cells there are spreadsheet formulas, not
-    Streamlit's to set. `NOO/Existing` joined that set 2026-09-10, the same
-    day BD Support inserted "Brand" and dropped "asm_name" from the pool
-    entirely — the written span now starts at "input_time" itself (column G
-    as of that layout), since nothing Streamlit owns still sits between it
-    and the nearest formula/manual column. `asm_name` is no longer part of
-    this dict at all: that column doesn't exist in the pool any more, so
-    there is nothing left for Streamlit to populate or preview it from.
+    `area`/`province`/`asm_kam`/`spv`/`se_kae`/`aom` — useful context for the
+    preview, showing what the system expects — but those specific keys are
+    NEVER part of what actually reaches the sheet (see `_owned_write_span`):
+    the live cells there are spreadsheet formulas, not Streamlit's to set.
+    `NOO/Existing` is NOT in that group, despite briefly living there on
+    2026-09-10: a live read the same day showed RSA Name/BD Support genuinely
+    populated by BD Support's own process on brand-new rows, but
+    NOO/Existing sitting blank with nothing else to fill it — it is, and
+    always has been, Streamlit's own column to write.
+
+    2026-09-10, same day: BD Support inserted "Brand" (after BASIS) and
+    dropped "asm_name" from the pool entirely. `asm_name` is no longer part
+    of this dict at all — that column doesn't exist any more, so there is
+    nothing left for Streamlit to populate or preview it from. The owned
+    write span recomputed automatically to start at "NOO/Existing" itself
+    (column F as of that layout), since nothing Streamlit owns is left
+    between it and the nearest formula/manual column.
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
     branch_code = norm_key(g("Customer Branch Code")) or norm_key(
