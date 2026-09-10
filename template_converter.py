@@ -191,6 +191,78 @@ def uniquify_column_names(columns) -> List[str]:
     return unique
 
 
+# =========================
+# PO Date parsing
+# =========================
+# pandas >= 2.0 infers ONE datetime format from the first non-null value of a
+# column and coerces every value that does not match it to NaT. Distributor
+# .xls exports routinely mix representations inside a single date column: xlrd
+# hands pandas real datetime objects, and str() renders those with microseconds
+# only when the stored serial has a sub-second remainder, so one column holds
+# both "2026-09-01 15:23:40.213000" and "2026-09-08 11:16:33". The batch call
+# locks onto whichever style appears first and blanks all the rest - if the
+# first row is the one without microseconds, virtually the whole PO Date column
+# comes out empty.
+#
+# The helpers below keep the original vectorised parse (so any value that
+# already converted is untouched) and only re-try the values it dropped.
+
+# Excel date serials: 20000 = 1954-10-03, 80000 = 2119-01-24. A bare number
+# outside that window is far more likely to be a mis-mapped numeric column than
+# a date, so it stays blank.
+_EXCEL_SERIAL_MIN = 20000
+_EXCEL_SERIAL_MAX = 80000
+_EXCEL_EPOCH = pd.Timestamp("1899-12-30")
+_BARE_NUMBER_RE = re.compile(r"^\d+(?:\.\d+)?$")
+
+
+def _parse_single_po_date(value) -> Optional[str]:
+    """Parse one PO Date cell the vectorised pass dropped. Returns YYYY-MM-DD or None."""
+    text = as_text(value)
+    if not text:
+        return None
+
+    # An Excel date serial that leaked through as a bare number ("46266.6414").
+    if _BARE_NUMBER_RE.match(text):
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        if _EXCEL_SERIAL_MIN <= number <= _EXCEL_SERIAL_MAX:
+            return (_EXCEL_EPOCH + pd.to_timedelta(number, unit="D")).strftime("%Y-%m-%d")
+        return None
+
+    # Element-wise parse: same parser and same defaults as the vectorised call
+    # (so a given value is still read the same way), but without the
+    # single-format constraint, so a row written in a different style than
+    # row 0 resolves instead of becoming NaT.
+    stamp = pd.to_datetime(text, errors="coerce")
+    if pd.isna(stamp):
+        return None
+    return stamp.strftime("%Y-%m-%d")
+
+
+def parse_po_date(series: pd.Series) -> pd.Series:
+    """Parse a PO Date source column to ``YYYY-MM-DD`` strings.
+
+    Values the vectorised parse already handled keep exactly the result they
+    had before; only the ones it coerced to NaT are retried per value. Blank
+    and genuinely unparseable cells stay empty, as before.
+
+    Assembled positionally through numpy rather than by masked assignment on
+    the datetime Series: the vectorised parse and the per-value retry can land
+    on different datetime resolutions (us vs ns), and writing one into the
+    other raises.
+    """
+    parsed = pd.to_datetime(series, errors="coerce")
+    values = parsed.dt.strftime("%Y-%m-%d").to_numpy(dtype=object)
+    missing = parsed.isna().to_numpy()
+    if missing.any():
+        source = series.to_numpy(dtype=object)
+        values[missing] = [_parse_single_po_date(v) for v in source[missing]]
+    return pd.Series(values, index=series.index, dtype=object)
+
+
 def force_text_columns(
     df: pd.DataFrame, columns: Optional[List[str]] = None
 ) -> pd.DataFrame:
@@ -641,7 +713,7 @@ def intelligent_mapping(
         src = mapping_lower.get(target, "")
         if src and src in df.columns:
             if target == "PO Date":
-                out[target] = pd.to_datetime(df[src], errors="coerce").dt.strftime("%Y-%m-%d")
+                out[target] = parse_po_date(df[src])
             else:
                 out[target] = df[src]
             effective_mapping[target] = src
