@@ -651,13 +651,18 @@ def render_section(kind, dist):
                            mime="application/vnd.openxmlformats-officedocument"
                                 ".spreadsheetml.sheet", key=f"tpl_{kind}")
         if is_noo:
-            st.caption("Template ini tidak lagi memiliki kolom **Store ID** — "
-                       "cukup isi 9 kolom yang tersedia.")
+            st.caption(
+                '<span style="color:darkred; font-weight:bold;">Template '
+                "ini tidak lagi memiliki kolom Store ID — cukup isi 9 "
+                "kolom yang tersedia.</span>", unsafe_allow_html=True)
         else:
-            st.caption("Template ini hanya berisi **3 kolom** yang perlu Anda "
-                       "isi. Kolom **Nama Produk Prinsipal** tidak perlu "
-                       "diisi — sistem akan melengkapinya secara otomatis "
-                       "dari master produk berdasarkan Kode SKU Prinsipal.")
+            st.caption(
+                '<span style="color:darkred; font-weight:bold;">Template '
+                "ini hanya berisi 3 kolom yang perlu Anda isi. Kolom Nama "
+                "Produk Prinsipal tidak perlu diisi — sistem akan "
+                "melengkapinya secara otomatis dari master produk "
+                "berdasarkan Kode SKU Prinsipal.</span>",
+                unsafe_allow_html=True)
     except Exception:
         st.warning("Template belum bisa diunduh saat ini. Hubungi BD Support.")
 
