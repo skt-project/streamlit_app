@@ -650,14 +650,6 @@ def render_section(kind, dist):
                            data=template_bytes, file_name=name,
                            mime="application/vnd.openxmlformats-officedocument"
                                 ".spreadsheetml.sheet", key=f"tpl_{kind}")
-        if not is_noo:
-            st.caption(
-                '<span style="color:darkred; font-weight:bold;">Template '
-                "ini hanya berisi 3 kolom yang perlu Anda isi. Kolom Nama "
-                "Produk Prinsipal tidak perlu diisi — sistem akan "
-                "melengkapinya secara otomatis dari master produk "
-                "berdasarkan Kode SKU Prinsipal.</span>",
-                unsafe_allow_html=True)
     except Exception:
         st.warning("Template belum bisa diunduh saat ini. Hubungi BD Support.")
 
