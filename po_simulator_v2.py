@@ -74,7 +74,6 @@ except Exception:
     _bq_credentials = service_account.Credentials.from_service_account_file(GCP_CREDENTIALS_PATH)
 
 
-# ─── BigQuery ─────────────────────────────────────────────────────────────────
 
 @st.cache_resource(show_spinner=False)
 def get_bq_client() -> bigquery.Client:
@@ -132,7 +131,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
 def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
-    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date between '2026-07-01' and '2026-08-31'"
+    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date between '2026-09-01' and '2026-09-30'"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -214,8 +213,6 @@ def get_brand_list() -> list:
     except Exception:
         return []
 
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def calculate_woi(stock, po_qty, avg_weekly_sales):
     return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
@@ -496,7 +493,7 @@ def create_zip_of_files(file_dict: dict) -> bytes:
             zf.writestr(fname, data)
     return buf.getvalue()
 
-# ─── Excel export with styling ────────────────────────────────────────────────
+
 
 def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     rows = list(dataframe_to_rows(df_no_flag, index=False, header=True))
@@ -585,7 +582,7 @@ def to_excel_single_sheet_with_sku(df: pd.DataFrame, npd_sku_list=None, sku_mast
     return to_excel_single_sheet(df, npd_sku_list)
 
 
-# ─── Image export ─────────────────────────────────────────────────────────────
+
 
 _REMARK_STYLES = [
     ('reject with suggestion', '#FFF3CD', '#856404'),
@@ -635,7 +632,7 @@ def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
     return buf.getvalue()
 
 
-# ─── Auth ─────────────────────────────────────────────────────────────────────
+
 
 def check_password():
     def login_form():
@@ -671,7 +668,7 @@ def check_password():
 #    st.stop()
 
 
-# ─── CSS ──────────────────────────────────────────────────────────────────────
+#################CSS
 
 st.markdown("""<style>
 body,p,div,span,label,input,textarea,select,button,h1,h2,h3,h4,h5,h6,li,td,th,caption,small,strong,em{font-family:'Trebuchet MS',sans-serif;box-sizing:border-box;}
@@ -718,7 +715,6 @@ html,body,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block
 </style>""", unsafe_allow_html=True)
 
 
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.markdown(f'<div style="text-align:center;padding:.5rem 0 .2rem;"><img src="{LOGO_URL}" style="max-width:200px;height:auto;" /></div>', unsafe_allow_html=True)
@@ -755,7 +751,7 @@ with st.sidebar:
     VITA_C = ['G2G-212','G2G-213','G2G-214','G2G-215','G2G-216','G2G-217','G2G-218']
     STOP_PO_BB= ["BXS003001", "BXS012001", "BXS006001", "BXS009001","BXS005001", "BXS004001", "BXS017001",
 "BXS015" , "BXS014", "BXS013", "BXS008001"]
-    FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
+    #FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
     PROGRAM = ["G2G-262",	"G2G-264",	"G2G-267",	"G2G-271",	"G2G-272",	"G2G-276"]
   #OR sku LIKE "%G2G-2970%
     st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
@@ -921,25 +917,26 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 #-----------------KLO MAU TAMBAH KOLOM BARU---------------
 
         conds = [
-            ((res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False))) & (~res_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) , #0 
+            #((res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False))) & (~res_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) , #0 
             res_df["Customer SKU Code"].isin(zero_price_skus), #1
             res_df["Customer SKU Code"].isin(skus_not_found), #2
             res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT), #3
             ra2 < 0, #4
             res_df["is_po_sku"] == False, #5
-            (res_df["Customer SKU Code"].isin(VITA_C) & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) &
-                res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)), #6
+            (res_df["Customer SKU Code"].isin(VITA_C) 
+            # & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) 
+             &res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)), #6
             res_df["Customer SKU Code"].isin(manual_reject_approval), #7
             res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
             sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]), #9
             ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])), #10
             bp3 == 0, #11
-            (res_df["PO Qty"] > bp3) & ((~res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (~res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False)))  , #12
+            (res_df["PO Qty"] > bp3)  , #12
             res_df["PO Qty"] < bp3, #13
             res_df["PO Qty"] == bp3, #14
         ]
         choices = [
-            "Proceed",                                              #0 FLUSH_OUT
+            #"Proceed",                                              #0 FLUSH_OUT
             "Price Not Available Yet",                              #1
             "Reject (SKU Not Found in System)",                     #2
             f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",      #3
@@ -969,11 +966,11 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         if __REJECTED_SKUS_2:
             res_df = apply_sku_rejection_rules(__REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
         
-        program_conds = [
-        res_df["SKU"].isin(FLUSH_OUT) | res_df["SKU"].str.contains("G2G-2970", case=False, na=False),
-        res_df["SKU"].isin(PROGRAM),]
-        program_choices = ["Flush Out", "MSL WAR"]
-        res_df["Program"] = np.select(program_conds, program_choices, default="")
+        #program_conds = [
+        #res_df["SKU"].isin(FLUSH_OUT) | res_df["SKU"].str.contains("G2G-2970", case=False, na=False),
+        #res_df["SKU"].isin(PROGRAM),]
+        #program_choices = ["Flush Out", "MSL WAR"]
+        #res_df["Program"] = np.select(program_conds, program_choices, default="")
 
         res_df["RSA Notes"] = ""
         moq_df_lookup = check_moq()
@@ -1010,7 +1007,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 #----------------PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
-                    "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark","Program",
+                    "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark",
                     "Suggested PO Qty","Suggested PO Value",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
@@ -1040,13 +1037,13 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 PO_TEMPLATE_COLS = [
     'Distributor','SKU','Product Name','Assortment','Supply Control',
     'Avg Weekly Sales LM (Qty)','Total Stock (Qty)','Current WOI',
-    'PO Qty','PO Value','WOI (Stock + PO Ori)','Remark', 'Program',
+    'PO Qty','PO Value','WOI (Stock + PO Ori)','Remark',
     'Suggested PO Qty','Suggested PO Value',
     'WOI After Buffer (Stock + Suggested Qty)',
     'Stock + Suggested Qty WOI (Projection at EOM)',
     'Remaining Allocation (By Region)','RSA Notes','MOQ', 'Check MOQ',
 ]
-PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:15]
+PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:14]
 PO_COLS_copy = PO_TEMPLATE_COLS[:14]
 
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim):
@@ -1215,36 +1212,36 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                             dist_lines.append("")  
                         st.code("\n".join(dist_lines), language=None)
             #---------------TESTING MASUKKAN KOLOM SUMMARY PROGRAM------------------            
-            if "Program" in final_disp.columns:
-                prog_df = final_disp[final_disp["Program"].astype(str).str.strip().ne("")].copy()
-                if not prog_df.empty:
-                    prog_summary = (
-                        prog_df.groupby("Program")["SKU"]
-                        .nunique()
-                        .reset_index()
-                        .rename(columns={"SKU": "Jumlah SKU"})
-                        .sort_values("Jumlah SKU", ascending=False)
-                    )
-                    pg1, pg2 = st.columns(2)
-                    with pg1:
-                        st.markdown("**Program**")
-                        st.dataframe(prog_summary, use_container_width=True, hide_index=True)
-                    with pg2:
-                        prog_dist = (
-                            prog_df.groupby(["Distributor", "Program"])["SKU"]
-                            .apply(lambda s: sorted(set(s)))
-                            .reset_index()
-                        )
-                        prog_dist["Jumlah SKU"] = prog_dist["SKU"].apply(len)
-                        total_prog_sku = prog_df["SKU"].nunique()
-                        with st.expander(f"📦 Copy SKU Program per Distributor ({total_prog_sku} SKU total)", expanded=False):
-                            for dist_name, dist_grp in prog_dist.groupby("Distributor"):
-                                dist_lines = [f"=== {dist_name} ==="]
-                                for _, row in dist_grp.iterrows():
-                                    dist_lines.append(f"-- {row['Program']} ({row['Jumlah SKU']} SKU)")
-                                    dist_lines.extend(row["SKU"])
-                                    dist_lines.append("")
-                                st.code("\n".join(dist_lines), language=None)
+            #if "Program" in final_disp.columns:
+            #    prog_df = final_disp[final_disp["Program"].astype(str).str.strip().ne("")].copy()
+            #    if not prog_df.empty:
+            #        prog_summary = (
+            #            prog_df.groupby("Program")["SKU"]
+            #            .nunique()
+            #            .reset_index()
+            #            .rename(columns={"SKU": "Jumlah SKU"})
+            #            .sort_values("Jumlah SKU", ascending=False)
+            #        )
+            #        pg1, pg2 = st.columns(2)
+            #        with pg1:
+            #            st.markdown("**Program**")
+            #            st.dataframe(prog_summary, use_container_width=True, hide_index=True)
+            #        with pg2:
+            #            prog_dist = (
+            #                prog_df.groupby(["Distributor", "Program"])["SKU"]
+            #                .apply(lambda s: sorted(set(s)))
+            #                .reset_index()
+            #            )
+            #            prog_dist["Jumlah SKU"] = prog_dist["SKU"].apply(len)
+            #            total_prog_sku = prog_df["SKU"].nunique()
+            #            with st.expander(f"📦 Copy SKU Program per Distributor ({total_prog_sku} SKU total)", expanded=False):
+            #                for dist_name, dist_grp in prog_dist.groupby("Distributor"):
+            #                    dist_lines = [f"=== {dist_name} ==="]
+            #                    for _, row in dist_grp.iterrows():
+            #                        dist_lines.append(f"-- {row['Program']} ({row['Jumlah SKU']} SKU)")
+            #                        dist_lines.extend(row["SKU"])
+            #                        dist_lines.append("")
+            #                    st.code("\n".join(dist_lines), language=None)
                     
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+3}</span><strong>Summary PO</strong></div>""", unsafe_allow_html=True)
     summary_df = final_disp.copy()
@@ -1304,7 +1301,6 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     return final_disp
 
-# ─── Shared file upload section ───────────────────────────────────────────────
 
 def _file_upload_section(page_key: str):
     _INVALID_QTY = {"-","null","none","","0","0.0"}
@@ -1649,7 +1645,6 @@ def _file_upload_section(page_key: str):
     return raw_entries, res
 
 
-# ─── Modify QTY section ───────────────────────────────────────────────────────
 
 def _modify_qty_section(raw_entries, page_key: str):
     if not raw_entries:
@@ -1844,8 +1839,9 @@ if st.session_state.get('page') == 'po_changer':
         <div class="hero-tag">✦ PO Management</div>
         <div class="hero-title">PO Simulator - RSA</div></div>""", unsafe_allow_html=True)
     st.divider()
-# ─── Page: PO Simulator (For RSA) ────────────────────────────────────────────
 
+
+###################PO Simulator (For RSA) 
     raw_entries, folder_res = _file_upload_section("rsa")
 
     if folder_res is not None:
@@ -1876,7 +1872,7 @@ if st.session_state.get('page') == 'po_changer':
     st.stop()
 
 
-# ─── Page: PO Simulator (For SPV) ────────────────────────────────────────────
+#################PO Simulator (For SPV)
 
 if st.session_state.get('page') == 'po_spv':
     st.markdown("""<div class="hero-wrap">
@@ -2202,8 +2198,8 @@ if st.session_state.get('page') == 'po_spv':
                         #sulawesi 1 only
                         (result_df["Customer SKU Code"].isin(VITA_C)  & 
                          #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
-                         ~result_df["Customer SKU Code"].isin(FLUSH_OUT)
-                        & result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)),
+                         #~result_df["Customer SKU Code"].isin(FLUSH_OUT)& 
+                        result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)),
                         #end
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
@@ -2422,7 +2418,7 @@ if st.session_state.get('page') == 'po_spv':
     st.stop()
 
 
-# ─── Page: Request PO (For SPV) ──────────────────────────────────────────────
+########################Request PO (For SPV)
 
 st.markdown("""<div class="hero-wrap">
     <div class="hero-tag">✦ REQUEST PO</div>
