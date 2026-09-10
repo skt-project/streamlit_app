@@ -191,8 +191,12 @@ SKU_SIGNATURE = {"kode sku prinsipal", "kode sku distributor",
 # docs/streamlit_noo_sku_mapping_write_mechanism.md for the full audit.
 POOL_NOO_HEADERS = [
     # BD Support's own processing columns — Streamlit never writes these.
-    "DMS", "BASIS", "RSA Name", "BD Support", "NOO/Existing",
-    "asm_name", "input_time", "branch_name", "region", "store_id", "store_name",
+    # Re-verified 2026-09-10: BD Support inserted "Brand" between BASIS and
+    # RSA Name, and removed "asm_name" entirely (its own ASM/AOM/SPV formula
+    # trio presumably now covers this) — net column count unchanged at 41,
+    # but confirmed via a live header read, not assumed from the count.
+    "DMS", "BASIS", "Brand", "RSA Name", "BD Support", "NOO/Existing",
+    "input_time", "branch_name", "region", "store_id", "store_name",
     "channel_name", "customer_code", "customer_branch_code",
     "customer_store_code", "customer_store_name", "city", "store_address",
     "longitude", "latitude", "store_type", "visibility_rating",
@@ -221,7 +225,11 @@ POOL_SKU_HEADERS = [
 # important. See writer._owned_write_span for how this is enforced.
 #
 # BD Support's manual processing flags — never derived, never touched.
-POOL_NOO_BD_MANUAL = frozenset({"DMS", "BASIS"})
+# "Brand" (added 2026-09-10) is grouped here rather than with the confirmed
+# formula columns below: its exact mechanism (manual entry vs. a formula) has
+# not been independently verified, but the write-side handling is identical
+# either way — never part of the write payload, not even blank.
+POOL_NOO_BD_MANUAL = frozenset({"DMS", "BASIS", "Brand"})
 #: Confirmed live spreadsheet formulas (XLOOKUP against 'DIST DATABASE' /
 #: 'ASM/SPV/SE', keyed on that row's own customer_branch_code or branch_name).
 #: "NOO/Existing" was added 2026-09-10 per explicit instruction — column E
@@ -278,7 +286,10 @@ VOLATILE_ENRICHMENT_COLUMNS = frozenset({
     # time. None is user input; each is a function of (identity, master state),
     # so including them would make the hash depend on WHEN the row was looked
     # up rather than WHAT the admin submitted.
-    "se_kae", "spv", "aom", "asm_name", "asm_kam", "asm", "area", "province",
+    # "asm_name" was here too until 2026-09-10, when BD Support removed that
+    # column from the pool entirely — nothing to exclude any more since it's
+    # no longer a real header (see writer.build_noo_row).
+    "se_kae", "spv", "aom", "asm_kam", "asm", "area", "province",
     "region",
     # NOO/Existing and store_id — MoM 2026-09-03: the NOO Detector's
     # Reference-ID verdict and its auto-populated Store ID. Both are DERIVED

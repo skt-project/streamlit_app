@@ -336,11 +336,13 @@ def test_dry_run_validates_and_checks_layout_but_never_appends():
 
 @pytest.mark.sanity
 def test_write_mode_appends_once_to_the_correct_pool():
-    """The write is scoped to the owned span (F:W, 18 columns since
-    2026-09-10 - NOO/Existing moved out of the write span, see the
-    formula-columns tests below), never the full 41-column header - formula
-    and BD-manual columns are structurally absent from the payload, not
-    merely blanked."""
+    """The write is scoped to the owned span (starting at "input_time"
+    itself, 17 columns since 2026-09-10 - BD Support removed "asm_name",
+    which used to sit between "NOO/Existing" and "input_time", so there is
+    nothing left between the anchor and the nearest formula/manual column;
+    see the formula-columns tests below), never the full 41-column header -
+    formula and BD-manual columns are structurally absent from the payload,
+    not merely blanked."""
     settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
     client = fx.FakeSheetsClient(
         {config.TAB_POOL_NOO: [config.POOL_NOO_HEADERS]})
@@ -353,8 +355,9 @@ def test_write_mode_appends_once_to_the_correct_pool():
     assert len(client.written) == 1
     assert client.written[0][0] == config.TAB_POOL_NOO
     _, _, span_columns = writer.owned_span_for("NOO", config.POOL_NOO_HEADERS)
-    assert len(span_columns) == 18
+    assert len(span_columns) == 17
     assert "NOO/Existing" not in span_columns
+    assert "asm_name" not in span_columns  # no longer a real column at all
     assert len(client.written[0][1][0]) == len(span_columns)
 
 
@@ -810,12 +813,17 @@ def test_mom_3_mixed_valid_and_unauthorised_does_not_silently_accept():
 
 @pytest.mark.sanity
 def test_mom_4_pool_hierarchy_fields_are_left_blank():
-    """Test 4: asm_kam / spv / se_kae / aom are BD Support's to formulate."""
+    """Test 4: asm_kam / spv / se_kae / aom are BD Support's to formulate.
+    "asm_name" was also part of this check until 2026-09-10, when BD Support
+    removed that column from the pool entirely — it is no longer a pool_rows
+    key at all (see writer.build_noo_row), so there is nothing left to
+    assert about it here."""
     result = _noo_pipeline([fx.noo_row(store_code="DST08200074")])
     row = result.pool_rows[0]
     for column in ("asm_kam", "spv", "se_kae", "aom"):
         assert row[column] == "", f"{column} must be blank"
-    assert row["branch_name"] and row["region"] and row["asm_name"]
+    assert row["branch_name"] and row["region"]
+    assert "asm_name" not in row
 
 
 def test_store_code_must_match_the_branch_named_on_the_same_row():

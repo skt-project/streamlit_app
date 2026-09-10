@@ -650,12 +650,7 @@ def render_section(kind, dist):
                            data=template_bytes, file_name=name,
                            mime="application/vnd.openxmlformats-officedocument"
                                 ".spreadsheetml.sheet", key=f"tpl_{kind}")
-        if is_noo:
-            st.caption(
-                '<span style="color:darkred; font-weight:bold;">Template '
-                "ini tidak lagi memiliki kolom Store ID — cukup isi 9 "
-                "kolom yang tersedia.</span>", unsafe_allow_html=True)
-        else:
+        if not is_noo:
             st.caption(
                 '<span style="color:darkred; font-weight:bold;">Template '
                 "ini hanya berisi 3 kolom yang perlu Anda isi. Kolom Nama "
