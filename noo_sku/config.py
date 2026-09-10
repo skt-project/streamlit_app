@@ -224,9 +224,14 @@ POOL_SKU_HEADERS = [
 POOL_NOO_BD_MANUAL = frozenset({"DMS", "BASIS"})
 #: Confirmed live spreadsheet formulas (XLOOKUP against 'DIST DATABASE' /
 #: 'ASM/SPV/SE', keyed on that row's own customer_branch_code or branch_name).
+#: "NOO/Existing" was added 2026-09-10 per explicit instruction — column E
+#: is now BD Support's to compute, not Streamlit's; unlike the other seven
+#: entries this one has not been independently re-verified via a live
+#: FORMULA-render inspection, but the write-side handling is identical
+#: either way: the column is simply never part of the write payload.
 POOL_NOO_FORMULA_COLUMNS = frozenset({
     "RSA Name", "BD Support", "asm_kam", "spv", "se_kae", "aom", "area",
-    "province",
+    "province", "NOO/Existing",
 })
 POOL_SKU_BD_MANUAL = frozenset({"DMS"})
 #: Confirmed live spreadsheet formula (XLOOKUP against 'DIST DATABASE').

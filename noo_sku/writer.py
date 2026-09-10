@@ -111,10 +111,13 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
     left blank otherwise so no fake/generated Store ID is ever written.
 
     The returned dict still carries a value for every pool column, including
-    `area`/`province`/`asm_kam`/`spv`/`se_kae`/`aom` — useful context for the
-    preview, showing what the system expects — but those specific keys are
-    NEVER part of what actually reaches the sheet (see `_owned_write_span`):
-    the live cells there are spreadsheet formulas, not Streamlit's to set.
+    `area`/`province`/`asm_kam`/`spv`/`se_kae`/`aom`/`NOO/Existing` — useful
+    context for the preview (`pipeline.mapping_sources` shows the label there
+    regardless), showing what the system expects — but those specific keys
+    are NEVER part of what actually reaches the sheet (see
+    `_owned_write_span`): the live cells there are spreadsheet formulas, not
+    Streamlit's to set. `NOO/Existing` joined that set 2026-09-10 — the
+    written span now starts at column F, not E.
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
     branch_code = norm_key(g("Customer Branch Code")) or norm_key(

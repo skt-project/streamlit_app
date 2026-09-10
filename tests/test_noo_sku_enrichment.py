@@ -336,9 +336,11 @@ def test_dry_run_validates_and_checks_layout_but_never_appends():
 
 @pytest.mark.sanity
 def test_write_mode_appends_once_to_the_correct_pool():
-    """The write is scoped to the owned span (E:W, 19 columns), never the
-    full 41-column header - formula and BD-manual columns are structurally
-    absent from the payload, not merely blanked."""
+    """The write is scoped to the owned span (F:W, 18 columns since
+    2026-09-10 - NOO/Existing moved out of the write span, see the
+    formula-columns tests below), never the full 41-column header - formula
+    and BD-manual columns are structurally absent from the payload, not
+    merely blanked."""
     settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
     client = fx.FakeSheetsClient(
         {config.TAB_POOL_NOO: [config.POOL_NOO_HEADERS]})
@@ -351,7 +353,8 @@ def test_write_mode_appends_once_to_the_correct_pool():
     assert len(client.written) == 1
     assert client.written[0][0] == config.TAB_POOL_NOO
     _, _, span_columns = writer.owned_span_for("NOO", config.POOL_NOO_HEADERS)
-    assert len(span_columns) == 19
+    assert len(span_columns) == 18
+    assert "NOO/Existing" not in span_columns
     assert len(client.written[0][1][0]) == len(span_columns)
 
 
@@ -444,6 +447,7 @@ def test_owned_span_excludes_every_formula_and_manual_noo_column():
     touched = set(span)
     assert not touched & config.POOL_NOO_BD_MANUAL
     assert not touched & config.POOL_NOO_FORMULA_COLUMNS
+    assert "NOO/Existing" not in touched  # column E — 2026-09-10, BD Support's now
     assert "store_type" in touched       # real, user-submitted field
     assert "location_rating" in touched  # unused-but-safe, sandwiched inside
 
@@ -584,12 +588,21 @@ def test_write_past_the_prefilled_rows_still_never_touches_a_formula_column():
 
 @pytest.mark.sanity
 def test_noo_and_not_noo_classification_survive_the_scoped_write_end_to_end():
+    """store_id (within the F:W write span) still gets written per the
+    Detector's verdict. NOO/Existing itself moved out of the write span on
+    2026-09-10 - the Detector still computes the right label (visible in
+    result.pool_rows, and in the preview via pipeline.mapping_sources), but
+    the live sheet cell is never touched by this write; it keeps whatever
+    was there before (BD Support's own formula/process)."""
     settings = config.Settings(mode="production", env={"WRITE_ENABLED": "true"})
     client = fx.FakeSheetsClient({config.TAB_POOL_NOO: _prefilled_noo_pool(2)})
     result = _noo_pipeline([
         fx.noo_row(store_code="DST08200074", name="TOKO ADA"),   # resolves
         fx.noo_row(store_code="DST08299999", name="TOKO BARU"),  # unresolved
     ])
+    assert result.pool_rows[0]["NOO/Existing"] == "Not NOO -> Reference ID not exist"
+    assert result.pool_rows[1]["NOO/Existing"] == "NOO -> Create ID"
+
     writer.append_rows(client, config.TAB_POOL_NOO, result.eligible_rows,
                        headers=config.POOL_NOO_HEADERS, settings=settings,
                        upload_id="x")
@@ -601,10 +614,12 @@ def test_noo_and_not_noo_classification_survive_the_scoped_write_end_to_end():
     sheet = client._values[config.TAB_POOL_NOO]
     not_noo = _row_dict(config.POOL_NOO_HEADERS, sheet[1])
     is_noo = _row_dict(config.POOL_NOO_HEADERS, sheet[2])
-    assert not_noo["NOO/Existing"] == "Not NOO -> Reference ID not exist"
     assert not_noo["store_id"] == "IESL00038"
-    assert is_noo["NOO/Existing"] == "NOO -> Create ID"
     assert is_noo["store_id"] == ""
+    # The sheet's own NOO/Existing cell is untouched - still the fixture's
+    # pre-filled formula placeholder, not the Detector's label.
+    assert not_noo["NOO/Existing"] == "=FORMULA_NOO/Existing_2"
+    assert is_noo["NOO/Existing"] == "=FORMULA_NOO/Existing_3"
 
 
 # ─── Guideline ────────────────────────────────────────────────────────────────
