@@ -701,6 +701,21 @@ hr{border-color:#E8EAED!important;margin:1.2rem 0!important;}
 </style>""", unsafe_allow_html=True)
 
 st.markdown("""<style>
+[data-testid="stSidebar"] .stLinkButton>a{
+    background:var(--g-rose)!important;
+    color:#FFF!important;
+    border:none!important;
+    border-radius:10px!important;
+    font-weight:700!important;
+    padding:.55rem 1.4rem!important;
+    text-decoration:none!important;
+    display:flex!important;
+    justify-content:center!important;
+    width:100%!important;
+}
+</style>""", unsafe_allow_html=True)
+
+st.markdown("""<style>
 html,body,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block-container{background:#FFFFFF!important;}
 [data-testid="stHeader"]{background:#FFFFFF!important;}
 [data-testid="stMain"] *:not(svg):not(path):not(button){color:#1F1F1F!important;}
@@ -737,11 +752,7 @@ with st.sidebar:
         st.session_state.pop('rsa_authenticated', None)
         st.rerun()
 
-    if st.button("🔍Modify File", use_container_width=True, key="nav_po_modify"):
-        components.html(
-        "<script>window.open('https://po-modify.streamlit.app/', '_blank').focus();</script>",
-        height=0, width=0
-    )
+    st.link_button("🔍 Modify File", "https://po-modify.streamlit.app/", use_container_width=True)
     
 
     # Shared constants used in PO simulation pages
