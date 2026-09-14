@@ -248,18 +248,44 @@ def get_credentials():
 # ─── BigQuery loaders ─────────────────────────────────────────────────────────
 
 
+# ─── Canonical distributor identity ────────────────────────────────────────
+# A distributor IS its distributor_code; the name is a label looked up from
+# master_distributor by that code. See distributor_naming.py for why (the
+# DST351 "ANUGERAH"/"ANUGRAH" duplicate) and for the pure, unit-tested
+# implementation of the same normalization this module mirrors in SQL.
+from distributor_naming import (  # noqa: E402
+    build_master_by_code,
+    canonical_dist_cte,
+    canonical_name_by_code,
+    find_cross_code_collisions,
+    find_name_variants,
+    norm_name_sql,
+    normalize_distributor_name,
+)
+
+
 @st.cache_data(show_spinner="Memuat data distributor dari BigQuery...")
 def load_distributor_data() -> pd.DataFrame:
     credentials, project_id = get_credentials()
     client = bigquery.Client(credentials=credentials, project=project_id)
-    query = """
+    # Region is region_g2g — the CURRENT org mapping. master_distributor also
+    # has a plain `region` column holding the OLD one (it still reads
+    # "Southern Sumatera 2" for DST351/DST352, which moved to Southern
+    # Sumatera 1 in September 2026); reading that column is the bug this
+    # query must not have. The name comes from the shared canonical CTE, so
+    # the dropdown shows one formatting-normalized label per code.
+    query = f"""
         SELECT
-            UPPER(distributor)      AS distributor_name,
-            UPPER(region_g2g)       AS region,
-            UPPER(distributor_code) AS distributor_code,
-            UPPER(asm_g2g)          AS asm
-        FROM `gt_schema.master_distributor`
-        WHERE region_g2g != '' AND status = 'Active'
+            distributor_name,
+            region_g2g   AS region,
+            distributor_code,
+            asm_g2g      AS asm
+        FROM ({canonical_dist_cte()})
+        WHERE distributor_code IN (
+            SELECT UPPER(TRIM(distributor_code))
+            FROM `gt_schema.master_distributor`
+            WHERE status = 'Active'
+        )
     """
     df = client.query(query).to_dataframe()
     df["distributor_code"] = df["distributor_code"].astype(str).str.strip()
@@ -270,30 +296,61 @@ def load_distributor_data() -> pd.DataFrame:
 @st.cache_data(show_spinner="Memuat data toko dari Database...")
 def load_store_master() -> pd.DataFrame:
     """
-    Loads store master data directly from master_store_database_basis,
-    sourcing distributor_code / region / asm straight off the store row
-    (per the PJP redesign mapping table) instead of joining by distributor
-    name. This is the single source of truth used to auto-populate
-    Nama Toko / Region / ASM / Nama Distributor / Kode Distributor once a
-    Kode Toko is chosen in the PJP flow.
+    Loads store master data from master_store_database_basis and resolves
+    Region from gt_schema.master_distributor.region_g2g (the single Region
+    source of truth). The store→distributor link is:
+
+      1. dst_id_g2g = master_distributor.distributor_code
+      2. fallback: distributor_g2g = master_distributor.distributor
+
+    Store.region_g2g is NOT used. Nama Toko / ASM / Kode Distributor still
+    come from the store row; Region AND Nama Distributor are inherited from
+    master_distributor so PJP Excel / upload always match Kelola Salesman.
+
+    Nama Distributor is resolved BY CODE, not from the store's own
+    distributor_g2g text. That column is a second denormalized copy of the
+    name and can drift from the master exactly the way gt_master_salesman
+    did (DST351 carrying both "ANUGERAH" and "ANUGRAH" spellings); taking it
+    by code means a master rename propagates everywhere instead of forking
+    into a second apparent distributor. The store's own text survives only
+    as a last-resort fallback for codes the master does not carry yet.
+
+    The name-based fallback join is matched on the NORMALIZED name, so a
+    pure formatting difference ("MANDIRI- BELITUNG" vs "MANDIRI - BELITUNG")
+    still resolves instead of silently falling through to a NULL region.
     """
     credentials, project_id = get_credentials()
     client = bigquery.Client(credentials=credentials, project=project_id)
-    query = """
+    query = f"""
+        WITH dist AS ({canonical_dist_cte()}),
+        dist_by_name AS (
+            SELECT * FROM dist
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY distributor_name_norm
+                ORDER BY distributor_code
+            ) = 1
+        )
         SELECT
-            UPPER(cust_id)           AS store_code,
-            UPPER(store_name)        AS store_name,
-            UPPER(distributor_g2g)   AS distributor_name,
-            UPPER(dst_id_g2g)  AS distributor_code,
-            UPPER(region_g2g)        AS region,
-            UPPER(asm_g2g)           AS asm
-        FROM `gt_schema.master_store_database_basis`
-        WHERE cust_id IS NOT NULL AND cust_id != ''
+            UPPER(s.cust_id)          AS store_code,
+            UPPER(s.store_name)       AS store_name,
+            COALESCE(d_code.distributor_name,
+                     d_name.distributor_name,
+                     UPPER(TRIM(s.distributor_g2g))) AS distributor_name,
+            UPPER(s.dst_id_g2g)       AS distributor_code,
+            COALESCE(d_code.region_g2g, d_name.region_g2g) AS region,
+            UPPER(s.asm_g2g)          AS asm
+        FROM `gt_schema.master_store_database_basis` s
+        LEFT JOIN dist d_code
+            ON d_code.distributor_code = UPPER(TRIM(s.dst_id_g2g))
+        LEFT JOIN dist_by_name d_name
+            ON d_name.distributor_name_norm = {norm_name_sql("s.distributor_g2g")}
+        WHERE s.cust_id IS NOT NULL AND s.cust_id != ''
     """
     df = client.query(query).to_dataframe()
     df = df.dropna(subset=["store_code", "store_name", "distributor_code"])
     for c in ["store_code", "store_name", "distributor_name", "distributor_code", "region", "asm"]:
-        df[c] = df[c].astype(str).str.strip()
+        df[c] = df[c].fillna("").astype(str).str.strip()
+        df.loc[df[c].isin(["NAN", "NONE", "<NA>"]), c] = ""
     # Dropdown now shows the bare store code only (no "Kode - Nama" combo).
     df["store_label"] = df["store_code"]
     df = df.drop_duplicates(subset=["store_code"]).reset_index(drop=True)
@@ -416,7 +473,17 @@ def build_lookup_tables(dist_df: pd.DataFrame):
 # ─── Salesman Mapping table helpers ──────────────────────────────────────────
 
 MAPPING_TABLE = "skintific-data-warehouse.gt_schema.gt_salesman_mapping"
+# WRITES go to the base table; READS go to the view.
+#
+# gt_master_salesman is an append-only snapshot store: its
+# nama_distributor / region were frozen at insert time and still hold
+# retired spellings ("PT ANUGERAH ...") and the pre-September region
+# ("SOUTHERN SUMATERA 2"). gt_master_salesman_v resolves both from
+# master_distributor by distributor_code, so every read of a salesman
+# snapshot sees the CURRENT canonical values without a single
+# historical row being rewritten.
 SALESMAN_TABLE = "skintific-data-warehouse.gt_schema.gt_master_salesman"
+SALESMAN_VIEW = "skintific-data-warehouse.gt_schema.gt_master_salesman_v"
 PJP_TABLE = "skintific-data-warehouse.gt_schema.gt_master_salesman_pjp"
 
 SALESMAN_TYPES = ["GTI", "MIX", "MTI"]
@@ -424,6 +491,18 @@ SALESMAN_TYPES = ["GTI", "MIX", "MTI"]
 
 @st.cache_data(show_spinner=False)
 def get_salesman_list(distributor_code: str) -> pd.DataFrame:
+    """
+    Kelola Salesman roster — the "SE Database" for one distributor.
+
+    Region AND distributor name both come from master_distributor, resolved
+    by `distributor_code`, NOT from the gt_master_salesman snapshot whose
+    `region` / `nama_distributor` are free text frozen at insert time. That
+    snapshot is what produced the DST351 duplicate (two spellings of
+    "ANUGRAH SUKSES MANDIRI - BANGKA") and the stale "SOUTHERN SUMATERA 2":
+    the table is append-only, so every name the master ever carried survives
+    as its own row. Joining on the stable code collapses them to one current
+    answer without rewriting a single historical row.
+    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
@@ -437,7 +516,7 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
                             UPPER(TRIM(kode_distributor))
                         ORDER BY uploaded_at DESC
                     ) AS rn
-                FROM `{SALESMAN_TABLE}`
+                FROM `{SALESMAN_VIEW}`
             )
             SELECT
                 m.salesman_id,
@@ -450,13 +529,16 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
                 s.nama_salesman,
                 s.no_hp,
                 s.status_salesman,
-                s.region,
+                d.region_g2g AS region,
+                d.distributor_name AS nama_distributor,
                 s.asm
             FROM `{MAPPING_TABLE}` m
             LEFT JOIN ranked_salesman s
                 ON  UPPER(TRIM(m.salesman))        = UPPER(TRIM(s.nama_salesman))
                 AND UPPER(TRIM(m.distributor_code)) = UPPER(TRIM(s.kode_distributor))
                 AND s.rn = 1
+            LEFT JOIN ({canonical_dist_cte()}) d
+                ON d.distributor_code = UPPER(TRIM(m.distributor_code))
             WHERE UPPER(m.distributor_code) = UPPER(@kode)
             ORDER BY m.salesman_id, m.created_at DESC
         """
@@ -1131,7 +1213,9 @@ def create_pjp_excel(
                here.
       Step 4 — "Nama Toko" (and Region / ASM / Nama Distributor / Kode
                Distributor) auto-fill (read-only) via VLOOKUP based on
-               whichever store was picked.
+               whichever store was picked. Region in that lookup is
+               master_distributor.region_g2g (joined via the store's
+               dst_id_g2g / distributor_g2g), not the store's own region_g2g.
 
     `selected_dist_code` / `selected_dist_name` / `selected_dist_asm` /
     `selected_dist_region` are kept as parameters for context/labeling
@@ -2490,7 +2574,7 @@ if PAGES[selected_page] == "salesman":
                             creds, proj = get_credentials()
                             c = bigquery.Client(credentials=creds, project=proj)
                             q = f"""
-                                SELECT * FROM `{SALESMAN_TABLE}`
+                                SELECT * FROM `{SALESMAN_VIEW}`
                                 WHERE UPPER(TRIM(nama_salesman))    = UPPER(TRIM(@nama))
                                   AND UPPER(TRIM(kode_distributor)) = UPPER(TRIM(@dist_code))
                                 ORDER BY uploaded_at DESC LIMIT 1
