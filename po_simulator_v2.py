@@ -25,6 +25,8 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 import os
+import streamlit.components.v1 as components
+
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -734,6 +736,13 @@ with st.sidebar:
         st.session_state['page'] = 'po_changer_login'
         st.session_state.pop('rsa_authenticated', None)
         st.rerun()
+
+    if st.button("🔍Modify File", use_container_width=True, key="nav_po_modify"):
+        components.html(
+        "<script>window.open('https://po-modify.streamlit.app/', '_blank').focus();</script>",
+        height=0, width=0
+    )
+    
 
     # Shared constants used in PO simulation pages
     _MANUAL_REJECT_APPROVAL = ["G2G-840","G2G-844","G2G-841","G2G-800","G2G-213","G2G-217","G2G-243"]
@@ -1804,7 +1813,6 @@ def _modify_qty_section(raw_entries, page_key: str):
                     mime=res_t["mime"],
                     use_container_width=True, key=f"tpl_dl_{page_key}_{fi}",
                 )
-
 # === HALAMAN BARU: Login RSA ===
 if st.session_state.get('page') == 'po_changer_login':
     st.markdown("""<div class="hero-wrap">
