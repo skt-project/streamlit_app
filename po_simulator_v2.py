@@ -10,7 +10,6 @@ from pathlib import Path
 import openpyxl
 import numpy as np
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from typing import List
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -25,8 +24,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 import os
-import streamlit.components.v1 as components
-
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -298,37 +295,6 @@ def create_po_template_excel() -> bytes:
     output.seek(0)
     return output.getvalue()
 
-def _sanitize_xlsx_bytes(xlsx_bytes: bytes) -> bytes:
-    _src = io.BytesIO(xlsx_bytes)
-    _dst = io.BytesIO()
-    try:
-        with zipfile.ZipFile(_src, "r") as _zin:
-            names = _zin.namelist()
-            rels_name = "xl/_rels/workbook.xml.rels"
-            drop_rids: set = set()
-            if rels_name in names:
-                _rels_txt = _zin.read(rels_name).decode("utf-8", "ignore")
-                for _m in re.finditer(r'<Relationship\b[^>]*?Id="([^"]+)"[^>]*?Type="[^"]*externalLink[^"]*"[^>]*/>', _rels_txt):
-                    drop_rids.add(_m.group(1))
-            with zipfile.ZipFile(_dst, "w", zipfile.ZIP_DEFLATED) as _zout:
-                for name in names:
-                    if name.startswith("xl/externalLinks/"):
-                        continue
-                    data = _zin.read(name)
-                    if name == "xl/workbook.xml":
-                        _txt = data.decode("utf-8", "ignore")
-                        _txt = re.sub(r"<externalReferences>.*?</externalReferences>", "", _txt, flags=re.DOTALL)
-                        data = _txt.encode("utf-8")
-                    elif name == rels_name and drop_rids:
-                        _txt = data.decode("utf-8", "ignore")
-                        for _rid in drop_rids:
-                            _txt = re.sub(rf'<Relationship\b[^>]*?Id="{re.escape(_rid)}"[^>]*/>', "", _txt)
-                        data = _txt.encode("utf-8")
-                    _zout.writestr(name, data)
-        return _dst.getvalue()
-    except Exception:
-        return xlsx_bytes
-
 
 def _excel_engine(fname: str) -> str:
     if fname.lower().endswith('.xls'):
@@ -351,22 +317,6 @@ def detect_header_row(file_bytes: bytes, fname: str = "", max_scan: int = 15, sh
             best_score = score; best_row = i
     return best_row
 
-
-def _get_sheet_names(file_bytes: bytes, engine: str) -> list:
-    try:
-        if engine == 'xlrd':
-            import xlrd
-            book = xlrd.open_workbook(file_contents=file_bytes)
-            if hasattr(book, 'sheet_visibility'):
-                return [book.sheet_name(i) for i in range(book.nsheets) if book.sheet_visibility[i] == 0]
-            return [book.sheet_name(i) for i in range(book.nsheets)]
-        else:
-            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-            sheets = [ws.title for ws in wb.worksheets if ws.sheet_state == 'visible']
-            wb.close()
-            return sheets
-    except Exception:
-        return []
 
 
 def _convert_to_xlsx(fname: str, fbytes: bytes):
@@ -404,56 +354,7 @@ def _convert_to_xlsx(fname: str, fbytes: bytes):
     return fname, fbytes
 
 
-def _edit_qty_via_excel_com(xlsx_bytes, sheet_name, hdr_row_0, sku_col_name, qty_col_name, cell_writer):
-    try:
-        import tempfile
-        import win32com.client as _wc
-        import pythoncom
-    except Exception:
-        return None
-    _fin_path = None; _xl = None
-    try:
-        pythoncom.CoInitialize()
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as _fin:
-            _fin.write(xlsx_bytes); _fin_path = _fin.name
-        _xl = _wc.DispatchEx("Excel.Application")
-        _xl.Visible = False; _xl.DisplayAlerts = False
-        _wb = _xl.Workbooks.Open(_fin_path, UpdateLinks=0)
-        _ws = None
-        for _s in _wb.Worksheets:
-            if _s.Name == sheet_name: _ws = _s; break
-        if _ws is None: _ws = _wb.Worksheets(1)
-        _hdr_row = hdr_row_0 + 1
-        _used = _ws.UsedRange
-        _max_col = _used.Columns.Count + _used.Column - 1
-        _max_row = _used.Rows.Count + _used.Row - 1
-        _sku_ci = _qty_ci = None
-        for _c in range(1, _max_col+1):
-            _v = _ws.Cells(_hdr_row, _c).Value
-            if _v == sku_col_name: _sku_ci = _c
-            elif _v == qty_col_name: _qty_ci = _c
-        changed = 0
-        if _sku_ci and _qty_ci:
-            for _r in range(_hdr_row+1, _max_row+1):
-                _sv = str(_ws.Cells(_r, _sku_ci).Value or "").strip()
-                _qv = _ws.Cells(_r, _qty_ci).Value
-                _new = cell_writer(_sv, _qv)
-                if _new is not None:
-                    _ws.Cells(_r, _qty_ci).Value = _new; changed += 1
-        _wb.Save(); _wb.Close(SaveChanges=False)
-        with open(_fin_path, "rb") as _f:
-            return _sanitize_xlsx_bytes(_f.read()), changed
-    except Exception:
-        return None
-    finally:
-        try:
-            if _xl: _xl.Quit()
-        except Exception: pass
-        if _fin_path:
-            try: os.remove(_fin_path)
-            except Exception: pass
-        try: pythoncom.CoUninitialize()
-        except Exception: pass
+
 
 def _detect_brand_tag(df: pd.DataFrame, name_col) -> str:
     if not name_col or name_col not in df.columns:
@@ -1664,166 +1565,6 @@ def _file_upload_section(page_key: str):
 
     return raw_entries, res
 
-
-
-def _modify_qty_section(raw_entries, page_key: str):
-    if not raw_entries:
-        st.info("ℹ️ Upload file PO di section atas terlebih dahulu.")
-        return
-
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">1</span>
-    <strong>Pilih File untuk Modifikasi</strong></div>""", unsafe_allow_html=True)
-
-    for fi, (tpl_fname, tpl_orig_bytes) in enumerate(raw_entries):
-        with st.container(border=True):
-            st.markdown(f"**#{fi+1} &nbsp; {tpl_fname}**")
-            tpl_name, tpl_bytes = _convert_to_xlsx(tpl_fname, tpl_orig_bytes)
-            tpl_sheets = _get_sheet_names(tpl_bytes, "openpyxl")
-            if not tpl_sheets:
-                st.warning("⚠️ Tidak ada sheet visible."); continue
-
-            sc1, sc2 = st.columns([2,1])
-            with sc1:
-                if len(tpl_sheets) > 1:
-                    tpl_selected_sheet = st.selectbox("Sheet:", options=tpl_sheets, key=f"tpl_sheet_{page_key}_{fi}")
-                else:
-                    tpl_selected_sheet = tpl_sheets[0]; st.caption(f"📄 Sheet: **{tpl_selected_sheet}**")
-            with sc2:
-                auto_hrow = detect_header_row(tpl_bytes, tpl_name, sheet_name=tpl_selected_sheet)
-                hrow_input = st.number_input("Header row", min_value=1, value=int(auto_hrow)+1, step=1, key=f"tpl_hrow_{page_key}_{fi}")
-            tpl_hrow = int(hrow_input) - 1
-
-            try:
-                tpl_df = pd.read_excel(io.BytesIO(tpl_bytes), sheet_name=tpl_selected_sheet,
-                                        header=tpl_hrow, engine="openpyxl", dtype=str)
-                tpl_df = tpl_df.loc[:, ~tpl_df.columns.str.startswith('Unnamed')].dropna(how='all').reset_index(drop=True)
-            except Exception as e:
-                st.error(f"❌ Gagal membaca file: {e}"); continue
-
-            st.caption(f"**{len(tpl_df):,} baris · {len(tpl_df.columns)} kolom**")
-            with st.expander("👁 Preview data", expanded=False):
-                st.dataframe(tpl_df, use_container_width=True, hide_index=True)
-
-            qty_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['qty','quantity'])), None)
-            sku_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['sku','product code','kode','code', 'sku code', 'sku kode', 'product kode'])), None)
-            name_col_t = next((c for c in tpl_df.columns if any(k in c.lower() for k in ['product name','nama produk','description','item name', 'item description', 'item', 'product'])), None)
-            if not qty_col_t or not sku_col_t:
-                st.info("ℹ️ Kolom SKU / QTY tidak terdeteksi."); continue
-
-            st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
-            <strong>Modifikasi Quantity per Product Code</strong></div>""", unsafe_allow_html=True)
-
-            def _save_tpl_file(cell_writer):
-                com_res = _edit_qty_via_excel_com(tpl_bytes, tpl_selected_sheet, tpl_hrow, sku_col_t, qty_col_t, cell_writer)
-                if com_res is not None:
-                    return com_res
-                out_buf = io.BytesIO(); changed = 0
-                wb_tmp = openpyxl.load_workbook(io.BytesIO(tpl_bytes), data_only=False)
-                ws_tmp = next((s for s in wb_tmp.worksheets if s.title == tpl_selected_sheet), wb_tmp.active)
-                hdr_row = tpl_hrow + 1
-                hdrs = {ws_tmp.cell(row=hdr_row, column=c).value: c for c in range(1, ws_tmp.max_column+1)}
-                sku_ci = hdrs.get(sku_col_t); qty_ci = hdrs.get(qty_col_t)
-                if sku_ci and qty_ci:
-                    for row in ws_tmp.iter_rows(min_row=hdr_row+1, max_row=ws_tmp.max_row):
-                        sv = str(row[sku_ci-1].value or "").strip()
-                        qcell = row[qty_ci-1]
-                        new = cell_writer(sv, qcell.value)
-                        if new is not None:
-                            qcell.value = new; changed += 1
-                wb_tmp.save(out_buf)
-                return out_buf.getvalue(), changed
-
-            with st.container(border=True):
-                st.caption(f"SKU: **{sku_col_t}** · Quantity: **{qty_col_t}**")
-                reduce_codes = st.text_area("Daftar Product Code (satu per baris)", placeholder="SKU001\nSKU-ABC", height=150, key=f"reduce_codes_{page_key}_{fi}")
-
-                btn1, btn2 = st.columns(2)
-                with btn1:
-                    if st.button("Modifikasi QTY", use_container_width=True, key=f"btn_qty_{page_key}_{fi}"):
-                        parsed_skus = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
-                        if parsed_skus:
-                            st.session_state[f"reduce_skus_{page_key}_{fi}"] = parsed_skus
-                            st.session_state[f"mod_mode_{page_key}_{fi}"] = "qty"
-                        else:
-                            st.warning("⚠️ Tidak ada SKU yang valid")
-
-                with btn2:
-                    if st.button("Auto Hapus SKU", use_container_width=True, key=f"btn_del_{page_key}_{fi}"):
-                        parsed_skus = [c.strip() for c in reduce_codes.strip().splitlines() if c.strip()]
-                        if not parsed_skus:
-                            st.warning("⚠️ Tidak ada SKU yang valid")
-                        else:
-                            del_set = set(parsed_skus)
-                            wb_del = openpyxl.load_workbook(io.BytesIO(tpl_bytes), data_only=False)
-                            ws_del = next((s for s in wb_del.worksheets if s.title == tpl_selected_sheet), wb_del.active)
-                            hdr_row_del = tpl_hrow + 1
-                            hdrs_del = {ws_del.cell(row=hdr_row_del, column=c).value: c for c in range(1, ws_del.max_column+1)}
-                            sku_ci_del = hdrs_del.get(sku_col_t); qty_ci_del = hdrs_del.get(qty_col_t)
-                            zeroed = 0
-                            if sku_ci_del and qty_ci_del:
-                                for r in range(hdr_row_del+1, ws_del.max_row+1):
-                                    sv = str(ws_del.cell(row=r, column=sku_ci_del).value or "").strip()
-                                    if sv in del_set:
-                                        ws_del.cell(row=r, column=qty_ci_del).value = None; zeroed += 1
-                            buf_del = io.BytesIO(); wb_del.save(buf_del)
-                            st.session_state[f"tpl_out_{page_key}_{fi}"] = {
-                                "buf": _sanitize_xlsx_bytes(buf_del.getvalue()), "cleared": zeroed, "mode": "delete",
-                                "ext": "xlsx", "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            }
-                            st.success(f"✅ {zeroed} baris dihapus.")
-
-            skus_r = st.session_state.get(f"reduce_skus_{page_key}_{fi}", [])
-            if skus_r and st.session_state.get(f"mod_mode_{page_key}_{fi}") == "qty":
-                st.markdown("**Atur quantity baru per Product Code:**")
-                sku_qty_map = (tpl_df[[sku_col_t, qty_col_t]].dropna(subset=[sku_col_t])
-                               .assign(**{sku_col_t: lambda d: d[sku_col_t].astype(str).str.strip()})
-                               .set_index(sku_col_t)[qty_col_t].to_dict())
-                for sku_r in skus_r:
-                    cur_q = sku_qty_map.get(sku_r, None)
-                    try: cur_q_int = int(float(cur_q)) if cur_q not in (None,"") else 0
-                    except: cur_q_int = 0
-                    def_key = f"edit_val_{page_key}_{fi}_{sku_r}"
-                    if def_key not in st.session_state:
-                        st.session_state[def_key] = cur_q_int
-                    with st.container(border=True):
-                        rc1, rc2, rc3 = st.columns([3,2,3])
-                        with rc1: st.markdown(f"**{sku_r}**")
-                        with rc2:
-                            st.caption("QTY saat ini")
-                            st.markdown(f"**{cur_q if cur_q is not None else '-'}**")
-                        with rc3:
-                            st.number_input("Quantity baru", min_value=0, step=1, key=def_key)
-
-                if st.button("Change QTY", use_container_width=True, key=f"apply_qty_{page_key}_{fi}"):
-                    edit_map = {sku_r: st.session_state.get(f"edit_val_{page_key}_{fi}_{sku_r}", 0) for sku_r in skus_r}
-                    def _edit_writer(sku_val, qty_val):
-                        if sku_val not in edit_map: return None
-                        new = float(edit_map[sku_val])
-                        return int(new) if new == int(new) else new
-                    buf, cnt = _save_tpl_file(_edit_writer)
-                    st.session_state[f"tpl_out_{page_key}_{fi}"] = {
-                        "buf": buf, "cleared": cnt,
-                        "ext": "xlsx", "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    }
-
-            res_t = st.session_state.get(f"tpl_out_{page_key}_{fi}")
-            if res_t:
-                mode_label = "SKU di-set QTY null" if res_t.get("mode") == "delete" else "baris diubah QTY-nya"
-                st.success(f"✅ **{res_t['cleared']}** {mode_label}.")
-                customer_name = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
-                                              key=f"tpl_cust_{page_key}_{fi}", label_visibility="collapsed")
-                file_label = re.sub(r'[\\/*?:"<>|]', "", (customer_name or "").strip()) or "Unnamed_Customer"
-                brand_tag = _detect_brand_tag(tpl_df, name_col_t)
-                if brand_tag:
-                    file_label = f"{file_label}-{brand_tag}"
-                timestamp = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%H.%M.%S")
-                st.download_button(
-                    label=f"⬇ Download Hasil Modifikasi (.{res_t['ext']})",
-                    data=res_t["buf"],
-                    file_name=f"Form PO {file_label} {timestamp}.{res_t['ext']}",
-                    mime=res_t["mime"],
-                    use_container_width=True, key=f"tpl_dl_{page_key}_{fi}",
-                )
 # === HALAMAN BARU: Login RSA ===
 if st.session_state.get('page') == 'po_changer_login':
     st.markdown("""<div class="hero-wrap">
@@ -1887,7 +1628,6 @@ if st.session_state.get('page') == 'po_changer':
                 st.success(f"Simulasi selesai — {len(sim_out['dfs'])} distributor")
                 _render_sim_results(sim_out["dfs"], sim_out["npd"], folder_res, sku_col_sim, qty_col_sim, dist_col_sim)
 
-    _modify_qty_section(raw_entries, "rsa")
     st.stop()
 
 
