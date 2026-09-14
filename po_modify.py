@@ -12,7 +12,7 @@ st.title("Modify Quantity per Product Code")
 st.caption("Upload file PO, pilih SKU yang mau diubah/dihapus qty-nya.")
 
 
-# ---------- Helper functions
+# ---------- Helper functions (ringan, cuma openpyxl + pandas) ----------
 
 def _convert_to_xlsx(fname: str, fbytes: bytes):
     ext = fname.rsplit(".", 1)[-1].lower()
@@ -65,6 +65,31 @@ def _read_df(file_bytes: bytes, sheet_name, header_row: int) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+@st.cache_data(show_spinner=False)
+def _get_qty_value_map(file_bytes: bytes, sheet_name: str, header_row: int, sku_col: str, qty_col: str) -> dict:
+    """Ambil QTY apa adanya (hasil kalkulasi kalau formula, bukan teks formula) pakai data_only=True."""
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
+    hdr_row = header_row + 1
+    headers = {}
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(row=hdr_row, column=c).value
+        if v is not None:
+            headers[str(v).strip()] = c
+    sku_ci = headers.get(sku_col)
+    qty_ci = headers.get(qty_col)
+    result = {}
+    if sku_ci and qty_ci:
+        for r in range(hdr_row + 1, ws.max_row + 1):
+            sv = ws.cell(row=r, column=sku_ci).value
+            if sv is None:
+                continue
+            sv = str(sv).strip()
+            result[sv] = ws.cell(row=r, column=qty_ci).value  # angka hasil, bukan formula
+    wb.close()
+    return result
+
+
 def _detect_col(df, keywords):
     return next((c for c in df.columns if any(k in c.lower() for k in keywords)), None)
 
@@ -110,6 +135,8 @@ def _make_zip(results: dict) -> bytes:
     return buf.getvalue()
 
 
+# ---------- UI ----------
+
 st.markdown("#### 1. Pilih File untuk Modifikasi")
 uploaded_files = st.file_uploader(
     "Upload file (.xlsx / .xls / .csv)", type=["xlsx", "xls", "csv"],
@@ -117,7 +144,7 @@ uploaded_files = st.file_uploader(
 )
 
 if not uploaded_files:
-    st.info("Upload file dulu ya.")
+    st.info("Upload file dulu ya 😊")
     st.stop()
 
 file_meta = []  # simpan info tiap file: fname, fbytes, sheet, header_row, sku_col, qty_col
@@ -201,9 +228,7 @@ with tab1:
         edit_skus = st.session_state.get(f"edit_skus_{fi}")
         if edit_skus:
             st.markdown("**Atur quantity baru per Product Code:**")
-            sku_qty_map = (df[[sku_col, qty_col]].dropna(subset=[sku_col])
-                           .assign(**{sku_col: lambda d: d[sku_col].astype(str).str.strip()})
-                           .set_index(sku_col)[qty_col].to_dict())
+            sku_qty_map = _get_qty_value_map(fbytes, sheet_sel, header_row, sku_col, qty_col)
             new_values = {}
             for s in edit_skus:
                 cur_q = sku_qty_map.get(s, None)
@@ -231,9 +256,18 @@ with tab1:
         result = st.session_state.get(f"result_{fi}")
         if result:
             st.success(f"✅ {result['mode']} — {result['cnt']} baris berhasil diubah.")
+            st.download_button(
+                label=f"⬇️ Download {fname} ({result['cnt']} baris diubah)",
+                data=result["bytes"],
+                file_name=f"Modified_{fname.rsplit('.',1)[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key=f"dl_single_{fi}",
+            )
 
 
 with tab2:
+    # ---------- Hapus SKU Massal (semua file) ----------
 
     st.markdown("#### Hapus SKU Massal (Semua File Sekaligus)")
     st.caption("Paste daftar SKU sekali — sistem cari & hapus qty SKU tersebut di semua file yang sudah diupload (kalau ketemu).")
@@ -244,7 +278,7 @@ with tab2:
         placeholder="G2G-2884\nG2G-216\nG2G-842",
     )
 
-    if st.button("🗑️ Terapkan ke Semua File", use_container_width=True):
+    if st.button("Modify Semua File", use_container_width=True):
         mass_skus = _parse_sku_lines(mass_codes)
         if not mass_skus:
             st.warning("⚠️ Tidak ada SKU yang valid.")
