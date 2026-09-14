@@ -192,9 +192,17 @@ def test_norm_name_sql_targets_the_requested_column():
 
 # ═══ Historical data must never be mutated ═══════════════════════════════
 
-SCRATCH_VIEW = Path(
-    r"C:\Users\JONATH~1\AppData\Local\Temp\claude\d--"
-    r"\a339ec34-88e3-4cef-8e45-0e5084a7c3f7\scratchpad\proposed_view.sql")
+SCRATCH = Path(r"C:\Users\JONATH~1\AppData\Local\Temp\claude\d--"
+               r"\a339ec34-88e3-4cef-8e45-0e5084a7c3f7\scratchpad")
+SCRATCH_VIEW = SCRATCH / "proposed_view.sql"
+SCRATCH_PJP_VIEW = SCRATCH / "proposed_pjp_view.sql"
+
+# The two current-facing views. Both must canonicalize; neither may stay a
+# bare passthrough over its append-only base table.
+CURRENT_FACING_VIEWS = [
+    ("gt_master_salesman_v", SCRATCH_VIEW, "gt_master_salesman", "s"),
+    ("gt_master_salesman_pjp_v", SCRATCH_PJP_VIEW, "gt_master_salesman_pjp", "p"),
+]
 
 
 def test_canonical_cte_contains_no_dml():
@@ -331,3 +339,77 @@ def test_proposed_view_is_generated_from_the_shared_cte():
     sql = _sql_of(SCRATCH_VIEW)
     assert norm_name_sql("distributor") in sql
     assert "AS region_g2g" in sql
+
+
+# ═══ Both current-facing views canonicalize identically ══════════════════
+# Confirmed business rule: for PJP / SE Database output, distributor name and
+# region must ALWAYS reflect the CURRENT master mapping -- never the value
+# frozen at upload time. So neither view may remain a bare passthrough.
+
+@pytest.mark.parametrize("name,ddl,base,alias", CURRENT_FACING_VIEWS)
+def test_current_facing_view_is_not_a_bare_passthrough(name, ddl, base, alias):
+    if not ddl.exists():
+        pytest.skip(f"{name} DDL not generated")
+    sql = _sql_of(ddl)
+    assert "LEFT JOIN dist" in sql, f"{name} does not join the canonical master"
+    body = sql.split("AS", 1)[1]
+    assert "SELECT * FROM" not in body.upper().replace("\n", " "), \
+        f"{name} is still a bare passthrough"
+
+
+@pytest.mark.parametrize("name,ddl,base,alias", CURRENT_FACING_VIEWS)
+def test_current_facing_view_resolves_name_and_region_by_code(name, ddl, base, alias):
+    if not ddl.exists():
+        pytest.skip(f"{name} DDL not generated")
+    sql = _sql_of(ddl)
+    # Identity is the code -- never a name match, never fuzzy.
+    assert f"d.distributor_code = UPPER(TRIM({alias}." in sql, \
+        f"{name} must join on distributor_code"
+    assert "COALESCE(d.distributor_name," in sql, f"{name} must canonicalize the name"
+    assert "COALESCE(d.region_g2g," in sql, f"{name} must take region from region_g2g"
+
+
+@pytest.mark.parametrize("name,ddl,base,alias", CURRENT_FACING_VIEWS)
+def test_current_facing_view_never_reads_the_obsolete_region_column(name, ddl, base, alias):
+    """
+    master_distributor.region is the company/SKT taxonomy, NOT the G2G one,
+    and the snapshot's own region is frozen. Neither belongs in this output.
+    """
+    if not ddl.exists():
+        pytest.skip(f"{name} DDL not generated")
+    sql = _sql_of(ddl)
+    assert re.search(r"\bd\.region\b(?!_g2g)", sql) is None, \
+        f"{name} reads master_distributor.region (obsolete taxonomy for G2G)"
+
+
+@pytest.mark.parametrize("name,ddl,base,alias", CURRENT_FACING_VIEWS)
+def test_current_facing_view_preserves_columns_and_touches_no_rows(name, ddl, base, alias):
+    """Column set/order preserved via SELECT * REPLACE; base table untouched."""
+    if not ddl.exists():
+        pytest.skip(f"{name} DDL not generated")
+    sql = _sql_of(ddl)
+    assert f"SELECT {alias}.* REPLACE" in sql, f"{name} must use SELECT * REPLACE"
+    up = sql.upper()
+    assert "CREATE OR REPLACE VIEW" in up
+    for verb in ("INSERT", "UPDATE ", "DELETE", "MERGE", "TRUNCATE", "DROP"):
+        assert verb not in up, f"{name} DDL contains {verb} -- would mutate history"
+
+
+@pytest.mark.parametrize("name,ddl,base,alias", CURRENT_FACING_VIEWS)
+def test_current_facing_view_reads_its_own_append_only_base(name, ddl, base, alias):
+    if not ddl.exists():
+        pytest.skip(f"{name} DDL not generated")
+    sql = _sql_of(ddl)
+    assert f"gt_schema.{base}` {alias}" in sql, f"{name} must read {base}"
+
+
+@pytest.mark.parametrize("name,ddl,base,alias", CURRENT_FACING_VIEWS)
+def test_both_views_share_one_canonical_definition(name, ddl, base, alias):
+    """
+    One source of truth: the same canonical_dist_cte() feeds both views and
+    both Streamlit apps, so they cannot drift apart.
+    """
+    if not ddl.exists():
+        pytest.skip(f"{name} DDL not generated")
+    assert canonical_dist_cte().strip() in _sql_of(ddl), \
+        f"{name} does not embed the shared canonical CTE verbatim"
