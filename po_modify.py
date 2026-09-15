@@ -6,7 +6,7 @@ import re
 import zipfile
 from datetime import datetime
 
-st.set_page_config(page_title="Modify Qty per SKU", layout="wide", page_icon="📝")
+st.set_page_config(page_title="Modify Qty per SKU", layout="wide", page_icon="✏️")
 
 # ---------- Global font size override ----------
 st.markdown("""
@@ -14,13 +14,13 @@ st.markdown("""
     html, body, [class*="css"]  {
         font-size: 13px !important;
     }
-    h1 { font-size: 1.6rem !important; }
+    h1 { font-size: 3rem !important; }
     h2 { font-size: 1.3rem !important; }
-    h3, h4 { font-size: 1.1rem !important; }
-    .stButton button { font-size: 13px !important; }
+    h3, h4 { font-size: 2 rem !important; }
+    .stButton button { font-size: 15px !important; }
     .stTextArea textarea, .stTextInput input, .stNumberInput input { font-size: 13px !important; }
     .stSelectbox div, .stMultiSelect div { font-size: 13px !important; }
-    .stDataFrame, .stDataFrame * { font-size: 12px !important; }
+    .stDataFrame, .stDataFrame * { font-size: 10px !important; }
     .stCaption, .st-emotion-cache-* p { font-size: 12px !important; }
     </style>
 """, unsafe_allow_html=True)
@@ -299,7 +299,7 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
                 with st.container(border=True):
                     st.markdown(f"**#{fi+1} {fname}** — sheet template terdeteksi otomatis")
 
-                    col_sheet, col_hrow, col_stats, col_badge = st.columns([2, 1, 1.3, 2.2])
+                    col_sheet, col_hrow, col_badge = st.columns([2, 1, 2.2])
 
                     with col_sheet:
                         st.selectbox(
@@ -320,8 +320,6 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
                             disabled=True,
                         )
 
-                    with col_stats:
-                        st.caption(f"{len(auto_df):,} baris · {len(auto_df.columns)} kolom")
 
                     with col_badge:
                         st.success(f"✅ OK")
@@ -338,7 +336,7 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
                     "sheet template tidak terdeteksi otomatis"
                 )
 
-                col_sheet, col_hrow,col_badge = st.columns([2, 0.8, 2])
+                col_sheet, col_hrow,col_badge = st.columns([2, 1, 2.2])
 
                 with col_sheet:
                     sheet_sel = st.selectbox(
@@ -440,7 +438,7 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
                     })
 
 st.markdown("#### 3. Modifikasi")
-tab1, tab2 = st.tabs(["📁 Modifikasi per File", "🗑️ Hapus SKU Massal & Download"])
+tab1, tab2 = st.tabs(["🔴 Hapus per File", "❌ Hapus SKU di Semua File Sekaligus"])
 
 with tab1:
     if not file_meta:
@@ -462,7 +460,7 @@ with tab1:
             raw_codes = st.text_area(
                 "Daftar Product Code",
                 height=150, key=f"codes_{fi}",
-                placeholder="G2G-2884\n\n-- STOP PO (2 SKU)\nG2G-216\nG2G-842",
+                placeholder="SKU1\nSKU2\nSKU3",
             )
 
             b1, b2 = st.columns(2)
