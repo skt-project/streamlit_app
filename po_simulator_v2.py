@@ -708,6 +708,14 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
     sim_df[dist_col] = sim_df[dist_col].astype(str).str.strip().str.upper()
     sim_df[sku_col] = sim_df[sku_col].astype(str).str.strip().str.upper()
     sim_df = sim_df.rename(columns={dist_col:"Distributor", sku_col:"Customer SKU Code", qty_col:"PO Qty"})
+
+   
+    dup_check = sim_df.groupby(["Distributor","Customer SKU Code"]).size()
+    n_dup = (dup_check > 1).sum()
+    if n_dup > 0:
+        st.info(f"ℹ️ {n_dup} SKU duplikat ditemukan — QTY-nya digabung (sum) per Distributor+SKU.")
+    sim_df = sim_df.groupby(["Distributor","Customer SKU Code"], as_index=False)["PO Qty"].sum()
+
     sim_df["is_po_sku"] = True
     sim_df = sim_df[["Distributor","Customer SKU Code","PO Qty","is_po_sku"]]
 
@@ -1292,46 +1300,155 @@ def _file_upload_section(page_key: str):
                         raw_entries.append((new_name, new_bytes))
                         if ext != "xlsx": converted_names.append(f"{zname} → {new_name}")
         else:
+            
             new_name, new_bytes = _convert_to_xlsx(uf.name, fb)
             raw_entries.append((new_name, new_bytes))
             if uf.name.rsplit(".",1)[-1].lower() != "xlsx":
                 converted_names.append(f"{uf.name} → {new_name}")
 
-    if converted_names:
-        st.caption("🔄 Auto-convert: " + "  ·  ".join(converted_names)) 
- 
+    #if converted_names:
+    #    st.caption("🔄 Auto-convert: " + "  ·  ".join(converted_names)) 
 
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">1</span>
+    mode_sel = st.radio(
+        "Mode",
+        options=["General", "Dedicated Kalimantan"],
+        horizontal=True,
+        key=f"region_mode_radio_{page_key}",
+        label_visibility="collapsed",
+    )
+    is_kalbar_mode = mode_sel.endswith("Dedicated Kalimantan")
+    st.session_state[f"region_mode_{page_key}"] = "kalimantan_dedicated_gt" if is_kalbar_mode else "standard"
+    
+    is_kalbar_mode = st.session_state.get(f"region_mode_{page_key}") == "kalimantan_dedicated_gt"
+    kalbar_submode = "template"
+    if is_kalbar_mode:
+        with st.container(border=True):
+            st.markdown("**Sumber Kolom**")
+            kalbar_submode_sel = st.radio(
+                "Sumber Kolom",
+                options=["WITH TEMPLATE", "NO TEMPLATE KOLOM"],
+                captions=[
+                    "Baca row 7, kolom T",
+                    "Hanya kolom SKU & QTY per sheet",
+                ],
+                horizontal=True,
+                key=f"kalbar_submode_{page_key}",
+                label_visibility="collapsed",
+            )
+            kalbar_submode = "template" if kalbar_submode_sel == "WITH TEMPLATE" else "sku_qty_only"
+        st.session_state[f"kalbar_submode_value_{page_key}"] = kalbar_submode
+
+    # Deteksi sheet per file sekali di awal
+    file_sheets_map = {}
+    for idx, (fname, fbytes) in enumerate(raw_entries):
+        try:
+            wb_tmp = openpyxl.load_workbook(io.BytesIO(fbytes), data_only=True)
+            file_sheets_map[idx] = [ws.title for ws in wb_tmp.worksheets if ws.sheet_state == 'visible']
+            wb_tmp.close()
+        except Exception:
+            file_sheets_map[idx] = []
+
+    # Step khusus Kalimantan: pilih sheet mana yg mau diproses (per file)
+    if is_kalbar_mode:
+        st.markdown("""<div class="pipeline-step active"><span class="step-number">1</span>
+        <strong>Pilih Sheet (Kalimantan Dedicated GT)</strong></div>""", unsafe_allow_html=True)
+        for idx, (fname, fbytes) in enumerate(raw_entries):
+            sheets = file_sheets_map[idx]
+            if len(sheets) > 1:
+                st.multiselect(f"Sheet — {fname}", options=sheets, default=sheets,
+                                key=f"sheetpick_{page_key}_{idx}_{fname}")
+        st.divider()
+
+    # Bangun daftar baris konfigurasi: 1 baris per file (standard) atau 1 baris per sheet terpilih (kalimantan)
+    entries_to_configure = []
+    for idx, (fname, fbytes) in enumerate(raw_entries):
+        sheets = file_sheets_map[idx]
+        if is_kalbar_mode and len(sheets) > 1:
+            picked = st.session_state.get(f"sheetpick_{page_key}_{idx}_{fname}", sheets) or sheets
+            for sh in picked:
+                entries_to_configure.append((idx, fname, fbytes, sh))
+        elif sheets:
+            entries_to_configure.append((idx, fname, fbytes, None if len(sheets) > 1 else sheets[0]))
+        else:
+            entries_to_configure.append((idx, fname, fbytes, 0))
+
+    def _key_suffix(idx, fname, sheet_fixed):
+        if is_kalbar_mode and sheet_fixed not in (None, 0):
+            return f"{page_key}_{idx}_{fname}_{sheet_fixed}"
+        return f"{page_key}_{idx}_{fname}"
+
+    prev_mode_key = f"_prev_region_mode_{page_key}"
+    cur_mode = st.session_state[f"region_mode_{page_key}"]
+    prev_submode_key = f"_prev_kalbar_submode_{page_key}"
+    cur_submode = kalbar_submode
+    mode_just_changed = (st.session_state.get(prev_mode_key) != cur_mode) or (st.session_state.get(prev_submode_key) != cur_submode)
+    if st.session_state.get(prev_mode_key) != cur_mode:
+        st.session_state[prev_mode_key] = cur_mode
+    if st.session_state.get(prev_submode_key) != cur_submode:
+        st.session_state[prev_submode_key] = cur_submode
+
+    def _force_kalbar_default(row_key, col_key):
+        """default row=7:, col=18:22"""
+        marker = f"_kalbar_defaulted_{row_key}"
+        if mode_just_changed or not st.session_state.get(marker):
+            st.session_state[row_key] = "7:"
+            st.session_state[col_key] = "18:22"
+            st.session_state[marker] = True
+
+    def _force_kalbar_row_default(row_key):
+        """default row=7:"""
+        marker = f"_kalbar_defaulted_{row_key}"
+        if mode_just_changed or not st.session_state.get(marker):
+            st.session_state[row_key] = "2:"
+            st.session_state[marker] = True
+
+    if mode_just_changed and cur_mode == "standard":
+        for idx, fname, fbytes, sheet_fixed in entries_to_configure:
+            suf = _key_suffix(idx, fname, sheet_fixed)
+            st.session_state[f"row_{suf}"] = ""
+            st.session_state[f"col_{suf}"] = ""
+            st.session_state.pop(f"_kalbar_defaulted_row_{suf}", None)
+
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
     <strong>Konfigurasi per File</strong></div>""", unsafe_allow_html=True)
 
     parsed = []
-    for idx, (fname, fbytes) in enumerate(raw_entries):
+    for row_i, (idx, fname, fbytes, sheet_fixed) in enumerate(entries_to_configure):
         with st.container(border=True):
-           
+
+            sheets = file_sheets_map[idx]
             hc1, hc2 = st.columns([2,1])
             with hc1:
-                st.markdown(f"**#{idx+1} &nbsp; {fname}**")
+                if is_kalbar_mode and sheet_fixed not in (None, 0):
+                    title = f"**#{row_i+1} &nbsp; {sheet_fixed}**"
+                else:
+                    title = f"**#{row_i+1} &nbsp; {fname}**"
+                st.markdown(title, unsafe_allow_html=True)
             with hc2:
-                try:
-                    wb_tmp = openpyxl.load_workbook(io.BytesIO(fbytes), data_only=True)
-                    sheets = [ws.title for ws in wb_tmp.worksheets if ws.sheet_state == 'visible']
-                    wb_tmp.close()
-                except Exception:
-                    sheets = []
-                if len(sheets) > 1:
+                if sheet_fixed not in (None, 0):
+                    sheet_sel = sheet_fixed
+                    if not is_kalbar_mode:
+                        st.caption(f"📄 `{sheet_sel}`")
+                elif len(sheets) > 1:
                     sheet_sel = st.selectbox("Sheet:", options=sheets, key=f"fs_{page_key}_{idx}_{fname}", label_visibility="collapsed")
                 elif sheets:
                     sheet_sel = sheets[0]; st.caption(f"📄 `{sheets[0]}`")
                 else:
                     sheet_sel = 0
 
-           
-            row_rng_key = f"row_{page_key}_{idx}_{fname}"
-            col_rng_key = f"col_{page_key}_{idx}_{fname}"
+            key_suf = _key_suffix(idx, fname, sheet_fixed)
+            row_rng_key = f"row_{key_suf}"
+            col_rng_key = f"col_{key_suf}"
+
+            if is_kalbar_mode:
+                if kalbar_submode == "template":
+                    _force_kalbar_default(row_rng_key, col_rng_key)
+                else:
+                    _force_kalbar_row_default(row_rng_key)
+
             row_rng_prev = st.session_state.get(row_rng_key, "")
             hrow, hrow_overridden = _resolve_header_row(row_rng_prev, fbytes, fname, sheet_sel)
 
-           
             try:
                 ext = fname.rsplit(".",1)[-1].lower()
                 if ext == "csv":
@@ -1360,29 +1477,110 @@ def _file_upload_section(page_key: str):
                     if removed:
                         st.caption(f"🗑 {removed:,} baris dibuang (QTY tidak valid — kolom **{qty_col}**)")
 
-               
+                    if is_kalbar_mode and kalbar_submode == "sku_qty_only" and "SKU" in df_f.columns:
+                        dup_sku = (df_f["SKU"].astype(str).str.strip().str.upper()
+                                   .loc[lambda s: s.ne("") & s.ne("NAN")])
+                        dup_counts = dup_sku[dup_sku.duplicated(keep=False)].value_counts()
+                        if not dup_counts.empty:
+                            sheet_label = f" (sheet `{sheet_sel}`)" if sheet_fixed not in (None, 0) else ""
+                            st.warning(
+                                f"⚠️ Ditemukan **{len(dup_counts)} SKU duplikat** di **{fname}**{sheet_label}: "
+                                + ", ".join(dup_counts.index.tolist()[:15])
+                                + (" ..." if len(dup_counts) > 15 else "")
+                            )
+                elif is_kalbar_mode and kalbar_submode == "template":
+                    # Scope pencarian ke Column Range yang sudah dikonfigurasi (default 18:22 / kolom T)
+                    _row_rng_cur = st.session_state.get(row_rng_key, "")
+                    _col_rng_cur = st.session_state.get(col_rng_key, "")
+                    df_dup_scope = _apply_range(df_f.copy(), _row_rng_cur, _col_rng_cur) if _col_rng_cur.strip() else df_f
+
+                    def _is_sku_code_col(col_name: str, series: pd.Series) -> bool:
+                        c = col_name.strip().upper()
+                        # nama kolom harus persis "SKU" / "PRODUCT CODE" / diawali "SKU " atau "SKU_"
+                        name_ok = c in ("SKU", "PRODUCT CODE", "SKU CODE", "KODE", "KODE PRODUK") \
+                                  or c.startswith(("SKU ", "SKU_", "PRODUCT CODE "))
+                        if not name_ok:
+                            return False
+                        # isinya harus mayoritas match pola kode G2G-xxxx, bukan label bebas
+                        sample = series.dropna().astype(str).str.strip().head(20)
+                        if sample.empty:
+                            return False
+                        match_ratio = sample.str.match(r'^[A-Z0-9]+-\S+$', case=False).mean()
+                        return match_ratio > 0.5
+
+                    sku_col_dup = next((c for c in df_dup_scope.columns if _is_sku_code_col(c, df_dup_scope[c])), None)
+
+                    if sku_col_dup:
+                        dup_sku = (df_dup_scope[sku_col_dup].astype(str).str.strip().str.upper()
+                                   .loc[lambda s: s.ne("") & s.ne("NAN")])
+                        dup_counts = dup_sku[dup_sku.duplicated(keep=False)].value_counts()
+                        if not dup_counts.empty:
+                            sheet_label = f" (sheet `{sheet_sel}`)" if sheet_fixed not in (None, 0) else ""
+                            st.warning(
+                                f"⚠️ Ditemukan **{len(dup_counts)} SKU duplikat** di **{fname}**{sheet_label}: "
+                                + ", ".join(dup_counts.index.tolist()[:15])
+                                + (" ..." if len(dup_counts) > 15 else ""))
+                            
                 has_dist = any("DISTRIBUTOR" in c.upper() for c in df_f.columns)
                 dc1, dc2 = st.columns([1,2])
                 with dc1:
                     st.caption("Distributor" + (" *(sudah ada)*" if has_dist else ""))
                 with dc2:
                     dist_val = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
-                                            key=f"dist_{page_key}_{idx}_{fname}", label_visibility="collapsed")
+                                            key=f"dist_{key_suf}", label_visibility="collapsed")
 
-               
                 auto_hrow_display = detect_header_row(fbytes, fname, sheet_name=sheet_sel) + 1
                 rc1, rc2 = st.columns(2)
                 with rc1:
-                    row_rng = st.text_input(
-                        f"Row Range",
-                        value="",
-                        key=row_rng_key,
-                        placeholder="0:6"
-                    )
-                with rc2:
-                    col_rng = st.text_input("Column Range", value="", key=col_rng_key, placeholder="0:6")
+                    if is_kalbar_mode:
+                        row_rng = st.text_input(
+                            "Row Range",
+                            value=st.session_state.get(row_rng_key, ""),
+                            key=row_rng_key,
+                            placeholder="0:6"
+                        )
+                    else:
+                        row_rng = st.text_input("Row Range", value="", key=row_rng_key, placeholder="0:6")
 
-                
+                if is_kalbar_mode and kalbar_submode == "sku_qty_only":
+                    with rc2:
+                        st.caption("🔎 Pilih kolom sumber")
+                        # heuristik default: SKU dari kolom mengandung "kode", QTY dari kolom mengandung "final po"
+                        _sku_guess_idx = next((i for i, c in enumerate(df_f.columns)
+                                                if "kode" in c.lower()), 
+                                               next((i for i, c in enumerate(df_f.columns)
+                                                     if any(k in c.lower() for k in ["sku", "product code", "code"])), 0))
+                        _qty_guess_idx = next((i for i, c in enumerate(df_f.columns)
+                                                if "final po" in c.lower()),
+                                               next((i for i, c in enumerate(df_f.columns)
+                                                     if c.strip().upper() in ("QTY", "QUANTITY")), 0))
+                        sku_pick_key = f"skupick_{key_suf}"
+                        qty_pick_key = f"qtypick_{key_suf}"
+                        pc1, pc2 = st.columns(2)
+                        with pc1:
+                            sku_pick = st.selectbox("Kolom SKU / Product Code (Kode)", options=list(df_f.columns),
+                                                     index=_sku_guess_idx, key=sku_pick_key)
+                        with pc2:
+                            qty_pick = st.selectbox("Kolom QTY (FINAL PO)", options=list(df_f.columns),
+                                                     index=_qty_guess_idx, key=qty_pick_key)
+                    col_rng = ""  # tidak slicing posisi — pakai pilihan kolom manual
+                    if sku_pick != "SKU":
+                        df_f = df_f.rename(columns={sku_pick: "SKU"})
+                    if qty_pick != "QTY" and qty_pick in df_f.columns:
+                        df_f = df_f.rename(columns={qty_pick: "QTY"})
+                    st.caption(f"✅ Terpilih: SKU dari kolom **{sku_pick}**, QTY dari kolom **{qty_pick}**")
+                else:
+                    with rc2:
+                        if is_kalbar_mode:
+                            col_rng = st.text_input(
+                                "Column Range",
+                                value=st.session_state.get(col_rng_key, ""),
+                                key=col_rng_key,
+                                placeholder="0:6"
+                            )
+                        else:
+                            col_rng = st.text_input("Column Range", value="", key=col_rng_key, placeholder="0:6")
+
                 df_preview = df_f.copy()
                 if col_rng.strip():
                     try:
