@@ -1,4 +1,0 @@
-libreoffice
-fonts-liberation
-libcairo2-dev
-pkg-config

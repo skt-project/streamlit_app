@@ -15,7 +15,6 @@ xlsxwriter
 google-cloud-storage
 gspread
 pendulum
-reportlab
 bcrypt
 streamlit-js-eval
 pytz
@@ -23,7 +22,9 @@ matplotlib
 xutils
 Pillow
 pyarrow
-reportlab>=3.5.53,<4
+# reportlab 3.x has no cp313 wheel and builds renderPM from C (needs ft2build.h);
+# 4.x ships a pure-Python py3-none-any wheel. Do not re-cap below 4.
+reportlab>=4.0.0,<5
 pypdf>=4.0.0
 requests>=2.31.0
 Pillow>=10.0.0

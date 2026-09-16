@@ -40,18 +40,26 @@ _ASSET_DIR = "assets/guide"
 
 @dataclass(frozen=True)
 class GuideItem:
-    """One bullet, or one walkthrough step with its screenshot.
+    """One reference bullet, or one numbered walkthrough step.
+
+    `is_step` decides how noo_sku_mapping.py renders it — a step is its own
+    plain paragraph (matching the PPTX's "(1) ... (2) ..." numbering), never
+    a bulleted list entry, EVEN when it has no screenshot: a step without an
+    image (see the NOO step 6 comment below) must still look like the rest
+    of its own walkthrough, not fall back to bullet styling just because
+    there's no image to anchor it to.
 
     `image`, when set, is a path relative to the repository root — the
     Streamlit app resolves it against its own file, never an absolute path.
     """
     text: str
     image: str = ""
+    is_step: bool = False
 
 
 def _step(text: str, image_filename: str = "") -> GuideItem:
     image = f"{_ASSET_DIR}/{image_filename}" if image_filename else ""
-    return GuideItem(text=text, image=image)
+    return GuideItem(text=text, image=image, is_step=True)
 
 
 def load_guide_pptx() -> bytes:

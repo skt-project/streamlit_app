@@ -104,17 +104,30 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
     (decision B3). Master values are used only to fill a blank.
 
     `noo_existing_label` and `resolved_store_id` are the integrated NOO
-    Detector's verdict (`noo_sku.noo_detector.classify`) — column E
-    ("NOO/Existing") and the auto-populated `store_id` respectively. Fixed
-    2026-09-03: `store_id` is now ALWAYS the master's own matched identifier,
-    never the admin's typed value — populated only when a match was found,
-    left blank otherwise so no fake/generated Store ID is ever written.
+    Detector's verdict (`noo_sku.noo_detector.classify`) — the "NOO/Existing"
+    column and the auto-populated `store_id` respectively. Fixed 2026-09-03:
+    `store_id` is now ALWAYS the master's own matched identifier, never the
+    admin's typed value — populated only when a match was found, left blank
+    otherwise so no fake/generated Store ID is ever written.
 
     The returned dict still carries a value for every pool column, including
     `area`/`province`/`asm_kam`/`spv`/`se_kae`/`aom` — useful context for the
     preview, showing what the system expects — but those specific keys are
     NEVER part of what actually reaches the sheet (see `_owned_write_span`):
     the live cells there are spreadsheet formulas, not Streamlit's to set.
+    `NOO/Existing` is NOT in that group, despite briefly living there on
+    2026-09-10: a live read the same day showed RSA Name/BD Support genuinely
+    populated by BD Support's own process on brand-new rows, but
+    NOO/Existing sitting blank with nothing else to fill it — it is, and
+    always has been, Streamlit's own column to write.
+
+    2026-09-10, same day: BD Support inserted "Brand" (after BASIS) and
+    dropped "asm_name" from the pool entirely. `asm_name` is no longer part
+    of this dict at all — that column doesn't exist any more, so there is
+    nothing left for Streamlit to populate or preview it from. The owned
+    write span recomputed automatically to start at "NOO/Existing" itself
+    (column F as of that layout), since nothing Streamlit owns is left
+    between it and the nearest formula/manual column.
     """
     g = lambda name: clean(user_row.get(name, ""))  # noqa: E731
     branch_code = norm_key(g("Customer Branch Code")) or norm_key(
@@ -122,7 +135,6 @@ def build_noo_row(user_row, *, distributor_code=None, dist_values,
 
     row = {column: "" for column in config.POOL_NOO_HEADERS}
     row.update({
-        "asm_name": dist_values.get("asm", ""),
         "input_time": format_input_time(when),
         "branch_name": g("Branch Name") or dist_values.get("branch_name", ""),
         "region": dist_values.get("region", ""),
