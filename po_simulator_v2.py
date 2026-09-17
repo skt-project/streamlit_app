@@ -1622,7 +1622,7 @@ def _file_upload_section(page_key: str):
         all_under_moq = []
         st.markdown(
     """
-    <p style="color:red; font-size:0.8rem;">
+    <p style="color:#A82020; font-size:1 rem; font-weight:bold;">
     If the quantity is <50 pcs, it must be a multiple of the inner pcs.<br>
     If the quantity is >50 pcs, there is no mandatory multiplication restriction; however, using multiples of the inner pcs is recommended.
     </p>
@@ -1660,7 +1660,7 @@ def _file_upload_section(page_key: str):
                 except Exception:
                     return "N/A"
 
-                return "Under MOQ" if qty_val < moq_val else "SAFE MOQ"
+                return "Under MOQ" if (qty_val < moq_val & qty < 50) else "SAFE MOQ"
 
             df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
 
@@ -1766,7 +1766,7 @@ def _file_upload_section(page_key: str):
         for col in ['QTY','DPP','TOTAL PRICE']:
             if col in combined_df.columns:
                 combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
-        st.subheader("📊 Hasil Gabungan")
+        st.subheader("Hasil Gabungan")
         st.dataframe(combined_df, use_container_width=True, hide_index=True)
 
     return raw_entries, res
