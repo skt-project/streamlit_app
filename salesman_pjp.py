@@ -2296,6 +2296,8 @@ DIST_CODE_FROM_LABEL = {
 }
 DIST_NAME_BY_CODE = dict(zip(dist_df["distributor_code"],
                              dist_df["distributor_name"]))
+DIST_REGION_BY_CODE = dict(zip(dist_df["distributor_code"],
+                               dist_df["region"]))
 
 
 @st.cache_data(ttl=15, show_spinner="Memuat daftar akun distributor...")
@@ -2786,6 +2788,179 @@ def _set_account_active(dist_code, is_active):
     st.rerun()
 
 
+def _render_bulk_deadline():
+    """Move the input deadline on many accounts at once.
+
+    Extending the input period is a daily operational act. Before the account
+    migration it meant editing a global constant and pushing a commit; after it,
+    without this, it would mean opening 128 accounts one at a time.
+    """
+    if not require_admin():
+        return
+    try:
+        accounts_df = _load_accounts_for_admin()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] bulk: account list load failed: {exc}", file=sys.stderr)
+        st.error("Gagal memuat daftar akun. Silakan coba lagi.")
+        return
+    if accounts_df.empty:
+        st.info("Belum ada akun distributor.")
+        return
+
+    accounts = accounts_df.to_dict("records")
+    active = [a for a in accounts if bool(a["is_active"])]
+    st.caption(f"{len(active)} akun aktif dari {len(accounts)} total. "
+               "Operasi ini hanya menyentuh kolom deadline.")
+
+    target = st.radio(
+        "Target",
+        ["Semua Akun Aktif", "Pilih Distributor", "Per Region"],
+        horizontal=True, key="bulk_target_mode")
+
+    if target == "Semua Akun Aktif":
+        codes = [a["distributor_code"] for a in active]
+        st.info(f"Target: **seluruh {len(codes)} akun aktif**.")
+    elif target == "Pilih Distributor":
+        labels = {
+            f"{a['distributor_code']} - "
+            f"{a['distributor_name'] or DIST_NAME_BY_CODE.get(a['distributor_code'], '')}":
+            a["distributor_code"]
+            for a in sorted(active, key=lambda r: r["distributor_code"])}
+        c1, c2 = st.columns(2)
+        if c1.button("Pilih semua yang aktif", key="bulk_select_all",
+                     use_container_width=True):
+            st.session_state["bulk_pick_codes"] = list(labels.keys())
+            st.rerun()
+        if c2.button("Kosongkan pilihan", key="bulk_clear",
+                     use_container_width=True):
+            st.session_state["bulk_pick_codes"] = []
+            st.rerun()
+        picked = st.multiselect(
+            "Distributor (ketik untuk mencari)", list(labels.keys()),
+            key="bulk_pick_codes")
+        codes = [labels[x] for x in picked]
+    else:
+        # region_g2g is the org grouping the whole app already uses
+        # (dist_df.region). Nothing new is invented here.
+        by_region = {}
+        for a in active:
+            region = str(DIST_REGION_BY_CODE.get(a["distributor_code"], "")).strip()
+            by_region.setdefault(region or "(tanpa region)", []).append(
+                a["distributor_code"])
+        chosen = st.multiselect(
+            "Region", sorted(by_region), key="bulk_pick_regions",
+            format_func=lambda r: f"{r} ({len(by_region[r])} akun)")
+        codes = [c for r in chosen for c in by_region[r]]
+
+    col_d, col_r = st.columns([1, 2])
+    new_deadline = col_d.date_input(
+        "Deadline Baru *", value=None, key="bulk_new_deadline",
+        help="Wajib dipilih. Tidak ada nilai default.")
+    reason = col_r.text_input(
+        "Alasan / Catatan (opsional)", key="bulk_reason",
+        placeholder="mis. Perpanjangan periode input PJP September")
+
+    plan = pjp_auth.plan_bulk_deadline(accounts, codes, new_deadline)
+    st.markdown("---")
+    st.markdown("#### Pratinjau")
+    if not plan.ok:
+        st.info(plan.message)
+        return
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Akun terdampak", plan.affected)
+    m2.metric("Akan berubah", len(plan.changing))
+    m3.metric("Sudah sesuai", len(plan.unchanged))
+
+    st.markdown("**Deadline saat ini:**")
+    st.dataframe(
+        pd.DataFrame([{"Deadline Saat Ini": d, "Jumlah Akun": n}
+                      for d, n in plan.current_distribution]),
+        use_container_width=True, hide_index=True)
+    st.markdown(f"**Deadline baru:** `{plan.deadline.isoformat()}`")
+    if plan.skipped_inactive:
+        st.warning(f"{len(plan.skipped_inactive)} akun nonaktif dilewati: "
+                   f"{', '.join(plan.skipped_inactive[:8])}"
+                   f"{'...' if len(plan.skipped_inactive) > 8 else ''}")
+
+    if plan.is_noop:
+        st.success(f"Tidak ada perubahan - {len(plan.unchanged)} akun sudah "
+                   f"memiliki deadline **{plan.deadline.isoformat()}**.")
+        return
+
+    with st.expander(f"Lihat {len(plan.changing)} akun yang akan berubah"):
+        st.dataframe(pd.DataFrame({"Distributor": list(plan.changing)}),
+                     use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    confirmed = st.checkbox(
+        f"Saya memahami ini akan mengubah deadline {len(plan.changing)} akun "
+        f"menjadi {plan.deadline.isoformat()}.",
+        key="bulk_confirm")
+    if not st.button("Jalankan Update Deadline", type="primary",
+                     disabled=not confirmed, key="bulk_execute"):
+        return
+
+    # Re-checked at submit, not merely by the tab being visible.
+    if not require_admin():
+        return
+    _execute_bulk_deadline(plan, reason)
+
+
+def _execute_bulk_deadline(plan, reason):
+    """Write, then verify against BigQuery before claiming success."""
+    codes = list(plan.changing)
+    try:
+        credentials, project_id, dataset = _account_ctx()
+        before = pjp_accounts.load_accounts_snapshot(credentials, project_id,
+                                                     codes, dataset)
+        with st.spinner(f"Memperbarui {len(codes)} akun..."):
+            affected = pjp_accounts.bulk_set_deadline(
+                credentials, project_id, codes, plan.deadline,
+                _current_admin(), dataset)
+        after = pjp_accounts.load_accounts_snapshot(credentials, project_id,
+                                                    codes, dataset)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] bulk deadline failed: {exc}", file=sys.stderr)
+        st.error("Gagal memperbarui deadline. Tidak ada yang dilaporkan "
+                 "berhasil - silakan periksa dan coba lagi.")
+        return
+
+    ok, problems = pjp_auth.verify_bulk_result(before, after, plan.deadline, codes)
+    if not ok or affected != len(codes):
+        print(f"[pjp-admin] bulk verification failed: affected={affected} "
+              f"expected={len(codes)} problems={problems[:5]}", file=sys.stderr)
+        st.error(f"Update TIDAK dapat dipastikan berhasil. {affected} dari "
+                 f"{len(codes)} baris dilaporkan berubah. Jangan anggap selesai "
+                 "- periksa Daftar Akun dan hubungi tim data.")
+        _refresh_accounts()
+        return
+
+    # Audit only what actually changed - a no-op account gets no row.
+    note = f"; reason: {str(reason).strip()}" if str(reason or "").strip() else ""
+    try:
+        pjp_accounts.bulk_write_audit(
+            credentials, project_id,
+            [(code, pjp_accounts.ACTION_CHANGE_DEADLINE,
+              f"input_deadline: "
+              f"{pjp_auth.coerce_date(before[code]['input_deadline'])} -> "
+              f"{plan.deadline}; bulk_action: true; batch_size: {len(codes)}{note}")
+             for code in codes],
+            _current_admin(), dataset)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] bulk audit write failed: {exc}", file=sys.stderr)
+        st.warning("Deadline diperbarui, tetapi pencatatan audit gagal. "
+                   "Laporkan ke tim data.")
+
+    _refresh_accounts()
+    st.success(
+        f"{len(codes)} akun diperbarui ke {plan.deadline.isoformat()} dan "
+        f"terverifikasi di database"
+        + (f" ({len(plan.unchanged)} sudah sesuai, dilewati)."
+           if plan.unchanged else "."))
+    st.rerun()
+
+
 def _render_audit_log():
     if not require_admin():
         return
@@ -2823,9 +2998,10 @@ def render_admin_dashboard():
                "distributor. Perubahan langsung berlaku pada percobaan "
                "login dan penulisan data berikutnya.")
 
-    tab_list, tab_add, tab_edit, tab_status, tab_audit = st.tabs([
+    (tab_list, tab_add, tab_edit, tab_bulk, tab_status,
+     tab_audit) = st.tabs([
         "📋 Daftar Akun", "➕ Tambah Distributor", "✏️ Edit Akun",
-        "🔁 Aktif/Nonaktif", "🧾 Audit",
+        "🗓️ Setting Deadline", "🔁 Aktif/Nonaktif", "🧾 Audit",
     ])
     with tab_list:
         _render_account_list()
@@ -2833,6 +3009,8 @@ def render_admin_dashboard():
         _render_add_account()
     with tab_edit:
         _render_edit_account()
+    with tab_bulk:
+        _render_bulk_deadline()
     with tab_status:
         _render_deactivate_account()
     with tab_audit:

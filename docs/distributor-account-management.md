@@ -210,6 +210,50 @@ Change Username, Deadline and Active status. The two password boxes are
 optional: **leave them empty to change only the deadline or status** — the
 stored password is untouched. Filling them requires New Password + Confirm.
 
+### 🗓️ Setting Deadline (bulk)
+
+Moves the input deadline on many accounts at once. Extending the input period is
+a near-daily act; before this it meant editing a global constant and pushing a
+commit, and after the account migration it would have meant opening 128 accounts
+one at a time.
+
+**Target** - pick one:
+
+| Option | Resolves to |
+|---|---|
+| Semua Akun Aktif | every account with `is_active = TRUE`, counted live (never hard-coded) |
+| Pilih Distributor | multi-select with type-to-search, plus select-all / clear |
+| Per Region | `region_g2g` from `master_distributor` - the grouping the app already uses, not a new one |
+
+**Deadline Baru** has **no default**. The admin must pick a date; nothing happens
+until they do. An optional Reason is recorded in the audit trail.
+
+**Preview comes before any write** and shows how many accounts are affected, how
+many actually change, how many are already on the target date, and the current
+deadline distribution. Inactive accounts in the selection are listed as skipped
+rather than silently updated.
+
+Executing needs a ticked confirmation naming the count and the date. The write:
+
+1. `pjp_accounts.bulk_set_deadline` - one parameterised `UPDATE ... WHERE
+   distributor_code IN UNNEST(@codes)`. One statement, so BigQuery applies all
+   of it or none; and the `SET` clause names only `input_deadline`,
+   `updated_at`, `updated_by`. `password_hash` is not in it.
+2. Re-reads the rows and runs `pjp_auth.verify_bulk_result`, which confirms the
+   deadline moved on exactly the selected rows and that `password_hash`,
+   `is_active`, `username` and `distributor_code` did not change anywhere.
+3. Only then reports success. A mismatch, or a row count other than expected,
+   reports failure explicitly rather than a partial success.
+4. Writes one `CHANGE_DEADLINE` audit row per **changed** account, tagged
+   `bulk_action: true` with the batch size and any reason. Accounts already on
+   the target date get no audit row.
+5. Clears both account caches, so the next read is the new value.
+
+`require_admin()` is checked on entry **and** again inside the submit branch, so
+the operation cannot be driven by anything other than an authenticated admin
+session. Individual **Edit Akun** is unchanged and remains the path for
+per-distributor exceptions.
+
 ### 🔁 Aktif/Nonaktif
 Deactivate and reactivate. **Accounts are never physically deleted.** An account
 carries the audit trail for every PJP snapshot that distributor uploaded;

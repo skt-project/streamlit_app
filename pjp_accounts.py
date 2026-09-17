@@ -371,6 +371,76 @@ def set_deadline(credentials, project, distributor_code, input_deadline, actor,
     ])
 
 
+def bulk_set_deadline(credentials, project, distributor_codes, input_deadline,
+                      actor, dataset=DEFAULT_DATASET) -> int:
+    """Move the deadline on many accounts in ONE statement.
+
+    Touches `input_deadline`, `updated_at` and `updated_by` and nothing else -
+    every other column, `password_hash` above all, is absent from the SET
+    clause, so a bulk run cannot disturb credentials or account status.
+
+    The code list is an array *parameter*, not interpolated text, so a
+    distributor code can never reach the SQL body. One statement rather than N
+    keeps the update atomic: BigQuery applies the whole UPDATE or none of it,
+    which is what stops a half-applied bulk change.
+
+    Returns the number of rows the statement reported as modified.
+    """
+    codes = sorted({_norm(c) for c in (distributor_codes or []) if _norm(c)})
+    if not codes:
+        return 0
+    deadline = input_deadline
+    if isinstance(deadline, datetime):
+        deadline = deadline.date()
+    if deadline is None:
+        raise ValueError("input_deadline wajib diisi untuk bulk update.")
+
+    sql = f"""
+        UPDATE {account_table(project, dataset)}
+        SET input_deadline = @deadline,
+            updated_at     = CURRENT_TIMESTAMP(),
+            updated_by     = @actor
+        WHERE UPPER(TRIM(distributor_code)) IN UNNEST(@codes)
+    """
+    job = _client(credentials, project).query(
+        sql, job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("deadline", "DATE", deadline),
+            bigquery.ScalarQueryParameter("actor", "STRING", str(actor or "").strip()),
+            bigquery.ArrayQueryParameter("codes", "STRING", codes),
+        ]))
+    job.result()
+    return int(job.num_dml_affected_rows or 0)
+
+
+def load_accounts_snapshot(credentials, project, distributor_codes=None,
+                           dataset=DEFAULT_DATASET) -> dict:
+    """``{code: row}`` including password_hash, for before/after verification.
+
+    The hash is read only so `pjp_auth.verify_bulk_result` can prove it did NOT
+    change. It is never rendered, logged or returned to the UI.
+    """
+    where, params = "", []
+    if distributor_codes is not None:
+        codes = sorted({_norm(c) for c in distributor_codes if _norm(c)})
+        if not codes:
+            return {}
+        where = "WHERE UPPER(TRIM(distributor_code)) IN UNNEST(@codes)"
+        params = [bigquery.ArrayQueryParameter("codes", "STRING", codes)]
+    sql = f"""
+        SELECT distributor_code, username, is_active, input_deadline, password_hash
+        FROM {account_table(project, dataset)}
+        {where}
+    """
+    rows = _run(credentials, project, sql, params)
+    return {_norm(r["distributor_code"]): {
+        "distributor_code": _norm(r["distributor_code"]),
+        "username": str(r["username"] or "").strip(),
+        "is_active": bool(r["is_active"]),
+        "input_deadline": r["input_deadline"],
+        "password_hash": str(r["password_hash"] or ""),
+    } for r in rows}
+
+
 def set_active(credentials, project, distributor_code, is_active, actor,
                dataset=DEFAULT_DATASET) -> None:
     """Enable or disable an account.

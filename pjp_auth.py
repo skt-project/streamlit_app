@@ -322,6 +322,118 @@ def validate_distributor_access(account, session_code, requested_code,
     return AccessResult(True, ACCESS_OK, "", deadline)
 
 
+# --- Bulk deadline planning ---------------------------------------------------
+# Pure: works on a list of account row dicts and answers "what would change?"
+# before anything touches BigQuery. The admin sees exactly this, and the write
+# path is handed only the codes that actually need updating.
+
+BULK_TARGET_ALL_ACTIVE = "all_active"
+BULK_TARGET_SELECTED = "selected"
+BULK_TARGET_REGION = "region"
+
+
+@dataclass(frozen=True)
+class BulkPlan:
+    """The preview and the work order, computed once and reused for both.
+
+    `ok` means the request is well-formed, not that there is work to do: a valid
+    request where every account already holds the target date is ok with an
+    empty `changing`, which the UI reports as a no-op rather than writing.
+    """
+    ok: bool
+    message: str = ""
+    deadline: object = None
+    changing: tuple = ()          # codes whose deadline actually differs
+    unchanged: tuple = ()         # codes already on the target date
+    current_distribution: tuple = ()   # ((date_str, count), ...) newest first
+    skipped_inactive: tuple = ()
+
+    @property
+    def is_noop(self) -> bool:
+        return self.ok and not self.changing
+
+    @property
+    def affected(self) -> int:
+        return len(self.changing) + len(self.unchanged)
+
+
+def plan_bulk_deadline(accounts, target_codes, new_deadline, today=None) -> BulkPlan:
+    """Work out exactly which accounts a bulk deadline update would change.
+
+    `accounts` is the full account list (row dicts with distributor_code,
+    is_active, input_deadline). `target_codes` is the selected population.
+
+    Inactive accounts are never silently included: a disabled account is
+    disabled, and quietly moving its deadline would misrepresent what the admin
+    asked for. They are reported in `skipped_inactive` instead.
+    """
+    parsed = coerce_date(new_deadline)
+    if parsed is None:
+        return BulkPlan(False, "Tanggal deadline baru wajib dipilih.")
+
+    wanted = {norm_code(c) for c in (target_codes or []) if norm_code(c)}
+    if not wanted:
+        return BulkPlan(False, "Pilih minimal satu distributor.")
+
+    by_code = {norm_code(a.get("distributor_code")): a for a in (accounts or [])}
+    missing = sorted(c for c in wanted if c not in by_code)
+    if missing:
+        return BulkPlan(
+            False,
+            f"{len(missing)} kode tidak ditemukan pada tabel akun: "
+            f"{', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}")
+
+    changing, unchanged, inactive = [], [], []
+    counts = {}
+    for code in sorted(wanted):
+        row = by_code[code]
+        if not row.get("is_active"):
+            inactive.append(code)
+            continue
+        current = coerce_date(row.get("input_deadline"))
+        key = current.isoformat() if current else "(kosong)"
+        counts[key] = counts.get(key, 0) + 1
+        (unchanged if current == parsed else changing).append(code)
+
+    if not changing and not unchanged:
+        return BulkPlan(
+            False,
+            "Semua distributor yang dipilih berstatus nonaktif; tidak ada yang diubah.")
+
+    distribution = tuple(sorted(counts.items(), key=lambda kv: kv[0], reverse=True))
+    return BulkPlan(True, "", parsed, tuple(changing), tuple(unchanged),
+                    distribution, tuple(inactive))
+
+
+def verify_bulk_result(before, after, deadline, changed_codes) -> tuple:
+    """Post-write check: confirm ONLY the deadline moved, on exactly those rows.
+
+    `before` / `after` are ``{code: row}`` snapshots including password_hash.
+    Returns ``(ok, [problems])``. Anything that does not line up is a problem -
+    a bulk write that half-applied must never be reported as success.
+    """
+    parsed = coerce_date(deadline)
+    problems = []
+    changed = {norm_code(c) for c in changed_codes}
+
+    if set(before) != set(after):
+        problems.append("jumlah baris akun berubah setelah update")
+
+    for code, row_after in after.items():
+        row_before = before.get(code)
+        if row_before is None:
+            continue
+        if code in changed and coerce_date(row_after.get("input_deadline")) != parsed:
+            problems.append(f"{code}: deadline tidak tersimpan")
+        if code not in changed and (coerce_date(row_after.get("input_deadline"))
+                                    != coerce_date(row_before.get("input_deadline"))):
+            problems.append(f"{code}: deadline berubah padahal tidak dipilih")
+        for field in ("password_hash", "is_active", "username", "distributor_code"):
+            if row_before.get(field) != row_after.get(field):
+                problems.append(f"{code}: {field} berubah (seharusnya tidak)")
+    return (not problems), problems
+
+
 # --- Admin credentials -------------------------------------------------------
 
 def admin_users_from_config(admin_config) -> dict:
