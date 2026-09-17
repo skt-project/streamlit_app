@@ -1620,7 +1620,15 @@ def _file_upload_section(page_key: str):
         moq_name_map = moq_master.set_index("sku")["product_name"].to_dict()
 
         all_under_moq = []
-
+        st.markdown(
+    """
+    <p style="color:red; font-size:0.8rem;">
+    If the quantity is <50 pcs, it must be a multiple of the inner pcs.<br>
+    If the quantity is >50 pcs, there is no mandatory multiplication restriction; however, using multiples of the inner pcs is recommended.
+    </p>
+    """,
+    unsafe_allow_html=True
+        )
         for p in ready:
             fname = p["name"]
             df_moq = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
@@ -1658,15 +1666,7 @@ def _file_upload_section(page_key: str):
 
             show_cols = [sku_col_m, "Product Name (MOQ Ref)", qty_col_m, "MOQ", "MOQ Check"]
             under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ"][show_cols].copy()
-            st.markdown(
-    """
-    <p style="color:red;">
-    If the quantity is <50 pcs, it must be a multiple of the inner pcs.<br>
-    If the quantity is >50 pcs, there is no mandatory multiplication restriction; however, using multiples of the inner pcs is recommended.
-    </p>
-    """,
-    unsafe_allow_html=True
-)
+            
             if under_moq.empty:
                 st.success(f"**{fname}** - ✅ **SAFE MOQ**")
             else:
