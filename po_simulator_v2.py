@@ -1660,7 +1660,7 @@ def _file_upload_section(page_key: str):
                 except Exception:
                     return "N/A"
 
-                return "Under MOQ" if (qty_val and moq_val & qty < 50) else "SAFE MOQ"
+                return "Under MOQ" if (qty_val < moq_val and qty < 50) else "SAFE MOQ"
 
             df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
 
