@@ -19,197 +19,20 @@ from openpyxl.formatting.rule import FormulaRule
 
 st.set_page_config(page_title="Salesman & PJP Template", page_icon="📋", layout="wide")
 
-# ─── Distributor Passwords ────────────────────────────────────────────────────
+# ─── Authentication & distributor accounts ────────────────────────────────────
+# Distributor credentials, account status and the input deadline all live in
+# BigQuery (gt_schema.sfa_pjp_distributor_accounts), managed from the Admin
+# dashboard in this app. They used to be a hard-coded DISTRIBUTOR_PASSWORDS
+# dict and a single global INPUT_DEADLINE constant here; both are gone, and
+# neither is an alternative login path any more.
+#
+#   pjp_auth      - pure rules (hashing, deadline, scope, session). No network.
+#   pjp_accounts  - BigQuery reads/writes for the account table. Never cached.
+#
+# See docs/distributor-account-management.md.
 
-DISTRIBUTOR_PASSWORDS = {
-    "DST171": "5bcd0fc2",
-    "DST157": "35b0e7bc",
-    "DST152": "abf3d041",
-    "DST109": "3a2e86c4",
-    "DST160": "6f2fbafb",
-    "DST057": "406ab114",
-    "DST076": "7fc47ba9",
-    "DST141": "b8e82723",
-    "DST036": "6203ab21",
-    "DST081": "dc0fc0b3",
-    "DST196": "01f554e6",
-    "DST197": "7d10ab68",
-    "DST227": "3e5eec77",
-    "DST108": "7202dd1d",
-    "DST173": "de2168d4",
-    "DST098": "3e2711e9",
-    "DST250": "c41f74ce",
-    "DST251": "474ebf78",
-    "DST265": "f2ba48a4",
-    "DST137": "a1869a0b",
-    "DST192": "a81445ba",
-    "DST193": "0759ffc9",
-    "DST194": "c7410acf",
-    "DST195": "3dea99f7",
-    "DST204": "9ada7de4",
-    "DST215": "bdeb210d",
-    "DST216": "5bc07dbd",
-    "DST217": "6fcae1a8",
-    "DST218": "4921348e",
-    "DST219": "a3bec96a",
-    "DST220": "856f8f92",
-    "DST221": "57688b82",
-    "DST222": "131ea904",
-    "DST223": "53904ab8",
-    "DST224": "786dc184",
-    "DST225": "041e1d37",
-    "DST226": "1a6c6353",
-    "DST101": "93b26366",
-    "DST233": "dc291890",
-    "DST236": "c1a10086",
-    "DST237": "41ee140e",
-    "DST238": "e7072f26",
-    "DST239": "d4fe81e6",
-    "DST240": "254d41a9",
-    "DST241": "170d68cd",
-    "DST242": "5dc64171",
-    "DST243": "ad2c616e",
-    "DST244": "6abe00f7",
-    "DST245": "ce0e29df",
-    "DST246": "6ff84751",
-    "DST247": "92301c77",
-    "DST248": "d8bc31bc",
-    "DST249": "90019722",
-    "DST143": "315ee2a1",
-    "DST138": "4b51355b",
-    "DST185": "797e3451",
-    "DST252": "eddd74e5",
-    "DST253": "9514af98",
-    "DST254": "a25ceb29",
-    "DST180": "6f414b90",
-    "DST268": "63bf1aee",
-    "DST269": "24dca8cf",
-    "DST270": "ea146e45",
-    "DST271": "416e4c21",
-    "DST272": "bb461723",
-    "DST181": "31f26be5",
-    "DST182": "4772412e",
-    "DST255": "6ec60126",
-    "DST256": "a5b8497f",
-    "DST257": "d08b956c",
-    "DST258": "56a3516f",
-    "DST259": "75d5bc79",
-    "DST260": "3f8b3f24",
-    "DST261": "c179ad32",
-    "DST262": "e371419f",
-    "DST263": "bffc53d7",
-    "DST183": "e95a1d9f",
-    "DST282": "997255a9",
-    "DST283": "bb14d95b",
-    "DST284": "da569e8f",
-    "DST285": "5235c272",
-    "DST286": "b1136924",
-    "DST287": "b19a6be6",
-    "DST288": "b868246a",
-    "DST289": "649a174e",
-    "DST290": "87c90fe4",
-    "DST190": "d4bca582",
-    "DST202": "c1711b29",
-    "DST234": "29e438ab",
-    "DST235": "e068abc5",
-    "DST292": "0d2def3b",
-    "DST305": "93443df2",
-    "DST307": "b5cf6933",
-    "DST308": "13500000",
-    "DST310": "3b00aae1",
-    "DST311": "a5b689d0",
-    "DST312": "d06b143b",
-    "DST313": "4008e3e0",
-    "DST314": "69e270b7",
-    "DST315": "88ab90fd",
-    "DST324": "98f33e07",
-    "DST326": "0453fc09",
-    "DST327": "ca73a962",
-    "DST328": "8d6c66c7",
-    "DST329": "bee166e4",
-    "DST330": "c66e5dda",
-    "DST331": "2e1a0b81",
-    "DST336": "b74ce041",
-    "DST337": "c937e2c7",
-    "DST338": "9eab97d2",
-    "DST339": "1426bbbd",
-    "DST340": "2094cfe8",
-    "DST341": "62a19cf1",
-    "DST342": "75b49aa5",
-    "DST343": "2eb7f316",
-    "DST344": "7303ada8",
-    "DST345": "f3e22d41",
-    "DST346": "0d2d6510",
-    "DST347": "e5f29c41",
-    "DST349": "b8e82723",
-    "DST350": "98f33e07",
-    "DST351": "12345678",
-    "DST352": "12345678",
-    "DST356": "1a2b3c4d",
-    "DST358": "83d715f2",
-    "DST360": "1da3f16e",
-    "DST362": "af08fc40",
-    "DST363": "2b3c4d5e"
-}
-
-# ─── Input Period Deadline ─────────────────────────────────────────────────────
-# Ubah tanggal ini setiap bulan sesuai jadwal. Format: datetime(YYYY, MM, DD)
-INPUT_DEADLINE = datetime(2026, 9, 17).date()
-
-
-def _get_password_for_distributor(dist_code: str) -> str | None:
-    return DISTRIBUTOR_PASSWORDS.get(str(dist_code).strip().upper())
-
-
-def _check_distributor_auth(dist_code: str) -> bool:
-    key = f"auth_{dist_code}"
-    return st.session_state.get(key, False)
-
-
-def _render_password_gate(dist_code: str, dist_name: str) -> bool:
-    key = f"auth_{dist_code}"
-    if st.session_state.get(key, False):
-        return True
-
-    expected = _get_password_for_distributor(dist_code)
-
-    st.markdown("---")
-    st.markdown(
-        f"""
-        <div style='text-align:center; padding: 2rem 0 1rem 0;'>
-            <span style='font-size:2.5rem'>🔒</span>
-            <h3 style='margin:0.5rem 0 0.25rem 0;'>Akses Terkunci</h3>
-            <p style='color:#888; margin:0;'>Masukkan password untuk distributor <b>{dist_name}</b></p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    col_l, col_c, col_r = st.columns([1, 2, 1])
-    with col_c:
-        entered = st.text_input(
-            "Password Distributor",
-            type="password",
-            key=f"pw_input_{dist_code}",
-            placeholder="••••••••",
-        )
-        if st.button(
-            "🔓 Masuk",
-            key=f"pw_btn_{dist_code}",
-            type="primary",
-            use_container_width=True,
-        ):
-            if expected is None:
-                st.error(
-                    "Password untuk distributor ini belum dikonfigurasi. Hubungi administrator."
-                )
-            elif entered == expected:
-                st.session_state[key] = True
-                st.rerun()
-            else:
-                st.error("Password salah. Silakan coba lagi.")
-
-    return False
+import pjp_accounts  # noqa: E402
+import pjp_auth  # noqa: E402
 
 
 # ─── BigQuery credentials ─────────────────────────────────────────────────────
@@ -245,21 +68,196 @@ def get_credentials():
     return credentials, project_id
 
 
+# ─── Account service ──────────────────────────────────────────────────────────
+# Deliberately NOT decorated with @st.cache_data. Every other BigQuery read in
+# this file is cached, but an account row must not be: when an admin disables
+# an account or pulls a deadline in, it has to bite on the distributor's very
+# next action, including one already in flight. A cached credential is a
+# credential that keeps working after it has been revoked.
+
+
+def _account_ctx():
+    credentials, project_id = get_credentials()
+    dataset = st.secrets.get("bigquery", {}).get("dataset",
+                                                 pjp_accounts.DEFAULT_DATASET)
+    return credentials, project_id, dataset
+
+
+def fetch_account(dist_code):
+    """Read one account fresh from BigQuery. None if it does not exist.
+
+    Errors are swallowed into None on purpose: the caller treats None as "no
+    access", so a BigQuery outage fails closed instead of opening the gate, and
+    the user never sees a SQL error or a service-account path.
+    """
+    try:
+        credentials, project_id, dataset = _account_ctx()
+        return pjp_accounts.load_account(credentials, project_id, dist_code,
+                                         dataset)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-auth] account lookup failed for "
+              f"{pjp_auth.norm_code(dist_code)}: {exc}", file=sys.stderr)
+        return None
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _fetch_account_for_gate(dist_code):
+    """Page-gate read, cached for 30s so ordinary widget interactions do not
+    each cost a BigQuery round trip.
+
+    Deliberately *not* used to authorize a write — `assert_distributor_write_access`
+    always reads fresh. The worst this cache can do is let a just-disabled
+    account keep browsing read-only screens for up to 30 seconds; it can never
+    let one write. The password hash is stripped before it enters the cache,
+    since Streamlit's cache outlives the request that filled it.
+    """
+    return pjp_auth.scrub(fetch_account(dist_code) or {}) or None
+
+
+def _admin_config():
+    """The `[admin]` block from deployment secrets, or {} when absent.
+
+    Admin credentials are never in this file. Without the secret configured,
+    `verify_admin_credentials` finds no users and every admin login fails.
+    """
+    try:
+        return st.secrets["admin"]
+    except Exception:  # noqa: BLE001 - a missing section is not an error
+        return {}
+
+
+def _current_admin() -> str:
+    return st.session_state.get("admin_username", "") or "admin"
+
+
+def _audit(dist_code, action, changed_fields):
+    """Best-effort audit write. A failed audit never blocks the change."""
+    try:
+        credentials, project_id, dataset = _account_ctx()
+        pjp_accounts.write_audit(credentials, project_id, dist_code, action,
+                                 changed_fields, _current_admin(), dataset)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-auth] audit write failed ({action} {dist_code}): {exc}",
+              file=sys.stderr)
+
+
+# ─── Authorization guards ─────────────────────────────────────────────────────
+
+
+def _render_locked(icon, title, body, note=""):
+    st.markdown(
+        f"""
+        <div style='
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 5rem 2rem;
+            text-align: center;
+        '>
+            <div style='font-size: 4rem; line-height: 1; margin-bottom: 1.5rem;'>{icon}</div>
+            <h2 style='margin: 0 0 0.75rem 0; font-size: 1.75rem; font-weight: 600;'>
+                {title}
+            </h2>
+            <p style='color: #888; margin: 0 0 0.5rem 0; font-size: 1rem; max-width: 460px;'>
+                {body}
+            </p>
+            <p style='color: #aaa; margin: 0; font-size: 0.9rem;'>{note}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_access_denied(access):
+    """The blocked-access screens. No table names, no hashes, no stack traces."""
+    if access.reason == pjp_auth.ACCESS_EXPIRED:
+        deadline = pjp_auth.coerce_date(access.deadline)
+        when = deadline.strftime("%d %B %Y") if deadline else "-"
+        _render_locked(
+            "🔒", "Periode Input Sudah Ditutup",
+            f"Batas akhir pengisian: <b>{when}</b>.<br>"
+            "Akses input PJP untuk distributor ini sudah ditutup.",
+            "Hubungi administrator jika membutuhkan perubahan deadline.")
+    elif access.reason == pjp_auth.ACCESS_INACTIVE:
+        _render_locked(
+            "🔒", "Akun Tidak Aktif",
+            "Akun distributor ini saat ini tidak aktif.",
+            "Silakan hubungi administrator.")
+    else:
+        _render_locked("🔒", "Akses Ditolak", access.message)
+
+
+def assert_distributor_write_access(dist_code):
+    """Authorize a distributor-facing BigQuery write, at the moment of writing.
+
+    Re-reads the account from BigQuery and re-checks session, scope, existence,
+    active status and deadline. Passing the login gate earlier means nothing
+    here: an admin may have disabled the account or moved the deadline while
+    the user sat on the confirmation screen, and the DELETE half of the PJP
+    replace is not something to run on a stale authorization.
+
+    Returns True when the write may proceed; otherwise renders the reason and
+    returns False. Callers must not write unless this returned True.
+    """
+    session_code = pjp_auth.session_distributor_code(st.session_state)
+    account = fetch_account(session_code) if session_code else None
+    access = pjp_auth.validate_distributor_access(
+        account, session_code, dist_code, datetime.now().date())
+    if not access.ok:
+        _render_access_denied(access)
+    return access.ok
+
+
+def require_admin() -> bool:
+    """Guard every admin write. UI visibility is never the control."""
+    if pjp_auth.is_admin_authenticated(st.session_state):
+        return True
+    st.error("⛔ Akses admin diperlukan.")
+    return False
+
+
 # ─── BigQuery loaders ─────────────────────────────────────────────────────────
+
+
+# ─── Canonical distributor identity ────────────────────────────────────────
+# A distributor IS its distributor_code; the name is a label looked up from
+# master_distributor by that code. See distributor_naming.py for why (the
+# DST351 "ANUGERAH"/"ANUGRAH" duplicate) and for the pure, unit-tested
+# implementation of the same normalization this module mirrors in SQL.
+from distributor_naming import (  # noqa: E402
+    build_master_by_code,
+    canonical_dist_cte,
+    canonical_name_by_code,
+    find_cross_code_collisions,
+    find_name_variants,
+    norm_name_sql,
+    normalize_distributor_name,
+)
 
 
 @st.cache_data(show_spinner="Memuat data distributor dari BigQuery...")
 def load_distributor_data() -> pd.DataFrame:
     credentials, project_id = get_credentials()
     client = bigquery.Client(credentials=credentials, project=project_id)
-    query = """
+    # Region is region_g2g — the CURRENT org mapping. master_distributor also
+    # has a plain `region` column holding the OLD one (it still reads
+    # "Southern Sumatera 2" for DST351/DST352, which moved to Southern
+    # Sumatera 1 in September 2026); reading that column is the bug this
+    # query must not have. The name comes from the shared canonical CTE, so
+    # the dropdown shows one formatting-normalized label per code.
+    query = f"""
         SELECT
-            UPPER(distributor)      AS distributor_name,
-            UPPER(region_g2g)       AS region,
-            UPPER(distributor_code) AS distributor_code,
-            UPPER(asm_g2g)          AS asm
-        FROM `gt_schema.master_distributor`
-        WHERE region_g2g != '' AND status = 'Active'
+            distributor_name,
+            region_g2g   AS region,
+            distributor_code,
+            asm_g2g      AS asm
+        FROM ({canonical_dist_cte()})
+        WHERE distributor_code IN (
+            SELECT UPPER(TRIM(distributor_code))
+            FROM `gt_schema.master_distributor`
+            WHERE status = 'Active'
+        )
     """
     df = client.query(query).to_dataframe()
     df["distributor_code"] = df["distributor_code"].astype(str).str.strip()
@@ -270,30 +268,61 @@ def load_distributor_data() -> pd.DataFrame:
 @st.cache_data(show_spinner="Memuat data toko dari Database...")
 def load_store_master() -> pd.DataFrame:
     """
-    Loads store master data directly from master_store_database_basis,
-    sourcing distributor_code / region / asm straight off the store row
-    (per the PJP redesign mapping table) instead of joining by distributor
-    name. This is the single source of truth used to auto-populate
-    Nama Toko / Region / ASM / Nama Distributor / Kode Distributor once a
-    Kode Toko is chosen in the PJP flow.
+    Loads store master data from master_store_database_basis and resolves
+    Region from gt_schema.master_distributor.region_g2g (the single Region
+    source of truth). The store→distributor link is:
+
+      1. dst_id_g2g = master_distributor.distributor_code
+      2. fallback: distributor_g2g = master_distributor.distributor
+
+    Store.region_g2g is NOT used. Nama Toko / ASM / Kode Distributor still
+    come from the store row; Region AND Nama Distributor are inherited from
+    master_distributor so PJP Excel / upload always match Kelola Salesman.
+
+    Nama Distributor is resolved BY CODE, not from the store's own
+    distributor_g2g text. That column is a second denormalized copy of the
+    name and can drift from the master exactly the way gt_master_salesman
+    did (DST351 carrying both "ANUGERAH" and "ANUGRAH" spellings); taking it
+    by code means a master rename propagates everywhere instead of forking
+    into a second apparent distributor. The store's own text survives only
+    as a last-resort fallback for codes the master does not carry yet.
+
+    The name-based fallback join is matched on the NORMALIZED name, so a
+    pure formatting difference ("MANDIRI- BELITUNG" vs "MANDIRI - BELITUNG")
+    still resolves instead of silently falling through to a NULL region.
     """
     credentials, project_id = get_credentials()
     client = bigquery.Client(credentials=credentials, project=project_id)
-    query = """
+    query = f"""
+        WITH dist AS ({canonical_dist_cte()}),
+        dist_by_name AS (
+            SELECT * FROM dist
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY distributor_name_norm
+                ORDER BY distributor_code
+            ) = 1
+        )
         SELECT
-            UPPER(cust_id)           AS store_code,
-            UPPER(store_name)        AS store_name,
-            UPPER(distributor_g2g)   AS distributor_name,
-            UPPER(dst_id_g2g)  AS distributor_code,
-            UPPER(region_g2g)        AS region,
-            UPPER(asm_g2g)           AS asm
-        FROM `gt_schema.master_store_database_basis`
-        WHERE cust_id IS NOT NULL AND cust_id != ''
+            UPPER(s.cust_id)          AS store_code,
+            UPPER(s.store_name)       AS store_name,
+            COALESCE(d_code.distributor_name,
+                     d_name.distributor_name,
+                     UPPER(TRIM(s.distributor_g2g))) AS distributor_name,
+            UPPER(s.dst_id_g2g)       AS distributor_code,
+            COALESCE(d_code.region_g2g, d_name.region_g2g) AS region,
+            UPPER(s.asm_g2g)          AS asm
+        FROM `gt_schema.master_store_database_basis` s
+        LEFT JOIN dist d_code
+            ON d_code.distributor_code = UPPER(TRIM(s.dst_id_g2g))
+        LEFT JOIN dist_by_name d_name
+            ON d_name.distributor_name_norm = {norm_name_sql("s.distributor_g2g")}
+        WHERE s.cust_id IS NOT NULL AND s.cust_id != ''
     """
     df = client.query(query).to_dataframe()
     df = df.dropna(subset=["store_code", "store_name", "distributor_code"])
     for c in ["store_code", "store_name", "distributor_name", "distributor_code", "region", "asm"]:
-        df[c] = df[c].astype(str).str.strip()
+        df[c] = df[c].fillna("").astype(str).str.strip()
+        df.loc[df[c].isin(["NAN", "NONE", "<NA>"]), c] = ""
     # Dropdown now shows the bare store code only (no "Kode - Nama" combo).
     df["store_label"] = df["store_code"]
     df = df.drop_duplicates(subset=["store_code"]).reset_index(drop=True)
@@ -416,7 +445,17 @@ def build_lookup_tables(dist_df: pd.DataFrame):
 # ─── Salesman Mapping table helpers ──────────────────────────────────────────
 
 MAPPING_TABLE = "skintific-data-warehouse.gt_schema.gt_salesman_mapping"
+# WRITES go to the base table; READS go to the view.
+#
+# gt_master_salesman is an append-only snapshot store: its
+# nama_distributor / region were frozen at insert time and still hold
+# retired spellings ("PT ANUGERAH ...") and the pre-September region
+# ("SOUTHERN SUMATERA 2"). gt_master_salesman_v resolves both from
+# master_distributor by distributor_code, so every read of a salesman
+# snapshot sees the CURRENT canonical values without a single
+# historical row being rewritten.
 SALESMAN_TABLE = "skintific-data-warehouse.gt_schema.gt_master_salesman"
+SALESMAN_VIEW = "skintific-data-warehouse.gt_schema.gt_master_salesman_v"
 PJP_TABLE = "skintific-data-warehouse.gt_schema.gt_master_salesman_pjp"
 
 SALESMAN_TYPES = ["GTI", "MIX", "MTI"]
@@ -424,6 +463,18 @@ SALESMAN_TYPES = ["GTI", "MIX", "MTI"]
 
 @st.cache_data(show_spinner=False)
 def get_salesman_list(distributor_code: str) -> pd.DataFrame:
+    """
+    Kelola Salesman roster — the "SE Database" for one distributor.
+
+    Region AND distributor name both come from master_distributor, resolved
+    by `distributor_code`, NOT from the gt_master_salesman snapshot whose
+    `region` / `nama_distributor` are free text frozen at insert time. That
+    snapshot is what produced the DST351 duplicate (two spellings of
+    "ANUGRAH SUKSES MANDIRI - BANGKA") and the stale "SOUTHERN SUMATERA 2":
+    the table is append-only, so every name the master ever carried survives
+    as its own row. Joining on the stable code collapses them to one current
+    answer without rewriting a single historical row.
+    """
     try:
         credentials, project_id = get_credentials()
         client = bigquery.Client(credentials=credentials, project=project_id)
@@ -437,7 +488,7 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
                             UPPER(TRIM(kode_distributor))
                         ORDER BY uploaded_at DESC
                     ) AS rn
-                FROM `{SALESMAN_TABLE}`
+                FROM `{SALESMAN_VIEW}`
             )
             SELECT
                 m.salesman_id,
@@ -450,13 +501,16 @@ def get_salesman_list(distributor_code: str) -> pd.DataFrame:
                 s.nama_salesman,
                 s.no_hp,
                 s.status_salesman,
-                s.region,
+                d.region_g2g AS region,
+                d.distributor_name AS nama_distributor,
                 s.asm
             FROM `{MAPPING_TABLE}` m
             LEFT JOIN ranked_salesman s
                 ON  UPPER(TRIM(m.salesman))        = UPPER(TRIM(s.nama_salesman))
                 AND UPPER(TRIM(m.distributor_code)) = UPPER(TRIM(s.kode_distributor))
                 AND s.rn = 1
+            LEFT JOIN ({canonical_dist_cte()}) d
+                ON d.distributor_code = UPPER(TRIM(m.distributor_code))
             WHERE UPPER(m.distributor_code) = UPPER(@kode)
             ORDER BY m.salesman_id, m.created_at DESC
         """
@@ -999,8 +1053,9 @@ def _build_lookup_and_named_ranges(wb, salesman_df, store_df):
         wb.defined_names[name] = DefinedName(
             name, attr_text=_write_combo_column(HARI_COMBOS_BY_FREKUENSI[freq], f"__HARI_{suffix}__")
         )
-    # Column K — one Minggu (week-parity) list per Frekuensi. F1/F2 offer
-    # Ganjil/Genap; F4/F4+ offer only "Minggu Ganjil + Genap" (a one-entry
+    # Column K — one Minggu (week-parity) list per Frekuensi. F1 offers
+    # Ganjil/Genap; F2 adds "Minggu Ganjil + Genap" for its mixed-parity
+    # week pairs; F4/F4+ offer only "Minggu Ganjil + Genap" (a one-entry
     # list is how "automatic + locked" is expressed without VBA).
     for freq, suffix in FREKUENSI_RANGE_SUFFIX.items():
         name = f"NR_MINGGU_{suffix}"
@@ -1130,7 +1185,9 @@ def create_pjp_excel(
                here.
       Step 4 — "Nama Toko" (and Region / ASM / Nama Distributor / Kode
                Distributor) auto-fill (read-only) via VLOOKUP based on
-               whichever store was picked.
+               whichever store was picked. Region in that lookup is
+               master_distributor.region_g2g (joined via the store's
+               dst_id_g2g / distributor_g2g), not the store's own region_g2g.
 
     `selected_dist_code` / `selected_dist_name` / `selected_dist_asm` /
     `selected_dist_region` are kept as parameters for context/labeling
@@ -1173,14 +1230,20 @@ def create_pjp_excel(
             "SENIN-SABTU saja (hari Minggu/Sunday tidak berlaku)."
         ),
         MINGGU_COL: (
-            "Langkah 5 - Pilih Frekuensi (kolom I) dahulu. F1/F2: pilih "
-            "Minggu Ganjil atau Minggu Genap. F4/F4+: hanya ada 1 pilihan, "
+            "Langkah 5 - Pilih Frekuensi (kolom I) dahulu. F1: Minggu Ganjil "
+            "atau Minggu Genap. F2: Minggu Ganjil (1,3), Minggu Genap (2,4), "
+            "atau Minggu Ganjil + Genap untuk kombinasi campuran "
+            "(1,2 / 1,4 / 2,3 / 3,4). F4/F4+: hanya ada 1 pilihan, "
             "Minggu Ganjil + Genap."
         ),
         KET_MINGGU_COL: (
-            "Langkah 6 - Terisi berdasarkan Frekuensi + Minggu. "
+            "Langkah 6 - Minggu ke berapa PJP dijalankan. F1 pilih 1 minggu, "
+            "F2 pilih 2 minggu (1,2 / 1,3 / 1,4 / 2,3 / 2,4 / 3,4). Sebagian "
+            "terisi otomatis berdasarkan Frekuensi + Minggu. "
             "F1 Ganjil: pilih 1 atau 3. F1 Genap: pilih 2 atau 4. "
-            "F2/F4/F4+: hanya ada 1 pilihan (otomatis). Nilai ini yang "
+            "F2 Ganjil: 1,3 dan F2 Genap: 2,4 (otomatis). "
+            "F2 Ganjil + Genap: pilih 1,2 / 1,4 / 2,3 / 3,4. "
+            "F4/F4+: hanya ada 1 pilihan (otomatis). Nilai ini yang "
             "disimpan sebagai callcycle."
         ),
     }
@@ -1300,8 +1363,11 @@ def create_pjp_excel(
         showInputMessage=True,
         promptTitle="Langkah 5 - Minggu (tergantung Frekuensi)",
         prompt=(
-            "Pilih Frekuensi (kolom I) terlebih dahulu.\n"
-            "  F1 / F2  -> Minggu Ganjil atau Minggu Genap\n"
+            "Pilih Frekuensi (kolom I) terlebih dahulu. Kolom ini menentukan "
+            "kelompok minggu yang bisa dipilih di kolom L (Ket. Minggu).\n"
+            "  F1       -> Minggu Ganjil atau Minggu Genap\n"
+            "  F2       -> Minggu Ganjil (1,3), Minggu Genap (2,4), atau\n"
+            "              Minggu Ganjil + Genap (1,2 / 1,4 / 2,3 / 3,4)\n"
             "  F4 / F4+ -> hanya Minggu Ganjil + Genap (otomatis)"
         ),
         showErrorMessage=True,
@@ -1316,6 +1382,8 @@ def create_pjp_excel(
     # and Minggu: the range name is NR_KET_<FREQ>_<MINGGU>, e.g.
     # NR_KET_F1_GANJIL = {1,3}, NR_KET_F1_GENAP = {2,4},
     # NR_KET_F2_GANJIL = {1,3} (single, automatic),
+    # NR_KET_F2_GENAP = {2,4} (single, automatic),
+    # NR_KET_F2_GANJILGENAP = {1,2 | 1,4 | 2,3 | 3,4} (a real choice),
     # NR_KET_F4_GANJILGENAP = {1,2,3,4}, NR_KET_F4PLUS_GANJILGENAP =
     # {1,2,3,4,5}. The nested SUBSTITUTEs turn the Minggu cell's text into
     # that suffix: "Minggu Ganjil + Genap" -> strip "Minggu " -> drop "+"
@@ -1333,10 +1401,13 @@ def create_pjp_excel(
         showInputMessage=True,
         promptTitle="Langkah 6 - Ket. Minggu (tergantung Frekuensi + Minggu)",
         prompt=(
+            "Minggu ke berapa dalam bulan PJP ini dijalankan.\n"
             "Isi Frekuensi (kolom I) dan Minggu (kolom K) terlebih dahulu.\n"
-            "  F1 + Minggu Ganjil -> pilih 1 atau 3\n"
-            "  F1 + Minggu Genap  -> pilih 2 atau 4\n"
-            "  F2  -> otomatis 1,3 (Ganjil) / 2,4 (Genap)\n"
+            "  F1 + Minggu Ganjil        -> pilih 1 atau 3\n"
+            "  F1 + Minggu Genap         -> pilih 2 atau 4\n"
+            "  F2 + Minggu Ganjil        -> 1,3 (otomatis)\n"
+            "  F2 + Minggu Genap         -> 2,4 (otomatis)\n"
+            "  F2 + Minggu Ganjil+Genap  -> pilih 1,2 / 1,4 / 2,3 / 3,4\n"
             "  F4  -> otomatis 1,2,3,4\n"
             "  F4+ -> otomatis 1,2,3,4,5"
         ),
@@ -1914,7 +1985,8 @@ def read_template_sheet(
             # this, leaving both blank (exactly what "automatic" invites)
             # fails as "kolom wajib belum terisi", and because the Ket.
             # Minggu auto-fill needs a resolved Minggu it fails too.
-            # F1/F2 have two real options, so they are never auto-filled.
+            # F1 (2 options) and F2 (3, since its mixed-parity pairs make
+            # "Ganjil + Genap" reachable) are real choices, never auto-filled.
             if pd.isna(v) or not str(v).strip():
                 options = minggu_options_for_frekuensi(freq)
                 return options[0] if len(options) == 1 else v
@@ -2198,6 +2270,650 @@ def _validate_salesman_fields(fields) -> list:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# AUTHENTICATION
+# ══════════════════════════════════════════════════════════════════════════════
+# The distributor master is loaded before the gate because the login screen's
+# distributor list comes from it — gt_schema.master_distributor stays the single
+# source of truth for which distributors exist and which are Active. The account
+# table only says who may log in, until when, and with what password.
+
+try:
+    dist_df = load_distributor_data()
+except Exception as e:  # noqa: BLE001
+    print(f"[pjp] distributor master load failed: {e}", file=sys.stderr)
+    st.error("Gagal memuat data distributor dari Database. "
+             "Silakan muat ulang halaman atau hubungi administrator.")
+    st.stop()
+
+_DIST_SORTED = dist_df.sort_values("distributor_name")
+DIST_LABELS = [
+    f"{row['distributor_code']} — {row['distributor_name']}"
+    for _, row in _DIST_SORTED.iterrows()
+]
+DIST_CODE_FROM_LABEL = {
+    f"{row['distributor_code']} — {row['distributor_name']}": row["distributor_code"]
+    for _, row in dist_df.iterrows()
+}
+DIST_NAME_BY_CODE = dict(zip(dist_df["distributor_code"],
+                             dist_df["distributor_name"]))
+
+
+@st.cache_data(ttl=15, show_spinner="Memuat daftar akun distributor...")
+def _load_accounts_for_admin():
+    """The admin account list. Short TTL, and cleared after every change.
+
+    Safe to cache because it is a *display* list and carries no password hash —
+    `pjp_accounts.load_all_accounts` does not select that column. The
+    authorization path (`fetch_account`) is never cached.
+    """
+    credentials, project_id, dataset = _account_ctx()
+    return pjp_accounts.load_all_accounts(credentials, project_id, dataset)
+
+
+def _refresh_accounts():
+    """Invalidate every cached view of account configuration.
+
+    Streamlit's cache_data is process-wide, not per-session, so clearing the
+    page-gate cache here is what makes an admin's change to a password,
+    deadline or status visible to a distributor session that is already open.
+    """
+    _load_accounts_for_admin.clear()
+    _fetch_account_for_gate.clear()
+
+
+# ─── Distributor login ────────────────────────────────────────────────────────
+
+
+def _render_distributor_login():
+    st.markdown(
+        "<p style='color:#888;margin:0 0 1rem 0;'>"
+        "Pilih distributor Anda, lalu masuk dengan username dan password "
+        "yang diberikan administrator.</p>",
+        unsafe_allow_html=True,
+    )
+    selected_label = st.selectbox(
+        "Distributor",
+        ["— Pilih distributor —"] + DIST_LABELS,
+        key="login_dist_selector",
+    )
+    if selected_label == "— Pilih distributor —":
+        st.info("👆 Pilih distributor untuk melanjutkan.")
+        return
+
+    dist_code = DIST_CODE_FROM_LABEL[selected_label]
+
+    with st.form("distributor_login_form"):
+        username = st.text_input("Username", value=dist_code,
+                                 key="login_dist_username")
+        password = st.text_input("Password", type="password",
+                                 placeholder="••••••••",
+                                 key="login_dist_password")
+        submitted = st.form_submit_button("🔓 Masuk", type="primary",
+                                          use_container_width=True)
+    st.caption("Username default adalah kode distributor. "
+               "Hubungi administrator jika password Anda tidak diketahui.")
+
+    if not submitted:
+        return
+
+    # Read fresh — never from cache, never from session. See fetch_account().
+    account = fetch_account(dist_code)
+    result = pjp_auth.evaluate_distributor_login(
+        account, password, username=username, today=datetime.now().date())
+
+    if result.ok:
+        pjp_auth.establish_distributor_session(st.session_state, account)
+        _fetch_account_for_gate.clear()
+        try:
+            credentials, project_id, dataset = _account_ctx()
+            pjp_accounts.touch_last_login(credentials, project_id, dist_code,
+                                          dataset)
+        except Exception as exc:  # noqa: BLE001 - never blocks a valid login
+            print(f"[pjp-auth] last_login stamp failed for {dist_code}: {exc}",
+                  file=sys.stderr)
+        st.rerun()
+    elif result.reason == pjp_auth.LOGIN_INACTIVE:
+        st.error("🔒 **Akun Tidak Aktif**\n\n"
+                 "Akun distributor ini saat ini tidak aktif. "
+                 "Silakan hubungi administrator.")
+    elif result.reason == pjp_auth.LOGIN_EXPIRED:
+        deadline = pjp_auth.coerce_date(result.deadline)
+        when = deadline.strftime("%d %B %Y") if deadline else "-"
+        st.error(f"🔒 **Periode Input Sudah Ditutup**\n\n"
+                 f"Batas akhir pengisian: **{when}**\n\n"
+                 "Akses input PJP untuk distributor ini sudah ditutup. "
+                 "Hubungi administrator jika membutuhkan perubahan deadline.")
+    else:
+        st.error(pjp_auth.MSG_INVALID)
+
+
+# ─── Admin login ──────────────────────────────────────────────────────────────
+
+
+def _render_admin_login():
+    st.markdown(
+        "<p style='color:#888;margin:0 0 1rem 0;'>"
+        "Area administrator — pengelolaan akun distributor dan deadline input."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+    with st.form("admin_login_form"):
+        username = st.text_input("Username", key="login_admin_username")
+        password = st.text_input("Password", type="password",
+                                 placeholder="••••••••",
+                                 key="login_admin_password")
+        submitted = st.form_submit_button("🔐 Login Admin", type="primary",
+                                          use_container_width=True)
+    if not submitted:
+        return
+
+    config = _admin_config()
+    if not pjp_auth.admin_users_from_config(config):
+        # No [admin] secret deployed. Say so without hinting at the shape of it.
+        st.error("Akses admin belum dikonfigurasi pada deployment ini.")
+        print("[pjp-auth] admin login attempted but no [admin] secret is set",
+              file=sys.stderr)
+        return
+
+    if pjp_auth.verify_admin_credentials(username, password, config):
+        pjp_auth.establish_admin_session(st.session_state, username)
+        st.rerun()
+    else:
+        st.error("Username atau password admin salah.")
+
+
+def render_login_page():
+    st.title("📋 Salesman & PJP Template Manager")
+    st.caption("G2G · Salesman & PJP")
+    tab_dist, tab_admin = st.tabs(["🏢 Login Distributor", "🔐 Login Admin"])
+    with tab_dist:
+        _render_distributor_login()
+    with tab_admin:
+        _render_admin_login()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADMIN DASHBOARD
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _accounts_view(accounts_df):
+    """The admin table. Builds only display columns — no hash ever reaches it."""
+    today = datetime.now().date()
+    rows = []
+    for _, row in accounts_df.iterrows():
+        account = {
+            "distributor_code": row["distributor_code"],
+            "is_active": bool(row["is_active"]),
+            "input_deadline": row["input_deadline"],
+        }
+        left = pjp_auth.days_remaining(row["input_deadline"], today)
+        deadline = pjp_auth.coerce_date(row["input_deadline"])
+        rows.append({
+            "Distributor Code": row["distributor_code"],
+            "Distributor Name": row["distributor_name"] or DIST_NAME_BY_CODE.get(
+                row["distributor_code"], ""),
+            "Username": row["username"],
+            "Status": "Active" if account["is_active"] else "Inactive",
+            "Deadline": deadline.isoformat() if deadline else "—",
+            "Deadline Status": pjp_auth.deadline_status(account, today),
+            "Days Remaining": "—" if left is None else left,
+            "Last Login": ("—" if pd.isna(row["last_login_at"])
+                           else pd.to_datetime(row["last_login_at"]).strftime(
+                               "%Y-%m-%d %H:%M")),
+        })
+    return pd.DataFrame(rows)
+
+
+def _render_account_list():
+    try:
+        accounts_df = _load_accounts_for_admin()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] account list load failed: {exc}", file=sys.stderr)
+        st.error("Gagal memuat daftar akun. Silakan coba lagi.")
+        return
+
+    if accounts_df.empty:
+        st.info("Belum ada akun distributor. Tambahkan lewat tab "
+                "**➕ Tambah Distributor**.")
+        return
+
+    view = _accounts_view(accounts_df)
+    today = datetime.now().date()
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Akun", len(view))
+    c2.metric("Aktif", int((view["Status"] == "Active").sum()))
+    c3.metric("Deadline Terlewat",
+              int((view["Deadline Status"] == pjp_auth.STATUS_EXPIRED).sum()))
+    c4.metric("Segera Berakhir",
+              int((view["Deadline Status"] == pjp_auth.STATUS_EXPIRING).sum()))
+
+    col_search, col_status = st.columns([3, 2])
+    with col_search:
+        query = st.text_input("🔍 Cari kode / nama distributor",
+                              key="admin_acct_search")
+    with col_status:
+        status_filter = st.selectbox(
+            "Filter status",
+            ["Semua", pjp_auth.STATUS_ACTIVE, pjp_auth.STATUS_EXPIRING,
+             pjp_auth.STATUS_EXPIRED, pjp_auth.STATUS_INACTIVE,
+             pjp_auth.STATUS_NO_DEADLINE],
+            key="admin_acct_status_filter")
+
+    filtered = view
+    if query:
+        needle = query.strip().upper()
+        filtered = filtered[
+            filtered["Distributor Code"].str.upper().str.contains(needle, na=False)
+            | filtered["Distributor Name"].str.upper().str.contains(needle, na=False)
+        ]
+    if status_filter != "Semua":
+        filtered = filtered[filtered["Deadline Status"] == status_filter]
+
+    st.caption(f"Menampilkan {len(filtered)} dari {len(view)} akun · "
+               f"tanggal sistem {today.isoformat()}")
+    st.dataframe(filtered, use_container_width=True, hide_index=True)
+    if st.button("🔄 Muat ulang", key="admin_acct_refresh"):
+        _refresh_accounts()
+        st.rerun()
+
+
+def _render_add_account():
+    if not require_admin():
+        return
+    try:
+        existing = set(_load_accounts_for_admin()["distributor_code"])
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] account list load failed: {exc}", file=sys.stderr)
+        st.error("Gagal memuat daftar akun. Silakan coba lagi.")
+        return
+
+    # Only distributors that are Active in master_distributor AND do not
+    # already have an account — this is what prevents a duplicate account row
+    # for one distributor, alongside the MERGE key in BigQuery.
+    available = [label for label in DIST_LABELS
+                 if DIST_CODE_FROM_LABEL[label] not in existing]
+    if not available:
+        st.success("Semua distributor aktif sudah memiliki akun.")
+        return
+
+    st.caption(f"{len(available)} distributor aktif belum memiliki akun.")
+
+    # The distributor picker sits OUTSIDE the form on purpose: widgets inside a
+    # st.form do not rerun until submit, so a picker inside it would leave the
+    # username default pinned to whichever distributor happened to be first.
+    label = st.selectbox("Distributor *", available, key="admin_add_dist")
+    dist_code = DIST_CODE_FROM_LABEL[label]
+
+    with st.form("admin_add_account"):
+        username = st.text_input("Username *", value=dist_code)
+        c1, c2 = st.columns(2)
+        password = c1.text_input("Password *", type="password")
+        confirm = c2.text_input("Konfirmasi Password *", type="password")
+        c3, c4 = st.columns(2)
+        deadline = c3.date_input("Input Deadline *",
+                                 value=datetime.now().date())
+        is_active = c4.checkbox("Aktif", value=True)
+        submitted = st.form_submit_button("➕ Buat Akun", type="primary")
+
+    if not submitted:
+        return
+    if not require_admin():
+        return
+
+    if dist_code in existing:
+        st.error("Distributor ini sudah memiliki akun.")
+        return
+    if not str(username).strip():
+        st.error("Username wajib diisi.")
+        return
+    check = pjp_auth.validate_new_password(password, confirm)
+    if not check.ok:
+        st.error(check.message)
+        return
+
+    try:
+        credentials, project_id, dataset = _account_ctx()
+        pjp_accounts.upsert_account(
+            credentials, project_id,
+            distributor_code=dist_code,
+            distributor_name=DIST_NAME_BY_CODE.get(dist_code, ""),
+            username=str(username).strip(),
+            password_hash=pjp_auth.hash_password(password),
+            is_active=bool(is_active),
+            input_deadline=deadline,
+            actor=_current_admin(),
+            dataset=dataset,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] create account failed for {dist_code}: {exc}",
+              file=sys.stderr)
+        st.error("Gagal membuat akun. Silakan coba lagi.")
+        return
+
+    _audit(dist_code, pjp_accounts.ACTION_CREATE,
+           f"username={str(username).strip()}; deadline={deadline}; "
+           f"is_active={bool(is_active)}")
+    _refresh_accounts()
+    st.success(f"✅ Akun **{dist_code}** berhasil dibuat.")
+    st.rerun()
+
+
+def _render_edit_account():
+    if not require_admin():
+        return
+    try:
+        accounts_df = _load_accounts_for_admin()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] account list load failed: {exc}", file=sys.stderr)
+        st.error("Gagal memuat daftar akun. Silakan coba lagi.")
+        return
+    if accounts_df.empty:
+        st.info("Belum ada akun untuk diubah.")
+        return
+
+    options = {
+        f"{r['distributor_code']} — "
+        f"{r['distributor_name'] or DIST_NAME_BY_CODE.get(r['distributor_code'], '')}":
+        r["distributor_code"]
+        for _, r in accounts_df.sort_values("distributor_code").iterrows()
+    }
+    chosen = st.selectbox("Distributor", list(options.keys()),
+                          key="admin_edit_pick")
+    dist_code = options[chosen]
+    row = accounts_df[accounts_df["distributor_code"] == dist_code].iloc[0]
+
+    current_deadline = pjp_auth.coerce_date(row["input_deadline"])
+    status = pjp_auth.deadline_status(
+        {"is_active": bool(row["is_active"]),
+         "input_deadline": row["input_deadline"]},
+        datetime.now().date())
+    left = pjp_auth.days_remaining(row["input_deadline"], datetime.now().date())
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Status Akun", "Active" if bool(row["is_active"]) else "Inactive")
+    m2.metric("Status Deadline", status)
+    m3.metric("Sisa Hari", "—" if left is None else f"{left} hari")
+
+    with st.form("admin_edit_account"):
+        st.markdown(f"**Distributor:** `{dist_code}`")
+        username = st.text_input("Username", value=row["username"] or dist_code)
+        c1, c2 = st.columns(2)
+        deadline = c1.date_input(
+            "Deadline",
+            value=current_deadline or datetime.now().date())
+        is_active = c2.checkbox("Aktif", value=bool(row["is_active"]))
+
+        st.markdown("###### Ubah Password (kosongkan jika tidak diubah)")
+        p1, p2 = st.columns(2)
+        new_password = p1.text_input("Password Baru", type="password",
+                                     key="admin_edit_pw")
+        confirm = p2.text_input("Konfirmasi Password Baru", type="password",
+                                key="admin_edit_pw2")
+        submitted = st.form_submit_button("💾 Simpan Perubahan", type="primary")
+
+    if not submitted:
+        return
+    if not require_admin():
+        return
+    if not str(username).strip():
+        st.error("Username wajib diisi.")
+        return
+
+    # A password change is opt-in: leaving both boxes empty edits the deadline
+    # and status only, and leaves the stored hash untouched.
+    password_hash = None
+    if new_password or confirm:
+        check = pjp_auth.validate_new_password(new_password, confirm)
+        if not check.ok:
+            st.error(check.message)
+            return
+        password_hash = pjp_auth.hash_password(new_password)
+
+    changes = []
+    if str(username).strip() != str(row["username"] or "").strip():
+        changes.append((pjp_accounts.ACTION_CHANGE_USERNAME,
+                        f"username: {row['username']} -> {str(username).strip()}"))
+    if deadline != current_deadline:
+        changes.append((pjp_accounts.ACTION_CHANGE_DEADLINE,
+                        f"input_deadline: {current_deadline} -> {deadline}"))
+    if bool(is_active) != bool(row["is_active"]):
+        changes.append((pjp_accounts.ACTION_ACTIVATE if is_active
+                        else pjp_accounts.ACTION_DEACTIVATE,
+                        f"is_active: {bool(row['is_active'])} -> {bool(is_active)}"))
+    if password_hash:
+        changes.append((pjp_accounts.ACTION_CHANGE_PASSWORD,
+                        "password diubah oleh admin"))
+
+    if not changes:
+        st.info("Tidak ada perubahan.")
+        return
+
+    try:
+        credentials, project_id, dataset = _account_ctx()
+        pjp_accounts.upsert_account(
+            credentials, project_id,
+            distributor_code=dist_code,
+            distributor_name=row["distributor_name"]
+            or DIST_NAME_BY_CODE.get(dist_code, ""),
+            username=str(username).strip(),
+            password_hash=password_hash,   # None = keep the stored hash
+            is_active=bool(is_active),
+            input_deadline=deadline,
+            actor=_current_admin(),
+            dataset=dataset,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] update account failed for {dist_code}: {exc}",
+              file=sys.stderr)
+        st.error("Gagal menyimpan perubahan. Silakan coba lagi.")
+        return
+
+    for action, summary in changes:
+        _audit(dist_code, action, summary)
+    _refresh_accounts()
+    st.success(f"✅ Perubahan untuk **{dist_code}** tersimpan: "
+               + "; ".join(s for _, s in changes))
+    st.rerun()
+
+
+def _render_deactivate_account():
+    if not require_admin():
+        return
+    st.caption("Akun tidak pernah dihapus permanen — menonaktifkan akun "
+               "memblokir login dan seluruh penulisan PJP, tetapi menjaga "
+               "jejak audit tetap utuh.")
+    try:
+        accounts_df = _load_accounts_for_admin()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] account list load failed: {exc}", file=sys.stderr)
+        st.error("Gagal memuat daftar akun. Silakan coba lagi.")
+        return
+    if accounts_df.empty:
+        st.info("Belum ada akun.")
+        return
+
+    active = accounts_df[accounts_df["is_active"].astype(bool)]
+    inactive = accounts_df[~accounts_df["is_active"].astype(bool)]
+
+    col_off, col_on = st.columns(2)
+    with col_off:
+        st.markdown("##### 🔴 Nonaktifkan Akun")
+        if active.empty:
+            st.caption("Tidak ada akun aktif.")
+        else:
+            code = st.selectbox("Akun aktif",
+                                sorted(active["distributor_code"]),
+                                key="admin_deactivate_pick")
+            confirmed = st.checkbox(
+                f"Saya yakin ingin menonaktifkan **{code}**.",
+                key="admin_deactivate_confirm")
+            if st.button("🔴 Nonaktifkan", key="admin_deactivate_btn",
+                         disabled=not confirmed):
+                _set_account_active(code, False)
+    with col_on:
+        st.markdown("##### 🟢 Aktifkan Kembali")
+        if inactive.empty:
+            st.caption("Tidak ada akun nonaktif.")
+        else:
+            code = st.selectbox("Akun nonaktif",
+                                sorted(inactive["distributor_code"]),
+                                key="admin_activate_pick")
+            if st.button("🟢 Aktifkan", key="admin_activate_btn"):
+                _set_account_active(code, True)
+
+
+def _set_account_active(dist_code, is_active):
+    if not require_admin():
+        return
+    try:
+        credentials, project_id, dataset = _account_ctx()
+        pjp_accounts.set_active(credentials, project_id, dist_code, is_active,
+                                _current_admin(), dataset)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] set_active failed for {dist_code}: {exc}",
+              file=sys.stderr)
+        st.error("Gagal mengubah status akun. Silakan coba lagi.")
+        return
+    _audit(dist_code,
+           pjp_accounts.ACTION_ACTIVATE if is_active
+           else pjp_accounts.ACTION_DEACTIVATE,
+           f"is_active -> {bool(is_active)}")
+    _refresh_accounts()
+    st.success(f"✅ Akun **{dist_code}** "
+               f"{'diaktifkan' if is_active else 'dinonaktifkan'}.")
+    st.rerun()
+
+
+def _render_audit_log():
+    if not require_admin():
+        return
+    try:
+        credentials, project_id, dataset = _account_ctx()
+        audit_df = pjp_accounts.load_audit(credentials, project_id,
+                                           limit=300, dataset=dataset)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] audit load failed: {exc}", file=sys.stderr)
+        st.error("Gagal memuat jejak audit.")
+        return
+    if audit_df.empty:
+        st.info("Belum ada aktivitas tercatat.")
+        return
+    st.caption("300 aktivitas terakhir. Tidak pernah memuat password "
+               "maupun hash.")
+    st.dataframe(audit_df, use_container_width=True, hide_index=True)
+
+
+def render_admin_dashboard():
+    with st.sidebar:
+        st.title("🔐 Admin")
+        st.markdown("---")
+        st.success(f"Login sebagai **{_current_admin()}**")
+        if st.button("🚪 Logout", use_container_width=True,
+                     key="admin_logout"):
+            pjp_auth.clear_session(st.session_state)
+            st.rerun()
+        st.markdown("---")
+        st.caption("Salesman & PJP Template Manager · G2G")
+
+    st.title("🔐 Admin Dashboard")
+    st.markdown("### 🏢 Distributor Account Management")
+    st.caption("Kelola akun, password, status, dan deadline input per "
+               "distributor. Perubahan langsung berlaku pada percobaan "
+               "login dan penulisan data berikutnya.")
+
+    tab_list, tab_add, tab_edit, tab_status, tab_audit = st.tabs([
+        "📋 Daftar Akun", "➕ Tambah Distributor", "✏️ Edit Akun",
+        "🔁 Aktif/Nonaktif", "🧾 Audit",
+    ])
+    with tab_list:
+        _render_account_list()
+    with tab_add:
+        _render_add_account()
+    with tab_edit:
+        _render_edit_account()
+    with tab_status:
+        _render_deactivate_account()
+    with tab_audit:
+        _render_audit_log()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ROUTING — nothing below this point runs for an unauthenticated visitor
+# ══════════════════════════════════════════════════════════════════════════════
+
+_role = pjp_auth.current_role(st.session_state)
+
+if _role is None:
+    render_login_page()
+    st.stop()
+
+if _role == pjp_auth.ROLE_ADMIN:
+    render_admin_dashboard()
+    st.stop()
+
+# ─── Distributor session ──────────────────────────────────────────────────────
+# The authenticated code is the scope. There is no distributor selector for a
+# distributor user: the old sidebar dropdown let a logged-in DST171 switch to
+# DST157 and keep working, because authorization was a per-code session flag.
+
+selected_dist_code = pjp_auth.session_distributor_code(st.session_state)
+
+with st.sidebar:
+    st.title("📋 G2G Template Manager")
+    st.markdown("---")
+    st.markdown("**🏢 Distributor**")
+    st.success(f"**{st.session_state.get('authenticated_distributor_name', '')}**"
+               f"\n\n`{selected_dist_code}`")
+    if st.button("🚪 Logout", use_container_width=True, key="dist_logout"):
+        pjp_auth.clear_session(st.session_state)
+        for _key in ("salesman_df", "_cached_dist", "pjp_salesman_df",
+                     "_pjp_cached_dist"):
+            st.session_state.pop(_key, None)
+        st.rerun()
+    st.markdown("---")
+
+# Re-checked on every rerun, against a fresh row — an account disabled or a
+# deadline pulled in mid-session takes effect on the next interaction, not at
+# the next login.
+_account = _fetch_account_for_gate(selected_dist_code)
+_access = pjp_auth.validate_distributor_access(
+    _account, selected_dist_code, selected_dist_code, datetime.now().date())
+if not _access.ok:
+    _render_access_denied(_access)
+    st.stop()
+
+if selected_dist_code not in DIST_NAME_BY_CODE:
+    # Has an account, but is no longer Active in master_distributor. The old
+    # app expressed this by simply not listing the distributor; make it explicit
+    # rather than crashing on an empty .iloc[0] lookup below.
+    _render_locked("🔒", "Distributor Tidak Aktif",
+                   "Distributor ini tidak lagi terdaftar aktif pada master data.",
+                   "Silakan hubungi administrator.")
+    st.stop()
+
+selected_dist_name = DIST_NAME_BY_CODE[selected_dist_code]
+selected_dist_asm = dist_df.loc[
+    dist_df["distributor_code"] == selected_dist_code, "asm"
+].iloc[0]
+selected_dist_region = dist_df.loc[
+    dist_df["distributor_code"] == selected_dist_code, "region"
+].iloc[0]
+
+# ─── Deadline banner ──────────────────────────────────────────────────────────
+
+_days_left = pjp_auth.days_remaining(_access.deadline, datetime.now().date())
+_deadline_text = (pjp_auth.coerce_date(_access.deadline).strftime("%d %B %Y")
+                  if _access.deadline else "-")
+with st.sidebar:
+    if _days_left is not None and _days_left <= pjp_auth.EXPIRY_WARNING_DAYS:
+        st.warning(f"⏳ Batas input: **{_deadline_text}**\n\n"
+                   f"Sisa **{_days_left} hari**.")
+    else:
+        st.info(f"📅 Batas input: **{_deadline_text}**")
+
+# ══════════════════════════════════════════════════════════════════════════════
 # NAVIGATION
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2207,8 +2923,6 @@ PAGES = {
 }
 
 with st.sidebar:
-    st.title("📋 G2G Template Manager")
-    st.markdown("---")
     selected_page = st.radio(
         "Navigasi",
         list(PAGES.keys()),
@@ -2220,96 +2934,10 @@ with st.sidebar:
 # ─── Load shared data ─────────────────────────────────────────────────────────
 
 try:
-    dist_df = load_distributor_data()
     store_df = load_store_data()
     distributor_map, asm_options, region_options = build_lookup_tables(dist_df)
 except Exception as e:
     st.error(f"Gagal memuat data dari Database: {e}")
-    st.stop()
-
-# ─── Distributor selector ────────────────────────────────────────────────────
-
-dist_labels = [
-    f"{row['distributor_code']} — {row['distributor_name']}"
-    for _, row in dist_df.sort_values("distributor_name").iterrows()
-]
-dist_code_from_label = {
-    f"{row['distributor_code']} — {row['distributor_name']}": row["distributor_code"]
-    for _, row in dist_df.iterrows()
-}
-
-with st.sidebar:
-    st.markdown("### 🏢 Pilih Distributor")
-    selected_label = st.selectbox(
-        "Distributor",
-        ["— Pilih distributor —"] + dist_labels,
-        key="dist_selector",
-        label_visibility="collapsed",
-    )
-
-if selected_label == "— Pilih distributor —":
-    st.title("📋 Salesman & PJP Template Manager")
-    st.info("👈 Pilih distributor di sidebar untuk melanjutkan.")
-    st.stop()
-
-selected_dist_code = dist_code_from_label[selected_label]
-selected_dist_name = dist_df.loc[
-    dist_df["distributor_code"] == selected_dist_code, "distributor_name"
-].iloc[0]
-selected_dist_asm = dist_df.loc[
-    dist_df["distributor_code"] == selected_dist_code, "asm"
-].iloc[0]
-selected_dist_region = dist_df.loc[
-    dist_df["distributor_code"] == selected_dist_code, "region"
-].iloc[0]
-
-# ── Detect distributor switch and reset auth + salesman cache ──────────────
-_prev = st.session_state.get("_prev_dist_code")
-if _prev is not None and _prev != selected_dist_code:
-    auth_key = f"auth_{selected_dist_code}"
-    st.session_state.pop(auth_key, None)
-    st.session_state.pop("salesman_df", None)
-    st.session_state.pop("_cached_dist", None)
-    st.session_state.pop("pjp_salesman_df", None)
-    st.session_state.pop("_pjp_cached_dist", None)
-st.session_state["_prev_dist_code"] = selected_dist_code
-
-with st.sidebar:
-    st.success(f"**{selected_dist_name}**\n\n`{selected_dist_code}`")
-
-# ─── PASSWORD GATE ────────────────────────────────────────────────────────────
-
-if not _render_password_gate(selected_dist_code, selected_dist_name):
-    st.stop()
-
-# ─── PERIOD LOCK GATE ─────────────────────────────────────────────────────────
-
-_today = datetime.now().date()
-if _today > INPUT_DEADLINE:
-    st.markdown(
-        """
-        <div style='
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 5rem 2rem;
-            text-align: center;
-        '>
-            <div style='font-size: 4rem; line-height: 1; margin-bottom: 1.5rem;'>🔒</div>
-            <h2 style='margin: 0 0 0.75rem 0; font-size: 1.75rem; font-weight: 600;'>
-                Periode Input Sudah Ditutup
-            </h2>
-            <p style='color: #888; margin: 0 0 0.5rem 0; font-size: 1rem; max-width: 420px;'>
-                Batas akhir pengisian adalah <b>{deadline}</b>.
-            </p>
-            <p style='color: #aaa; margin: 0; font-size: 0.9rem;'>
-                Hubungi tim G2G jika ada pertanyaan.
-            </p>
-        </div>
-        """.format(deadline=INPUT_DEADLINE.strftime("%d %B %Y")),
-        unsafe_allow_html=True,
-    )
     st.stop()
 
 # ─── Load salesman data globally (shared across ALL pages) ────────────────────
@@ -2474,7 +3102,7 @@ if PAGES[selected_page] == "salesman":
                             creds, proj = get_credentials()
                             c = bigquery.Client(credentials=creds, project=proj)
                             q = f"""
-                                SELECT * FROM `{SALESMAN_TABLE}`
+                                SELECT * FROM `{SALESMAN_VIEW}`
                                 WHERE UPPER(TRIM(nama_salesman))    = UPPER(TRIM(@nama))
                                   AND UPPER(TRIM(kode_distributor)) = UPPER(TRIM(@dist_code))
                                 ORDER BY uploaded_at DESC LIMIT 1
@@ -2651,6 +3279,9 @@ if PAGES[selected_page] == "salesman":
                                 "tanggal_join_g2g": e_join,
                             }
 
+                            if not assert_distributor_write_access(cur_dist_code):
+                                st.stop()
+
                             with st.spinner("Menyimpan perubahan..."):
                                 ok_e, err_e = update_salesman_record(
                                     cur_nama, cur_dist_code, updated
@@ -2723,6 +3354,9 @@ if PAGES[selected_page] == "salesman":
                             sal_data_r = _build_salesman_data(
                                 fields_r, dist_df, selected_dist_code, selected_dist_name
                             )
+                            if not assert_distributor_write_access(selected_dist_code):
+                                st.stop()
+
                             with st.spinner("Menyimpan..."):
                                 ok1, err1 = insert_salesman_record(sal_data_r)
                             if not ok1:
@@ -2781,6 +3415,9 @@ if PAGES[selected_page] == "salesman":
                         disabled=not confirm,
                         use_container_width=True,
                     ):
+                        if not assert_distributor_write_access(selected_dist_code):
+                            st.stop()
+
                         with st.spinner("Menonaktifkan salesman..."):
                             ok_d, err_d = deactivate_salesman_mapping(sal_id)
                         if ok_d:
@@ -2850,6 +3487,9 @@ if PAGES[selected_page] == "salesman":
                     salesman_id_new = generate_salesman_id(
                         selected_dist_code, salesman_type_add
                     )
+                    if not assert_distributor_write_access(selected_dist_code):
+                        st.stop()
+
                     with st.spinner("Menyimpan data salesman..."):
                         ok1, err1 = insert_salesman_record(sal_data_add)
                     if not ok1:
@@ -2926,7 +3566,14 @@ elif PAGES[selected_page] == "pjp_template":
             ### ✅ FORMAT DATA YANG BENAR:
             - **Frekuensi PJP**: F4+ / F4 / F2 / F1
             - **Hari**: Pilih dari dropdown
-            - **Minggu**: Pilih Ganjil / Genap / Ganjil+Genap
+            - **Minggu (kolom K)**: kelompok minggu — Ganjil / Genap / Ganjil+Genap
+              (F1 hanya Ganjil atau Genap; F4/F4+ hanya Ganjil+Genap)
+            - **Ket. Minggu (kolom L)**: minggu ke berapa PJP dijalankan
+                - F1 = 1 minggu → 1 / 2 / 3 / 4
+                - F2 = 2 minggu → 1,2 / 1,3 / 1,4 / 2,3 / 2,4 / 3,4.
+                  Ganjil→1,3 dan Genap→2,4 terisi otomatis; untuk kombinasi
+                  campuran (1,2 / 1,4 / 2,3 / 3,4) pilih Minggu Ganjil+Genap di kolom K
+                - F4 = 1,2,3,4 dan F4+ = 1,2,3,4,5 (otomatis)
 
             ### 📞 BUTUH BANTUAN?
             Hubungi tim support G2G
@@ -3181,6 +3828,15 @@ elif PAGES[selected_page] == "pjp_template":
                     type="primary",
                     disabled=not confirm_update,
                 ):
+                    # Authorization is re-established HERE, not inherited from
+                    # the login gate: this branch deletes the current month's
+                    # PJP snapshot before inserting the replacement, and the
+                    # admin may have disabled the account or moved the deadline
+                    # while the user sat on this confirmation screen. Nothing
+                    # below runs unless the fresh check passes.
+                    if not assert_distributor_write_access(scope_dist_code):
+                        st.stop()
+
                     with st.spinner(f"Menghapus data PJP bulan {_current_snapshot_month}..."):
                         ok_del, err_del = delete_pjp_records(
                             distributor_code=scope_dist_code,

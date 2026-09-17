@@ -2,16 +2,18 @@
 Distributor-code coverage for Salesman PJP.
 
 The dropdown and salesman/store/PJP rows are loaded from BigQuery
-(gt_schema.master_distributor and related tables). The only local whitelist
-is DISTRIBUTOR_PASSWORDS, which gates login. Import/export/validation treat
-any distributor_code the same as long as salesman and store ownership match
-the selected code.
+(gt_schema.master_distributor and related tables). There is no longer any local
+whitelist: login is gated by gt_schema.sfa_pjp_distributor_accounts, and the
+rules that read it are covered in test_pjp_auth.py. Import/export/validation
+treat any distributor_code the same as long as salesman and store ownership
+match the selected code.
 
 Run: pytest tests/test_pjp_distributor_codes.py -q
 """
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -75,39 +77,66 @@ def _validate_for(df, dist_code, store_df, salesman_df):
         selected_dist_code=dist_code)
 
 
-# ─── Password whitelist ────────────────────────────────────────────────────
+# ─── Account gate (replaces the old password whitelist) ────────────────────
+# DISTRIBUTOR_PASSWORDS is gone. These tests pin that it stayed gone, and that
+# the codes it used to cover still authenticate through the account table's
+# rules instead. The rules themselves live in test_pjp_auth.py.
 
-def test_new_distributor_codes_are_in_password_whitelist():
-    passwords = SP["DISTRIBUTOR_PASSWORDS"]
-    for code in NEW_DIST_CODES:
-        assert code in passwords, f"{code} missing from DISTRIBUTOR_PASSWORDS"
-        assert isinstance(passwords[code], str) and passwords[code].strip(), (
-            f"{code} has an empty password")
+import pjp_auth as A  # noqa: E402
 
-
-def test_existing_distributor_codes_are_unchanged():
-    passwords = SP["DISTRIBUTOR_PASSWORDS"]
-    for code in EXISTING_DIST_CODES:
-        assert code in passwords, f"existing code {code} was removed"
-    assert passwords["DST171"] == "5bcd0fc2"
-    assert passwords["DST356"] == "1a2b3c4d"
-    assert passwords["DST363"] == "2b3c4d5e"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ALL_DIST_CODES = NEW_DIST_CODES + EXISTING_DIST_CODES
 
 
-@pytest.mark.parametrize("code", NEW_DIST_CODES)
+def test_hardcoded_credentials_are_gone_from_the_source():
+    """The migrated dict must not linger as a second way in."""
+    source = (REPO_ROOT / "salesman_pjp.py").read_text(encoding="utf-8")
+    for banned in ("DISTRIBUTOR_PASSWORDS = {",
+                   "INPUT_DEADLINE = datetime(",
+                   "def _get_password_for_distributor",
+                   "def _render_password_gate"):
+        assert banned not in source, f"{banned!r} is still an auth path"
+
+
+def test_source_has_no_plaintext_password_comparison():
+    source = (REPO_ROOT / "salesman_pjp.py").read_text(encoding="utf-8")
+    assert "entered == expected" not in source
+
+
+def _account(code, password="rahasia123", deadline=date(2026, 12, 31),
+             is_active=True):
+    return {"distributor_code": code, "distributor_name": f"DIST {code}",
+            "username": code, "password_hash": A.hash_password(password),
+            "is_active": is_active, "input_deadline": deadline}
+
+
+@pytest.mark.parametrize("code", ALL_DIST_CODES)
+def test_every_distributor_code_authenticates_through_the_account_table(code):
+    account = _account(code)
+    today = date(2026, 9, 16)
+    assert A.evaluate_distributor_login(account, "rahasia123",
+                                        username=code, today=today).ok is True
+    assert A.evaluate_distributor_login(account, "salah",
+                                        username=code, today=today).ok is False
+
+
+@pytest.mark.parametrize("code", ALL_DIST_CODES)
 @pytest.mark.parametrize("variant_fn", [
     lambda c: c,
     lambda c: c.lower(),
     lambda c: f"  {c}  ",
     lambda c: c[:3].lower() + c[3:],
 ])
-def test_password_lookup_accepts_case_and_whitespace(code, variant_fn):
-    expected = SP["DISTRIBUTOR_PASSWORDS"][code]
-    assert SP["_get_password_for_distributor"](variant_fn(code)) == expected
+def test_account_lookup_accepts_case_and_whitespace(code, variant_fn):
+    """Scope checks must survive the same code spellings the old lookup did."""
+    account = _account(code)
+    assert A.validate_distributor_access(account, code, variant_fn(code),
+                                         date(2026, 9, 16)).ok is True
 
 
-def test_unknown_distributor_still_has_no_password():
-    assert SP["_get_password_for_distributor"]("DST999") is None
+def test_unknown_distributor_has_no_account_and_cannot_log_in():
+    assert A.evaluate_distributor_login(None, "apa pun",
+                                        today=date(2026, 9, 16)).ok is False
 
 
 # ─── Import / validate / export ────────────────────────────────────────────
@@ -168,4 +197,3 @@ def test_existing_dst171_import_still_succeeds():
     assert errors == []
     assert STORE_DF["distributor_code"].iloc[0] == "DST171"
     assert SALESMAN_DF["distributor_code"].iloc[0] == "DST171"
-    assert "DST171" in SP["DISTRIBUTOR_PASSWORDS"]
