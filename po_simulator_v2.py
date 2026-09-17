@@ -1658,7 +1658,11 @@ def _file_upload_section(page_key: str):
 
             show_cols = [sku_col_m, "Product Name (MOQ Ref)", qty_col_m, "MOQ", "MOQ Check"]
             under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ"][show_cols].copy()
-
+            st.caption(
+        "If <50 pcs, the quantity must be a multiple of the inner pcs. "
+        "\nIf >50 pcs, there is no mandatory multiplication restriction "
+        "\nhowever, using multiples of the inner pcs is recommended."
+            )
             if under_moq.empty:
                 st.success(f"**{fname}** - ✅ **SAFE MOQ**")
             else:
