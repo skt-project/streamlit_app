@@ -456,6 +456,69 @@ credentials.
 
 ---
 
+## 9a. Go-live runbook (Streamlit Community Cloud)
+
+This app deploys from GitHub `main` to Streamlit Community Cloud. There is no
+`deploy/` folder and no Cloud Run service for it; pushing `main` triggers the
+redeploy. That is also why the old deadline was changed by editing a constant
+and pushing - a lever this release removes.
+
+**The order matters.** Adding the secret first is harmless to the running app
+(the old code ignores an unknown `[admin]` section); merging first is not, since
+it would leave an admin dashboard nobody can log into and no other way to reopen
+input.
+
+### Step 1 - add the `[admin]` secret (human, ~1 minute)
+
+1. Open <https://share.streamlit.io> and sign in.
+2. Find the `salesman_pjp` app -> **⋮** -> **Settings** -> **Secrets**.
+3. Append the `[admin]` block from the local `.streamlit/secrets.toml`
+   (username + bcrypt `password_hash`; the plaintext is not stored anywhere in
+   the repo). Leave `[connections.bigquery]` and `[bigquery]` untouched.
+4. **Save**. The app restarts; the old code is unaffected.
+
+### Step 2 - merge and deploy
+
+```bash
+git checkout main && git pull
+git merge migration/cloud-run       # resolves clean; branch already merged main
+git push origin main                # triggers the Streamlit Cloud redeploy
+```
+
+### Step 3 - verify the deployment
+
+1. Open the app. The landing page must show two tabs: **🏢 Login Distributor**
+   and **🔐 Login Admin**.
+2. Admin tab -> log in. Anything other than the dashboard means Step 1 did not
+   take: *"Akses admin belum dikonfigurasi pada deployment ini."* means the
+   secret is missing or malformed.
+3. **📋 Daftar Akun** must list 128 accounts. The `tanggal sistem` line is
+   today's date, not a deadline - the deadline is the column in the table.
+4. Set the intended `input_deadline` per distributor in **✏️ Edit Akun**.
+   Nobody can log in until a deadline is in the future (or today).
+5. Distributor tab -> log in as one distributor and confirm the sidebar is
+   pinned to that distributor with no selector.
+
+### Rollback
+
+```bash
+git revert -m 1 <merge-commit> && git push origin main
+```
+
+The account tables are additive and are not touched by a rollback; the legacy
+`DISTRIBUTOR_PASSWORDS`/`INPUT_DEADLINE` code returns with it. Rolling back does
+**not** delete accounts, so rolling forward again needs no re-seeding.
+
+### Deadline clock on Cloud
+
+Community Cloud containers run **UTC**, and the gate compares
+`datetime.now().date()` - so a deadline of `2026-09-16` stops accepting input at
+**07:00 WIB on 2026-09-17**, not local midnight. Production `main` used the same
+expression, so this release changes nothing; set deadlines knowing the effective
+cutoff is 07:00 WIB the following morning.
+
+---
+
 ## 10. Testing
 
 ```bash
