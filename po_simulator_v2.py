@@ -12,7 +12,7 @@ import numpy as np
 from datetime import datetime
 from typing import List
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.styles import PatternFill, Font, Alignment, Side, Border
 from openpyxl.utils.dataframe import dataframe_to_rows
 from google.cloud import bigquery
 from google.oauth2 import service_account
@@ -1631,23 +1631,140 @@ def _file_upload_section(page_key: str):
             with st.expander(f"👁 {sheet_label} — {len(clean_df)} baris × {clean_df.shape[1]} kolom", expanded=False):
                 st.dataframe(clean_df.reset_index(drop=True), use_container_width=True)
 
-        def _build_kalbar_clean_excel(sheets_dict: dict) -> bytes:
+        def _build_kalbar_clean_excel(sheets_dict: dict, dist_name: str = "", dist_map: dict = None) -> bytes:
             buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                for sn, sdf in sheets_dict.items():
-                    sdf.to_excel(writer, sheet_name=sn, index=False)
-                    ws_out = writer.sheets[sn]
-                    for cell in ws_out[1]:
-                        cell.font = Font(bold=True)
-                        cell.fill = PatternFill(start_color="F0D9E2", end_color="F0D9E2", fill_type="solid")
-                    for col_cells in ws_out.columns:
-                        max_len = max((len(str(c.value)) if c.value else 0) for c in col_cells)
-                        ws_out.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 40)
-                    ws_out.freeze_panes = "A2"
+            wb = Workbook()
+            wb.remove(wb.active)
+        
+            HEADER_FILL   = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+            HEADER_FONT   = Font(bold=True, size=11)
+            TITLE_FONT    = Font(bold=True, size=14)
+            LABEL_FONT    = Font(bold=True, size=10)
+            COL_HEADERS   = ["DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY", "DPP", "TOTAL PRICE"]
+            COL_WIDTHS    = [30, 18, 45, 10, 15, 18]
+            DATA_START_ROW = 8   # row 7 = header, row 8 = data (1-indexed)
+        
+            for sn, sdf in sheets_dict.items():
+                ws = wb.create_sheet(title=sn[:31])
+        
+                # ── Row 1: Title ──────────────────────────────────
+                ws["A1"] = "PUCHASE ORDER FORM"
+                ws["A1"].font = TITLE_FONT
+                ws.merge_cells("A1:F1")
+        
+                # ── Row 2: Customer Name ──────────────────────────
+                ws["A2"] = "CUSTOMER NAME"
+                ws["A2"].font = LABEL_FONT
+                ws["B2"] = dist_name
+                ws["B2"].font = Font(bold=True, size=10)
+                ws["D2"] = "DATE"
+                ws["D2"].font = LABEL_FONT
+                ws["E2"] = datetime.now().strftime("%d/%m/%Y")
+        
+                # ── Row 3: NPWP ───────────────────────────────────
+                ws["A3"] = "NPWP / ID CARD"
+                ws["A3"].font = LABEL_FONT
+                ws["D3"] = "ORDERED BY"
+                ws["D3"].font = LABEL_FONT
+        
+                # ── Row 4: Address ────────────────────────────────
+                ws["A4"] = "ADDRESS"
+                ws["A4"].font = LABEL_FONT
+        
+                # ── Rows 5-6: empty spacer ────────────────────────
+        
+                # ── Row 7: Column headers ─────────────────────────
+                HDR_ROW = 7
+                for ci, (h, w) in enumerate(zip(COL_HEADERS, COL_WIDTHS), start=1):
+                    cell = ws.cell(row=HDR_ROW, column=ci, value=h)
+                    cell.font   = HEADER_FONT
+                    cell.fill   = HEADER_FILL
+                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    ws.column_dimensions[cell.column_letter].width = w
+                ws.row_dimensions[HDR_ROW].height = 20
+        
+                # ── Rows 8+: Data ─────────────────────────────────
+                # Normalise sdf columns → map to template columns
+                col_map = {}
+                for src_col in sdf.columns:
+                    up = str(src_col).strip().upper()
+                    if any(k in up for k in ["DISTRIBUTOR"]):
+                        col_map["DISTRIBUTOR"]    = src_col
+                    elif any(k in up for k in ["PRODUCT CODE", "SKU", "KODE"]):
+                        col_map["PRODUCT CODE"]   = src_col
+                    elif any(k in up for k in ["DESCRIPTION", "DESC", "NAMA", "PRODUCT NAME"]):
+                        col_map["DESCRIPTION"]    = src_col
+                    elif up in ("QTY", "QUANTITY"):
+                        col_map["QTY"]            = src_col
+                    elif any(k in up for k in ["DPP", "PRICE FOR DISTRI", "SIP", "HARGA"]):
+                        col_map["DPP"]            = src_col
+                    elif any(k in up for k in ["TOTAL", "TOTAL PRICE"]):
+                        col_map["TOTAL PRICE"]    = src_col
+        
+                THIN = Side(border_style="thin", color="000000")
+                BOX  = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+        
+                for r_offset, (_, row) in enumerate(sdf.iterrows()):
+                    excel_row = DATA_START_ROW + r_offset
+                    for ci, col_name in enumerate(COL_HEADERS, start=1):
+                        src = col_map.get(col_name)
+                        if col_name == "TOTAL PRICE":
+                            # formula: QTY * DPP
+                            val = f"=D{excel_row}*E{excel_row}"
+                            cell = ws.cell(row=excel_row, column=ci, value=val)
+                            cell.number_format = "#,##0.00"
+                        elif src and src in sdf.columns:
+                            raw = row[src]
+                            if col_name in ("QTY", "DPP"):
+                                raw = pd.to_numeric(raw, errors="coerce")
+                                if pd.isna(raw):
+                                    raw = None
+                            cell = ws.cell(row=excel_row, column=ci, value=raw)
+                            if col_name in ("QTY", "DPP"):
+                                cell.number_format = "#,##0" if col_name == "QTY" else "#,##0.00"
+                        else:
+                            cell = ws.cell(row=excel_row, column=ci, value=None)
+                        cell.border    = BOX
+                        cell.alignment = Alignment(vertical="center",
+                                                   horizontal="right" if col_name in ("QTY","DPP","TOTAL PRICE") else "left")
+        
+                # ── Summary rows ──────────────────────────────────
+                last_data = DATA_START_ROW + len(sdf) - 1
+                sum_start = last_data + 2
+                sub_row, tax_row, grand_row = sum_start, sum_start + 1, sum_start + 2
+        
+                SUMMARY_FONT = Font(bold=True, size=10)
+                for row_idx, label, formula in [
+                    (sub_row,   "SUB-TOTAL",    f"=SUM(F{DATA_START_ROW}:F{last_data})"),
+                    (tax_row,   "TAX (11%)",    f"=F{sub_row}*0.11"),
+                    (grand_row, "GRAND TOTAL",  f"=F{sub_row}+F{tax_row}"),
+                ]:
+                    lc = ws.cell(row=row_idx, column=5, value=label)
+                    lc.font = SUMMARY_FONT
+                    lc.alignment = Alignment(horizontal="right")
+                    vc = ws.cell(row=row_idx, column=6, value=formula)
+                    vc.font = SUMMARY_FONT
+                    vc.number_format = "#,##0.00"
+                    vc.border = BOX
+        
+                ws.freeze_panes = f"A{DATA_START_ROW}"
+        
+            wb.save(buf)
             buf.seek(0)
             return buf.getvalue()
+        
+        # Kumpulkan semua dist_val yang valid per sheet
+        _kalbar_dist_map = {}
+        for p in ready:
+            dv = p.get("dist_val", "")
+            sheet_label = p.get("sheet_name") or p["name"]
+            base_name = re.sub(r'[\\/*?:\[\]]', "", str(sheet_label)).strip()[:31] or "Sheet"
+            if dv not in ("", "(Pilih)", None):
+                _kalbar_dist_map[base_name] = dv        
 
-        kalbar_excel_bytes = _build_kalbar_clean_excel(kalbar_clean_sheets)
+        # fallback: nama distributor pertama yang valid
+        _kalbar_dist_name = next(iter(_kalbar_dist_map.values()), "")
+        kalbar_excel_bytes = _build_kalbar_clean_excel(kalbar_clean_sheets, dist_name=_kalbar_dist_name, dist_map=_kalbar_dist_map)
         st.download_button(
             label=f"📥 Download Hasil Rapi ({len(kalbar_clean_sheets)} sheet)",
             data=kalbar_excel_bytes,
@@ -2470,6 +2587,14 @@ with st.container(border=True):
     with drill_col1:
         drill_dist = st.multiselect("Pilih Distributor untuk lihat suggestion SKU",
                                      options=["(Pilih Distributor)"] + CUSTOMER_NAMES, key="drill_distri")
+                # Auto-sync ke selectbox distributor di bawah
+        if drill_dist and any(d != "(Pilih Distributor)" for d in drill_dist):
+            valid_drill = [d for d in drill_dist if d != "(Pilih Distributor)"]
+            if valid_drill:
+                _new_dist = valid_drill[0]
+                if st.session_state.get("distri") != _new_dist:
+                    st.session_state["distri"] = _new_dist
+                    st.rerun()
     with drill_col2:
         brand_options = get_brand_list()
         drill_brand = st.selectbox("Filter Brand", options=["All"] + brand_options, key="drill_brand")
