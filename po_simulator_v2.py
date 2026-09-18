@@ -1597,13 +1597,67 @@ def _file_upload_section(page_key: str):
                     st.dataframe(df_preview.reset_index(drop=True), use_container_width=True)
 
                 parsed.append({"name":fname,"df":df_f,"row_rng":row_rng,"col_rng":col_rng,
-                                "dist_val":dist_val,"has_dist":has_dist,"error":None})
+                                "dist_val":dist_val,"has_dist":has_dist,"error":None,
+                                "sheet_name":sheet_sel})
             else:
                 st.error(f"❌ {parse_err}")
-                parsed.append({"name":fname,"df":None,"row_rng":"","col_rng":"","dist_val":"","has_dist":False,"error":parse_err})
+                parsed.append({"name":fname,"df":None,"row_rng":"","col_rng":"","dist_val":"","has_dist":False,"error":parse_err,
+                                "sheet_name": sheet_fixed if sheet_fixed not in (None, 0) else fname})
 
     ready = [p for p in parsed if p["df"] is not None]
     st.divider()
+
+    # === DOWNLOAD HASIL RAPI PER SHEET (khusus Dedicated Kalimantan) ===
+    if is_kalbar_mode and ready:
+        st.markdown("""<div class="pipeline-step active"><span class="step-number">✓</span>
+        <strong>Download Hasil Rapi — per Sheet (Dedicated Kalimantan)</strong></div>""", unsafe_allow_html=True)
+
+        kalbar_clean_sheets = {}
+        for p in ready:
+            clean_df = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
+            clean_df = clean_df.dropna(how="all")
+
+            sheet_label = p.get("sheet_name") or p["name"]
+            # nama sheet Excel maksimal 31 char & tidak boleh ada karakter \/*?:[]
+            base_name = re.sub(r'[\\/*?:\[\]]', "", str(sheet_label)).strip()[:31] or "Sheet"
+            safe_sheet_name = base_name
+            dupe_i = 1
+            while safe_sheet_name in kalbar_clean_sheets:
+                suffix = f"_{dupe_i}"
+                safe_sheet_name = base_name[:31 - len(suffix)] + suffix
+                dupe_i += 1
+            kalbar_clean_sheets[safe_sheet_name] = clean_df
+
+            with st.expander(f"👁 {sheet_label} — {len(clean_df)} baris × {clean_df.shape[1]} kolom", expanded=False):
+                st.dataframe(clean_df.reset_index(drop=True), use_container_width=True)
+
+        def _build_kalbar_clean_excel(sheets_dict: dict) -> bytes:
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                for sn, sdf in sheets_dict.items():
+                    sdf.to_excel(writer, sheet_name=sn, index=False)
+                    ws_out = writer.sheets[sn]
+                    for cell in ws_out[1]:
+                        cell.font = Font(bold=True)
+                        cell.fill = PatternFill(start_color="F0D9E2", end_color="F0D9E2", fill_type="solid")
+                    for col_cells in ws_out.columns:
+                        max_len = max((len(str(c.value)) if c.value else 0) for c in col_cells)
+                        ws_out.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 40)
+                    ws_out.freeze_panes = "A2"
+            buf.seek(0)
+            return buf.getvalue()
+
+        kalbar_excel_bytes = _build_kalbar_clean_excel(kalbar_clean_sheets)
+        st.download_button(
+            label=f"📥 Download Hasil Rapi ({len(kalbar_clean_sheets)} sheet)",
+            data=kalbar_excel_bytes,
+            file_name=f"Kalimantan_Dedicated_Rapi_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key=f"dl_kalbar_clean_{page_key}",
+        )
+        st.divider()
+    # === END DOWNLOAD HASIL RAPI PER SHEET ===
 
     # CHECK MINIMUM MOQ 
     st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
