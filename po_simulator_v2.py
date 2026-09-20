@@ -1610,15 +1610,15 @@ def _file_upload_section(page_key: str):
     # === DOWNLOAD HASIL RAPI PER SHEET (khusus Dedicated Kalimantan) ===
     if is_kalbar_mode and ready:
         st.markdown("""<div class="pipeline-step active"><span class="step-number">✓</span>
-        <strong>Download Hasil Rapi — per Sheet (Dedicated Kalimantan)</strong></div>""", unsafe_allow_html=True)
+        <strong>Download Gabungan</strong></div>""", unsafe_allow_html=True)
 
         kalbar_clean_sheets = {}
+        kalbar_dist_map = {}
         for p in ready:
             clean_df = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
             clean_df = clean_df.dropna(how="all")
 
             sheet_label = p.get("sheet_name") or p["name"]
-            # nama sheet Excel maksimal 31 char & tidak boleh ada karakter \/*?:[]
             base_name = re.sub(r'[\\/*?:\[\]]', "", str(sheet_label)).strip()[:31] or "Sheet"
             safe_sheet_name = base_name
             dupe_i = 1
@@ -1626,11 +1626,44 @@ def _file_upload_section(page_key: str):
                 suffix = f"_{dupe_i}"
                 safe_sheet_name = base_name[:31 - len(suffix)] + suffix
                 dupe_i += 1
+
             kalbar_clean_sheets[safe_sheet_name] = clean_df
+            _dv = p.get("dist_val", "")
+            kalbar_dist_map[safe_sheet_name] = _dv if _dv not in ("", "(Pilih)", None) else ""
 
-            with st.expander(f"👁 {sheet_label} — {len(clean_df)} baris × {clean_df.shape[1]} kolom", expanded=False):
-                st.dataframe(clean_df.reset_index(drop=True), use_container_width=True)
+        # ── Preview ringkas: 1 expander untuk semua sheet ──   (indent 8 spasi, sejajar `for p in ready:`)
+        summary_df = pd.DataFrame(
+            [{"Sheet": sn, "Baris": len(d), "Kolom": d.shape[1]} for sn, d in kalbar_clean_sheets.items()],
+            columns=["Sheet", "Baris", "Kolom"],
+        )
 
+        empty_sheets = summary_df.loc[summary_df["Baris"] == 0, "Sheet"].tolist()
+        if empty_sheets:
+            st.warning(f"⚠️ Sheet kosong (0 baris): {', '.join(empty_sheets)}")
+
+        with st.expander(
+            f"👁 Preview — {len(kalbar_clean_sheets)} sheet · {summary_df['Baris'].sum():,} baris total",
+            expanded=False,
+        ):
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+            pick = st.selectbox(
+                "Lihat isi sheet",
+                options=["(Semua sheet)"] + list(kalbar_clean_sheets.keys()),
+                key=f"kalbar_preview_pick_{page_key}",
+            )
+
+            if pick == "(Semua sheet)":
+                frames_prev = []
+                for sn, d in kalbar_clean_sheets.items():
+                    d = d.loc[:, ~d.columns.duplicated()].copy()
+                    d.insert(0, "SHEET", sn)
+                    frames_prev.append(d)
+                prev_df = pd.concat(frames_prev, ignore_index=True)
+            else:
+                prev_df = kalbar_clean_sheets[pick]
+
+            st.dataframe(prev_df.reset_index(drop=True), use_container_width=True, height=400)
         def _build_kalbar_clean_excel(sheets_dict: dict, dist_name: str = "", dist_map: dict = None) -> bytes:
             buf = io.BytesIO()
             wb = Workbook()
@@ -1646,6 +1679,7 @@ def _file_upload_section(page_key: str):
         
             for sn, sdf in sheets_dict.items():
                 ws = wb.create_sheet(title=sn[:31])
+                sheet_dist = (dist_map or {}).get(sn) or dist_name
         
                 # ── Row 1: Title ──────────────────────────────────
                 ws["A1"] = "PUCHASE ORDER FORM"
@@ -1655,7 +1689,7 @@ def _file_upload_section(page_key: str):
                 # ── Row 2: Customer Name ──────────────────────────
                 ws["A2"] = "CUSTOMER NAME"
                 ws["A2"].font = LABEL_FONT
-                ws["B2"] = dist_name
+                ws["B2"] = sheet_dist
                 ws["B2"].font = Font(bold=True, size=10)
                 ws["D2"] = "DATE"
                 ws["D2"].font = LABEL_FONT
@@ -1708,7 +1742,9 @@ def _file_upload_section(page_key: str):
                     excel_row = DATA_START_ROW + r_offset
                     for ci, col_name in enumerate(COL_HEADERS, start=1):
                         src = col_map.get(col_name)
-                        if col_name == "TOTAL PRICE":
+                        if col_name == "DISTRIBUTOR":
+                            cell = ws.cell(row=excel_row, column=ci, value=sheet_dist)
+                        elif col_name == "TOTAL PRICE":
                             # formula: QTY * DPP
                             val = f"=D{excel_row}*E{excel_row}"
                             cell = ws.cell(row=excel_row, column=ci, value=val)
@@ -1764,17 +1800,17 @@ def _file_upload_section(page_key: str):
 
         # fallback: nama distributor pertama yang valid
         _kalbar_dist_name = next(iter(_kalbar_dist_map.values()), "")
-        kalbar_excel_bytes = _build_kalbar_clean_excel(kalbar_clean_sheets, dist_name=_kalbar_dist_name, dist_map=_kalbar_dist_map)
+        kalbar_excel_bytes = _build_kalbar_clean_excel(kalbar_clean_sheets, dist_map=kalbar_dist_map)
         st.download_button(
-            label=f"📥 Download Hasil Rapi ({len(kalbar_clean_sheets)} sheet)",
+            label=f"Download({len(kalbar_clean_sheets)} sheet)",
             data=kalbar_excel_bytes,
-            file_name=f"Kalimantan_Dedicated_Rapi_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            file_name=f"Kalimantan_File_PO{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             key=f"dl_kalbar_clean_{page_key}",
         )
         st.divider()
-    # === END DOWNLOAD HASIL RAPI PER SHEET ===
+    # === END DOWNLOAD SHEET ===
 
     # CHECK MINIMUM MOQ 
     st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
@@ -1790,7 +1826,6 @@ def _file_upload_section(page_key: str):
         moq_map = moq_master.set_index("sku")["MOQ"].to_dict()
         moq_name_map = moq_master.set_index("sku")["product_name"].to_dict()
 
-        all_under_moq = []
         st.markdown(
     """
     <p style="color:#A82020; font-size:1 rem; font-weight:bold;">
@@ -1800,8 +1835,32 @@ def _file_upload_section(page_key: str):
     """,
     unsafe_allow_html=True
         )
+
+        STD_COLS = ["SKU", "Product Name (MOQ Ref)", "QTY", "MOQ", "MOQ Check"]
+        moq_summary, moq_preview_all, moq_under_all, moq_skipped = [], {}, [], []
+
+        def _highlight_moq(val):
+            if val == "Under MOQ":
+                return "background-color:#F8D7DA;color:#721C24;font-weight:600;"
+            elif val == "SAFE MOQ":
+                return "background-color:#D4EDDA;color:#155724;font-weight:600;"
+            elif val == "MOQ Not Found":
+                return "background-color:#FFF3CD;color:#856404;font-weight:600;"
+            return ""
+
+        def _clean_qty(v):
+            s = str(v).strip()
+            try:
+                f = float(s.replace(",", "."))
+                return str(int(f)) if f == int(f) else s
+            except Exception:
+                return s
+
         for p in ready:
             fname = p["name"]
+            sh = p.get("sheet_name")
+            label = f"{fname} · {sh}" if isinstance(sh, str) and sh != fname else fname
+
             df_moq = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
             df_moq.columns = [str(c).strip().upper() for c in df_moq.columns]
 
@@ -1810,83 +1869,93 @@ def _file_upload_section(page_key: str):
             qty_col_m = next((c for c in df_moq.columns if c.strip().upper() in ("QTY","QUANTITY")), None)
 
             if not sku_col_m or not qty_col_m:
-                st.caption(f"ℹ️ **{fname}** — kolom SKU/QTY tidak terdeteksi, skip cek MOQ.")
+                moq_skipped.append(label)
                 continue
 
             df_moq[sku_col_m] = df_moq[sku_col_m].astype(str).str.strip().str.upper()
             df_moq["MOQ"] = df_moq[sku_col_m].map(moq_map)
             df_moq["Product Name (MOQ Ref)"] = df_moq[sku_col_m].map(moq_name_map)
 
-            def _moq_status(row):
+            def _moq_status(row, _q=qty_col_m):
                 moq_val = row["MOQ"]
-                s = str(row[qty_col_m]).strip().lower()
-
+                s = str(row[_q]).strip().lower()
                 if pd.isna(moq_val):
                     return "MOQ Not Found"
-
                 if s in _INVALID_QTY:
                     return "N/A"
                 try:
                     qty_val = float(s.replace(",", "."))
                 except Exception:
                     return "N/A"
-
                 return "Under MOQ" if (qty_val < moq_val and qty_val < 50) else "SAFE MOQ"
 
             df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
 
             show_cols = [sku_col_m, "Product Name (MOQ Ref)", qty_col_m, "MOQ", "MOQ Check"]
+
             under_moq = df_moq[df_moq["MOQ Check"] == "Under MOQ"][show_cols].copy()
-            
-            if under_moq.empty:
-                st.success(f"**{fname}** - ✅ **SAFE MOQ**")
+            under_moq.columns = STD_COLS
+            if not under_moq.empty:
+                under_moq.insert(0, "Sheet", label)
+                moq_under_all.append(under_moq)
+
+            sku_valid = (df_moq[sku_col_m].notna()
+                         & df_moq[sku_col_m].astype(str).str.strip().ne("")
+                         & df_moq[sku_col_m].astype(str).str.upper().ne("NAN"))
+            df_prev = df_moq[sku_valid & (df_moq["MOQ Check"] != "N/A")][show_cols].copy()
+            df_prev.columns = STD_COLS
+            df_prev["QTY"] = df_prev["QTY"].apply(_clean_qty)
+            df_prev["MOQ"] = df_prev["MOQ"].apply(_clean_qty)
+            moq_preview_all[label] = df_prev
+
+            moq_summary.append({
+                "Sheet": label,
+                "Baris": len(df_prev),
+                "Under MOQ": len(under_moq),
+                "MOQ Not Found": int((df_prev["MOQ Check"] == "MOQ Not Found").sum()),
+            })
+
+        if moq_skipped:
+            st.caption(f"ℹ️ Kolom SKU/QTY tidak terdeteksi, skip cek MOQ: {', '.join(moq_skipped)}")
+
+        if moq_summary:
+            moq_sum_df = pd.DataFrame(moq_summary)
+            total_under = int(moq_sum_df["Under MOQ"].sum())
+
+            if total_under == 0:
+                st.success(f"✅ SAFE MOQ — {len(moq_sum_df)} sheet/file dicek, semua aman")
             else:
-                under_moq_labeled = under_moq.copy()
-                under_moq_labeled.insert(0, "File", fname)
-                all_under_moq.append(under_moq_labeled)
+                n_bad = int((moq_sum_df["Under MOQ"] > 0).sum())
+                st.error(f"❌ {total_under} baris di bawah MOQ minimum, dari {n_bad} sheet/file")
+                st.dataframe(pd.concat(moq_under_all, ignore_index=True),
+                             use_container_width=True, hide_index=True)
 
-                st.warning(f"⚠️ **{fname}** — {len(under_moq)} baris di bawah MOQ minimum")
-                st.dataframe(under_moq, use_container_width=True, hide_index=True)
+            with st.expander(f"👁 Preview MOQ — {len(moq_sum_df)} sheet/file · {int(moq_sum_df['Baris'].sum()):,} baris",
+                             expanded=False):
+                st.dataframe(moq_sum_df, use_container_width=True, hide_index=True)
 
-            def _highlight_moq(val):
-                if val == "Under MOQ":
-                    return "background-color:#F8D7DA;color:#721C24;font-weight:600;"
-                elif val == "SAFE MOQ":
-                    return "background-color:#D4EDDA;color:#155724;font-weight:600;"
-                elif val == "MOQ Not Found":
-                    return "background-color:#FFF3CD;color:#856404;font-weight:600;"
-                return ""
-
-            sku_valid = df_moq[sku_col_m].notna() & df_moq[sku_col_m].astype(str).str.strip().ne("") & df_moq[sku_col_m].astype(str).str.upper().ne("NAN")
-            df_preview_moq = df_moq[sku_valid & (df_moq["MOQ Check"] != "N/A")][show_cols].copy()
-
-            def _clean_qty(v):
-                s = str(v).strip()
-                try:
-                    f = float(s.replace(",", "."))
-                    return str(int(f)) if f == int(f) else s
-                except Exception:
-                    return s
-            df_preview_moq[qty_col_m] = df_preview_moq[qty_col_m].apply(_clean_qty)
-            df_preview_moq["MOQ"] = df_preview_moq["MOQ"].apply(_clean_qty)
-
-            with st.expander(f"👁 Preview — {fname} ({len(df_preview_moq)} baris, {len(df_moq) - len(df_preview_moq)} N/A disembunyikan)", expanded=False):
-                if df_preview_moq.empty:
-                    st.caption("Tidak ada baris valid untuk ditampilkan (semua N/A).")
+                moq_pick = st.selectbox(
+                    "Lihat isi sheet",
+                    options=["(Semua sheet)"] + list(moq_preview_all.keys()),
+                    key=f"moq_preview_pick_{page_key}",
+                )
+                if moq_pick == "(Semua sheet)":
+                    _frames = []
+                    for _lb, _d in moq_preview_all.items():
+                        _d = _d.copy()
+                        _d.insert(0, "Sheet", _lb)
+                        _frames.append(_d)
+                    moq_prev_df = pd.concat(_frames, ignore_index=True) if _frames else pd.DataFrame(columns=["Sheet"] + STD_COLS)
                 else:
-                    st.dataframe(
-                        df_preview_moq.style.map(_highlight_moq, subset=["MOQ Check"]),
-                        use_container_width=True, hide_index=True
-                    )
+                    moq_prev_df = moq_preview_all[moq_pick]
 
-        if all_under_moq:
-            combined_under_moq = pd.concat(all_under_moq, ignore_index=True)
-            st.divider()
-            st.error(f"❌ Total **{len(combined_under_moq)}** baris QTY di bawah MOQ minimum dari semua file")
-            st.dataframe(combined_under_moq, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    moq_prev_df.reset_index(drop=True).style.map(_highlight_moq, subset=["MOQ Check"]),
+                    use_container_width=True, hide_index=True, height=400,
+                )
 
     st.divider()
-    # END CHECK MOQ 
+    # END CHECK MOQ
 
     auto_run = bool(ready) and any(
         p["row_rng"].strip() or p["col_rng"].strip() or p["dist_val"] not in ("", "(Pilih)")
