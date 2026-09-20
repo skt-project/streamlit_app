@@ -83,38 +83,14 @@ def _read_df(file_bytes: bytes, sheet_name, header_row: int) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False)
-def _get_qty_value_map(file_bytes: bytes, sheet_name: str, header_row: int, sku_col: str, qty_col: str) -> dict:
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
-    ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
-    hdr_row = header_row + 1
-    headers = {}
-    for c in range(1, ws.max_column + 1):
-        v = ws.cell(row=hdr_row, column=c).value
-        if v is not None:
-            headers[str(v).strip()] = c
-    sku_ci = headers.get(sku_col)
-    qty_ci = headers.get(qty_col)
-    result = {}
-    if sku_ci and qty_ci:
-        for r in range(hdr_row + 1, ws.max_row + 1):
-            sv = ws.cell(row=r, column=sku_ci).value
-            if sv is None:
-                continue
-            sv = str(sv).strip()
-            result[sv] = ws.cell(row=r, column=qty_ci).value
-    wb.close()
-    return result
-
-
 def _detect_col(df, keywords):
     return next((c for c in df.columns if any(k in c.lower() for k in keywords)), None)
 
 
-_SKU_KEYWORDS       = ["sku", "product code", "kode", "code"]
-_QTY_KEYWORDS       = ["qty", "quantity"]
-_DESC_KEYWORDS      = ["description", "deskripsi", "nama barang", "nama produk"]
-_DPP_KEYWORDS       = ["dpp"]
+_SKU_KEYWORDS         = ["sku", "product code", "kode", "code"]
+_QTY_KEYWORDS         = ["qty", "quantity"]
+_DESC_KEYWORDS        = ["description", "deskripsi", "nama barang", "nama produk"]
+_DPP_KEYWORDS         = ["dpp"]
 _TOTAL_PRICE_KEYWORDS = ["total price", "total harga", "jumlah harga"]
 _DISTRIBUTOR_KEYWORDS = ["distributor"]
 
@@ -131,8 +107,8 @@ def _detect_extra_cols(df) -> dict:
 def _pick_template_sheet(file_bytes: bytes, sheets: list):
     for sh in sheets:
         try:
-            hrow   = detect_header_row(file_bytes, sh)
-            df_try = _read_df(file_bytes, sh, hrow)
+            hrow    = detect_header_row(file_bytes, sh)
+            df_try  = _read_df(file_bytes, sh, hrow)
             dist_c  = _detect_col(df_try, _DISTRIBUTOR_KEYWORDS)
             sku_c   = _detect_col(df_try, _SKU_KEYWORDS)
             desc_c  = _detect_col(df_try, _DESC_KEYWORDS)
@@ -179,33 +155,67 @@ def _parse_distributor_blocks(raw_text: str) -> dict:
     return blocks
 
 
-def _apply_qty_changes(file_bytes: bytes, sheet_name: str, header_row: int,
-                        sku_col: str, qty_col: str, value_map: dict, mode: str):
+def _parse_edit_lines(lines) -> tuple:
+    """'SKU, 50' / 'SKU 50' / 'SKU<tab>50' -> {sku: qty}, list baris invalid"""
+    edits, invalid = {}, []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("--") or line.startswith("#"):
+            continue
+        parts = [p for p in re.split(r"[,\t;\s]+", line) if p]
+        try:
+            edits[parts[0]] = int(float(parts[1]))
+        except (IndexError, ValueError):
+            invalid.append(line)
+    return edits, invalid
+
+
+def _parse_edit_blocks(raw_text: str) -> tuple:
+    blocks, invalid = {}, []
+    for k, lines in _parse_distributor_blocks(raw_text).items():
+        blocks[k], bad = _parse_edit_lines(lines)
+        invalid += [f"{k}: {b}" for b in bad]
+    return blocks, invalid
+
+
+def _apply_qty_changes(file_bytes, sheet_name, header_row, sku_col, qty_col,
+                       delete_skus=(), edit_map=None):
+    """Hapus + modify dalam 1 pass. Kalau SKU ada di dua-duanya, hapus menang."""
+    edit_map = edit_map or {}
+    delete_skus = set(delete_skus)
+    targets = delete_skus | set(edit_map)
+
     wb_vals = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
     ws_vals = wb_vals[sheet_name] if sheet_name in wb_vals.sheetnames else wb_vals.active
     hdr_row = header_row + 1
-    headers_vals = {ws_vals.cell(row=hdr_row, column=c).value: c for c in range(1, ws_vals.max_column + 1)}
+    headers_vals = {ws_vals.cell(row=hdr_row, column=c).value: c
+                    for c in range(1, ws_vals.max_column + 1)}
     sku_ci_vals = headers_vals.get(sku_col)
-    row_map = {}
+    row_map = {}   # sku -> list of rows (SKU dobel di 1 sheet ikut kena semua)
     if sku_ci_vals:
         for r in range(hdr_row + 1, ws_vals.max_row + 1):
             sv = str(ws_vals.cell(row=r, column=sku_ci_vals).value or "").strip()
-            if sv in value_map:
-                row_map[sv] = r
+            if sv in targets:
+                row_map.setdefault(sv, []).append(r)
     wb_vals.close()
 
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=False)
     ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
     headers = {ws.cell(row=hdr_row, column=c).value: c for c in range(1, ws.max_column + 1)}
     qty_ci = headers.get(qty_col)
-    changed = 0
+    n_del = n_edit = 0
     if qty_ci:
-        for sv, r in row_map.items():
-            ws.cell(row=r, column=qty_ci).value = None if mode == "delete" else value_map[sv]
-            changed += 1
+        for sv, rows in row_map.items():
+            for r in rows:
+                if sv in delete_skus:
+                    ws.cell(row=r, column=qty_ci).value = None
+                    n_del += 1
+                else:
+                    ws.cell(row=r, column=qty_ci).value = edit_map[sv]
+                    n_edit += 1
     buf = io.BytesIO()
     wb.save(buf)
-    return buf.getvalue(), changed
+    return buf.getvalue(), n_del, n_edit
 
 
 def _make_zip(results: dict) -> bytes:
@@ -235,7 +245,7 @@ st.caption(
     "ditampilkan di sini untuk pemilihan manual."
 )
 
-file_meta    = []
+file_meta     = []
 excluded_meta = []
 
 # ---------- Process uploaded files in 3 columns ----------
@@ -265,24 +275,12 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
 
             auto_sheet = _pick_template_sheet(fbytes, sheets)
 
-      
             if auto_sheet is not None:
 
-                auto_hrow = detect_header_row(
-                    fbytes, auto_sheet
-                )
-
-                auto_df = _read_df(
-                    fbytes, auto_sheet, auto_hrow
-                )
-
-                auto_sku = _detect_col(
-                    auto_df, _SKU_KEYWORDS
-                )
-
-                auto_qty = _detect_col(
-                    auto_df, _QTY_KEYWORDS
-                )
+                auto_hrow = detect_header_row(fbytes, auto_sheet)
+                auto_df   = _read_df(fbytes, auto_sheet, auto_hrow)
+                auto_sku  = _detect_col(auto_df, _SKU_KEYWORDS)
+                auto_qty  = _detect_col(auto_df, _QTY_KEYWORDS)
 
                 file_meta.append({
                     "fi": fi,
@@ -320,15 +318,14 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
                             disabled=True,
                         )
 
-
                     with col_badge:
-                        st.success(f"✅ OK")
+                        st.success("✅ OK")
 
                     with st.expander("👁 Preview data", expanded=False):
                         st.dataframe(auto_df, use_container_width=True, hide_index=True)
 
                 continue
-            
+
             with st.container(border=True):
 
                 st.markdown(
@@ -336,7 +333,7 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
                     "sheet template tidak terdeteksi otomatis"
                 )
 
-                col_sheet, col_hrow,col_badge = st.columns([2, 1, 2.2])
+                col_sheet, col_hrow, col_badge = st.columns([2, 1, 2.2])
 
                 with col_sheet:
                     sheet_sel = st.selectbox(
@@ -346,9 +343,7 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
                         key=f"check_sheet_{fi}"
                     )
 
-                hrow_default = detect_header_row(
-                    fbytes, sheet_sel
-                )
+                hrow_default = detect_header_row(fbytes, sheet_sel)
 
                 with col_hrow:
                     hrow_input = st.number_input(
@@ -363,20 +358,10 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
 
                 try:
 
-                    df = _read_df(
-                        fbytes,
-                        sheet_sel,
-                        header_row
-                    )
+                    df = _read_df(fbytes, sheet_sel, header_row)
 
-                    sku_col = _detect_col(
-                        df, _SKU_KEYWORDS
-                    )
-
-                    qty_col = _detect_col(
-                        df, _QTY_KEYWORDS
-                    )
-
+                    sku_col = _detect_col(df, _SKU_KEYWORDS)
+                    qty_col = _detect_col(df, _QTY_KEYWORDS)
 
                     missing = []
                     if not sku_col:
@@ -386,35 +371,19 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
 
                     with col_badge:
                         if missing:
-                            st.warning(
-                                f"⚠️"
-                                f"{' & '.join(missing)} "
-                                "MISSING"
-                            )
+                            st.warning(f"⚠️{' & '.join(missing)} MISSING")
                         else:
-                            st.success(
-                                f"✅OK"
-                            )
+                            st.success("✅OK")
 
                     if missing:
                         excluded_meta.append({
                             "fname": fname,
-                            "reason": (
-                                f"kolom {' & '.join(missing)} "
-                                f"tidak terdeteksi"
-                            )
+                            "reason": f"kolom {' & '.join(missing)} tidak terdeteksi"
                         })
                         continue
 
-                    with st.expander(
-                        "👁 Preview data",
-                        expanded=False
-                    ):
-                        st.dataframe(
-                            df,
-                            use_container_width=True,
-                            hide_index=True
-                        )
+                    with st.expander("👁 Preview data", expanded=False):
+                        st.dataframe(df, use_container_width=True, hide_index=True)
 
                     file_meta.append({
                         "fi": fi,
@@ -439,11 +408,15 @@ for row_start in range(0, len(uploaded_files), cols_per_row):
 
 st.markdown("#### 3. Modifikasi")
 tab1, tab2, tab3 = st.tabs([
-    "🔴 Hapus per File",
-    "❌ Hapus SKU di Semua File Sekaligus",
+    "🔴 Hapus / Modify per File",
+    "❌ Hapus / Modify di Semua File Sekaligus",
     "🗂️ Modifikasi Semua Sheet dalam 1 File",
 ])
 
+
+# =====================================================================
+# TAB 1 — per file
+# =====================================================================
 with tab1:
     if not file_meta:
         st.info("Belum ada file dengan kolom SKU/QTY yang berhasil terdeteksi.")
@@ -455,85 +428,48 @@ with tab1:
         header_row = fm["header_row"]
         sku_col    = fm["sku_col"]
         qty_col    = fm["qty_col"]
-        desc_col   = fm.get("desc_col")
 
         with st.container(border=True):
             st.markdown(f"**{fname}**")
             st.caption(f"SKU: **{sku_col}** · Quantity: **{qty_col}**")
 
-            raw_codes = st.text_area(
-                "Daftar Product Code",
-                height=150, key=f"codes_{fi}",
-                placeholder="SKU1\nSKU2\nSKU3",
-            )
+            c_del, c_edit = st.columns(2)
+            with c_del:
+                raw_del = st.text_area(
+                    "🗑️ Hapus QTY (1 SKU per baris)",
+                    height=150, key=f"del_{fi}",
+                    placeholder="SKU1\nSKU2",
+                )
+            with c_edit:
+                raw_edit = st.text_area(
+                    "✏️ Modify QTY, FORMAT: SKU, QTY",
+                    height=150, key=f"edit_{fi}",
+                    placeholder="SKU1, 50\nSKU2, 120",
+                )
 
-            b1, b2 = st.columns(2)
-            with b1:
-                do_edit   = st.button("Modifikasi QTY",  use_container_width=True, key=f"btn_edit_{fi}")
-            with b2:
-                do_delete = st.button("Auto Hapus SKU",  use_container_width=True, key=f"btn_del_{fi}")
+            if st.button("Proceed", use_container_width=True, type="primary", key=f"btn_go_{fi}"):
+                del_skus = _parse_sku_lines(raw_del)
+                edit_map, invalid = _parse_edit_lines(raw_edit.splitlines())
 
-            skus = _parse_sku_lines(raw_codes)
+                if invalid:
+                    st.warning("⚠️ Format salah (harus `SKU, QTY`): " + " | ".join(invalid))
 
-            if do_delete:
-                if not skus:
-                    st.warning("⚠️ Tidak ada SKU yang valid di daftar.")
+                if not del_skus and not edit_map:
+                    st.warning("⚠️ Isi minimal salah satu kolom.")
                 else:
-                    out_bytes, cnt = _apply_qty_changes(
+                    out_bytes, n_del, n_edit = _apply_qty_changes(
                         fbytes, sheet_sel, header_row, sku_col, qty_col,
-                        {s: None for s in skus}, mode="delete"
+                        del_skus, edit_map
                     )
                     st.session_state[f"result_{fi}"] = {
-                        "fname": fname, "bytes": out_bytes, "cnt": cnt, "mode": "Auto Hapus"
+                        "fname": fname, "bytes": out_bytes,
+                        "cnt": n_del + n_edit,
+                        "mode": f"{n_del} dihapus · {n_edit} diubah",
                     }
-
-            if do_edit:
-                if not skus:
-                    st.warning("⚠️ Tidak ada SKU yang valid di daftar.")
-                else:
-                    st.session_state[f"edit_skus_{fi}"] = skus
-
-            edit_skus = st.session_state.get(f"edit_skus_{fi}")
-            if edit_skus:
-                st.markdown("**Atur quantity baru per Product Code:**")
-                sku_qty_map = _get_qty_value_map(fbytes, sheet_sel, header_row, sku_col, qty_col)
-                desc_map = {}
-                if desc_col:
-                    desc_map = dict(zip(fm["df"][sku_col].astype(str).str.strip(), fm["df"][desc_col]))
-                new_values = {}
-                for s in edit_skus:
-                    cur_q = sku_qty_map.get(s, None)
-                    try:
-                        cur_q_int = int(float(cur_q)) if cur_q not in (None, "") else 0
-                    except Exception:
-                        cur_q_int = 0
-                    rc1, rc2, rc3 = st.columns([3, 2, 3])
-                    with rc1:
-                        st.markdown(f"**{s}**")
-                        if desc_col:
-                            desc_val = desc_map.get(s)
-                            st.caption(desc_val if desc_val not in (None, "", "nan") else "-")
-                    with rc2:
-                        st.caption("QTY saat ini")
-                        st.markdown(f"**{cur_q if cur_q is not None else '-'}**")
-                    with rc3:
-                        new_values[s] = st.number_input(
-                            "Quantity baru", min_value=0, step=1, value=cur_q_int,
-                            key=f"newqty_{fi}_{s}", label_visibility="collapsed"
-                        )
-
-                if st.button("Simpan Perubahan QTY", use_container_width=True, key=f"apply_edit_{fi}"):
-                    out_bytes, cnt = _apply_qty_changes(
-                        fbytes, sheet_sel, header_row, sku_col, qty_col, new_values, mode="edit"
-                    )
-                    st.session_state[f"result_{fi}"] = {
-                        "fname": fname, "bytes": out_bytes, "cnt": cnt, "mode": "Modifikasi QTY"
-                    }
-                    st.session_state.pop(f"edit_skus_{fi}", None)
 
             result = st.session_state.get(f"result_{fi}")
             if result:
-                st.success(f"✅ {result['mode']} — {result['cnt']} baris berhasil diubah.")
+                st.success(f"✅ Selesai — {result['mode']}.")
                 st.download_button(
                     label=f"⬇️ Download {fname} ({result['cnt']} baris diubah)",
                     data=result["bytes"],
@@ -544,27 +480,48 @@ with tab1:
                 )
 
 
+# =====================================================================
+# TAB 2 — semua file, per distributor
+# =====================================================================
 with tab2:
-    st.markdown("#### Hapus Semua SKU Sekaligus per Distributor/File")
-    st.caption(
-        "Paste daftar SKU dikelompokkan per distributor pakai header `=== NAMA DISTRIBUTOR ===`. "
-        "Sistem hanya akan hapus SKU dari blok distributor yang cocok untuk file tersebut."
-    )
+    st.markdown("#### Hapus / Modify QTY di Semua File Sekaligus per Distributor")
+    
 
-    mass_codes = st.text_area(
-        "Daftar Product Code per distributor",
-        height=150, key="mass_codes",
-        placeholder=(
-            "=== PASTE NAMA DISTRI FROM PO SIMULATOR ===\n"
-            "G2G-SKU\n"
-        ),
-    )
+    m_del, m_edit = st.columns(2)
+    with m_del:
+        mass_del = st.text_area(
+            "🗑️ Hapus QTY per distributor",
+            height=150, key="mass_del",
+            placeholder=(
+                "=== PASTE NAMA DISTRI FROM PO SIMULATOR ===\n"
+                "G2G-SKU1\n"
+                "G2G-SKU2\n"
+            ),
+        )
+    with m_edit:
+        mass_edit = st.text_area(
+            "✏️ Modify QTY, FORMAT: SKU, QTY",
+            height=150, key="mass_edit",
+            placeholder=(
+                "=== PASTE NAMA DISTRI FROM PO SIMULATOR ===\n"
+                "G2G-SKU3, 50\n"
+                "G2G-SKU4, 120\n"
+            ),
+        )
 
-    dist_blocks_preview = _parse_distributor_blocks(mass_codes) if mass_codes.strip() else {}
-    if dist_blocks_preview:
+    del_blocks = _parse_distributor_blocks(mass_del) if mass_del.strip() else {}
+    edit_blocks, mass_bad = _parse_edit_blocks(mass_edit) if mass_edit.strip() else ({}, [])
+    if mass_bad:
+        st.warning("⚠️ Format salah (harus `SKU, QTY`): " + " | ".join(mass_bad))
+
+    distributor_options = list(dict.fromkeys([*del_blocks, *edit_blocks]))
+    if distributor_options:
         st.caption(
             "Distributor terdeteksi: "
-            + ", ".join(f"**{k}** ({len(v)} SKU)" for k, v in dist_blocks_preview.items())
+            + ", ".join(
+                f"**{k}** ({len(del_blocks.get(k, []))} hapus · {len(edit_blocks.get(k, {}))} modify)"
+                for k in distributor_options
+            )
         )
 
     st.markdown("#### Tentukan Distributor per File")
@@ -573,7 +530,6 @@ with tab2:
     if not file_meta:
         st.info("Belum ada file yang berhasil dibaca kolom SKU/QTY-nya.")
     else:
-        distributor_options = list(dist_blocks_preview.keys())
         if not distributor_options:
             st.info("ℹ️ Paste daftar SKU per distributor di atas dulu (format `=== NAMA ===`).")
 
@@ -601,9 +557,8 @@ with tab2:
                             key=state_key,
                         )
 
-    if st.button("Modify Semua File", use_container_width=True):
-        dist_blocks = _parse_distributor_blocks(mass_codes)
-        if not dist_blocks:
+    if st.button("Proceed", use_container_width=True, type="primary", key="mass_go"):
+        if not distributor_options:
             st.warning("⚠️ Tidak ada blok distributor yang valid. Format: `=== NAMA DISTRIBUTOR ===`.")
         elif not file_meta:
             st.warning("⚠️ Belum ada file yang berhasil dibaca kolom SKU/QTY-nya.")
@@ -615,30 +570,35 @@ with tab2:
                 if not dist_name or dist_name == "-- pilih distributor --":
                     skipped.append(f"{fm['fname']} — belum pilih distributor")
                     continue
-                skus_for_file = dist_blocks.get(dist_name)
-                if not skus_for_file:
+
+                del_list = del_blocks.get(dist_name, [])
+                edit_map = edit_blocks.get(dist_name, {})
+                if not del_list and not edit_map:
                     skipped.append(f"{fm['fname']} — tidak ada blok SKU untuk '{dist_name}'")
                     continue
-                out_bytes, cnt = _apply_qty_changes(
+
+                out_bytes, n_del, n_edit = _apply_qty_changes(
                     fm["fbytes"], fm["sheet"], fm["header_row"],
                     fm["sku_col"], fm["qty_col"],
-                    {s: None for s in skus_for_file}, mode="delete"
+                    del_list, edit_map
                 )
                 st.session_state[f"result_{fm['fi']}"] = {
-                    "fname": fm["fname"], "bytes": out_bytes, "cnt": cnt, "mode": "Auto Hapus"
+                    "fname": fm["fname"], "bytes": out_bytes,
+                    "cnt": n_del + n_edit,
+                    "mode": f"{n_del} dihapus · {n_edit} diubah",
                 }
-                summary.append((fm["fname"], dist_name, cnt))
+                summary.append((fm["fname"], dist_name, n_del, n_edit))
 
             if summary:
                 st.success("✅ Selesai:")
-                for fname, dist_name, cnt in summary:
-                    st.markdown(f"- **{fname}** ({dist_name}) — {cnt} baris dihapus")
+                for fname, dist_name, n_del, n_edit in summary:
+                    st.markdown(f"- **{fname}** ({dist_name}) — {n_del} dihapus · {n_edit} diubah")
             #if skipped:
             #    st.warning("⚠️ File berikut dilewati:")
             #    for s in skipped:
             #        st.markdown(f"- {s}")
 
-    #Download semua hasil
+    # Download semua hasil
     st.divider()
     st.markdown("#### Download Hasil")
 
@@ -680,18 +640,22 @@ with tab2:
             use_container_width=True,
             key="dl_all_zip",
         )
+
+
+# =====================================================================
+# TAB 3 — semua sheet dalam 1 file
+# =====================================================================
 with tab3:
     st.markdown("#### Modifikasi QTY di Semua Sheet dalam Satu File")
     st.caption(
-        "Upload 1 file Excel, sistem akan detect semua sheet yang punya kolom SKU & QTY, "
-        "lalu terapkan perubahan ke semua sheet sekaligus."
+        "Pilih 1 file Excel, sistem akan detect semua sheet yang punya kolom SKU & QTY, "
+        "lalu terapkan hapus/modify QTY ke semua sheet sekaligus."
     )
 
-    # ── 1. File picker (reuse dari uploaded_files, atau upload ulang khusus tab ini) ──
+    # ── 1. File picker ─────────────────────────────────────────────────
     if not uploaded_files:
         st.info("Upload file di bagian atas dulu ya 😊")
     else:
-        # Pilih 1 file dari yang sudah diupload
         file_options = {uf.name: idx for idx, uf in enumerate(uploaded_files)}
         selected_fname = st.selectbox(
             "Pilih file yang mau diproses:",
@@ -713,9 +677,9 @@ with tab3:
             st.stop()
 
         tab3_fname = tab3_meta_match["fname"]
-        tab3_bytes = tab3_meta_match["fbytes"]   # ← bytes yang sudah valid & ter-cache
+        tab3_bytes = tab3_meta_match["fbytes"]   # bytes yang sudah valid & ter-cache
 
-        # ── 2. Detect semua sheet ──────────────────────────────────────────
+        # ── 2. Detect semua sheet ──────────────────────────────────────
         all_sheets = _get_sheet_names(tab3_bytes)
         if not all_sheets:
             st.error("❌ Tidak ada sheet yang bisa dibaca dari file ini.")
@@ -756,11 +720,11 @@ with tab3:
         summary_rows = []
         for s in sheet_scan_results:
             summary_rows.append({
-                "Sheet":     s["sheet"],
-                "SKU Col":   s.get("sku_col") or "❌ Tidak ditemukan",
-                "QTY Col":   s.get("qty_col") or "❌ Tidak ditemukan",
-                "Rows":      s.get("row_count", "-"),
-                "Status":    "✅ Valid" if s["valid"] else "⚠️ Dilewati",
+                "Sheet":   s["sheet"],
+                "SKU Col": s.get("sku_col") or "❌ Tidak ditemukan",
+                "QTY Col": s.get("qty_col") or "❌ Tidak ditemukan",
+                "Rows":    s.get("row_count", "-"),
+                "Status":  "✅ Valid" if s["valid"] else "⚠️ Dilewati",
             })
         st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
@@ -773,7 +737,7 @@ with tab3:
             f"{len(invalid_sheets)} sheet dilewati (tidak ada kolom SKU/QTY)"
         )
 
-        # ── 3. Checkbox pilih sheet mana yang diproses ────────────────────
+        # ── 3. Checkbox pilih sheet mana yang diproses ─────────────────
         with st.expander("⚙️ Pilih Sheet yang Akan Dimodifikasi", expanded=False):
             sheet_enabled = {}
             for s in valid_sheets:
@@ -783,68 +747,88 @@ with tab3:
                     key=f"tab3_enable_{s['sheet']}",
                 )
             selected_valid_sheets = [s for s in valid_sheets if sheet_enabled.get(s["sheet"])]
-        
-        # ── 4. Input SKU per sheet pakai format === NAMA SHEET === ─────────
+
+        # ── 4. Input SKU per sheet pakai format === NAMA SHEET === ─────
         st.markdown("---")
         st.markdown("**Daftar Product Code per Sheet:**")
-        st.caption(
-            "Kelompokkan SKU pakai header `=== NAMA SHEET ===` — "
-            "nama harus cocok dengan nama sheet di file. "
-            "SKU di bawah tiap header akan dihapus QTY-nya di sheet yang sesuai."
-        )
 
-        tab3_raw_blocks = st.text_area(
-            "SKU per sheet",
-            height=200,
-            key="tab3_sku_input",
-            placeholder=(
-                "=== PT USAHA INDAH JAYA - BANJARBARU ===\n"
-                "-- STOP PO (2 SKU)\n"
-                "NJM101001\n"
-                "NJM104001\n\n"
-                "=== NAMA SHEET LAIN ===\n"
-                "SKU001\n"
-                "SKU002\n"
-            ),
-        )
+        t3_del, t3_edit = st.columns(2)
+        with t3_del:
+            tab3_del_raw = st.text_area(
+                "🗑️ Hapus QTY per sheet",
+                height=200,
+                key="tab3_del_input",
+                placeholder=(
+                    "=== PASTE NAMA DISTRI DISINI ===\n"
+                    "NJM101001\n"
+                    "NJM104001\n\n"
+                    "=== NAMA SHEET LAIN ===\n"
+                    "SKU001\n"
+                    "SKU002\n"
+                ),
+            )
+        with t3_edit:
+            tab3_edit_raw = st.text_area(
+                "✏️ Modify QTY, FORMAT : SKU, QTY",
+                height=200,
+                key="tab3_edit_input",
+                placeholder=(
+                    "=== PASTE NAMA DISTRI DISINI ===\n"
+                    "NJM105001, 50\n"
+                    "NJM106001, 120\n\n"
+                    "=== NAMA SHEET LAIN ===\n"
+                    "SKU003, 30\n"
+                ),
+            )
 
         # Parse blok — reuse fungsi yang sama dengan Tab 2
-        tab3_sheet_blocks = _parse_distributor_blocks(tab3_raw_blocks) if tab3_raw_blocks.strip() else {}
+        tab3_del_blocks = _parse_distributor_blocks(tab3_del_raw) if tab3_del_raw.strip() else {}
+        tab3_edit_blocks, tab3_bad = (
+            _parse_edit_blocks(tab3_edit_raw) if tab3_edit_raw.strip() else ({}, [])
+        )
+        if tab3_bad:
+            st.warning("⚠️ Format salah (harus `SKU, QTY`): " + " | ".join(tab3_bad))
 
-        if tab3_sheet_blocks:
+        tab3_keys = list(dict.fromkeys([*tab3_del_blocks, *tab3_edit_blocks]))
+
+        if tab3_keys:
             st.caption(
                 "Distributor/blok terdeteksi dari input: "
                 + ", ".join(
-                    f"**{k}** ({len(v)} SKU)" for k, v in tab3_sheet_blocks.items()
+                    f"**{k}** ({len(tab3_del_blocks.get(k, []))} hapus · "
+                    f"{len(tab3_edit_blocks.get(k, {}))} modify)"
+                    for k in tab3_keys
                 )
             )
 
-        # ── 5. Mapping: blok distributor → sheet di file ───────────────────
+        # ── 5. Mapping: blok distributor → sheet di file ───────────────
         st.markdown("---")
         st.markdown("**Mapping Distributor → Sheet di File:**")
         st.caption(
-            "Tentukan blok distributor mana yang akan dihapus SKU-nya di sheet mana. "
+            "Tentukan blok distributor mana yang diterapkan ke sheet mana. "
             "Satu sheet bisa menerima SKU dari beberapa blok distributor sekaligus."
         )
 
-        valid_sheet_names_list = ["-- lewati --"] + [s["sheet"] for s in valid_sheets]
+        valid_sheet_names_list = ["-- lewati --"] + [s["sheet"] for s in selected_valid_sheets]
         tab3_mapping = {}  # {dist_key: sheet_name or None}
 
-        if not tab3_sheet_blocks:
+        if not tab3_keys:
             st.info("ℹ️ Paste daftar SKU per distributor di atas dulu (format `=== NAMA ===`).")
         else:
             map_cols_per_row = 2
-            block_items = list(tab3_sheet_blocks.items())
 
-            for row_start in range(0, len(block_items), map_cols_per_row):
-                row_items = block_items[row_start:row_start + map_cols_per_row]
+            for row_start in range(0, len(tab3_keys), map_cols_per_row):
+                row_keys = tab3_keys[row_start:row_start + map_cols_per_row]
                 map_cols = st.columns(map_cols_per_row)
 
-                for col, (dist_key, skus) in zip(map_cols, row_items):
+                for col, dist_key in zip(map_cols, row_keys):
                     with col:
                         with st.container(border=True):
                             st.markdown(f"**{dist_key}**")
-                            st.caption(f"{len(skus)} SKU akan dihapus")
+                            st.caption(
+                                f"{len(tab3_del_blocks.get(dist_key, []))} SKU dihapus · "
+                                f"{len(tab3_edit_blocks.get(dist_key, {}))} SKU dimodify"
+                            )
 
                             sel = st.selectbox(
                                 "Apply ke sheet:",
@@ -859,15 +843,12 @@ with tab3:
             if mapped_count:
                 st.success(f"✅ {mapped_count} blok siap diproses · {skipped_count} dilewati")
 
-        # ── 6. Tombol Proses ───────────────────────────────────────────────
+        # ── 6. Tombol Proses ───────────────────────────────────────────
         st.markdown("---")
-        can_run = bool(
-            tab3_sheet_blocks and
-            any(v for v in tab3_mapping.values())
-        )
+        can_run = bool(tab3_keys and any(v for v in tab3_mapping.values()))
 
         if st.button(
-            "Proceed All",
+            "Proceed",
             use_container_width=True,
             key="tab3_run_btn",
             type="primary",
@@ -879,24 +860,25 @@ with tab3:
                 )
                 sheet_meta_map = {s["sheet"]: s for s in valid_sheets}
 
-                # Gabungkan SKU per sheet dari semua blok yang dimapping ke sheet yang sama
-                # {sheet_name: set of SKUs}
-                sheet_sku_map = {}
+                # Gabungkan per sheet dari semua blok yang dimapping ke sheet yang sama
+                # sheet_del: {sheet: set of SKU}, sheet_edit: {sheet: {sku: qty}}
+                sheet_del, sheet_edit = {}, {}
                 for dist_key, sheet_name in tab3_mapping.items():
                     if not sheet_name:
                         continue
-                    skus = tab3_sheet_blocks.get(dist_key, [])
-                    if sheet_name not in sheet_sku_map:
-                        sheet_sku_map[sheet_name] = set()
-                    sheet_sku_map[sheet_name].update(skus)
+                    sheet_del.setdefault(sheet_name, set()).update(tab3_del_blocks.get(dist_key, []))
+                    sheet_edit.setdefault(sheet_name, {}).update(tab3_edit_blocks.get(dist_key, {}))
 
                 sheet_results = []
 
-                for sheet_name, sku_set in sheet_sku_map.items():
+                for sheet_name, del_set in sheet_del.items():
+                    edit_map = sheet_edit.get(sheet_name, {})
+
                     if sheet_name not in sheet_meta_map:
                         sheet_results.append({
                             "Sheet":   sheet_name,
-                            "SKU dihapus": 0,
+                            "Dihapus": 0,
+                            "Diubah":  0,
                             "Status":  "⚠️ Sheet tidak ditemukan",
                         })
                         continue
@@ -915,20 +897,25 @@ with tab3:
                     sku_ci = headers.get(sku_col)
                     qty_ci = headers.get(qty_col)
 
-                    changed = 0
+                    n_del = n_edit = 0
                     if sku_ci and qty_ci:
                         for r in range(hdr_row_idx + 1, ws.max_row + 1):
                             cell_val = ws.cell(row=r, column=sku_ci).value
                             if cell_val is None:
                                 continue
-                            if str(cell_val).strip() in sku_set:
+                            key = str(cell_val).strip()
+                            if key in del_set:            # hapus menang kalau ada di dua-duanya
                                 ws.cell(row=r, column=qty_ci).value = None
-                                changed += 1
+                                n_del += 1
+                            elif key in edit_map:
+                                ws.cell(row=r, column=qty_ci).value = edit_map[key]
+                                n_edit += 1
 
                     sheet_results.append({
-                        "Sheet":       sheet_name,
-                        "SKU dihapus": changed,
-                        "Status":      "✅ Diproses" if changed > 0 else "ℹ️ Tidak ada SKU cocok",
+                        "Sheet":   sheet_name,
+                        "Dihapus": n_del,
+                        "Diubah":  n_edit,
+                        "Status":  "✅ Diproses" if (n_del + n_edit) > 0 else "ℹ️ Tidak ada SKU cocok",
                     })
 
                 out_buf = io.BytesIO()
@@ -939,41 +926,20 @@ with tab3:
                 "bytes":         out_bytes_final,
                 "fname":         tab3_fname,
                 "sheet_results": sheet_results,
-                "mode":          "Hapus QTY",
-                "sku_count":     sum(len(v) for v in sheet_sku_map.values()),
             }
-        # ── 8. Hasil & Download ────────────────────────────────────────────
+
+        # ── 7. Hasil & Download ────────────────────────────────────────
         tab3_result = st.session_state.get("tab3_result")
         if tab3_result:
-            total_changed = sum(
-                r.get("SKU dihapus", 0)
-                for r in tab3_result["sheet_results"]
-            )
+            rows = tab3_result["sheet_results"]
 
             st.success(
-                f"✅ Selesai ({tab3_result['mode']}) — "
-                f"total **{total_changed} baris** diubah di "
-                f"**{len(tab3_result['sheet_results'])} sheet**."
+                f"✅ Selesai — {sum(r.get('Dihapus', 0) for r in rows)} baris dihapus · "
+                f"{sum(r.get('Diubah', 0) for r in rows)} baris diubah "
+                f"di {len(rows)} sheet."
             )
 
-            result_rows = [
-                {
-                    "Sheet": r.get("Sheet", "-"),
-                    "Baris Diubah": r.get("SKU dihapus", 0),
-                    "Status": r.get(
-                        "Status",
-                        "ℹ️ Tidak ada SKU cocok"
-                    ),
-                }
-                for r in tab3_result["sheet_results"]
-            ]
-
-            st.dataframe(
-                pd.DataFrame(result_rows),
-                use_container_width=True,
-                hide_index=True
-            ) 
-            st.dataframe(pd.DataFrame(result_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
             out_name = (
                 f"AllSheets_Modified_{tab3_result['fname'].rsplit('.',1)[0]}"
