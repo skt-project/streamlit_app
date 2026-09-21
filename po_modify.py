@@ -413,10 +413,7 @@ tab1, tab2, tab3 = st.tabs([
     "🗂️ Modifikasi Semua Sheet dalam 1 File",
 ])
 
-
-# =====================================================================
 # TAB 1 — per file
-# =====================================================================
 with tab1:
     if not file_meta:
         st.info("Belum ada file dengan kolom SKU/QTY yang berhasil terdeteksi.")
@@ -473,16 +470,16 @@ with tab1:
                 st.download_button(
                     label=f"⬇️ Download {fname} ({result['cnt']} baris diubah)",
                     data=result["bytes"],
-                    file_name=f"Modified_{fname.rsplit('.',1)[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    file_name=f"{fname.rsplit('.',1)[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     key=f"dl_single_{fi}",
                 )
 
 
-# =====================================================================
+
 # TAB 2 — semua file, per distributor
-# =====================================================================
+
 with tab2:
     st.markdown("#### Hapus / Modify QTY di Semua File Sekaligus per Distributor")
     
@@ -620,7 +617,7 @@ with tab2:
         st.download_button(
             label=f"⬇️ Download {fname}",
             data=file_bytes,
-            file_name=f"Modified_{fname.rsplit('.', 1)[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            file_name=f"{fname.rsplit('.', 1)[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             key="dl_single_mass",
@@ -635,16 +632,14 @@ with tab2:
         st.download_button(
             label=f"⬇️ Download Semua File ({len(results)} file, .zip)",
             data=zip_bytes,
-            file_name=f"Modified_Files_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+            file_name=f"{fname.rsplit('.', 1)[0]}_{datetime.now().strftime('%Y%m%d')}.zip",
             mime="application/zip",
             use_container_width=True,
             key="dl_all_zip",
         )
 
 
-# =====================================================================
 # TAB 3 — semua sheet dalam 1 file
-# =====================================================================
 with tab3:
     st.markdown("#### Modifikasi QTY di Semua Sheet dalam Satu File")
     st.caption(
@@ -652,7 +647,6 @@ with tab3:
         "lalu terapkan hapus/modify QTY ke semua sheet sekaligus."
     )
 
-    # ── 1. File picker ─────────────────────────────────────────────────
     if not uploaded_files:
         st.info("Upload file di bagian atas dulu ya 😊")
     else:
@@ -677,9 +671,8 @@ with tab3:
             st.stop()
 
         tab3_fname = tab3_meta_match["fname"]
-        tab3_bytes = tab3_meta_match["fbytes"]   # bytes yang sudah valid & ter-cache
+        tab3_bytes = tab3_meta_match["fbytes"]   # bersihin cache
 
-        # ── 2. Detect semua sheet ──────────────────────────────────────
         all_sheets = _get_sheet_names(tab3_bytes)
         if not all_sheets:
             st.error("❌ Tidak ada sheet yang bisa dibaca dari file ini.")
@@ -737,7 +730,7 @@ with tab3:
             f"{len(invalid_sheets)} sheet dilewati (tidak ada kolom SKU/QTY)"
         )
 
-        # ── 3. Checkbox pilih sheet mana yang diproses ─────────────────
+        
         with st.expander("⚙️ Pilih Sheet yang Akan Dimodifikasi", expanded=False):
             sheet_enabled = {}
             for s in valid_sheets:
@@ -748,7 +741,7 @@ with tab3:
                 )
             selected_valid_sheets = [s for s in valid_sheets if sheet_enabled.get(s["sheet"])]
 
-        # ── 4. Input SKU per sheet pakai format === NAMA SHEET === ─────
+        
         st.markdown("---")
         st.markdown("**Daftar Product Code per Sheet:**")
 
@@ -843,7 +836,6 @@ with tab3:
             if mapped_count:
                 st.success(f"✅ {mapped_count} blok siap diproses · {skipped_count} dilewati")
 
-        # ── 6. Tombol Proses ───────────────────────────────────────────
         st.markdown("---")
         can_run = bool(tab3_keys and any(v for v in tab3_mapping.values()))
 
@@ -928,7 +920,7 @@ with tab3:
                 "sheet_results": sheet_results,
             }
 
-        # ── 7. Hasil & Download ────────────────────────────────────────
+
         tab3_result = st.session_state.get("tab3_result")
         if tab3_result:
             rows = tab3_result["sheet_results"]
@@ -942,7 +934,7 @@ with tab3:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
             out_name = (
-                f"AllSheets_Modified_{tab3_result['fname'].rsplit('.',1)[0]}"
+                f"AllSheets_{tab3_result['fname'].rsplit('.',1)[0]}"
                 f"_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
             )
             st.download_button(
