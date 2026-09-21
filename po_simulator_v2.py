@@ -933,6 +933,10 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["Check MOQ"] = "MOQ Not Found"
             res_df["Suggested Min Order Qty"] = np.nan
 
+        is_stop = res_df["Supply Control"].astype(str).str.upper().isin(["STOP PO", "DISCONTINUED", "UNAVAILABLE"])
+        res_df.loc[is_stop, "Check MOQ"] = ""
+        res_df.loc[is_stop, "Suggested Min Order Qty"] = np.nan
+
 #----------------PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
@@ -1873,6 +1877,20 @@ def _file_upload_section(page_key: str):
                 continue
 
             df_moq[sku_col_m] = df_moq[sku_col_m].astype(str).str.strip().str.upper()
+            ##EDIT LOGIC##
+            _dv = p.get("dist_val", "")
+            stop_skus = set()
+            if _dv not in ("", "(Pilih)", None):
+                _stk = get_stock_data(str(_dv).upper(), tuple(df_moq[sku_col_m].dropna().unique()))
+                if not _stk.empty:
+                    _stk["sku"] = _stk["sku"].astype(str).str.upper()
+                    stop_skus = set(_stk.loc[
+                        _stk["supply_control_status_gt"].astype(str).str.upper()
+                        .isin(["STOP PO", "DISCONTINUED", "UNAVAILABLE"]), "sku"])
+            df_moq = df_moq[~df_moq[sku_col_m].isin(stop_skus)].copy()
+            if df_moq.empty:
+                continue
+            ##END LOGIC##
             df_moq["MOQ"] = df_moq[sku_col_m].map(moq_map)
             df_moq["Product Name (MOQ Ref)"] = df_moq[sku_col_m].map(moq_name_map)
 
