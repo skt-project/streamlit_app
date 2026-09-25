@@ -856,7 +856,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["is_po_sku"] == False, #5
             (res_df["Customer SKU Code"].isin(VITA_C_INC_STOP) 
             # & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) 
-             &(res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False))|res_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False))), #6
+             &((res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)) |(res_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False)))), #6
             res_df["Customer SKU Code"].isin(manual_reject_approval), #7
             res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
             sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]), #9
