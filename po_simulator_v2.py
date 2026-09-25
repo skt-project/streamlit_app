@@ -669,7 +669,9 @@ with st.sidebar:
     _REGION_LIST_2 = []
     _STOP_PO_SKU_ALLOWED_REGION = {"": ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"],
                                   "" :  ["CENTRAL JAVA 1", "CENTRAL JAVA 2", "CENTRAL JAVA 3", "NORTH CENTRAL JAVA", "SOUTH CENTRAL JAVA", "WEST JAVA", "JABODETABEK"] }
-    VITA_C = ['G2G-212','G2G-213','G2G-214','G2G-215','G2G-216','G2G-217','G2G-218']
+    VITA_C_INC_STOP = [
+        "G2G-106", "G2G-110", "G2G-1445", "G2G-186", "G2G-193", "G2G-1945", "G2G-20900", "G2G-222", "G2G-254", "G2G-255", "G2G-27300", "G2G-29700", "G2G-325000", "G2G-325005", "G2G-3271", "G2G-800",
+        'G2G-212','G2G-213','G2G-214','G2G-215','G2G-216','G2G-217','G2G-218']
     STOP_PO_BB= ["BXS003001", "BXS012001", "BXS006001", "BXS009001","BXS005001", "BXS004001", "BXS017001",
 "BXS015" , "BXS014", "BXS013", "BXS008001"]
     #FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
@@ -852,9 +854,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT), #3
             ra2 < 0, #4
             res_df["is_po_sku"] == False, #5
-            (res_df["Customer SKU Code"].isin(VITA_C) 
+            (res_df["Customer SKU Code"].isin(VITA_C_INC_STOP) 
             # & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) 
-             &res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)), #6
+             &(res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False))|res_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False))), #6
             res_df["Customer SKU Code"].isin(manual_reject_approval), #7
             res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
             sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]), #9
@@ -871,7 +873,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",      #3
             "Reject (Negative Allocation)",                          #4
             "Additional Suggestion",                                 #5
-            "Reject (Sulawesi 1 Only)",                              #6
+            "Reject (Sulawesi Only)",                              #6
             "Reject (Stop by Steve - Need approval email)",          #7
             "Reject (Stop by Steve - No tolerance to open)",         #8
             "Reject",                                                 #9
@@ -1062,7 +1064,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     steve_mask = (non_stop_df["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) |
                   non_stop_df["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False))
     steve_df = non_stop_df[steve_mask].reset_index(drop=True)
-    sul1_mask = non_stop_df["Remark"].str.strip().str.lower() == "reject (sulawesi 1 only)"
+    sul1_mask = non_stop_df["Remark"].str.strip().str.lower() == "reject (sulawesi only)"
     sul1_df = non_stop_df[sul1_mask].reset_index(drop=True)
     approval_mask = (non_stop_df["Remark"].str.strip().str.lower().isin(["reject","reject with suggestion"]) & ~steve_mask & ~sul1_mask)
     approval_df = non_stop_df[approval_mask].reset_index(drop=True)
@@ -1198,7 +1200,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         steve_grp = grp_po[steve_mask_s]
         #sul1_mask_s = grp_po["Remark"].str.strip().str.lower() == "reject (sulawesi 1 only)"
         #sul1_mask_s = grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi 1 only", na=False)
-        sul1_mask_s = (grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi 1 only", na=False) & ~stop_mask_s)
+        sul1_mask_s = (grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi only", na=False) & ~stop_mask_s)
         sul1_grp = grp_po[sul1_mask_s]
         total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum() + sul1_grp["PO Value"].sum()
         #total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum()
@@ -1224,7 +1226,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
             <ul style="margin:0;padding-left:1.2rem;color:#1F1F1F;font-size:.88rem;line-height:1.7;">
                 <li>Total SKU: <strong>{grp_po["SKU"].nunique():,}</strong></li>
                 <li>Grand Total PO (sebelum pengurangan): <strong>{_rp(grand_total_po)}</strong></li>
-                <li>Sulawesi 1 - VITA C Series: <strong>{sul1_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(sul1_grp["PO Value"].sum())}</strong></li>
+                <li>KHUSUS Sulawesi & Maluku Papua SKU VITA C & STOP PO request series: <strong>{sul1_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(sul1_grp["PO Value"].sum())}</strong></li>
                 <li>{stop_label}: <strong>{stop_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(stop_grp["PO Value"].sum())}</strong></li>
                 <li>{steve_label}: <strong>{steve_grp["SKU"].nunique():,}</strong> SKU — <strong>{_rp(steve_grp["PO Value"].sum())}</strong></li>
                 <li>Total pengurangan: <strong>{_rp(total_reduction)}</strong></li>
@@ -2419,10 +2421,10 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["remaining_allocation_qty_region"] < 0),
                         (result_df["is_po_sku"] == False),
                         #sulawesi 1 only
-                        (result_df["Customer SKU Code"].isin(VITA_C)  & 
+                        (result_df["Customer SKU Code"].isin(VITA_C_INC_STOP)  & 
                          #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
                          #~result_df["Customer SKU Code"].isin(FLUSH_OUT)& 
-                        result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)),
+                        (result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False))| result_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False))),
                         #end
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
@@ -2446,7 +2448,7 @@ if st.session_state.get('page') == 'po_spv':
                         f"Reject (Exceeds Qty Limit of {___MAX_QTY_LIMIT})",
                         "Reject (Negative Allocation)",
                         "Additional Suggestion",
-                        "Reject (Sulawesi 1 Only)",
+                        "Reject (Sulawesi Only)",
                         "Reject (Stop by Steve - Need approval email)",
                         "Reject (Stop by Steve - No tolerance to open)",
                         "Reject",
