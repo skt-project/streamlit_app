@@ -2422,9 +2422,9 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["is_po_sku"] == False),
                         #sulawesi 1 only
                         (result_df["Customer SKU Code"].isin(VITA_C_INC_STOP)  & 
-                         #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
-                         #~result_df["Customer SKU Code"].isin(FLUSH_OUT)& 
-                        (result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False))| result_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False))),
+                        #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
+                        #~result_df["Customer SKU Code"].isin(FLUSH_OUT)& 
+                        (result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)| result_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False))),
                         #end
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
