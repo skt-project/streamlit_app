@@ -119,7 +119,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
         return pd.DataFrame()
     client = get_bq_client()
     sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
-    query = f"SELECT sku, product_name, price_for_distri FROM `{GCP_PROJECT_ID}.gt_schema.master_product` WHERE UPPER(sku) IN ({sku_list_str})"
+    query = f"SELECT sku, product_name, price_for_distri, dpp FROM `{GCP_PROJECT_ID}.gt_schema.master_product` WHERE UPPER(sku) IN ({sku_list_str})"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -913,8 +913,8 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             moq_lookup_val =  sku_upper.map(moq_map_lookup).astype(float) 
             po_qty_val = pd.to_numeric(res_df["PO Qty"], errors="coerce")
 
-            is_multiple = np.mod(po_qty_val, moq_lookup_val) == 0
-            under_moq_mask = (po_qty_val < 50) & ~is_multiple
+            is_multiple = (po_qty_val <50) & np.mod(po_qty_val, moq_lookup_val) == 0
+            under_moq_mask = (po_qty_val < moq_lookup_val) & ~is_multiple
             suggested_qty = np.ceil(po_qty_val / moq_lookup_val) * moq_lookup_val
 
             res_df["MOQ"] = moq_lookup_val
@@ -978,7 +978,8 @@ PO_TEMPLATE_COLS = [
     'Stock + Suggested Qty WOI (Projection at EOM)',
     'Remaining Allocation (By Region)','RSA Notes','MOQ', 'Check MOQ',
 ]
-PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2]] + PO_TEMPLATE_COLS[6:14]
+#PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2] + PO_TEMPLATE_COLS[3]+ PO_TEMPLATE_COLS[6:14]]
+PO_IMG_COLS = PO_TEMPLATE_COLS[0:4] + PO_TEMPLATE_COLS[6:14]
 PO_COLS_copy = PO_TEMPLATE_COLS[:14]
 
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim):
@@ -997,33 +998,36 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     woi_col = next((c for c in final_disp.columns if "woi" in c.lower() and "stock" in c.lower()), None)
     if woi_col is None:
-        woi_col = next((c for c in final_disp.columns if "woi" in c.lower()), "Current WOI")
+        woi_col = next((c for c in final_disp.columns if "woi" in c.lower()), "WOI (Stock + PO Ori)")
 
     st.markdown("""<div class="pipeline-step active"><span class="step-number">3</span><strong>Preview Data — Top 10 WOI (Exclude : STOP PO/DISCONTINUED and Reject by Steve)</strong></div>""", unsafe_allow_html=True)
-    prev_df = final_disp[
-    ~final_disp["Supply Control"].str.contains(
-        "Stop PO|Discontinued",
-        case=False,
-        na=False
-    )
-    &
-    ~final_disp["Remark"].str.contains(
-        "Steve",
-        case=False,
-        na=False
-    )
-    &
-    final_disp["Remark"].str.contains(
-        "Reject",
-        case=False,
-        na=False
-    )
-].copy()
-    prev_df[woi_col] = pd.to_numeric(prev_df[woi_col], errors="coerce")
-    top10 = prev_df.nlargest(10, woi_col)[PO_IMG_COLS].reset_index(drop=True)
+
+    _woi_ori = "WOI (Stock + PO Ori)"
+    _stock_col = "Total Stock (Qty)"
+    _final_num = final_disp.copy()
+    _final_num[_woi_ori] = pd.to_numeric(_final_num[_woi_ori], errors="coerce")
+    _final_num[_stock_col] = pd.to_numeric(_final_num[_stock_col], errors="coerce")
+
+    prev_df = _final_num[
+        ~_final_num["Supply Control"].str.contains("Stop PO|Discontinued", case=False, na=False)
+        & (_final_num[_stock_col] > 0)
+        & ~_final_num["Remark"].str.contains("Steve", case=False, na=False)
+        & _final_num["Remark"].str.contains("Reject", case=False, na=False)
+        & (_final_num[_woi_ori] > 17 )
+    ].copy()
+
+   
+    top10 = prev_df.sort_values(_woi_ori, ascending=False)[PO_IMG_COLS].reset_index(drop=True)
     num_cols_top10 = top10.select_dtypes(include=['number']).columns
-    st.dataframe(top10.style.set_properties(**{"background-color":"#D6EAF8","color":"#1a1a2e","border":"1px solid #AED6F1"}).format({c: "{:.2f}" for c in num_cols_top10}, na_rep="-"), use_container_width=True, hide_index=True)
-    
+    if top10.empty:
+        st.info("Tidak ada SKU Reject dengan stock > 0 dan WOI (Stock + PO Ori) > 15.")
+    else:
+        st.caption(f"{len(top10)} baris ditemukan")
+        st.dataframe(
+            top10.style.set_properties(**{"background-color":"#D6EAF8","color":"#1a1a2e","border":"1px solid #AED6F1"})
+                 .format({c: "{:.2f}" for c in num_cols_top10}, na_rep="-"),
+            use_container_width=True, hide_index=True,
+        )
 
     alloc_col = next((c for c in final_disp.columns if "allocation" in c.lower()), None)
     if alloc_col:
@@ -1287,6 +1291,29 @@ def _file_upload_section(page_key: str):
                 cs, ce = _parse_idx(rng_c); df = df.iloc[:, cs:ce]
             except Exception: pass
         return df
+
+        # alias nama kolom
+    _COL_ALIASES = {
+        "PRODUCT CODE": ["PRODUCT CODE", "SKU", "SKU CODE", "KODE", "KODE PRODUK",
+                         "KODE G2G", "PRODUCT KODE", "SKU KODE","KODE SKU", "PRODUCT ID", "ITEM CODE"],
+        "QTY":          ["QTY", "QUANTITY", "FINAL PO", "QTY PO", "JUMLAH"],
+        "DISTRIBUTOR":  ["DISTRIBUTOR", "DISTRIBUTOR NAME", "CUSTOMER NAME"],
+        "DESCRIPTION":  ["DESCRIPTION", "PRODUCT NAME", "NAMA PRODUK", "NAMA BARANG"],
+        "DPP":          ["DPP"],
+    }
+
+    def _norm_col(c):
+        return re.sub(r'[\s_]+', ' ', str(c)).strip().upper()
+
+    def _unify_columns(df):
+        rename = {}
+        for canon, aliases in _COL_ALIASES.items():
+            for alias in aliases:
+                hit = next((c for c in df.columns if c not in rename and _norm_col(c) == alias), None)
+                if hit is not None:
+                    rename[hit] = canon
+                    break
+        return df.rename(columns=rename)
 
     folder_files = st.file_uploader("📁 Upload File PO (.xlsx / .xls / .csv / .zip)",
                                      type=["xlsx","xls","csv","zip"],
@@ -1613,15 +1640,34 @@ def _file_upload_section(page_key: str):
     ready = [p for p in parsed if p["df"] is not None]
     st.divider()
 
-    # === DOWNLOAD HASIL RAPI PER SHEET (khusus Dedicated Kalimantan) ===
+        # === DOWNLOAD HASIL RAPI PER SHEET (khusus Dedicated Kalimantan) ===
     if is_kalbar_mode and ready:
         st.markdown("""<div class="pipeline-step active"><span class="step-number">✓</span>
         <strong>Download Gabungan</strong></div>""", unsafe_allow_html=True)
 
+        def _find_sku_col(cols):
+            return next((c for c in cols if any(k in str(c).upper() for k in ["PRODUCT CODE", "SKU", "KODE"])), None)
+
         kalbar_clean_sheets = {}
         kalbar_dist_map = {}
+        _brand_missing = []
+
         for p in ready:
-            clean_df = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
+            df_src = p["df"].copy()
+
+            # 1. FILTER BRAND: contains G2G / GLAD2GLOW
+            _SKU_KEYS = ["SKU", "PRODUCT CODE", "KODE", "KODE G2G", "SKU CODE"]
+            brand_col = next(
+                (c for c in df_src.columns if any(k in str(c).upper() for k in _SKU_KEYS)),
+                None,
+            )
+            if brand_col:
+                _b = df_src[brand_col].astype(str).str.upper()
+                df_src = df_src[_b.str.contains("G2G", na=False) | _b.str.contains("GLAD2GLOW", na=False)]
+            else:
+                _brand_missing.append(p["name"])
+
+            clean_df = _apply_range(df_src, p["row_rng"], p["col_rng"])
             clean_df = clean_df.dropna(how="all")
 
             sheet_label = p.get("sheet_name") or p["name"]
@@ -1637,7 +1683,31 @@ def _file_upload_section(page_key: str):
             _dv = p.get("dist_val", "")
             kalbar_dist_map[safe_sheet_name] = _dv if _dv not in ("", "(Pilih)", None) else ""
 
-        # ── Preview ringkas: 1 expander untuk semua sheet ──   (indent 8 spasi, sejajar `for p in ready:`)
+        if _brand_missing:
+            st.warning(f"⚠️ Kolom SKU/Product Code tidak ditemukan, filter G2G/GLAD2GLOW dilewati: {', '.join(_brand_missing)}")
+
+        # 3. DESCRIPTION: kumpulkan SKU unik, panggil get_sku_data sekali
+        _all_skus = set()
+        for _d in kalbar_clean_sheets.values():
+            _sc = _find_sku_col(_d.columns)
+            if _sc:
+                _s = _d[_sc].astype(str).str.strip().str.upper()
+                _all_skus.update(_s[_s.ne("") & _s.ne("NAN")].tolist())
+
+        desc_map, dpp_map = {}, {}
+        if _all_skus:
+            _master = get_sku_data(tuple(sorted(_all_skus)))
+            if not _master.empty:
+                _master["sku"] = _master["sku"].astype(str).str.strip().str.upper()
+                _m = _master.drop_duplicates("sku").set_index("sku")
+                desc_map = _m["product_name"].to_dict()
+                dpp_map = pd.to_numeric(_m["dpp"], errors="coerce").to_dict()
+
+        # 2. NOTIF sebelum download
+        _g2g_skus = {s for s in _all_skus if "GLAD2GLOW" in s}
+        st.info(f"Ada {len(_g2g_skus)} SKU GLAD2GLOW")
+
+        # ── Preview ringkas ──
         summary_df = pd.DataFrame(
             [{"Sheet": sn, "Baris": len(d), "Kolom": d.shape[1]} for sn, d in kalbar_clean_sheets.items()],
             columns=["Sheet", "Baris", "Kolom"],
@@ -1670,50 +1740,83 @@ def _file_upload_section(page_key: str):
                 prev_df = kalbar_clean_sheets[pick]
 
             st.dataframe(prev_df.reset_index(drop=True), use_container_width=True, height=400)
-        def _build_kalbar_clean_excel(sheets_dict: dict, dist_name: str = "", dist_map: dict = None) -> bytes:
+
+        KALBAR_ORDERED_BY = "Arif"
+        KALBAR_DIST_INFO = {
+            'PT BADAN PUTRA NIAGA SEJAHTERA - PANGKALAN BUN': {"npwp": '02.550.014.1-713.000', "address": 'PT. Putra Niaga Sejahtera Jl. Pasanah RT.012 Madurejo'},
+            'PT BADAN PUTRA NIAGA BERSAMA - SAMPIT': {"npwp": '02.549.793.4-712.000', "address": 'PT. Putra Niaga bersama Jl. HM. Arsyad RT.016 RW.004 Ketapang-MB Ketapang-Kotim'},
+            'PT BADAN NIAGA SINAR JAYA - TANJUNG': {"npwp": '74.143.111.8-735.000', "address": 'PT. Niaga Sinar Jaya Jl. A. Yani RT.02 Maburai Murung Pudak Tabalong'},
+            'PT BADAN LAUT INDAH BARU - BARABAI': {"npwp": '74.027.693.6-733.000', "address": 'PT. Laut Indah Baru Jl. Abdul Muis Redhani RT. 004 RW. 002 Mandingin'},
+            'PT BINTANG SINAR JAYA - BATULICIN': {"npwp": '03.218.713.0-734.000', "address": 'PT. Bintang Sinar Jaya Jl. Raya Batulicin, No, RT.009 RW.000 Kersik Putih'},
+            'PT USAHA INDAH JAYA - BANJARBARU': {"npwp": '73.983.544.5-732.000', "address": 'PT. Usaha Jaya Indah Jl. Guntung Manggis RT. 018 RW. 003 Kel. Guntung Manggis'},
+            'PT LAUT INDAH JAYA - BANJARMASIN': {"npwp": '02.614.164.8-731.000', "address": 'PT. Laut Indah Jaya JL.Ahmad Yani km 5,7 No. 56 RT.000 RW.000 Pemurus Luar Banjarmasin Timur'},
+            'PT BADAN CAHAYA NIAGA SEMESTA - KAPUAS': {"npwp": '02.618.599.1-711.000', "address": 'PT. Cahaya Niaga Semesta Jl. Jepang RT. 4 Sesudah Puskesmas Kapuas'},
+            'PT BINTANG SINAR JAYA - KOTA BARU': {"npwp": '03.218.713.0-734.000', "address": 'PT. Bintang Sinar Jaya Kotabaru Jl. Stagen KM 7,8 Desa Stagen Pulau Laut Utara'},
+            'PT BADAN SURYA NIAGA BERSAMA - MUARA TEWEH': {"npwp": '74.448.220.9-714.000', "address": 'PT. Surya Niaga Bersama Jl. Pendreh RT.018 RW.005 Lanjas Teweh Tengah Barito Utara'},
+            'PT BADAN KAHAYAN NIAGA UTAMA - PALANGKARAYA': {"npwp": '02.618.564.5-711.000', "address": 'PT. Kahayan Niaga Utama Jl. RTA Milono KM. 5 Langkai - Pahandut - Palangka Raya'},
+        }
+
+        def _build_kalbar_clean_excel(sheets_dict: dict, dist_name: str = "", dist_map: dict = None, desc_map: dict = None, dpp_map:dict = None) -> bytes:
             buf = io.BytesIO()
             wb = Workbook()
             wb.remove(wb.active)
-        
+
             HEADER_FILL   = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
             HEADER_FONT   = Font(bold=True, size=11)
             TITLE_FONT    = Font(bold=True, size=14)
             LABEL_FONT    = Font(bold=True, size=10)
             COL_HEADERS   = ["DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY", "DPP", "TOTAL PRICE"]
             COL_WIDTHS    = [30, 18, 45, 10, 15, 18]
-            DATA_START_ROW = 8   # row 7 = header, row 8 = data (1-indexed)
-        
+            DATA_START_ROW = 8
+
             for sn, sdf in sheets_dict.items():
                 ws = wb.create_sheet(title=sn[:31])
                 sheet_dist = (dist_map or {}).get(sn) or dist_name
-        
-                # ── Row 1: Title ──────────────────────────────────
+
                 ws["A1"] = "PUCHASE ORDER FORM"
                 ws["A1"].font = TITLE_FONT
                 ws.merge_cells("A1:F1")
-        
-                # ── Row 2: Customer Name ──────────────────────────
+
+                _info = KALBAR_DIST_INFO.get(str(sheet_dist).strip().upper(), {})
+                _plain = Font(size=10)
+
                 ws["A2"] = "CUSTOMER NAME"
-                ws["A2"].font = LABEL_FONT
                 ws["B2"] = sheet_dist
-                ws["B2"].font = Font(bold=True, size=10)
                 ws["D2"] = "DATE"
-                ws["D2"].font = LABEL_FONT
                 ws["E2"] = datetime.now().strftime("%d/%m/%Y")
-        
-                # ── Row 3: NPWP ───────────────────────────────────
+
                 ws["A3"] = "NPWP / ID CARD"
-                ws["A3"].font = LABEL_FONT
+                ws["B3"] = _info.get("npwp", "")
                 ws["D3"] = "ORDERED BY"
-                ws["D3"].font = LABEL_FONT
-        
-                # ── Row 4: Address ────────────────────────────────
+                ws["E3"] = KALBAR_ORDERED_BY
+
                 ws["A4"] = "ADDRESS"
-                ws["A4"].font = LABEL_FONT
-        
-                # ── Rows 5-6: empty spacer ────────────────────────
-        
-                # ── Row 7: Column headers ─────────────────────────
+                ws["B4"] = _info.get("address", "")
+
+                for _c in ("A2", "B2", "D2", "E2", "A3", "B3", "D3", "E3", "A4", "B4"):
+                    ws[_c].font = _plain
+                    ws[_c].alignment = Alignment(horizontal="left", vertical="center")
+
+                # ws["A1"] = "PUCHASE ORDER FORM"
+                # ws["A1"].font = TITLE_FONT
+                # ws.merge_cells("A1:F1")
+
+                # ws["A2"] = "CUSTOMER NAME"
+                # ws["A2"].font = LABEL_FONT
+                # ws["B2"] = sheet_dist
+                # ws["B2"].font = Font(bold=True, size=10)
+                # ws["D2"] = "DATE"
+                # ws["D2"].font = LABEL_FONT
+                # ws["E2"] = datetime.now().strftime("%d/%m/%Y")
+
+                # ws["A3"] = "NPWP / ID CARD"
+                # ws["A3"].font = LABEL_FONT
+                # ws["D3"] = "ORDERED BY"
+                # ws["D3"].font = LABEL_FONT
+
+                # ws["A4"] = "ADDRESS"
+                # ws["A4"].font = LABEL_FONT
+
                 HDR_ROW = 7
                 for ci, (h, w) in enumerate(zip(COL_HEADERS, COL_WIDTHS), start=1):
                     cell = ws.cell(row=HDR_ROW, column=ci, value=h)
@@ -1722,9 +1825,7 @@ def _file_upload_section(page_key: str):
                     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                     ws.column_dimensions[cell.column_letter].width = w
                 ws.row_dimensions[HDR_ROW].height = 20
-        
-                # ── Rows 8+: Data ─────────────────────────────────
-                # Normalise sdf columns → map to template columns
+
                 col_map = {}
                 for src_col in sdf.columns:
                     up = str(src_col).strip().upper()
@@ -1740,20 +1841,34 @@ def _file_upload_section(page_key: str):
                         col_map["DPP"]            = src_col
                     elif any(k in up for k in ["TOTAL", "TOTAL PRICE"]):
                         col_map["TOTAL PRICE"]    = src_col
-        
+
                 THIN = Side(border_style="thin", color="000000")
                 BOX  = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-        
+
                 for r_offset, (_, row) in enumerate(sdf.iterrows()):
                     excel_row = DATA_START_ROW + r_offset
                     for ci, col_name in enumerate(COL_HEADERS, start=1):
                         src = col_map.get(col_name)
+                        #MAPPING KOLOM KALIMANTAN#
                         if col_name == "DISTRIBUTOR":
                             cell = ws.cell(row=excel_row, column=ci, value=sheet_dist)
                         elif col_name == "TOTAL PRICE":
-                            # formula: QTY * DPP
                             val = f"=D{excel_row}*E{excel_row}"
                             cell = ws.cell(row=excel_row, column=ci, value=val)
+                            cell.number_format = "#,##0.00"
+                        elif col_name == "DESCRIPTION":
+                            _psrc = col_map.get("PRODUCT CODE")
+                            _sku_key = str(row[_psrc]).strip().upper() if _psrc else ""
+                            cell = ws.cell(row=excel_row, column=ci, value=(desc_map or {}).get(_sku_key) or None)
+                        elif col_name == "DPP":
+                            _psrc = col_map.get("PRODUCT CODE")
+                            _sku_key = str(row[_psrc]).strip().upper() if _psrc else ""
+                            _v = (dpp_map or {}).get(_sku_key)
+                            if _v is None or pd.isna(_v):
+                                _v = pd.to_numeric(row[src], errors="coerce") if src else None
+                                if _v is not None and pd.isna(_v):
+                                    _v = None
+                            cell = ws.cell(row=excel_row, column=ci, value=_v)
                             cell.number_format = "#,##0.00"
                         elif src and src in sdf.columns:
                             raw = row[src]
@@ -1769,12 +1884,11 @@ def _file_upload_section(page_key: str):
                         cell.border    = BOX
                         cell.alignment = Alignment(vertical="center",
                                                    horizontal="right" if col_name in ("QTY","DPP","TOTAL PRICE") else "left")
-        
-                # ── Summary rows ──────────────────────────────────
+
                 last_data = DATA_START_ROW + len(sdf) - 1
                 sum_start = last_data + 2
                 sub_row, tax_row, grand_row = sum_start, sum_start + 1, sum_start + 2
-        
+
                 SUMMARY_FONT = Font(bold=True, size=10)
                 for row_idx, label, formula in [
                     (sub_row,   "SUB-TOTAL",    f"=SUM(F{DATA_START_ROW}:F{last_data})"),
@@ -1788,25 +1902,16 @@ def _file_upload_section(page_key: str):
                     vc.font = SUMMARY_FONT
                     vc.number_format = "#,##0.00"
                     vc.border = BOX
-        
+
                 ws.freeze_panes = f"A{DATA_START_ROW}"
-        
+
             wb.save(buf)
             buf.seek(0)
             return buf.getvalue()
-        
-        # Kumpulkan semua dist_val yang valid per sheet
-        _kalbar_dist_map = {}
-        for p in ready:
-            dv = p.get("dist_val", "")
-            sheet_label = p.get("sheet_name") or p["name"]
-            base_name = re.sub(r'[\\/*?:\[\]]', "", str(sheet_label)).strip()[:31] or "Sheet"
-            if dv not in ("", "(Pilih)", None):
-                _kalbar_dist_map[base_name] = dv        
 
-        # fallback: nama distributor pertama yang valid
-        _kalbar_dist_name = next(iter(_kalbar_dist_map.values()), "")
-        kalbar_excel_bytes = _build_kalbar_clean_excel(kalbar_clean_sheets, dist_map=kalbar_dist_map)
+        kalbar_excel_bytes = _build_kalbar_clean_excel(
+            kalbar_clean_sheets, dist_map=kalbar_dist_map, desc_map=desc_map, dpp_map=dpp_map
+        )
         st.download_button(
             label=f"Download({len(kalbar_clean_sheets)} sheet)",
             data=kalbar_excel_bytes,
@@ -1986,6 +2091,7 @@ def _file_upload_section(page_key: str):
         frames = []
         for p in ready:
             df_tmp = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
+            df_tmp = _unify_columns(df_tmp)          # <-- samakan nama kolom
             if p["dist_val"] not in ("","(Pilih)"):
                 if p["has_dist"]:
                     df_tmp["DISTRIBUTOR"] = p["dist_val"]
@@ -1993,6 +2099,13 @@ def _file_upload_section(page_key: str):
                     df_tmp.insert(0, "DISTRIBUTOR", p["dist_val"])
             df_tmp["_source_file"] = p["name"]
             frames.append(df_tmp)
+
+    
+        _bad = [f"{p['name']} ({p.get('sheet_name')})" for p, f in zip(ready, frames)
+                if "PRODUCT CODE" not in f.columns or "QTY" not in f.columns]
+        if _bad:
+            st.warning("⚠️ Kolom SKU/QTY tidak terdeteksi di: " + ", ".join(_bad)
+                       + ". Tambahkan nama kolomnya ke `_COL_ALIASES`.")
         try:
             tpl_bytes = _fetch_template_bytes(TEMPLATE_DRIVE_URL)
         except Exception:
@@ -2509,7 +2622,7 @@ if st.session_state.get('page') == 'po_spv':
                         moq_val_spv = sku_upper_spv.map(moq_map_spv).astype(float)
                         po_qty_val_spv = pd.to_numeric(result_df["PO Qty"], errors="coerce")
 
-                        is_multiple_spv = np.mod(po_qty_val_spv, moq_val_spv) == 0
+                        is_multiple = (po_qty_val < 50) & (np.mod(po_qty_val, moq_lookup_val) == 0)
                         under_moq_mask_spv = (po_qty_val_spv < 50) & ~is_multiple_spv
 
                         suggested_qty_spv = np.ceil(po_qty_val_spv / moq_val_spv) * moq_val_spv
