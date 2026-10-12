@@ -768,10 +768,10 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
         uploaded_file.seek(0)
 
     if name.endswith(".csv"):
-    first_line = uploaded_file.readline().decode("utf-8-sig", errors="ignore")
-    uploaded_file.seek(0)
-    sep = max([",", ";", "\t", "|"], key=first_line.count)
-    df = pd.read_csv(
+        first_line = uploaded_file.readline().decode("utf-8-sig", errors="ignore")
+        uploaded_file.seek(0)
+        sep = max([",", ";", "\t", "|"], key=first_line.count)
+        df = pd.read_csv(
         uploaded_file,
         sep=sep,
         dtype=str,
