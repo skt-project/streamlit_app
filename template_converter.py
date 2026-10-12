@@ -768,12 +768,17 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
         uploaded_file.seek(0)
 
     if name.endswith(".csv"):
-        df = pd.read_csv(
-            uploaded_file,
-            dtype=str,
-            keep_default_na=False,
-            na_filter=False,
-        )
+    first_line = uploaded_file.readline().decode("utf-8-sig", errors="ignore")
+    uploaded_file.seek(0)
+    sep = max([",", ";", "\t", "|"], key=first_line.count)
+    df = pd.read_csv(
+        uploaded_file,
+        sep=sep,
+        dtype=str,
+        keep_default_na=False,
+        na_filter=False,
+        encoding="utf-8-sig",
+    )
     elif name.endswith(".xlsx"):
         df = _read_excel_as_text(uploaded_file, header=0)
     elif name.endswith(".xls"):
