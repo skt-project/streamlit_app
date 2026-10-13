@@ -51,6 +51,7 @@ TEMPLATE_PO_URL = "https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntY
 BQ_DATASET = "rsa"
 BQ_TABLE = "stock_analysis"
 
+
 try:
     gcp_secrets = st.secrets["connections"]["bigquery"]
     private_key = gcp_secrets["private_key"].replace("\\n", "\n")
@@ -72,11 +73,69 @@ except Exception:
     GCP_PROJECT_ID = "skintific-data-warehouse"
     _bq_credentials = service_account.Credentials.from_service_account_file(GCP_CREDENTIALS_PATH)
 
-
+TEST_TABLE = "skintific-data-warehouse.gt_schema.po_supply_control_g2g"
 
 @st.cache_resource(show_spinner=False)
 def get_bq_client() -> bigquery.Client:
     return bigquery.Client(credentials=_bq_credentials, project=GCP_PROJECT_ID)
+
+
+# ===== Supply Control (Section 8) =====
+SUPPLY_CONTROL_STATUSES = ["STOP PO", "DISCONTINUED", "UNAVAILABLE", "OOS"]
+DATA_COLS = ["region", "distributor_name", "brand", "sku", "product_name",
+             "status_supply", "po_qty", "file_name", "record_time", "calendar_date"]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_distributor_region_map(distributor_names: tuple) -> dict:
+    """Mapping distributor -> region, via get_distributor_suggestions (cached)."""
+    df = get_distributor_suggestions(list(distributor_names), "All")
+    if df.empty or "DISTRIBUTOR" not in df.columns or "REGION" not in df.columns:
+        return {}
+    df["DISTRIBUTOR"] = df["DISTRIBUTOR"].astype(str).str.strip().str.upper()
+    return df.drop_duplicates("DISTRIBUTOR").set_index("DISTRIBUTOR")["REGION"].to_dict()
+
+
+def _insert_supply_control(df: pd.DataFrame):
+    client = get_bq_client()
+    job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
+    job = client.load_table_from_dataframe(df, TEST_TABLE, job_config=job_config)
+    job.result()
+
+
+def _filter_already_saved(df: pd.DataFrame) -> pd.DataFrame:
+    """Buang baris yang kombinasi file_name+sku+po_qty-nya sudah pernah ter-insert di BigQuery."""
+    if df.empty:
+        return df
+    client = get_bq_client()
+    file_names = sorted(set(df["file_name"].dropna().astype(str)))
+    if not file_names:
+        return df
+    file_str = ", ".join([f"'{f}'" for f in file_names])
+    query = f"""
+        SELECT DISTINCT file_name, sku, po_qty
+        FROM `{TEST_TABLE}`
+        WHERE file_name IN ({file_str})
+    """
+    try:
+        existing = client.query(query).to_dataframe()
+    except Exception as e:
+        st.warning(f"⚠️ Gagal cek data existing (lanjut tanpa dedup check): {e}")
+        return df
+    if existing.empty:
+        return df
+    existing_keys = set(zip(
+        existing["file_name"].astype(str),
+        existing["sku"].astype(str),
+        existing["po_qty"].astype(int),
+    ))
+    key_series = list(zip(
+        df["file_name"].astype(str),
+        df["sku"].astype(str),
+        df["po_qty"].astype(int),
+    ))
+    mask = [k not in existing_keys for k in key_series]
+    return df[mask]
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -88,6 +147,7 @@ def get_zero_price_skus() -> set:
         return {r.sku for r in rows if r.sku}
     except Exception:
         return set()
+    
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -119,7 +179,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
         return pd.DataFrame()
     client = get_bq_client()
     sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
-    query = f"SELECT sku, product_name, price_for_distri, dpp FROM `{GCP_PROJECT_ID}.gt_schema.master_product` WHERE UPPER(sku) IN ({sku_list_str})"
+    query = f"SELECT sku, product_name, price_for_distri, dpp, brand FROM `{GCP_PROJECT_ID}.gt_schema.master_product` WHERE UPPER(sku) IN ({sku_list_str})"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -130,7 +190,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
 def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
-    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date between '2026-09-01' and '2026-09-30'"
+    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date between '2026-10-01' and '2026-10-31'"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -721,7 +781,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
     sim_df["is_po_sku"] = True
     sim_df = sim_df[["Distributor","Customer SKU Code","PO Qty","is_po_sku"]]
 
-    all_npd = []; excel_dfs = {}
+    all_npd = []; excel_dfs = {}; brand_map = {}
     zero_price_skus = get_zero_price_skus()
     prog = st.progress(0)
     distributors = sim_df["Distributor"].unique().tolist()
@@ -947,7 +1007,12 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
-        
+
+        # brand ditangkap terpisah (tidak masuk output PO Simulator), khusus untuk Section 8
+        if "brand" in res_df.columns:
+            _bm = res_df.set_index(res_df["SKU"].astype(str).str.upper())["brand"].dropna().to_dict()
+            brand_map.update(_bm)
+
         res_df = res_df.reindex(columns=out_cols)
         res_df.sort_values(by=["is_po_sku","SKU"], ascending=[False,True], inplace=True)
 
@@ -967,7 +1032,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
     missing_dist = [d for d in distributors if d not in excel_dfs]
     if missing_dist:
         st.error(f"⚠️ **{len(missing_dist)} distributor TIDAK diproses** (tidak ada data SKU/Stock di BigQuery): {', '.join(missing_dist)}")
-    return excel_dfs, all_npd
+    return excel_dfs, all_npd, brand_map
 
 PO_TEMPLATE_COLS = [
     'Distributor','SKU','Product Name','Assortment','Supply Control',
@@ -982,7 +1047,8 @@ PO_TEMPLATE_COLS = [
 PO_IMG_COLS = PO_TEMPLATE_COLS[0:4] + PO_TEMPLATE_COLS[6:14]
 PO_COLS_copy = PO_TEMPLATE_COLS[:14]
 
-def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim):
+def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim, brand_map=None):
+    brand_map = brand_map or {}
     final_disp = pd.concat(e_dfs.values(), ignore_index=True)
 
     combined_raw = folder_res["df"].copy()
@@ -1237,8 +1303,82 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                 <li>Grand Total setelah pengurangan: <strong>{_rp(grand_total_after)}</strong></li>
             </ul>
         </div>""", unsafe_allow_html=True)
+     # ============ 8. Save Supply Control ============
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">8</span><strong>Save Supply Control</strong></div>""", unsafe_allow_html=True)
+
+    sc_base = final_disp.rename(columns={
+        "Distributor": "distributor_name", "SKU": "sku",
+        "Product Name": "product_name", "Supply Control": "status_supply",
+        "PO Qty": "po_qty", "_source_file": "file_name",
+    }).copy()
+    sc_base["status_supply"] = sc_base["status_supply"].astype(str).str.strip().str.upper()
+
+
+    if "file_name" not in sc_base.columns:
+        sc_base["file_name"] = ""
+    sc_base["file_name"] = sc_base["file_name"].fillna("")
+
+    # brand diambil dari mapping terpisah (tidak ikut tampil/download di output PO Simulator)
+    sc_base["brand"] = sc_base["sku"].astype(str).str.upper().map(brand_map).fillna("")
+
+    base_cols = ["distributor_name", "sku", "product_name", "brand", "file_name", "po_qty"]
+
+    
+    supply_rows = sc_base[sc_base["status_supply"].isin(SUPPLY_CONTROL_STATUSES)][base_cols].copy()
+    supply_rows["status_supply"] = sc_base.loc[supply_rows.index, "status_supply"]
+
+
+    npd_mask = sc_base["sku"].astype(str).str.upper().isin([str(s).upper() for s in (e_npd or [])])
+    npd_rows = sc_base[npd_mask][base_cols].copy()
+    npd_rows["status_supply"] = "NPD ALLOCATION"
+
+    sc_df = pd.concat([supply_rows, npd_rows], ignore_index=True)
+    sc_df = sc_df.drop_duplicates(subset=["distributor_name", "sku", "status_supply"])
+
+    if sc_df.empty:
+        st.info("Tidak ada SKU supply control / NPD allocation.")
+    else:
+        dist_tuple = tuple(sorted(sc_df["distributor_name"].dropna().astype(str).str.strip().str.upper().unique()))
+        region_map = get_distributor_region_map(dist_tuple)
+        dist_norm = sc_df["distributor_name"].astype(str).str.strip().str.upper()
+        sc_df["region"] = dist_norm.map(region_map).fillna("UNMAPPED")
+
+        unmapped = sorted(sc_df.loc[sc_df["region"] == "UNMAPPED", "distributor_name"].unique().tolist())
+        if unmapped:
+            st.warning(f"⚠️ Distributor tidak ter-mapping ke region: {', '.join(unmapped)}")
+
+        preview_cols = ["region", "distributor_name", "brand", "sku", "product_name", "status_supply", "po_qty", "file_name"]
+        st.caption(f"{len(sc_df)} baris · {sc_df['distributor_name'].nunique()} distributor")
+        st.dataframe(sc_df[preview_cols].reset_index(drop=True), use_container_width=True, hide_index=True)
+
+        saved = st.session_state.get("supply_control_saved", False)
+        if st.button("Save Supply Control", disabled=saved, use_container_width=True, key="btn_save_supply_control"):
+            try:
+                out_df = sc_df[preview_cols].copy()
+                out_df["po_qty"] = pd.to_numeric(out_df["po_qty"], errors="coerce").fillna(0).astype(int)
+                now_jkt = pd.Timestamp.now(tz="Asia/Jakarta")
+                out_df["calendar_date"] = now_jkt.date()
+                out_df["record_time"] = now_jkt.tz_localize(None)
+                out_df = out_df[DATA_COLS]
+
+                filtered_df = _filter_already_saved(out_df)
+                n_skipped = len(out_df) - len(filtered_df)
+
+                if filtered_df.empty:
+                    st.session_state["supply_control_saved"] = True
+                    st.warning(f"All rows already exist (file_name+sku+qty).")
+                else:
+                    _insert_supply_control(filtered_df)
+                    st.session_state["supply_control_saved"] = True
+                    msg = f"{len(filtered_df)} baris baru tersimpan ke po_supply_control_g2g"
+                    if n_skipped:
+                        msg += f" ({n_skipped} baris dilewati karena sudah pernah tersimpan)"
+                    st.success(msg)
+            except Exception as e:
+                st.error(f"Gagal simpan ke BigQuery: {e}")
 
     return final_disp
+    
 
 
 def _file_upload_section(page_key: str):
@@ -1442,7 +1582,7 @@ def _file_upload_section(page_key: str):
             st.session_state[f"col_{suf}"] = ""
             st.session_state.pop(f"_kalbar_defaulted_row_{suf}", None)
 
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">2</span>
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">1</span>
     <strong>Konfigurasi per File</strong></div>""", unsafe_allow_html=True)
 
     parsed = []
@@ -2131,6 +2271,7 @@ def _file_upload_section(page_key: str):
         if new_hash is None or new_hash != old_hash:
             st.session_state[f"folder_hash_{page_key}"] = new_hash
             st.session_state.pop(f"sim_result_{page_key}", None)
+            st.session_state.pop("supply_control_saved", None)
 
     res = st.session_state.get(f"folder_result_{page_key}")
     if res is not None:
@@ -2192,20 +2333,20 @@ if st.session_state.get('page') == 'po_changer':
         if sku_col_sim and qty_col_sim and dist_col_sim:
             st.divider()
             if st.session_state.get("sim_result_rsa") is None:
-                excel_dfs, all_npd = _run_po_simulation(
+                excel_dfs, all_npd, brand_map = _run_po_simulation(
                     sim_df.copy(), sku_col_sim, qty_col_sim, dist_col_sim,
                     _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
                     _REJECTED_SKUS_1, __REGION_LIST_1,
                     __REJECTED_SKUS_2, _REGION_LIST_2,
                     _LIMITED_SKUS_QTY, ___MAX_QTY_LIMIT,
                 )
-                st.session_state["sim_result_rsa"] = {"dfs": excel_dfs, "npd": all_npd}
+                st.session_state["sim_result_rsa"] = {"dfs": excel_dfs, "npd": all_npd, "brand_map": brand_map}
                 st.rerun()
 
             sim_out = st.session_state.get("sim_result_rsa")
             if sim_out and sim_out["dfs"]:
                 st.success(f"Simulasi selesai — {len(sim_out['dfs'])} distributor")
-                _render_sim_results(sim_out["dfs"], sim_out["npd"], folder_res, sku_col_sim, qty_col_sim, dist_col_sim)
+                _render_sim_results(sim_out["dfs"], sim_out["npd"], folder_res, sku_col_sim, qty_col_sim, dist_col_sim, sim_out.get("brand_map", {}))
 
     st.stop()
 
