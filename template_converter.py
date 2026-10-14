@@ -74,6 +74,11 @@ BRAND_OPTIONS = list(BRAND_PREFIXES.keys())
 # Distributors whose raw files require the 3M cleaning pipeline
 # (matched via case-insensitive prefix)
 M3_DISTRIBUTOR_PREFIX = "pt mitra makmur mandiri sejahtera"
+#kalo ada tambahan perbedaan customer branch code tiap brand-------------------------
+CUSTOMER_CODE_OVERRIDES = {
+    ("CV SUKSES SEHATI SELARAS - BAU BAU", "17"): "17SSS",
+}
+
 
 # Master distributor table for BQ lookups
 BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
@@ -704,8 +709,14 @@ def intelligent_mapping(
     for col in FIXED_FIRST_5:
         out[col] = [static_fields.get(col, "")] * len(df)
 
+####===============TARUH DISINI KALO ADA IF ELSE CASE YANG BERKAITAN DENGAN CUSTOMER BRANCH CODE
+
     customer_code_static = static_fields.get("Customer Code", "")
-    out["Customer Code"] = brand_prefix + customer_code_static
+    override = CUSTOMER_CODE_OVERRIDES.get((distributor.strip().upper(), brand_prefix))
+    if override:
+        out["Customer Code"] = override
+    else:
+        out["Customer Code"] = brand_prefix + customer_code_static
 
     needed = [c for c in MASTER_SCHEMA if c not in FIXED_FIRST_5]
 
