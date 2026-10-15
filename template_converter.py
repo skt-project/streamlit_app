@@ -815,6 +815,13 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
             keep_default_na=False,
             engine="xlrd",
         )
+    elif name.endswith(".ods"):
+        df = pd.read_excel(
+            uploaded_file,
+            dtype=str,
+            keep_default_na=False,
+            engine="odf",
+        )
     else:
         st.error("Unsupported file type. Please upload a .csv, .xls, or .xlsx file.")
         return pd.DataFrame()
@@ -1018,7 +1025,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
 def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     """Handles upload + conversion for standard distributor formats."""
     uploaded = st.file_uploader(
-        "Upload Distributor File (.xlsx/.csv)", type=["xlsx", "xls", "csv"]
+        "Upload Distributor File (.xlsx/.csv)", type=["xlsx", "xls", "csv", "ods"]
     )
     if not uploaded:
         return
