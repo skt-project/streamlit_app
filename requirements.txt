@@ -28,4 +28,5 @@ reportlab>=4.0.0,<5
 pypdf>=4.0.0
 requests>=2.31.0
 Pillow>=10.0.0
+odfpy
 
