@@ -81,9 +81,10 @@ def get_bq_client() -> bigquery.Client:
 
 
 # ===== Supply Control (Section 8) =====
-SUPPLY_CONTROL_STATUSES = ["STOP PO", "DISCONTINUED", "UNAVAILABLE", "OOS"]
+SUPPLY_CONTROL_STATUSES = ["STOP PO", "DISCONTINUED", "OOS"]
 DATA_COLS = ["region", "distributor_name", "brand", "sku", "product_name",
-             "status_supply", "po_qty", "file_name", "record_time", "calendar_date"]
+             "status_supply", "po_qty", "current_woi", "allocation",
+             "final_qty", "file_name", "record_time", "calendar_date"]
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1303,16 +1304,19 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                 <li>Grand Total setelah pengurangan: <strong>{_rp(grand_total_after)}</strong></li>
             </ul>
         </div>""", unsafe_allow_html=True)
-     # ============ 8. Save Supply Control ============
+
+    # ============ 8. Save Supply Control ============
     st.markdown("""<div class="pipeline-step active"><span class="step-number">8</span><strong>Save Supply Control</strong></div>""", unsafe_allow_html=True)
-
+#--------------------MASUKKAN/MAPPING KOLOM BARU
     sc_base = final_disp.rename(columns={
-        "Distributor": "distributor_name", "SKU": "sku",
-        "Product Name": "product_name", "Supply Control": "status_supply",
-        "PO Qty": "po_qty", "_source_file": "file_name",
-    }).copy()
-    sc_base["status_supply"] = sc_base["status_supply"].astype(str).str.strip().str.upper()
+    "Distributor": "distributor_name", "SKU": "sku",
+    "Product Name": "product_name", "Supply Control": "status_supply",
+    "PO Qty": "po_qty", "_source_file": "file_name",
+    "Suggested PO Qty": "suggested_po_qty",
+    "Remaining Allocation (By Region)": "remaining_allocation",
+    "WOI (Stock + PO Ori)": "current_woi" }).copy()
 
+    sc_base["status_supply"] = sc_base["status_supply"].astype(str).str.strip().str.upper()
 
     if "file_name" not in sc_base.columns:
         sc_base["file_name"] = ""
@@ -1321,15 +1325,52 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     # brand diambil dari mapping terpisah (tidak ikut tampil/download di output PO Simulator)
     sc_base["brand"] = sc_base["sku"].astype(str).str.upper().map(brand_map).fillna("")
 
-    base_cols = ["distributor_name", "sku", "product_name", "brand", "file_name", "po_qty"]
+    # po_qty TETAP qty asli dari file upload — tidak diubah
+    sc_base["po_qty"] = pd.to_numeric(sc_base.get("po_qty"), errors="coerce").fillna(0)
+    sc_base["suggested_po_qty"] = pd.to_numeric(sc_base.get("suggested_po_qty"), errors="coerce").fillna(0)
+    sc_base["remaining_allocation"] = pd.to_numeric(sc_base.get("remaining_allocation"), errors="coerce")
+    sc_base["current_woi"] = pd.to_numeric(sc_base.get("current_woi"), errors="coerce").round(2)
+    sc_base["allocation"] = sc_base["remaining_allocation"]
 
-    
-    supply_rows = sc_base[sc_base["status_supply"].isin(SUPPLY_CONTROL_STATUSES)][base_cols].copy()
+    is_unavailable = sc_base["status_supply"] == "UNAVAILABLE"
+
+    # =========== LOGIC FINAL QTY (kolom baru: final_qty) ===========
+    # 1. Supply control TIDAK normal (STOP PO / DISCONTINUED / OOS) -> final_qty = po_qty
+    # 2. Supply control normal & remaining allocation > 0           -> final_qty = N/A (baris di-skip, tidak disimpan)
+    # 3. Supply control normal & (tidak ada allocation / alloc = 0) & po_qty > suggested -> final_qty = suggested_po_qty
+    # 4. Supply control normal & (tidak ada allocation / alloc = 0) & po_qty <= suggested -> final_qty = po_qty
+    is_abnormal = sc_base["status_supply"].isin(SUPPLY_CONTROL_STATUSES)  # STOP PO / DISCONTINUED / OOS
+    has_allocation = sc_base["remaining_allocation"].notna() & (sc_base["remaining_allocation"] > 0)
+    over_suggested = sc_base["po_qty"] > sc_base["suggested_po_qty"]
+
+    sc_base["final_qty"] = np.select(
+        [
+            is_abnormal,                                             # 1
+            (~is_abnormal) & has_allocation,                         # 2 -> N/A (np.nan)
+            (~is_abnormal) & (~has_allocation) & over_suggested,     # 3
+            (~is_abnormal) & (~has_allocation) & (~over_suggested),  # 4
+        ],
+        [
+            sc_base["po_qty"],
+            np.nan,
+            sc_base["suggested_po_qty"],
+            sc_base["po_qty"],
+        ],
+        default=np.nan,
+    )
+    # =================================================================
+
+    base_cols = ["distributor_name", "sku", "product_name", "brand", "file_name", "po_qty", "current_woi", "allocation","final_qty"]
+
+    is_po_row = sc_base.get("is_po_sku", False) == True
+    # exclude UNAVAILABLE di sini + buang kasus #2 (N/A)
+    valid_final = is_po_row & sc_base["final_qty"].notna() & (~is_unavailable)
+
+    supply_rows = sc_base.loc[valid_final, base_cols].copy()
     supply_rows["status_supply"] = sc_base.loc[supply_rows.index, "status_supply"]
 
-
     npd_mask = sc_base["sku"].astype(str).str.upper().isin([str(s).upper() for s in (e_npd or [])])
-    npd_rows = sc_base[npd_mask][base_cols].copy()
+    npd_rows = sc_base.loc[npd_mask, base_cols].copy()
     npd_rows["status_supply"] = "NPD ALLOCATION"
 
     sc_df = pd.concat([supply_rows, npd_rows], ignore_index=True)
@@ -1346,8 +1387,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         unmapped = sorted(sc_df.loc[sc_df["region"] == "UNMAPPED", "distributor_name"].unique().tolist())
         if unmapped:
             st.warning(f"⚠️ Distributor tidak ter-mapping ke region: {', '.join(unmapped)}")
-
-        preview_cols = ["region", "distributor_name", "brand", "sku", "product_name", "status_supply", "po_qty", "file_name"]
+        preview_cols = ["region", "distributor_name", "brand", "sku", "product_name", "status_supply", "po_qty", "current_woi", "allocation", "final_qty", "file_name"]
+        
         st.caption(f"{len(sc_df)} baris · {sc_df['distributor_name'].nunique()} distributor")
         st.dataframe(sc_df[preview_cols].reset_index(drop=True), use_container_width=True, hide_index=True)
 
@@ -1356,6 +1397,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
             try:
                 out_df = sc_df[preview_cols].copy()
                 out_df["po_qty"] = pd.to_numeric(out_df["po_qty"], errors="coerce").fillna(0).astype(int)
+                out_df["final_qty"] = pd.to_numeric(out_df["final_qty"], errors="coerce").fillna(0).astype(int)
+                out_df["current_woi"] = pd.to_numeric(out_df["current_woi"], errors="coerce").round(2)
+                out_df["allocation"] = pd.to_numeric(out_df["allocation"], errors="coerce").fillna(0).astype(int)
                 now_jkt = pd.Timestamp.now(tz="Asia/Jakarta")
                 out_df["calendar_date"] = now_jkt.date()
                 out_df["record_time"] = now_jkt.tz_localize(None)
