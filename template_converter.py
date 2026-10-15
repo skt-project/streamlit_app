@@ -75,11 +75,14 @@ BRAND_OPTIONS = list(BRAND_PREFIXES.keys())
 # (matched via case-insensitive prefix)
 M3_DISTRIBUTOR_PREFIX = "pt mitra makmur mandiri sejahtera"
 #kalo ada tambahan perbedaan customer branch code tiap brand-------------------------
+
+
 CUSTOMER_CODE_OVERRIDES = {
     ("CV SUKSES SEHATI SELARAS - BAU BAU", "17"): "17SSS",
 }
 
-
+STORE_CODE_FROM_NAME_DIST = "CV SUKSES SEHATI SELARAS - BAU BAU"  
+STORE_CODE_FROM_NAME_PREFIX = "DST363-"  
 # Master distributor table for BQ lookups
 BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
 
@@ -709,14 +712,19 @@ def intelligent_mapping(
     for col in FIXED_FIRST_5:
         out[col] = [static_fields.get(col, "")] * len(df)
 
-####===============TARUH DISINI KALO ADA IF ELSE CASE YANG BERKAITAN DENGAN CUSTOMER BRANCH CODE
-
     customer_code_static = static_fields.get("Customer Code", "")
     override = CUSTOMER_CODE_OVERRIDES.get((distributor.strip().upper(), brand_prefix))
     if override:
         out["Customer Code"] = override
     else:
         out["Customer Code"] = brand_prefix + customer_code_static
+
+    # Khusus CV SUKSES SEHATI SELARAS - BAU BAU: store code dibentuk dari store name
+    store_name_prefix = (                                              # <-- BARU
+        STORE_CODE_FROM_NAME_PREFIX                                    # <-- BARU
+        if distributor.strip().upper() == STORE_CODE_FROM_NAME_DIST    # <-- BARU
+        else None                                                      # <-- BARU
+    )                                                                  # <-- BARU
 
     needed = [c for c in MASTER_SCHEMA if c not in FIXED_FIRST_5]
 
@@ -733,6 +741,8 @@ def intelligent_mapping(
 
     if enable_fuzzy:
         for target in needed:
+            if target == "Customer Store Code" and store_name_prefix:  # <-- BARU
+                continue  # dibentuk dari Customer Store Name         # <-- BARU
             if out[target].isna().all():
                 guesses = get_close_matches(
                     target.lower(), df.columns.tolist(), n=1, cutoff=fuzzy_cutoff
@@ -744,21 +754,27 @@ def intelligent_mapping(
                 else:
                     failed_columns.append(target)
 
-    # Coerce identity fields AFTER fuzzy matching so missing columns (all-NA)
-    # can still be filled by fuzzy match. as_text turns NA into "" (not "nan").
     out = force_text_columns(out)
 
-    # ✅ PREFIX LOGIC (SAFE)
     if distributor.upper() == "CV SINAR SAKTI":
         po = series_as_text(out["PO Number"])
         out["PO Number"] = po.map(
             lambda x: x if (not x or x.startswith("SS")) else "SS" + x
         )
 
+    if store_name_prefix:                                             #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+        names = series_as_text(out["Customer Store Name"])            #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+        out["Customer Store Code"] = names.map(                       #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+            lambda x: store_name_prefix + x if x else ""              #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+        )                                                             #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+        effective_mapping["Customer Store Code"] = (                  #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+            f"CONCAT({store_name_prefix}, Customer Store Name)"       #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+        )                                                             #MODIFIKASI DISTRI CV SUKSES SEHATI SELARAS
+
     branch_code_prefix = static_fields.get("Customer Branch Code", "")
     original_store_code_col = effective_mapping.get("Customer Store Code")
 
-    if branch_code_prefix and original_store_code_col:
+    if not store_name_prefix and branch_code_prefix and original_store_code_col:  # <-- BARU: not store_name_prefix
         store = series_as_text(out["Customer Store Code"])
         out["Customer Store Code"] = store.map(lambda x: branch_code_prefix + x)
         effective_mapping["Customer Store Code"] = (
