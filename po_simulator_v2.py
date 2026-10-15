@@ -2395,7 +2395,7 @@ if st.session_state.get('page') == 'po_changer':
     st.stop()
 
 
-#################PO Simulator (For SPV)
+#################PO Simulator (For SPV) LOGIC SPV
 
 if st.session_state.get('page') == 'po_spv':
     st.markdown("""<div class="hero-wrap">
@@ -2475,7 +2475,7 @@ if st.session_state.get('page') == 'po_spv':
 
         if uploaded_file:
             try:
-                required_cols = ["PRODUCT CODE", "DESCRIPTION", "QTY", "DISTRIBUTOR"]
+                required_cols = [ "DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY"]
 
                 if uploaded_file.name.endswith(".xlsx"):
                     po_df = pd.read_excel(uploaded_file, header=7, engine="openpyxl")
