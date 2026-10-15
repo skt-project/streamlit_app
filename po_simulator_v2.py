@@ -974,7 +974,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             moq_lookup_val =  sku_upper.map(moq_map_lookup).astype(float) 
             po_qty_val = pd.to_numeric(res_df["PO Qty"], errors="coerce")
 
-            is_multiple = (po_qty_val <50) & np.mod(po_qty_val, moq_lookup_val) == 0
+            is_multiple = (po_qty_val < 50) & (np.mod(po_qty_val, moq_lookup_val) == 0)
             under_moq_mask = (po_qty_val < moq_lookup_val) & ~is_multiple
             suggested_qty = np.ceil(po_qty_val / moq_lookup_val) * moq_lookup_val
 
@@ -2807,8 +2807,8 @@ if st.session_state.get('page') == 'po_spv':
                         moq_val_spv = sku_upper_spv.map(moq_map_spv).astype(float)
                         po_qty_val_spv = pd.to_numeric(result_df["PO Qty"], errors="coerce")
 
-                        is_multiple = (po_qty_val < 50) & (np.mod(po_qty_val, moq_lookup_val) == 0)
-                        under_moq_mask_spv = (po_qty_val_spv < 50) & ~is_multiple_spv
+                        is_multiple_spv = (po_qty_val_spv < 50) & (np.mod(po_qty_val_spv, moq_val_spv) == 0)
+                        under_moq_mask_spv = (po_qty_val_spv < moq_val_spv) & ~is_multiple_spv
 
                         suggested_qty_spv = np.ceil(po_qty_val_spv / moq_val_spv) * moq_val_spv
 
