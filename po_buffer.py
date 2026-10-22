@@ -48,6 +48,8 @@ class Config:
     BQ_PROJECT = "skintific-data-warehouse"
     BQ_DATASET = "rsa"
     BQ_TABLE = "inventory_buffer"
+    BQ_STAGING_DATASET = "gt_schema"
+    BQ_STAGING_TABLE = "po_store_suggestion_stagging"
     BQ_STORED_PROC = f"`{BQ_PROJECT}.{BQ_DATASET}.inventory_buffer_sp`"
     
     # Timing Configuration
@@ -377,11 +379,7 @@ def _generate_store_page_elements(
     elements = []
     table_font_size = 8.5
     
-    # ✅ FILTER FIRST - Only products with buffer_plan > 0
-    sku_data_filtered = sku_data[
-        (sku_data['buffer_plan_ver2'].notna()) & 
-        (sku_data['buffer_plan_ver2'] > 0)
-    ].copy()
+    sku_data_filtered = sku_data[sku_data['buffer_plan'].notna()].copy()
     
     # Define styles
     cell_style = ParagraphStyle(
@@ -485,7 +483,7 @@ def _generate_store_page_elements(
     
     # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
     for _, row in sku_data_filtered.iterrows():
-        buffer_qty = int(row['buffer_plan_ver2'])  # Already filtered, must be > 0
+        buffer_qty = int(row['buffer_plan_ver2']) if pd.notna(row['buffer_plan_ver2']) else 0
         actual_stock = int(row['estimated_actual_stock_adj']) if not pd.isna(row['estimated_actual_stock_adj']) else 0
         buffer_val = (
             int(row['buffer_plan_value_ver2'].item())
@@ -600,7 +598,7 @@ def generate_multi_store_pdf(
                 df_inventory_buffer['store_code'] == store_row['store_code']
             ].copy()
             
-            if store_detail['buffer_plan_ver2'].sum() == 0:
+            if not store_detail['buffer_plan'].notna().any():
                 continue
             
             store_info = {
@@ -631,6 +629,136 @@ def generate_multi_store_pdf(
 # ============================================================================
 # DATA LOADING FUNCTIONS
 # ============================================================================
+
+def combined_inventory_sql() -> str:
+    """
+    Inventory buffer unioned with the current-month store suggestion staging
+    table, collapsed to one row per id_st + product_code.
+
+    Numeric, qty, value, and date columns use MAX. Text and bool columns use
+    ANY_VALUE. Only rows with buffer_plan IS NOT NULL are returned.
+    Staging rows are limited to Kalimantan and Sulawesi.
+    """
+    inventory_table = f"`{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`"
+    staging_table = (
+        f"`{Config.BQ_PROJECT}.{Config.BQ_STAGING_DATASET}.{Config.BQ_STAGING_TABLE}`"
+    )
+    return f"""
+    SELECT
+        id_st,
+        product_code,
+        MAX(inner_pcs) AS inner_pcs,
+        MAX(price_for_store) AS price_for_store,
+        MAX(actual_stock) AS actual_stock,
+        MAX(stock_date) AS stock_date,
+        MAX(avg_daily_qty) AS avg_daily_qty,
+        MAX(so_since_stock_date) AS so_since_stock_date,
+        MAX(estimated_actual_stock) AS estimated_actual_stock,
+        MAX(topup_qty_allocated) AS topup_qty_allocated,
+        MAX(estimated_actual_stock_adj) AS estimated_actual_stock_adj,
+        MAX(SO_Bulanan) AS SO_Bulanan,
+        MAX(days_of_inventory) AS days_of_inventory,
+        MAX(standard_doi) AS standard_doi,
+        MAX(stok_distributor) AS stok_distributor,
+        MAX(buffer_plan) AS buffer_plan,
+        MAX(buffer_plan_ver2) AS buffer_plan_ver2,
+        MAX(last_updated_jkt) AS last_updated_jkt,
+        MAX(buffer_plan_value) AS buffer_plan_value,
+        MAX(buffer_plan_value_ver2) AS buffer_plan_value_ver2,
+        ANY_VALUE(product_life_cycle) AS product_life_cycle,
+        ANY_VALUE(Stok_Principal) AS Stok_Principal,
+        ANY_VALUE(assortment) AS assortment,
+        ANY_VALUE(priority_label) AS priority_label,
+        ANY_VALUE(product_name) AS product_name,
+        ANY_VALUE(store_code) AS store_code,
+        ANY_VALUE(distributor_g2g) AS distributor_g2g,
+        ANY_VALUE(region) AS region,
+        ANY_VALUE(store_name) AS store_name,
+        ANY_VALUE(address) AS address,
+        ANY_VALUE(status_stok_distributor) AS status_stok_distributor,
+        ANY_VALUE(is_topup) AS is_topup
+    FROM (
+        SELECT
+            store_code,
+            product_code,
+            product_life_cycle,
+            Stok_Principal,
+            assortment,
+            priority_label,
+            inner_pcs,
+            price_for_store,
+            product_name,
+            actual_stock,
+            stock_date,
+            avg_daily_qty,
+            so_since_stock_date,
+            estimated_actual_stock,
+            topup_qty_allocated,
+            estimated_actual_stock_adj,
+            SO_Bulanan,
+            days_of_inventory,
+            standard_doi,
+            id_st,
+            distributor_g2g,
+            region,
+            store_name,
+            address,
+            stok_distributor,
+            status_stok_distributor,
+            is_topup,
+            buffer_plan,
+            buffer_plan_ver2,
+            last_updated_jkt,
+            buffer_plan_value,
+            buffer_plan_value_ver2
+        FROM {inventory_table}
+        UNION ALL
+        SELECT
+            CAST(NULL AS STRING) AS store_code,
+            product_code,
+            CAST(NULL AS STRING) AS product_life_cycle,
+            CAST(NULL AS STRING) AS Stok_Principal,
+            CAST(NULL AS STRING) AS assortment,
+            CAST(NULL AS STRING) AS priority_label,
+            CAST(NULL AS INT64) AS inner_pcs,
+            price_for_store,
+            product_name,
+            CAST(NULL AS FLOAT64) AS actual_stock,
+            date AS stock_date,
+            CAST(NULL AS FLOAT64) AS avg_daily_qty,
+            CAST(NULL AS FLOAT64) AS so_since_stock_date,
+            CAST(NULL AS FLOAT64) AS estimated_actual_stock,
+            CAST(NULL AS FLOAT64) AS topup_qty_allocated,
+            CAST(NULL AS FLOAT64) AS estimated_actual_stock_adj,
+            CAST(NULL AS INT64) AS SO_Bulanan,
+            CAST(NULL AS FLOAT64) AS days_of_inventory,
+            CAST(NULL AS INT64) AS standard_doi,
+            id_st,
+            distributor_g2g,
+            region,
+            store_name,
+            CAST(NULL AS STRING) AS address,
+            CAST(NULL AS FLOAT64) AS stok_distributor,
+            CAST(NULL AS STRING) AS status_stok_distributor,
+            CAST(NULL AS BOOL) AS is_topup,
+            buffer_plan,
+            CAST(NULL AS FLOAT64) AS buffer_plan_ver2,
+            CAST(NULL AS DATETIME) AS last_updated_jkt,
+            buffer_plan_value,
+            CAST(NULL AS FLOAT64) AS buffer_plan_value_ver2
+        FROM {staging_table}
+        WHERE date >= DATE_TRUNC(CURRENT_DATE(), MONTH)
+          AND date < DATE_ADD(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 1 MONTH)
+          AND (
+              UPPER(region) LIKE '%KALIMANTAN%'
+              OR UPPER(region) LIKE '%SULAWESI%'
+          )
+    ) AS combined_data
+    GROUP BY
+        id_st,
+        product_code
+    HAVING MAX(buffer_plan) IS NOT NULL
+    """
 
 @st.cache_data(ttl=60)
 def get_inventory_last_updated_jkt() -> Optional[datetime]:
@@ -730,7 +858,6 @@ def check_and_execute_sp() -> Optional[datetime]:
     return last_updated_jkt
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
-@st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
 def load_store_summary_filtered(selected_region="All", selected_distributor="All") -> pd.DataFrame:
     client = get_bigquery_client()
 
@@ -745,31 +872,22 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         where_sql = "WHERE " + " AND ".join(filters)
 
     query = f"""
-    WITH latest_stock AS (
-        SELECT
-            store_code,
-            MAX(stock_date) AS latest_stock_date
-        FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
-        GROUP BY store_code
+    WITH combined_data AS (
+        {combined_inventory_sql()}
     )
     SELECT
         ib.store_code,
         ANY_VALUE(ib.store_name) AS store_name,
         ANY_VALUE(ib.region) AS region,
         ANY_VALUE(ib.distributor_g2g) AS distributor,
-        ANY_VALUE(ib.stock_date) AS stock_date,
-        -- ✅ Only count SKUs where buffer_plan_ver2 > 0
-        COUNT(DISTINCT CASE WHEN ib.buffer_plan_ver2 > 0 THEN ib.product_code END) AS total_skus,
-        -- ✅ Only sum where buffer_plan_ver2 > 0
-        SUM(CASE WHEN ib.buffer_plan_ver2 > 0 THEN ib.buffer_plan_ver2 ELSE 0 END) AS total_buffer_qty,
-        SUM(CASE WHEN ib.buffer_plan_ver2 > 0 THEN ib.buffer_plan_value_ver2 ELSE 0 END) AS est_order_value
-    FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
-    INNER JOIN latest_stock ls
-        ON ib.store_code = ls.store_code
-        AND ib.stock_date = ls.latest_stock_date
+        MAX(ib.stock_date) AS stock_date,
+        COUNT(DISTINCT CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.product_code END) AS total_skus,
+        COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_ver2 ELSE 0 END), 0) AS total_buffer_qty,
+        COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_value_ver2 ELSE 0 END), 0) AS est_order_value
+    FROM combined_data ib
     {where_sql}
     GROUP BY ib.store_code
-    HAVING total_buffer_qty > 0
+    HAVING total_skus > 0
     ORDER BY est_order_value DESC
     """
 
@@ -795,44 +913,35 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
 def load_inventory_buffer_data() -> pd.DataFrame:
     """
-    Load full inventory buffer data from BigQuery (latest stock_date only per store)
+    Load inventory rows from rsa.inventory_buffer unioned with the current
+    month of gt_schema.po_store_suggestion_stagging, one row per id_st + product_code.
     
     Returns:
-        pd.DataFrame: Complete inventory buffer data
+        pd.DataFrame: Combined inventory buffer data
         
     Raises:
         Exception: If query fails
     """
     try:
-        logger.info("Loading inventory buffer data...")
+        logger.info("Loading combined inventory buffer data...")
         client = get_bigquery_client()
         
         query = f"""
-        WITH latest_stock AS (
-            SELECT
-                store_code,
-                MAX(stock_date) AS latest_stock_date
-            FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`
-            GROUP BY store_code
-        )
-        SELECT 
-            ib.store_code, ib.product_code, ib.product_life_cycle, ib.assortment,
-            ib.inner_pcs, ib.price_for_store, ib.product_name, ib.estimated_actual_stock_adj,
-            ib.stock_date, ib.avg_daily_qty, ib.days_of_inventory, ib.standard_doi,
-            ib.id_st, ib.distributor_g2g, ib.region, ib.store_name, ib.address,
-            ib.stok_distributor, ib.status_stok_distributor, ib.buffer_plan,
-            ib.buffer_plan_ver2, ib.buffer_plan_value, ib.buffer_plan_value_ver2,
-            ib.SO_Bulanan, ib.priority_label 
-        FROM `{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}` ib
-        INNER JOIN latest_stock ls
-            ON ib.store_code = ls.store_code
-            AND ib.stock_date = ls.latest_stock_date
-        ORDER BY ib.region, ib.store_name, STRPOS('Must Have SKU, NPD, Discontinued', ib.priority_label), ib.SO_Bulanan DESC, ib.buffer_plan_value_ver2 DESC
+        SELECT *
+        FROM (
+            {combined_inventory_sql()}
+        ) AS ib
+        ORDER BY
+            ib.region,
+            ib.store_name,
+            STRPOS('Must Have SKU, NPD, Discontinued', ib.priority_label),
+            ib.SO_Bulanan DESC,
+            ib.buffer_plan_value_ver2 DESC
         """
         
         df = client.query(query).to_dataframe()
         
-        logger.info(f"✓ Loaded {len(df)} inventory records (latest stock_date only)")
+        logger.info(f"✓ Loaded {len(df)} combined inventory records")
         return df
         
     except google_exceptions.GoogleAPIError as e:
