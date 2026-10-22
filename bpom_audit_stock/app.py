@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, replace
-from datetime import date
 from pathlib import Path
 
 import gspread
@@ -32,6 +31,8 @@ SCOPES = [
 ]
 BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus",
          "September", "Oktober", "November", "Desember"]
+# Periode audit yang dibuka saat ini (tahun, bulan). Tambahkan tuple baru untuk membuka periode berikutnya.
+OPEN_PERIODS = ((2026, 10),)
 MODES = ("Input", "Revisi")
 MAX_ISSUES_SHOWN = 300
 
@@ -338,16 +339,15 @@ def main() -> None:
     st.subheader("Langkah 2 - Periode audit, tanggal audit, dan PIC")
     st.caption("**Periode Audit** = bulan dan tahun stock yang diaudit. **Tanggal Audit** = tanggal pengecekan "
                "fisik dilakukan. **Nama PIC** = nama Anda; akan tercatat sebagai pembuat/pengubah data.")
-    col_month, col_year, col_date, col_pic = st.columns([2, 1, 2, 3])
-    month = col_month.selectbox("Periode Audit - Bulan", BULAN, index=None, placeholder="Bulan")
-    this_year = date.today().year
-    year = col_year.selectbox("Tahun", list(range(this_year, this_year - 4, -1)), index=None, placeholder="Tahun")
+    col_period, col_date, col_pic = st.columns([2, 2, 3])
+    period = col_period.selectbox("Periode Audit", OPEN_PERIODS, index=0 if len(OPEN_PERIODS) == 1 else None,
+                                  format_func=lambda p: f"{BULAN[p[1] - 1]} {p[0]}", placeholder="Pilih periode")
     tanggal = col_date.date_input("Tanggal Audit", value=None, format="DD/MM/YYYY")
     pic = col_pic.text_input("Nama PIC Distributor", max_chars=100)
 
-    periode = f"{year}-{BULAN.index(month) + 1:02d}" if month and year else None
+    periode = f"{period[0]}-{period[1]:02d}" if period else None
     if periode:
-        st.caption(f"Periode Audit: {month} {year} (disimpan sebagai `{periode}`)")
+        st.caption(f"Periode Audit: {BULAN[period[1] - 1]} {period[0]} (disimpan sebagai `{periode}`)")
 
     # 6. Mode
     st.subheader("Langkah 3 - Pilih mode")
