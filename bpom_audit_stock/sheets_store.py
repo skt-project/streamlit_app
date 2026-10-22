@@ -95,7 +95,14 @@ def open_spreadsheet(
                               "ke service account.") from None
         if not create:
             return None, False
-    sh = gc.create(title)
+    try:
+        sh = gc.create(title)
+    except gspread.exceptions.APIError as exc:
+        raise SheetsError(
+            f"Spreadsheet '{title}' tidak ditemukan dan service account tidak bisa membuat yang baru ({exc}). "
+            "Service account tidak punya kuota Drive, jadi spreadsheet harus dibuat manual, di-share sebagai Editor "
+            "ke service account, lalu ID-nya diisi sebagai `google_sheet_id` di bagian `[app]` pada Secrets."
+        ) from None
     for email in share_with:
         sh.share(email, perm_type="user", role="writer", notify=False)
     return sh, True

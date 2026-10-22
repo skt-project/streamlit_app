@@ -305,6 +305,10 @@ def main() -> None:
     st.session_state.setdefault("upload_ver", 0)
 
     st.title("BPOM Audit Stock Distributor")
+    if not cfg.sheet_id:
+        st.warning("`google_sheet_id` belum terbaca dari Secrets. Pastikan ada di bagian `[app]` "
+                   "(`[app]` lalu baris `google_sheet_id = \"...\"`). Tanpa itu, aplikasi mencari spreadsheet "
+                   f"berjudul '{cfg.sheet_name}' dan mencoba membuatnya, yang akan gagal.")
     show_flash()
     with st.expander("Panduan singkat: alur pengisian", expanded=True):
         st.markdown(GUIDE_OVERVIEW)
