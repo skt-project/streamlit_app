@@ -1,4 +1,4 @@
-"""Store Sales Input — pencatatan penjualan store ke end consumer oleh supervisor.
+"""Facerinna Submission Program — pencatatan penjualan store ke end consumer oleh supervisor.
 
 BigQuery = source of truth, Google Sheets = reporting mirror, Google Cloud Storage = evidence foto.
 """
@@ -26,7 +26,7 @@ from validation import LineInput, validate_submission
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("store_sales.app")
 
-st.set_page_config(page_title="Store Sales Input", page_icon="🛒", layout="centered",
+st.set_page_config(page_title="Facerinna Submission Program", page_icon="🛒", layout="centered",
                    initial_sidebar_state="collapsed")
 
 NO_REGION = "(Tanpa Region)"
@@ -160,9 +160,7 @@ def main():
     _init_state()
     ss = st.session_state
     apply_mobile_layout()
-    st.title("🛒 Store Sales Input")
-    st.caption("Catat Sell Out dan Stock per SKU di store. Submit ulang untuk tanggal + store + SKU yang sama "
-               "memperbarui data lama (tanpa duplikat).")
+    st.title("Facerinna Submission Program")
 
     try:
         be = get_backends()

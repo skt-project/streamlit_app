@@ -5,6 +5,7 @@
 - Judul/padding lebih kecil, tombol dan input cukup besar untuk jari, font input >= 16 px (mencegah iOS
   men-zoom otomatis saat kolom difokuskan).
 - Kolom Sell Out / Stock memunculkan keypad ANGKA (inputmode=numeric).
+- Tombol kamera "Take Photo" bawaan Streamlit ditampilkan sebagai "Ambil gambar" (merah, putih, tebal).
 """
 from __future__ import annotations
 
@@ -26,6 +27,20 @@ _CSS = """
 [data-testid="stHorizontalBlock"]:has(.keep-row.last-button) > [data-testid="stColumn"]:last-child {
     flex: 0 0 5.5rem !important;
 }
+/* tombol kamera: "Take Photo" (teks bawaan Streamlit, tidak bisa diganti lewat Python) → "Ambil gambar",
+   latar merah, huruf putih tebal. Tombol "Clear photo" adalah komponen lain dan tidak ikut berubah. */
+[data-testid="stCameraInputButton"] {
+    background: #d32f2f !important; border: 1px solid #d32f2f !important; color: #fff !important;
+    font-size: 0 !important; min-height: 3rem; border-radius: .5rem;
+}
+[data-testid="stCameraInputButton"] * { font-size: 0 !important; color: transparent !important; }
+[data-testid="stCameraInputButton"]::after {
+    content: "Ambil gambar"; font-size: 1rem; font-weight: 700; color: #fff;
+}
+[data-testid="stCameraInputButton"]:hover:not(:disabled), [data-testid="stCameraInputButton"]:active:not(:disabled) {
+    background: #b71c1c !important; border-color: #b71c1c !important;
+}
+[data-testid="stCameraInputButton"]:disabled { opacity: .55; }
 @media (max-width: 640px) {
   [data-testid="stMainBlockContainer"] { padding: 1.25rem .75rem 5rem !important; }
   h1 { font-size: 1.55rem !important; line-height: 1.25 !important; padding: 0 !important; }

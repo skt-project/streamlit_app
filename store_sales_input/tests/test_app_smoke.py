@@ -83,6 +83,8 @@ def submit(at):
 def test_page_loads_with_all_skus_prefilled_and_no_pristine_noise(backend):
     at = fresh()
     assert not at.exception and not at.error
+    assert [t.value for t in at.title] == ["Facerinna Submission Program"]
+    assert not any("Catat Sell Out" in c.value for c in at.caption)      # tanpa deskripsi di bawah judul
     assert at.selectbox[0].label == "Region" and at.selectbox[1].label == "Selected Store"
     assert at.selectbox[0].options == ["JABAR", "JATENG"]
     assert at.selectbox[1].disabled                              # store terkunci sampai region dipilih
