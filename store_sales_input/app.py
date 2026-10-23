@@ -30,6 +30,7 @@ st.set_page_config(page_title="Facerinna Submission Program", page_icon="🛒", 
                    initial_sidebar_state="collapsed")
 
 NO_REGION = "(Tanpa Region)"
+QTY_PLACEHOLDER = "isi quantity disini"      # bukan "0": supaya jelas kolom ini belum diisi
 _REQUIRED_SUFFIX = "wajib diisi."
 
 
@@ -256,9 +257,9 @@ def render_input(be, master):
     for i, uid in enumerate(list(ss.rows), start=1):
         with st.container(border=True):
             fixed_label = ss.row_fixed.get(uid)
-            head = st.columns([6, 1], vertical_alignment="center")
+            head = st.columns([5, 2], vertical_alignment="center")
             with head[0]:
-                keep_row("icon")
+                keep_row("button")
                 if fixed_label:                                   # SKU dari template: teks tetap, hemat layar HP
                     sku = sku_by_label.get(fixed_label)
                     st.markdown(f"**{i}. {sku.code}**  \n{sku.name}" if sku else f"**{i}.** {fixed_label}")
@@ -266,13 +267,14 @@ def render_input(be, master):
                 else:                                             # baris tambahan: pilih SKU sendiri
                     sku_label = st.selectbox(f"SKU #{i}", sku_labels, index=None, key=_k("sku", uid),
                                              placeholder="Ketik kode atau nama SKU")
-            head[1].button("🗑", key=_k("del", uid), help="Hapus baris", on_click=_delete_row, args=(uid,))
+            head[1].button("Delete", key=_k("del", uid), help="Hapus SKU ini dari daftar",
+                           on_click=_delete_row, args=(uid,))
             qty = st.columns(2)
             with qty[0]:
                 keep_row()
-                sell_out_raw = st.text_input("Sell Out", key=_k("so", uid), placeholder="0",
+                sell_out_raw = st.text_input("Sell Out", key=_k("so", uid), placeholder=QTY_PLACEHOLDER,
                                              help="Penjualan store ke end consumer (pcs)")
-            stock_raw = qty[1].text_input("Stock", key=_k("st", uid), placeholder="0",
+            stock_raw = qty[1].text_input("Stock", key=_k("st", uid), placeholder=QTY_PLACEHOLDER,
                                           help="Stock SKU di store (pcs)")
             with st.expander("📷 Foto SKU (opsional)"):
                 cam = st.camera_input("Ambil foto", key=_k("cam", uid))

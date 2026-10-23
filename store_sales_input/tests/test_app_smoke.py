@@ -97,6 +97,27 @@ def test_page_loads_with_all_skus_prefilled_and_no_pristine_noise(backend):
     assert not at.warning
 
 
+def test_quantity_placeholder_says_fill_here_not_zero(backend):
+    at = fresh()
+    qty_inputs = [t for t in at.text_input if t.label in ("Sell Out", "Stock")]
+    assert len(qty_inputs) == 2 * len(SKUS)
+    assert all(t.placeholder == "isi quantity disini" for t in qty_inputs)
+    assert all(t.value == "" for t in qty_inputs)                # kosong sungguhan, bukan "0"
+
+
+def test_delete_button_is_labelled_and_removes_only_that_sku(backend):
+    at = fresh()
+    dels = [b for b in at.button if b.label == "Delete"]            # teks saja, tanpa ikon
+    assert len(dels) == len(SKUS)
+    assert not any("🗑" in b.label for b in at.button)
+    assert all("Hapus SKU ini dari daftar" in b.help for b in dels)
+    dels[0].click()
+    at = at.run()
+    texts = [m.value for m in at.markdown]
+    assert not any("**1. K1**" in t for t in texts) and any("K2" in t and "Produk Dua" in t for t in texts)
+    assert len([t for t in at.text_input if t.label == "Sell Out"]) == len(SKUS) - 1
+
+
 def test_store_dropdown_is_filtered_by_region(backend):
     at = fresh()
     at.selectbox[0].set_value("JATENG")
@@ -277,3 +298,86 @@ def test_form_is_not_red_right_after_successful_submit(backend):
     at = submit(fill(fresh()))
     assert any("INSERT" in x.value for x in at.success)
     assert not at.error                                            # supervisor masih terisi, tapi form kosong → tanpa error
+
+
+# ── Pagination galeri admin ─────────────────────────────────────────────────
+
+def seed_photos(backend):
+    """Tiap store x SKU punya foto → 3 store x 2 SKU = 6 foto (S1, S3 di JATENG; S2 di JABAR)."""
+    from datetime import datetime
+    from test_service import T1
+    from timeutil import WIB
+    from validation import make_transaction_id
+    today = datetime.now(WIB).date()
+    for sid, name in (("S1", "Toko Satu"), ("S2", "Toko Dua"), ("S3", "Toko Tiga")):
+        for sku in ("K1", "K2"):
+            backend.bq_store.rows[(today, sid, sku)] = dict(
+                transaction_id=make_transaction_id(today, sid, sku), tanggal_penjualan=today, store_id=sid,
+                store_name=name, region="X", store_group="GT", sku_code=sku, sku_name=sku, sell_out_qty=1,
+                stock_qty=1, supervisor_name="Budi", evidence_file_id=f"{sid}-{sku}.jpg",
+                evidence_file_url="u", evidence_file_name="n.jpg", evidence_uploaded_at=T1,
+                created_at=T1, updated_at=T1)
+
+
+def gallery_files(at):
+    return [i.proto.imgs[0].url.rsplit("/", 1)[-1] for i in at.get("image")]
+
+
+def test_gallery_is_paginated_with_prev_next_top_and_bottom(backend, monkeypatch):
+    import admin_view
+    monkeypatch.setattr(admin_view, "PAGE_SIZE", 2)
+    seed_photos(backend)
+    at = admin_login(fresh())
+    # urutan galeri: region lalu nama store → JABAR/Toko Dua, JATENG/Toko Satu, JATENG/Toko Tiga
+    assert gallery_files(at) == ["S2-K1.jpg", "S2-K2.jpg"]                 # halaman 1 dari 3
+    assert at.button(key="adm_prev_top").disabled and at.button(key="adm_prev_bottom").disabled
+    assert not at.button(key="adm_next_top").disabled and not at.button(key="adm_next_bottom").disabled
+    assert any("6 foto" in c.value and "1–2" in c.value for c in at.caption)
+
+    at.button(key="adm_next_bottom").click()                               # tombol BAWAH juga bekerja
+    at = at.run()
+    assert gallery_files(at) == ["S1-K1.jpg", "S1-K2.jpg"]
+    assert not at.button(key="adm_prev_top").disabled
+    assert at.selectbox(key="adm_page").value == 2
+
+    at.selectbox(key="adm_page").set_value(3)                              # loncat ke halaman tertentu
+    at = at.run()
+    assert gallery_files(at) == ["S3-K1.jpg", "S3-K2.jpg"]
+    assert at.button(key="adm_next_top").disabled and at.button(key="adm_next_bottom").disabled
+
+    at.button(key="adm_prev_top").click()
+    at = at.run()
+    assert at.selectbox(key="adm_page").value == 2
+
+
+def test_gallery_pages_cover_every_photo_exactly_once(backend, monkeypatch):
+    import admin_view
+    monkeypatch.setattr(admin_view, "PAGE_SIZE", 2)
+    seed_photos(backend)
+    at = admin_login(fresh())
+    seen = gallery_files(at)
+    for _ in range(2):
+        at.button(key="adm_next_top").click()
+        at = at.run()
+        seen += gallery_files(at)
+    assert sorted(seen) == sorted(f"{s}-{k}.jpg" for s in ("S1", "S2", "S3") for k in ("K1", "K2"))
+
+
+def test_changing_filter_returns_gallery_to_page_one(backend, monkeypatch):
+    import admin_view
+    monkeypatch.setattr(admin_view, "PAGE_SIZE", 2)
+    seed_photos(backend)
+    at = admin_login(fresh())
+    at.button(key="adm_next_top").click()
+    at = at.run()
+    assert at.selectbox(key="adm_page").value == 2
+    at.selectbox(key="adm_region").set_value("JATENG")
+    at = at.run()
+    assert at.selectbox(key="adm_page").value == 1
+
+
+def test_single_page_gallery_has_no_pager(backend):
+    seed_photos(backend)                                                   # PAGE_SIZE asli 8 > 6 foto
+    at = admin_login(fresh())
+    assert len(gallery_files(at)) == 6
+    assert not [b for b in at.button if b.key and b.key.startswith("adm_prev_")]

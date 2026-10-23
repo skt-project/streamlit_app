@@ -27,6 +27,17 @@ _CSS = """
 [data-testid="stHorizontalBlock"]:has(.keep-row.last-button) > [data-testid="stColumn"]:last-child {
     flex: 0 0 5.5rem !important;
 }
+/* tombol "Delete" SKU: tulisan putih tebal di latar merah (Streamlit memberi class st-key-<key>) */
+[class*="st-key-del_"] button {
+    background: #d32f2f !important; color: #fff !important; border: 1.5px solid #d32f2f !important;
+    font-weight: 700 !important; padding: .25rem .5rem !important; white-space: nowrap; border-radius: .5rem;
+}
+[class*="st-key-del_"] button p { font-weight: 700 !important; color: inherit !important; }
+[class*="st-key-del_"] button:hover, [class*="st-key-del_"] button:active {
+    background: #b71c1c !important; border-color: #b71c1c !important; color: #fff !important;
+}
+/* placeholder "isi quantity disini" harus muat di dua kolom sempit di HP */
+input[aria-label="Sell Out"]::placeholder, input[aria-label="Stock"]::placeholder { font-size: .8rem; }
 /* tombol kamera: "Take Photo" (teks bawaan Streamlit, tidak bisa diganti lewat Python) → "Ambil gambar",
    latar merah, huruf putih tebal. Tombol "Clear photo" adalah komponen lain dan tidak ikut berubah. */
 [data-testid="stCameraInputButton"] {

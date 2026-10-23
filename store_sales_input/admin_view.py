@@ -89,6 +89,29 @@ def _store_table(statuses: list[StoreStatus]) -> pd.DataFrame:
     } for s in statuses])
 
 
+def _step(delta: int) -> None:
+    """Callback tombol Prev/Next: geser halaman galeri, tetap dalam rentang 1..jumlah halaman."""
+    ss = st.session_state
+    ss["adm_page"] = min(max(1, ss.get("adm_page", 1) + delta), ss.get("adm_pages", 1))
+
+
+def _pager(pages: int, page: int, where: str) -> None:
+    """Kontrol halaman: [◀ Prev] [halaman] [Next ▶]. Dipasang di atas dan di bawah galeri."""
+    cols = st.columns(3, vertical_alignment="center")
+    with cols[0]:
+        keep_row()
+        st.button("◀ Prev", key=f"adm_prev_{where}", on_click=_step, args=(-1,), disabled=page <= 1, width="stretch")
+    with cols[1]:
+        if where == "top":                          # di atas: bisa loncat langsung ke halaman tertentu
+            st.selectbox("Halaman", list(range(1, pages + 1)), key="adm_page", label_visibility="collapsed",
+                         format_func=lambda n: f"Hal. {n} / {pages}")
+        else:
+            st.markdown(f"<div style='text-align:center;font-weight:700;margin:0;line-height:1'>Hal. {page} / {pages}</div>",
+                        unsafe_allow_html=True)
+    cols[2].button("Next ▶", key=f"adm_next_{where}", on_click=_step, args=(1,), disabled=page >= pages,
+                   width="stretch")
+
+
 def render_admin(be, master, fetch_rows: Callable[[str, int], list[dict]]) -> None:
     cfg, ss = be.config, st.session_state
     if not (cfg.admin_username and cfg.admin_password):
@@ -173,16 +196,22 @@ def render_admin(be, master, fetch_rows: Callable[[str, int], list[dict]]) -> No
         st.info("Belum ada foto evidence untuk filter ini.")
         return
     pages = max(1, math.ceil(len(items) / PAGE_SIZE))
-    page = 1
+    sig = (region, pick, sales_date.isoformat(), tuple(sorted(wanted)))
+    if ss.get("adm_sig") != sig:                    # filter berubah → kembali ke halaman 1
+        ss["adm_sig"], ss["adm_page"] = sig, 1
+    ss["adm_pages"] = pages
+    ss["adm_page"] = min(max(1, ss.get("adm_page", 1)), pages)
+    page = ss["adm_page"]
+    first, last = (page - 1) * PAGE_SIZE, min(page * PAGE_SIZE, len(items))
+    st.caption(f"{len(items)} foto" + (f" · menampilkan {first + 1}–{last}" if pages > 1 else ""))
     if pages > 1:
-        page = st.selectbox(f"Halaman (total {len(items)} foto)", list(range(1, pages + 1)),
-                            key=f"adm_page_{region}_{pick}_{sales_date.isoformat()}_{pages}")
-    else:
-        st.caption(f"{len(items)} foto")
-    chunk = items[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
+        _pager(pages, page, "top")
     cols = st.columns(2)
     with cols[0]:
         keep_row()
-    for idx, it in enumerate(chunk):
+    for idx, it in enumerate(items[first:last]):
         with cols[idx % 2]:
             _photo_card(be.evidence, it)
+    if pages > 1:
+        st.divider()
+        _pager(pages, page, "bottom")
