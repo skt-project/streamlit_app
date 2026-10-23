@@ -1,28 +1,28 @@
 # BPOM Stock Opname Distributor
 
-Distributor memilih namanya (daftar dari BD), men-download template yang sudah terisi nama distributor dan daftar
-SKU + nomor BPOM resmi, mengisi **QTY**, lalu meng-upload-nya. Hasil disimpan ke **satu** Google Spreadsheet utama
+Distributor memilih **Distributor Company** (daftar dari BD), men-download template yang berisi seluruh Distributor Name
+milik company itu beserta daftar SKU + nomor BPOM resmi, mengisi **QTY**, lalu meng-upload-nya. Hasil disimpan ke **satu** Google Spreadsheet utama
 (satu worksheet). Tidak ada mode revisi.
 
 ## Alur di layar
 
-1. **Pilih Distributor Company** lalu Distributor Name (dari `reference/Daftar Distributor.xlsx`).
+1. **Pilih Distributor Company** (dari `reference/Daftar Distributor.xlsx`). Tidak ada dropdown Distributor Name: semua Distributor Name milik company itu otomatis ada di template (satu blok baris per distributor).
 2. **Tanggal Stock Opname + Nama PIC.** Kolom *Periode* di sheet diisi otomatis dari bulan-tahun tanggal itu (`YYYY-MM`).
-3. **Download template** (tombol merah) dan isi hanya kolom QTY. BPOM tambahan: tambah baris baru dengan SKU yang sudah ada.
+3. **Download template** (tombol merah; sheet kedua "Cara Pengisian" berisi panduan) dan isi hanya kolom QTY. BPOM tambahan: tambah baris baru dengan SKU yang sudah ada dan Distributor Name yang sesuai.
 4. **Upload .xlsx** - diperiksa otomatis; satu baris salah = seluruh upload dibatalkan (tidak ada data masuk).
 5. **Submit.**
 
 ## Aturan validasi
 
 - Header persis sama dengan template (case-sensitive, urutan sama); tidak boleh ada kolom tambahan/hilang.
-- Kolom A harus sama dengan Distributor Name yang dipilih; PRODUCT ID, PRODUCT NAME, BPOM NUMBER, QTY wajib.
+- Kolom A tiap baris harus salah satu Distributor Name milik company yang dipilih; PRODUCT ID, PRODUCT NAME, BPOM NUMBER, QTY wajib.
 - QTY bilangan bulat (boleh negatif/0).
 - PRODUCT ID harus SKU dari `reference/Data SKU BPOM.xlsx`. Nomor BPOM di luar daftar diterima sebagai **BPOM tambahan**.
   PRODUCT NAME untuk pasangan SKU+BPOM resmi harus sama dengan daftar.
-- Tidak ada kombinasi PRODUCT ID + BPOM NUMBER ganda dalam satu file.
-- Kombinasi resmi yang tidak ada di file hanya diberi **peringatan** (tidak memblokir).
-- Setelah file valid, sheet dicek satu kali: bila distributor + periode yang sama sudah pernah mengirim kombinasi
-  PRODUCT ID + BPOM NUMBER yang sama, **seluruh input ditolak** (tidak ada revisi; hubungi BD).
+- Tidak ada kombinasi Distributor Name + PRODUCT ID + BPOM NUMBER ganda dalam satu file.
+- Kombinasi resmi (per distributor) yang tidak ada di file hanya diberi **peringatan** (tidak memblokir).
+- Setelah file valid, sheet dicek satu kali: bila periode yang sama sudah pernah menerima kombinasi
+  Distributor Name + PRODUCT ID + BPOM NUMBER yang sama, **seluruh input ditolak** (tidak ada revisi; hubungi BD).
 - Semua baris ditulis dalam satu request `batchUpdate` (atomik).
 
 ## Data referensi (dari BD)

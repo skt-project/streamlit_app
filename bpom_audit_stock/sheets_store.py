@@ -36,13 +36,13 @@ class SheetsError(Exception):
 
 
 class DuplicateDataError(SheetsError):
-    """Input ditolak karena kombinasi PRODUCT ID + BPOM NUMBER sudah ada untuk distributor + periode ini."""
+    """Input ditolak karena kombinasi Distributor Name + PRODUCT ID + BPOM NUMBER sudah ada pada periode ini."""
 
-    def __init__(self, conflicts: list[ExcelRow], distributor_name: str, periode: str):
+    def __init__(self, conflicts: list[ExcelRow], periode: str):
         self.conflicts = conflicts
         super().__init__(
-            f"Data duplikat: {len(conflicts)} baris di file sudah pernah dikirim untuk '{distributor_name}' "
-            f"periode {periode}. "
+            f"Data duplikat: {len(conflicts)} baris di file sudah pernah dikirim "
+            f"(periode {periode}). "
             "Tidak ada data yang disimpan. Revisi tidak tersedia di form ini; jika ada kesalahan data, "
             "hubungi BD."
         )
@@ -52,7 +52,6 @@ class DuplicateDataError(SheetsError):
 class OpnameMeta:
     """Metadata dari form Streamlit, ikut disimpan di setiap baris."""
     company: str
-    distributor_name: str
     tanggal: str            # YYYY-MM-DD
     pic: str
 
@@ -66,6 +65,7 @@ class OpnameMeta:
 class SaveSummary:
     inserted: int
     additional: int = 0
+    distributors: int = 0
 
 
 def now_str() -> str:
@@ -154,7 +154,7 @@ def _cell(value) -> dict:
 
 def _row_values(meta: OpnameMeta, row: ExcelRow, ts: str) -> list:
     return [
-        meta.company, meta.distributor_name, meta.periode, meta.tanggal, meta.pic,
+        meta.company, row.distributor_name, meta.periode, meta.tanggal, meta.pic,
         row.product_id, row.product_name, row.bpom_number, row.qty,
         ts, meta.pic, ts, meta.pic,
     ]
@@ -164,8 +164,8 @@ def insert_rows(sh: gspread.Spreadsheet, ws: gspread.Worksheet, meta: OpnameMeta
                 rows: list[ExcelRow], *, check_duplicates: bool = True) -> SaveSummary:
     """Tambahkan semua baris dalam satu request.
 
-    Hanya setelah file lolos validasi, data yang ada dibaca sekali untuk memastikan distributor ini
-    belum pernah mengirim kombinasi PRODUCT ID + BPOM NUMBER yang sama pada periode itu; bila ada, seluruh input ditolak
+    Hanya setelah file lolos validasi, data yang ada dibaca sekali untuk memastikan tidak ada baris yang
+    sudah pernah mengirim kombinasi Distributor Name + PRODUCT ID + BPOM NUMBER yang sama pada periode itu; bila ada, seluruh input ditolak
     dengan `DuplicateDataError`. `check_duplicates=False` untuk spreadsheet yang baru dibuat.
     """
     if check_duplicates:
@@ -173,17 +173,18 @@ def insert_rows(sh: gspread.Spreadsheet, ws: gspread.Worksheet, meta: OpnameMeta
         if values and values[0][: len(HEADERS)] != HEADERS:
             raise SheetsError(f"Header worksheet '{ws.title}' tidak sesuai skema.")
         existing = {
-            row_key(r[_IDX["PRODUCT ID"]], r[_IDX["BPOM NUMBER"]])
+            (normalize_name(r[_IDX["Distributor Name"]]),
+             *row_key(r[_IDX["PRODUCT ID"]], r[_IDX["BPOM NUMBER"]]))
             for r in map(_pad, values[1:])
-            if normalize_name(r[_IDX["Distributor Name"]]) == normalize_name(meta.distributor_name)
-            and r[_IDX["Periode Audit"]].strip() == meta.periode
+            if r[_IDX["Periode Audit"]].strip() == meta.periode
         }
         conflicts = [r for r in rows if r.key in existing]
         if conflicts:
-            raise DuplicateDataError(conflicts, meta.distributor_name, meta.periode)
+            raise DuplicateDataError(conflicts, meta.periode)
     ts = now_str()
     data = [{"values": [_cell(v) for v in _row_values(meta, r, ts)]} for r in rows]
     sh.batch_update({"requests": [
         {"appendCells": {"sheetId": ws.id, "rows": data, "fields": "userEnteredValue"}}
     ]})
-    return SaveSummary(inserted=len(rows), additional=sum(r.additional for r in rows))
+    return SaveSummary(inserted=len(rows), additional=sum(r.additional for r in rows),
+                       distributors=len({r.distributor_name for r in rows}))

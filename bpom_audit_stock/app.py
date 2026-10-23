@@ -87,15 +87,15 @@ mengacu pada SKU yang telah ditetapkan oleh prinsipal.
 4. Klik **Submit**. Data hanya disimpan jika seluruh isi file valid.
 
 - Distributor tidak diperkenankan mengubah header, nama kolom, atau urutan kolom. Baris judul di atas header boleh dibiarkan.
-- Kolom **Distributor Name (Company - Region)** sudah terisi otomatis sesuai distributor yang dipilih; jangan diubah.
+- Kolom **Distributor Name (Company - Region)** sudah terisi otomatis untuk seluruh distributor milik company yang dipilih; jangan diubah.
 - **PRODUCT ID, PRODUCT NAME, BPOM NUMBER** sudah terisi di template; jangan dikosongkan.
 - Yang perlu Anda isi hanya **QTY** di setiap baris dengan bilangan bulat (boleh positif, 0, atau negatif; tanpa desimal atau huruf).
-- Satu kombinasi **PRODUCT ID + BPOM NUMBER** hanya boleh muncul satu kali dalam satu file.
+- Satu kombinasi **Distributor Name + PRODUCT ID + BPOM NUMBER** hanya boleh muncul satu kali dalam satu file.
 """
 GUIDE_RULES = GUIDE_RULES.replace("**\n", "**  \n")  # judul + paragraf: pindah baris tanpa paragraf baru
 GUIDE_EXTRA_BPOM = """
 **Menambah nomor BPOM yang belum ada di template:** tambahkan baris baru di bagian bawah data. Isi kolom
-*Distributor Name* sama seperti baris lainnya, **PRODUCT ID** dengan SKU yang sudah ada di template, lalu
+*Distributor Name* dengan nama distributor yang memiliki stok tersebut (salin dari baris distributor itu), **PRODUCT ID** dengan SKU yang sudah ada di template, lalu
 **PRODUCT NAME**, **BPOM NUMBER** baru, dan **QTY**. Baris tambahan ditandai pada pratinjau setelah upload.
 """
 
@@ -191,6 +191,7 @@ def show_preview(rows: list[val.ExcelRow]) -> None:
     st.dataframe(
         pd.DataFrame({
             "Baris Excel": [r.excel_row for r in rows],
+            "Distributor Name": [r.distributor_name for r in rows],
             "PRODUCT ID": [r.product_id for r in rows],
             "PRODUCT NAME": [r.product_name for r in rows],
             "BPOM NUMBER": [r.bpom_number for r in rows],
@@ -208,21 +209,21 @@ def show_flash() -> None:
         st.success(flash)
 
 
-def template_button(cfg: Config, distributor_name: str | None, skus: list[val.Sku]) -> None:
+def template_button(cfg: Config, company: str | None, names: list[str], skus: list[val.Sku]) -> None:
     if cfg.template_path is None:
         st.warning(f"File template '{TEMPLATE_FILENAME}' tidak ditemukan. Letakkan di folder `template/` "
                    "atau atur `template_path` di `[app]`.")
         return
-    if not distributor_name:
-        st.info("Pilih Distributor Company dan Distributor Name (Langkah 1) agar template bisa di-download "
-                "dengan nama distributor yang sudah terisi.")
+    if not company:
+        st.info("Pilih Distributor Company (Langkah 1) agar template bisa di-download "
+                "dengan seluruh Distributor Name milik company tersebut.")
         return
-    data = template_builder.build_template(cfg.template_path.read_bytes(), distributor_name, skus)
-    safe = re.sub(r'[\\/:*?"<>|]+', "_", distributor_name).strip()
+    data = template_builder.build_template(cfg.template_path.read_bytes(), company, names, skus)
+    safe = re.sub(r'[\\/:*?"<>|]+', "_", company).strip()
     st.markdown(DOWNLOAD_BUTTON_CSS, unsafe_allow_html=True)
     st.download_button(
         "**DOWNLOAD TEMPLATE**", data=data, file_name=f"BPOM Stock Opname - {safe}.xlsx", mime=XLSX_MIME,
-        help="Template resmi dengan nama distributor dan daftar SKU + nomor BPOM sudah terisi. Isi kolom QTY saja.",
+        help="Template resmi berisi seluruh Distributor Name milik company Anda beserta daftar SKU + nomor BPOM. Isi kolom QTY saja.",
     )
 
 
@@ -252,6 +253,7 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
         st.error(str(exc))
         st.dataframe(
             pd.DataFrame({"Baris Excel": [r.excel_row for r in exc.conflicts],
+                          "Distributor Name": [r.distributor_name for r in exc.conflicts],
                           "PRODUCT ID": [r.product_id for r in exc.conflicts],
                           "BPOM NUMBER": [r.bpom_number for r in exc.conflicts]}),
             hide_index=True, width="stretch")
@@ -269,7 +271,8 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
                  "agar tidak terjadi duplikasi.")
         return
 
-    msg = f"Berhasil menyimpan {summary.inserted} baris stock opname untuk {meta.distributor_name}."
+    msg = (f"Berhasil menyimpan {summary.inserted} baris stock opname untuk {meta.company} "
+           f"({summary.distributors} distributor).")
     if summary.additional:
         msg += f" Termasuk {summary.additional} baris BPOM tambahan."
     msg += " Data yang sudah terkirim tidak dapat direvisi dari form ini; hubungi BD bila ada kesalahan."
@@ -302,17 +305,16 @@ def main() -> None:
     with st.expander("Ketentuan dan panduan pengisian", expanded=True):
         st.markdown(GUIDE_RULES)
 
-    # Langkah 1 - distributor (daftar dari BD): company -> name
+    # Langkah 1 - distributor company (daftar dari BD)
     st.subheader("Langkah 1 - Pilih Distributor Company")
-    st.caption("Pilih **Distributor Company**, lalu **Distributor Name** (cabang/region) yang melakukan stock opname. "
-               "Pilihan berasal dari daftar distributor yang disediakan BD. Klik kolom lalu ketik untuk mencari.")
-    col_company, col_name = st.columns(2)
+    st.caption("Pilih **Distributor Company**. Seluruh **Distributor Name** (cabang/region) milik company tersebut akan "
+               "muncul di template saat di-download. Pilihan berasal dari daftar distributor yang disediakan BD. "
+               "Klik kolom lalu ketik untuk mencari.")
     companies = sorted({c for c, _ in distributors})
-    company = col_company.selectbox("Distributor Company", companies, index=None,
-                                    placeholder="Pilih atau ketik untuk mencari")
+    company = st.selectbox("Distributor Company", companies, index=None, placeholder="Pilih atau ketik untuk mencari")
     names = [n for c, n in distributors if c == company] if company else []
-    distributor = col_name.selectbox("Distributor Name", names, index=None, key=f"name_{company}",
-                                     disabled=not company, placeholder="Pilih Distributor Company dulu")
+    if names:
+        st.caption(f"{len(names)} Distributor Name pada company ini akan ada di template.")
 
     # Langkah 2 - tanggal + PIC
     st.subheader("Langkah 2 - Isi Tanggal Stock Opname dan PIC")
@@ -325,10 +327,10 @@ def main() -> None:
 
     # Langkah 3 - template
     st.subheader("Langkah 3 - Download template dan isi hanya data QTY")
-    st.caption(f"Template berisi {len(skus)} kombinasi SKU + nomor BPOM. Isi hanya kolom **QTY** "
-               "(bilangan bulat; boleh positif, 0, atau negatif). Jangan mengubah header atau urutan kolom.")
+    st.caption(f"Template berisi {len(skus)} kombinasi SKU + nomor BPOM untuk setiap Distributor Name. Isi hanya kolom "
+               "**QTY** (bilangan bulat; boleh positif, 0, atau negatif). Jangan mengubah header atau urutan kolom.")
     st.markdown(GUIDE_EXTRA_BPOM)
-    template_button(cfg, distributor, skus)
+    template_button(cfg, company, names, skus)
 
     # Langkah 4 - upload
     st.subheader("Langkah 4 - Upload file Excel")
@@ -338,10 +340,10 @@ def main() -> None:
 
     parsed = None
     if uploaded is not None:
-        if not distributor:
-            st.info("Pilih Distributor Company dan Distributor Name dulu agar isi file bisa divalidasi.")
+        if not company:
+            st.info("Pilih Distributor Company dulu agar isi file bisa divalidasi.")
         else:
-            parsed = val.parse_excel(uploaded.getvalue(), distributor, skus)
+            parsed = val.parse_excel(uploaded.getvalue(), names, skus)
             for warning in parsed.warnings:
                 st.warning(warning)
             if parsed.issues:
@@ -351,13 +353,15 @@ def main() -> None:
                 st.success(f"File valid: {len(parsed.rows)} baris siap disimpan"
                            + (f", termasuk {extra} baris BPOM tambahan." if extra else "."))
                 if parsed.missing:
-                    st.warning(f"{len(parsed.missing)} kombinasi SKU + BPOM dari daftar prinsipal tidak ada di file. "
-                               "Pastikan seluruh SKU dan nomor BPOM yang menjadi tanggung jawab Anda sudah dilaporkan.")
+                    st.warning(f"{len(parsed.missing)} kombinasi Distributor Name + SKU + BPOM dari daftar prinsipal "
+                               "tidak ada di file. Pastikan seluruh SKU dan nomor BPOM yang menjadi tanggung jawab "
+                               "Anda sudah dilaporkan.")
                     with st.expander("Lihat yang belum ada di file"):
                         st.dataframe(pd.DataFrame({
-                            "PRODUCT ID": [k.product_id for k in parsed.missing],
-                            "PRODUCT NAME": [k.product_name for k in parsed.missing],
-                            "BPOM NUMBER": [k.bpom_number for k in parsed.missing],
+                            "Distributor Name": [n for n, _ in parsed.missing],
+                            "PRODUCT ID": [k.product_id for _, k in parsed.missing],
+                            "PRODUCT NAME": [k.product_name for _, k in parsed.missing],
+                            "BPOM NUMBER": [k.bpom_number for _, k in parsed.missing],
                         }), hide_index=True, width="stretch")
                 with st.expander("Pratinjau isi file", expanded=False):
                     show_preview(parsed.rows)
@@ -367,12 +371,11 @@ def main() -> None:
     st.caption("Pastikan semua isian benar dan file sudah berstatus **valid**, lalu klik Submit satu kali dan tunggu "
                "sampai muncul pesan hasil. Data yang sudah terkirim **tidak dapat direvisi** dari form ini.")
     if st.button("Submit", type="primary"):
-        form_errors = val.validate_form(company=company, distributor=distributor, tanggal=tanggal,
-                                        pic=pic, has_file=uploaded is not None)
+        form_errors = val.validate_form(company=company, tanggal=tanggal, pic=pic,
+                                        has_file=uploaded is not None)
         meta = None
         if not form_errors:
-            meta = store.OpnameMeta(company=company, distributor_name=distributor,
-                                    tanggal=tanggal.isoformat(), pic=pic.strip())
+            meta = store.OpnameMeta(company=company, tanggal=tanggal.isoformat(), pic=pic.strip())
         handle_submit(cfg, meta, form_errors, parsed)
 
 

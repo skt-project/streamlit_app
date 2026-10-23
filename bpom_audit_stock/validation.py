@@ -63,6 +63,7 @@ class Sku:
 @dataclass(frozen=True)
 class ExcelRow:
     excel_row: int
+    distributor_name: str      # nama kanonik dari daftar BD (bukan ketikan user)
     product_id: str
     product_name: str
     bpom_number: str
@@ -70,8 +71,9 @@ class ExcelRow:
     additional: bool = False   # BPOM tambahan: tidak ada di daftar resmi prinsipal
 
     @property
-    def key(self) -> tuple[str, str]:
-        return row_key(self.product_id, self.bpom_number)
+    def key(self) -> tuple[str, str, str]:
+        """Distributor + PRODUCT ID + BPOM NUMBER (tidak peduli huruf besar/kecil)."""
+        return (normalize_name(self.distributor_name), *row_key(self.product_id, self.bpom_number))
 
 
 @dataclass
@@ -79,7 +81,7 @@ class ParseResult:
     rows: list[ExcelRow] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    missing: list[Sku] = field(default_factory=list)   # kombinasi resmi yang tidak ada di file
+    missing: list[tuple[str, Sku]] = field(default_factory=list)   # (distributor, kombinasi resmi) yang tidak ada di file
 
     @property
     def ok(self) -> bool:
@@ -109,13 +111,11 @@ def row_key(product_id: str, bpom_number: str) -> tuple[str, str]:
     return (product_id.strip().upper(), bpom_number.strip().upper())
 
 
-def validate_form(*, company, distributor, tanggal, pic, has_file: bool) -> list[str]:
+def validate_form(*, company, tanggal, pic, has_file: bool) -> list[str]:
     """Validasi field form. Mengembalikan daftar pesan error (kosong = valid)."""
     errors = []
     if not company:
         errors.append("Distributor Company wajib dipilih.")
-    if not distributor:
-        errors.append("Distributor Name wajib dipilih.")
     if not tanggal:
         errors.append("Tanggal Stock Opname wajib diisi.")
     if not (pic and pic.strip()):
@@ -208,16 +208,24 @@ def parse_qty(value: Any) -> tuple[int | None, str | None]:
     return qty, None
 
 
-def parse_excel(data: bytes, expected_distributor_name: str,
+def _name_list(names: Sequence[str], limit: int = 3) -> str:
+    shown = ", ".join(f"'{n}'" for n in names[:limit])
+    return shown + (f", ... ({len(names)} distributor)" if len(names) > limit else "")
+
+
+def parse_excel(data: bytes, expected_names: Sequence[str],
                 skus: Sequence[Sku] | None = None) -> ParseResult:
     """Baca + validasi file Excel. Tidak ada efek samping; hasilnya `ParseResult`.
 
     Baris judul di atas header diabaikan. Baris yang sepenuhnya kosong dilewati.
     Semua baris data lain dicek; `result.ok` hanya True bila TIDAK ada masalah.
 
+    `expected_names` = semua Distributor Name milik company yang dipilih. Kolom A tiap baris harus salah
+    satunya; nama kanonik disimpan di `ExcelRow.distributor_name`.
+
     Bila `skus` diberikan: PRODUCT ID wajib salah satu SKU resmi; nomor BPOM boleh di luar daftar
     resmi (ditandai `additional=True`, BPOM tambahan); untuk pasangan resmi, PRODUCT NAME harus
-    sama dengan daftar. Kombinasi resmi yang tidak ada di file dilaporkan di `result.missing`.
+    sama dengan daftar. Kombinasi resmi (per distributor) yang tidak ada di file dilaporkan di `result.missing`.
     """
     master = {k.key: k for k in skus} if skus is not None else None
     master_ids = {k.product_id.strip().upper() for k in skus} if skus is not None else None
@@ -263,8 +271,8 @@ def parse_excel(data: bytes, expected_distributor_name: str,
             result.issues.extend(header_issues)
             return result
 
-        expected_norm = normalize_name(expected_distributor_name)
-        seen: dict[tuple[str, str], int] = {}
+        names_by_norm = {normalize_name(n): n for n in expected_names}
+        seen: dict[tuple[str, str, str], int] = {}
         blank_run = 0
         data_rows = 0
         for no, cells in rows_iter:
@@ -291,11 +299,11 @@ def parse_excel(data: bytes, expected_distributor_name: str,
                 result.issues.append(Issue(no, EXPECTED_HEADERS[0], err.capitalize() + "."))
             elif not dist:
                 result.issues.append(Issue(no, EXPECTED_HEADERS[0],
-                                           f"Wajib diisi dengan '{expected_distributor_name}'."))
-            elif normalize_name(dist) != expected_norm:
+                                           f"Wajib diisi dengan salah satu: {_name_list(list(expected_names))}."))
+            elif normalize_name(dist) not in names_by_norm:
                 result.issues.append(Issue(
                     no, EXPECTED_HEADERS[0],
-                    f"'{dist}' tidak sesuai distributor yang dipilih; seharusnya '{expected_distributor_name}'."))
+                    f"'{dist}' bukan distributor milik company yang dipilih. Pilihan: {_name_list(list(expected_names))}."))
 
             texts = {}
             for label, cell in (("PRODUCT ID", pid_cell), ("PRODUCT NAME", pname_cell), ("BPOM NUMBER", bpom_cell)):
@@ -326,20 +334,24 @@ def parse_excel(data: bytes, expected_distributor_name: str,
                         f"Tidak sesuai daftar prinsipal; seharusnya '{known.product_name}'."))
 
             if len(result.issues) == before:  # baris ini bersih -> cek duplikat
-                if key in seen:
+                canonical = names_by_norm[normalize_name(dist)]
+                row_id = (normalize_name(canonical), *key)
+                if row_id in seen:
                     result.issues.append(Issue(
                         no, "PRODUCT ID + BPOM NUMBER",
-                        f"Duplikat dengan baris {seen[key]} ({texts['PRODUCT ID']} / {texts['BPOM NUMBER']})."))
+                        f"Duplikat dengan baris {seen[row_id]} ({canonical} / {texts['PRODUCT ID']} / "
+                        f"{texts['BPOM NUMBER']})."))
                 else:
-                    seen[key] = no
-                    result.rows.append(ExcelRow(no, texts["PRODUCT ID"], texts["PRODUCT NAME"],
+                    seen[row_id] = no
+                    result.rows.append(ExcelRow(no, canonical, texts["PRODUCT ID"], texts["PRODUCT NAME"],
                                                 texts["BPOM NUMBER"], qty,
                                                 additional=master is not None and known is None))
 
         if data_rows == 0:
             result.issues.append(Issue(None, "File", "File tidak berisi baris data di bawah header."))
         elif master is not None and not result.issues:
-            result.missing = [k for k in skus if k.key not in seen]
+            result.missing = [(n, k) for n in expected_names for k in skus
+                              if (normalize_name(n), *k.key) not in seen]
     finally:
         wb.close()
     return result
