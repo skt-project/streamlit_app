@@ -212,9 +212,10 @@ def test_duplicates_block_input_same_period_only():
 
 
 def test_legacy_13_column_header_is_upgraded_not_overwritten():
-    ws = MagicMock(); ws.row_values.return_value = list(store._LEGACY_HEADERS)
+    ws = MagicMock(); ws.row_values.return_value = list(store._LEGACY_HEADERS); ws.col_count = 13
     sh = MagicMock(); sh.worksheet.return_value = ws
     store.ensure_worksheet(sh, "W")
+    ws.add_cols.assert_called_once_with(1)                      # grid 13 kolom diperlebar dulu
     ws.update_cell.assert_called_once_with(1, 14, "ISI (GR / ML)")
     ws.update.assert_not_called()
     ws2 = MagicMock(); ws2.row_values.return_value = ["header", "lain"]; ws2.title = "W"

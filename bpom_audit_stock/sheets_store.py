@@ -134,6 +134,8 @@ def ensure_worksheet(sh: gspread.Spreadsheet, title: str, *, fresh: bool = False
             ws = sh.add_worksheet(title, rows=1000, cols=len(HEADERS))
     first_row = ws.row_values(1)
     if first_row == _LEGACY_HEADERS:      # tab lama 13 kolom: tambahkan kolom ISI di ujung (data tidak disentuh)
+        if ws.col_count < len(HEADERS):   # grid tab lama hanya 13 kolom; perlu diperlebar dulu
+            ws.add_cols(len(HEADERS) - ws.col_count)
         ws.update_cell(1, len(HEADERS), HEADERS[-1])
         first_row = HEADERS
     if not any(str(c).strip() for c in first_row):
