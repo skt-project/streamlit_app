@@ -50,6 +50,7 @@ class Config:
     BQ_TABLE = "inventory_buffer"
     BQ_STAGING_DATASET = "gt_schema"
     BQ_STAGING_TABLE = "po_store_suggestion_stagging"
+    BQ_MASTER_TABLE = "master_distributor"
     BQ_STORED_PROC = f"`{BQ_PROJECT}.{BQ_DATASET}.inventory_buffer_sp`"
     
     # Timing Configuration
@@ -874,19 +875,45 @@ def check_and_execute_sp() -> Optional[datetime]:
     return last_updated_jkt
 
 @st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
-def load_store_summary_filtered(selected_region="All", selected_distributor="All") -> pd.DataFrame:
+def load_active_distributors() -> pd.DataFrame:
+    """Active master distributors whose Glad2Glow region is filled in."""
     client = get_bigquery_client()
+    query = f"""
+    SELECT DISTINCT
+        TRIM(region_g2g) AS region_g2g,
+        TRIM(distributor) AS distributor
+    FROM `{Config.BQ_PROJECT}.{Config.BQ_STAGING_DATASET}.{Config.BQ_MASTER_TABLE}`
+    WHERE UPPER(TRIM(status)) IN ('ACTIVE', 'AKTIF')
+      AND region_g2g IS NOT NULL
+      AND TRIM(region_g2g) != ''
+      AND distributor IS NOT NULL
+      AND TRIM(distributor) != ''
+    """
+    df = client.query(query).to_dataframe()
+    for column in ("region_g2g", "distributor"):
+        df[column] = df[column].astype(str).str.strip()
+    return df.drop_duplicates()
 
-    filters = []
+def _distributors_for_filter(selected_region: str, selected_distributor: str) -> List[str]:
+    master = load_active_distributors()
+    scoped = master
     if selected_region != "All":
-        filters.append(f"region = '{selected_region}'")
+        scoped = scoped[scoped["region_g2g"] == selected_region]
     if selected_distributor != "All":
-        filters.append(f"distributor_g2g = '{selected_distributor}'")
+        scoped = scoped[scoped["distributor"] == selected_distributor]
+    return sorted(scoped["distributor"].dropna().unique().tolist())
 
-    where_sql = ""
-    if filters:
-        where_sql = "WHERE " + " AND ".join(filters)
+@st.cache_data(ttl=Config.CACHE_TTL_SECONDS)
+def load_store_summary_filtered(selected_region="All", selected_distributor="All") -> pd.DataFrame:
+    empty = pd.DataFrame(columns=[
+        "store_code", "store_name", "region", "distributor", "stock_date",
+        "total_skus", "total_buffer_qty", "est_order_value", "priority",
+    ])
+    distributors = _distributors_for_filter(selected_region, selected_distributor)
+    if not distributors:
+        return empty
 
+    client = get_bigquery_client()
     query = f"""
     WITH combined_data AS (
         {combined_inventory_sql()}
@@ -895,19 +922,23 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         ib.store_code,
         ANY_VALUE(ib.store_name) AS store_name,
         ANY_VALUE(ib.region) AS region,
-        ANY_VALUE(ib.distributor_g2g) AS distributor,
+        ANY_VALUE(TRIM(ib.distributor_g2g)) AS distributor,
         MAX(ib.stock_date) AS stock_date,
         COUNT(DISTINCT CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.product_code END) AS total_skus,
         COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_ver2 ELSE 0 END), 0) AS total_buffer_qty,
         COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_value_ver2 ELSE 0 END), 0) AS est_order_value
     FROM combined_data ib
-    {where_sql}
+    WHERE TRIM(ib.distributor_g2g) IN UNNEST(@distributors)
     GROUP BY ib.store_code
     HAVING total_skus > 0
     ORDER BY est_order_value DESC
     """
-
-    df = client.query(query).to_dataframe()
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("distributors", "STRING", distributors),
+        ]
+    )
+    df = client.query(query, job_config=job_config).to_dataframe()
 
     def classify_priority(val):
         if val > Config.PRIORITY_HIGH_THRESHOLD:
@@ -1103,7 +1134,8 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
             '<div class="selection-title" style="font-size:0.9rem;">📍 Region</div>',
             unsafe_allow_html=True
         )
-        regions = ["All"] + sorted(df_inventory_buffer["region"].dropna().unique())
+        master = load_active_distributors()
+        regions = ["All"] + sorted(master["region_g2g"].unique())
         selected_region = st.selectbox(
             "Region",
             regions,
@@ -1117,11 +1149,8 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
             '<div class="selection-title" style="font-size:0.9rem;">🏢 Distributor</div>',
             unsafe_allow_html=True
         )
-        df_filtered = df_inventory_buffer.copy()
-        if selected_region != "All":
-            df_filtered = df_filtered[df_filtered["region"] == selected_region]
-        
-        distributors = ["All"] + sorted(df_filtered["distributor_g2g"].dropna().unique())
+        scoped = master if selected_region == "All" else master[master["region_g2g"] == selected_region]
+        distributors = ["All"] + sorted(scoped["distributor"].unique())
         selected_distributor = st.selectbox(
             "Distributor",
             distributors,
@@ -1139,12 +1168,10 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
     
     st.markdown("<hr style='margin:1rem 0; opacity:0.3;'>", unsafe_allow_html=True)
     
-    # Store filter
-    df_filtered_stores = df_filtered.copy()
-    if selected_distributor != "All":
-        df_filtered_stores = df_filtered_stores[
-            df_filtered_stores["distributor_g2g"] == selected_distributor
-        ]
+    # Store filter follows the master distributor list for the selected region.
+    allowed_distributors = set(_distributors_for_filter(selected_region, selected_distributor))
+    dist_key = df_inventory_buffer["distributor_g2g"].fillna("").astype(str).str.strip()
+    df_filtered_stores = df_inventory_buffer.loc[dist_key.isin(allowed_distributors)].copy()
     
     store_options = (
     df_filtered_stores[["store_code", "store_name"]]
@@ -1213,12 +1240,9 @@ def apply_filters(
     selected_stores: List[str]
 ) -> pd.DataFrame:
     filtered = df_store_summary.copy()
-
-    if selected_region != "All":
-        filtered = filtered[filtered["region"] == selected_region]
-
-    if selected_distributor != "All":
-        filtered = filtered[filtered["distributor"] == selected_distributor]
+    allowed_distributors = set(_distributors_for_filter(selected_region, selected_distributor))
+    distributor_key = filtered["distributor"].fillna("").astype(str).str.strip()
+    filtered = filtered.loc[distributor_key.isin(allowed_distributors)]
 
     if selected_stores:
         filtered = filtered[filtered["store_code"].isin(selected_stores)]
