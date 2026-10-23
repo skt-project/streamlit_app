@@ -644,6 +644,8 @@ def combined_inventory_sql() -> str:
         f"`{Config.BQ_PROJECT}.{Config.BQ_STAGING_DATASET}.{Config.BQ_STAGING_TABLE}`"
     )
     return f"""
+    SELECT *
+    FROM (
     SELECT
         id_st,
         product_code,
@@ -757,7 +759,8 @@ def combined_inventory_sql() -> str:
     GROUP BY
         id_st,
         product_code
-    HAVING MAX(buffer_plan) IS NOT NULL
+    ) AS grouped_inventory
+    WHERE buffer_plan IS NOT NULL
     """
 
 @st.cache_data(ttl=60)
