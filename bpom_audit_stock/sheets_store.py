@@ -26,7 +26,9 @@ HEADERS: list[str] = [
     "created_by",
     "updated_date",
     "updated_by",
+    "ISI (GR / ML)",
 ]
+_LEGACY_HEADERS = HEADERS[:-1]   # 13 kolom, sebelum kolom ISI ditambahkan di ujung
 _IDX = {name: i for i, name in enumerate(HEADERS)}
 _WIB = timezone(timedelta(hours=7))  # Indonesia tidak memakai DST
 
@@ -131,6 +133,9 @@ def ensure_worksheet(sh: gspread.Spreadsheet, title: str, *, fresh: bool = False
         else:
             ws = sh.add_worksheet(title, rows=1000, cols=len(HEADERS))
     first_row = ws.row_values(1)
+    if first_row == _LEGACY_HEADERS:      # tab lama 13 kolom: tambahkan kolom ISI di ujung (data tidak disentuh)
+        ws.update_cell(1, len(HEADERS), HEADERS[-1])
+        first_row = HEADERS
     if not any(str(c).strip() for c in first_row):
         ws.update([HEADERS], f"A1:{chr(ord('A') + len(HEADERS) - 1)}1", value_input_option="RAW")
         ws.freeze(rows=1)
@@ -157,6 +162,7 @@ def _row_values(meta: OpnameMeta, row: ExcelRow, ts: str) -> list:
         meta.company, row.distributor_name, meta.periode, meta.tanggal, meta.pic,
         row.product_id, row.product_name, row.bpom_number, row.qty,
         ts, meta.pic, ts, meta.pic,
+        row.isi,
     ]
 
 

@@ -34,7 +34,6 @@ MAX_ISSUES_SHOWN = 300
 
 APP_DIR = Path(__file__).parent
 DISTRIBUTOR_FILE = APP_DIR / "reference" / "Daftar Distributor.xlsx"
-SKU_FILE = APP_DIR / "reference" / "Data SKU BPOM.xlsx"
 TEMPLATE_FILENAME = "Contoh Excel Response.xlsx"
 TEMPLATE_CANDIDATES = (
     APP_DIR / "template" / TEMPLATE_FILENAME,  # salinan yang ikut ter-deploy
@@ -100,16 +99,16 @@ mengacu pada SKU yang telah ditetapkan oleh prinsipal.
 4. Klik **Submit**. Data hanya disimpan jika seluruh isi file valid.
 
 - Distributor tidak diperkenankan mengubah header, nama kolom, atau urutan kolom. Baris judul di atas header boleh dibiarkan.
-- Kolom **Distributor Name (Company - Region)** sudah terisi otomatis untuk seluruh distributor milik company yang dipilih; jangan diubah.
-- **PRODUCT ID, PRODUCT NAME, BPOM NUMBER** sudah terisi di template; jangan dikosongkan.
+- Kolom **Distributor Branch** sudah terisi otomatis untuk seluruh distributor milik company yang dipilih; jangan diubah.
+- **PRODUCT ID, PRODUCT NAME, ISI (GR / ML), BPOM NUMBER** sudah terisi di template; jangan dikosongkan.
 - Yang perlu Anda isi hanya **QTY** di setiap baris dengan bilangan bulat (boleh positif, 0, atau negatif; tanpa desimal atau huruf).
-- Satu kombinasi **Distributor Name + PRODUCT ID + BPOM NUMBER** hanya boleh muncul satu kali dalam satu file.
+- Satu kombinasi **Distributor Branch + PRODUCT ID + BPOM NUMBER** hanya boleh muncul satu kali dalam satu file.
 """
 GUIDE_RULES = GUIDE_RULES.replace("**\n", "**  \n")  # judul + paragraf: pindah baris tanpa paragraf baru
 GUIDE_EXTRA_BPOM = """
 **Menambah nomor BPOM yang belum ada di template:** tambahkan baris baru di bagian bawah data. Isi kolom
-*Distributor Name* dengan nama distributor yang memiliki stok tersebut (salin dari baris distributor itu), **PRODUCT ID** dengan SKU yang sudah ada di template, lalu
-**PRODUCT NAME**, **BPOM NUMBER** baru, dan **QTY**. Baris tambahan ditandai pada pratinjau setelah upload.
+*Distributor Branch* dengan nama distributor yang memiliki stok tersebut (salin dari baris distributor itu), **PRODUCT ID** dengan SKU yang sudah ada di template, lalu
+**PRODUCT NAME** dan **ISI (GR / ML)** (salin dari baris SKU yang sama), **BPOM NUMBER** baru, dan **QTY**. Baris tambahan ditandai pada pratinjau setelah upload.
 """
 
 
@@ -178,8 +177,8 @@ def load_distributors() -> list[tuple[str, str]]:
 
 
 @st.cache_data(show_spinner=False)
-def load_skus() -> list[val.Sku]:
-    return reference_data.load_skus(SKU_FILE)
+def load_skus(template_path: str) -> list[val.Sku]:
+    return reference_data.load_catalogue(Path(template_path))
 
 
 # ── Komponen UI ────────────────────────────────────────────────────────────
@@ -208,9 +207,10 @@ def show_preview(rows: list[val.ExcelRow]) -> None:
     st.dataframe(
         pd.DataFrame({
             "Baris Excel": [r.excel_row for r in rows],
-            "Distributor Name": [r.distributor_name for r in rows],
+            "Distributor Branch": [r.distributor_name for r in rows],
             "PRODUCT ID": [r.product_id for r in rows],
             "PRODUCT NAME": [r.product_name for r in rows],
+            "ISI (GR / ML)": [r.isi for r in rows],
             "BPOM NUMBER": [r.bpom_number for r in rows],
             "QTY": [r.qty for r in rows],
             "BPOM Tambahan": ["Ya" if r.additional else "" for r in rows],
@@ -233,13 +233,13 @@ def template_button(cfg: Config, company: str | None, names: list[str], skus: li
         return
     if not company:
         st.info("Pilih Distributor Company (Langkah 1) agar template bisa di-download "
-                "dengan seluruh Distributor Name milik company tersebut.")
+                "dengan seluruh Distributor Branch milik company tersebut.")
         return
     data = template_builder.build_template(cfg.template_path.read_bytes(), company, names, skus)
     safe = re.sub(r'[\\/:*?"<>|]+', "_", company).strip()
     st.download_button(
         "**DOWNLOAD TEMPLATE**", data=data, file_name=f"BPOM Stock Opname - {safe}.xlsx", mime=XLSX_MIME,
-        help="Template resmi berisi seluruh Distributor Name milik company Anda beserta daftar SKU + nomor BPOM. Isi kolom QTY saja.",
+        help="Template resmi berisi seluruh Distributor Branch milik company Anda beserta daftar SKU + nomor BPOM. Isi kolom QTY saja.",
     )
 
 
@@ -269,7 +269,7 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
         st.error(str(exc))
         st.dataframe(
             pd.DataFrame({"Baris Excel": [r.excel_row for r in exc.conflicts],
-                          "Distributor Name": [r.distributor_name for r in exc.conflicts],
+                          "Distributor Branch": [r.distributor_name for r in exc.conflicts],
                           "PRODUCT ID": [r.product_id for r in exc.conflicts],
                           "BPOM NUMBER": [r.bpom_number for r in exc.conflicts]}),
             hide_index=True, width="stretch")
@@ -312,9 +312,13 @@ def main() -> None:
                    f"berjudul '{cfg.sheet_name}' dan mencoba membuatnya, yang akan gagal.")
     show_flash()
 
+    if cfg.template_path is None:
+        st.error(f"File template '{TEMPLATE_FILENAME}' tidak ditemukan. Letakkan di folder `template/` "
+                 "atau atur `template_path` di `[app]`.")
+        st.stop()
     try:
         distributors = load_distributors()
-        skus = load_skus()
+        skus = load_skus(str(cfg.template_path))
     except reference_data.ReferenceDataError as exc:
         st.error(f"Data referensi dari BD bermasalah: {exc}")
         st.stop()
@@ -324,14 +328,14 @@ def main() -> None:
 
     # Langkah 1 - distributor company (daftar dari BD)
     st.subheader("Langkah 1 - Pilih Distributor Company")
-    st.caption("Pilih **Distributor Company**. Seluruh **Distributor Name** (cabang/region) milik company tersebut akan "
+    st.caption("Pilih **Distributor Company**. Seluruh **Distributor Branch** (cabang/region) milik company tersebut akan "
                "muncul di template saat di-download. Pilihan berasal dari daftar distributor yang disediakan BD. "
                "Klik kolom lalu ketik untuk mencari.")
     companies = sorted({c for c, _ in distributors})
     company = st.selectbox("Distributor Company", companies, index=None, placeholder="Pilih atau ketik untuk mencari")
     names = [n for c, n in distributors if c == company] if company else []
     if names:
-        st.caption(f"{len(names)} Distributor Name pada company ini akan ada di template.")
+        st.caption(f"{len(names)} Distributor Branch pada company ini akan ada di template.")
 
     # Langkah 2 - tanggal + PIC
     st.subheader("Langkah 2 - Isi Tanggal Stock Opname dan PIC")
@@ -344,7 +348,7 @@ def main() -> None:
 
     # Langkah 3 - template
     st.subheader("Langkah 3 - Download template dan isi hanya data QTY")
-    st.caption(f"Template berisi {len(skus)} kombinasi SKU + nomor BPOM untuk setiap Distributor Name. Isi hanya kolom "
+    st.caption(f"Template berisi {len(skus)} kombinasi SKU + nomor BPOM untuk setiap Distributor Branch. Isi hanya kolom "
                "**QTY** (bilangan bulat; boleh positif, 0, atau negatif). Jangan mengubah header atau urutan kolom.")
     st.markdown(GUIDE_EXTRA_BPOM)
     template_button(cfg, company, names, skus)
@@ -370,12 +374,12 @@ def main() -> None:
                 st.success(f"File valid: {len(parsed.rows)} baris siap disimpan"
                            + (f", termasuk {extra} baris BPOM tambahan." if extra else "."))
                 if parsed.missing:
-                    st.warning(f"{len(parsed.missing)} kombinasi Distributor Name + SKU + BPOM dari daftar prinsipal "
+                    st.warning(f"{len(parsed.missing)} kombinasi Distributor Branch + SKU + BPOM dari daftar prinsipal "
                                "tidak ada di file. Pastikan seluruh SKU dan nomor BPOM yang menjadi tanggung jawab "
                                "Anda sudah dilaporkan.")
                     with st.expander("Lihat yang belum ada di file"):
                         st.dataframe(pd.DataFrame({
-                            "Distributor Name": [n for n, _ in parsed.missing],
+                            "Distributor Branch": [n for n, _ in parsed.missing],
                             "PRODUCT ID": [k.product_id for _, k in parsed.missing],
                             "PRODUCT NAME": [k.product_name for _, k in parsed.missing],
                             "BPOM NUMBER": [k.bpom_number for _, k in parsed.missing],

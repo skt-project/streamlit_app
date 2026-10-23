@@ -1,18 +1,13 @@
-"""Data referensi dari BD: daftar distributor dan daftar SKU + nomor BPOM.
-
-Kedua file ada di folder `reference/`. Untuk memperbarui daftar, ganti file-nya (header harus sama).
-"""
+"""Data referensi dari BD: daftar distributor (`reference/`) dan katalog SKU + nomor BPOM (Sheet1 template resmi)."""
 from __future__ import annotations
 
-from datetime import date, datetime
 from pathlib import Path
 
 import openpyxl
 
-from validation import Sku, normalize_name, row_key
+from validation import EXPECTED_HEADERS, HEADER_SEARCH_ROWS, Sku, normalize_name, row_key
 
 DISTRIBUTOR_HEADERS = ("Distributor Company", "Distributor Name")
-SKU_HEADERS = ("SKU", "BPOM Product Name", "BPOM Number", "Expired Date")
 
 
 class ReferenceDataError(Exception):
@@ -62,20 +57,44 @@ def load_distributors(path: Path) -> list[tuple[str, str]]:
     return result
 
 
-def load_skus(path: Path) -> list[Sku]:
-    """Daftar SKU + nomor BPOM resmi dari prinsipal (baris kosong dilewati)."""
-    result, seen = [], set()
-    for no, (product_id, product_name, bpom, expired) in _read(path, SKU_HEADERS):
-        product_id, product_name, bpom = _clean(product_id), _clean(product_name), _clean(bpom)
-        if not (product_id and product_name and bpom):
-            raise ReferenceDataError(f"'{path.name}' baris {no}: SKU, nama produk, dan nomor BPOM wajib diisi.")
-        key = row_key(product_id, bpom)
-        if key in seen:
-            raise ReferenceDataError(f"'{path.name}' baris {no}: kombinasi {product_id} + {bpom} ganda.")
-        seen.add(key)
-        if isinstance(expired, datetime):
-            expired = expired.date()
-        result.append(Sku(product_id, product_name, bpom, expired if isinstance(expired, date) else None))
+def load_catalogue(path: Path) -> list[Sku]:
+    """Daftar SKU + nama produk + isi + nomor BPOM resmi, dibaca dari Sheet1 template resmi dari BD.
+
+    Template adalah sumber tunggal: yang di-download distributor dan yang dipakai validasi selalu sama.
+    """
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception as exc:
+        raise ReferenceDataError(f"Template '{path.name}' tidak dapat dibaca: {exc}") from None
+    try:
+        ws = wb.worksheets[0]
+        ws.reset_dimensions()
+        rows = enumerate(ws.iter_rows(values_only=True), start=1)
+        header_no = None
+        for no, cells in rows:
+            if no > HEADER_SEARCH_ROWS:
+                break
+            if tuple(_clean(c) for c in cells[: len(EXPECTED_HEADERS)]) == EXPECTED_HEADERS:
+                header_no = no
+                break
+        if header_no is None:
+            raise ReferenceDataError(f"Header template '{path.name}' harus {list(EXPECTED_HEADERS)}.")
+        result, seen = [], set()
+        for no, cells in rows:
+            cells = tuple(cells) + (None,) * (len(EXPECTED_HEADERS) - len(cells))
+            _, product_id, product_name, isi, bpom, _ = (_clean(c) for c in cells[: len(EXPECTED_HEADERS)])
+            if not (product_id or product_name or isi or bpom):
+                continue
+            if not (product_id and product_name and isi and bpom):
+                raise ReferenceDataError(
+                    f"'{path.name}' baris {no}: PRODUCT ID, PRODUCT NAME, ISI, dan BPOM NUMBER wajib diisi.")
+            key = row_key(product_id, bpom)
+            if key in seen:
+                raise ReferenceDataError(f"'{path.name}' baris {no}: kombinasi {product_id} + {bpom} ganda.")
+            seen.add(key)
+            result.append(Sku(product_id, product_name, bpom, isi))
+    finally:
+        wb.close()
     if not result:
         raise ReferenceDataError(f"'{path.name}' tidak berisi SKU.")
     return result

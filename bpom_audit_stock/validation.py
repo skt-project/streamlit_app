@@ -17,12 +17,14 @@ import openpyxl
 
 # Header template resmi. Harus persis sama (case-sensitive, urutan sama).
 EXPECTED_HEADERS: tuple[str, ...] = (
-    "Distributor Name (Company - Region)",
+    "Distributor Branch",
     "PRODUCT ID",
     "PRODUCT NAME",
+    "ISI (GR / ML)",
     "BPOM NUMBER",
     "QTY",
 )
+COL_ISI = EXPECTED_HEADERS[3]
 _HEADERS_FOLDED = {h.casefold() for h in EXPECTED_HEADERS}
 
 INSTRUCTION_SHEET = "Cara Pengisian"   # sheet panduan di template; tidak dibaca saat upload
@@ -53,6 +55,7 @@ class Sku:
     product_id: str
     product_name: str
     bpom_number: str
+    isi: str = ""                  # mis. "30g", "20ml"
     expired: date | None = None
 
     @property
@@ -66,6 +69,7 @@ class ExcelRow:
     distributor_name: str      # nama kanonik dari daftar BD (bukan ketikan user)
     product_id: str
     product_name: str
+    isi: str
     bpom_number: str
     qty: int
     additional: bool = False   # BPOM tambahan: tidak ada di daftar resmi prinsipal
@@ -292,7 +296,7 @@ def parse_excel(data: bytes, expected_names: Sequence[str],
             if not _is_blank(cells[len(EXPECTED_HEADERS):]):
                 result.issues.append(Issue(no, "-", "Ada data di kolom tambahan di luar template."))
 
-            name_cell, pid_cell, pname_cell, bpom_cell, qty_cell = cells[:5]
+            name_cell, pid_cell, pname_cell, isi_cell, bpom_cell, qty_cell = cells[: len(EXPECTED_HEADERS)]
 
             dist, err = _text(name_cell)
             if err:
@@ -306,7 +310,8 @@ def parse_excel(data: bytes, expected_names: Sequence[str],
                     f"'{dist}' bukan distributor milik company yang dipilih. Pilihan: {_name_list(list(expected_names))}."))
 
             texts = {}
-            for label, cell in (("PRODUCT ID", pid_cell), ("PRODUCT NAME", pname_cell), ("BPOM NUMBER", bpom_cell)):
+            for label, cell in (("PRODUCT ID", pid_cell), ("PRODUCT NAME", pname_cell), (COL_ISI, isi_cell),
+                                ("BPOM NUMBER", bpom_cell)):
                 text, err = _text(cell)
                 if err:
                     result.issues.append(Issue(no, label, err.capitalize() + "."))
@@ -332,6 +337,9 @@ def parse_excel(data: bytes, expected_names: Sequence[str],
                     result.issues.append(Issue(
                         no, "PRODUCT NAME",
                         f"Tidak sesuai daftar prinsipal; seharusnya '{known.product_name}'."))
+                elif known is not None and known.isi and normalize_name(known.isi) != normalize_name(texts[COL_ISI]):
+                    result.issues.append(Issue(
+                        no, COL_ISI, f"Tidak sesuai daftar prinsipal; seharusnya '{known.isi}'."))
 
             if len(result.issues) == before:  # baris ini bersih -> cek duplikat
                 canonical = names_by_norm[normalize_name(dist)]
@@ -344,7 +352,7 @@ def parse_excel(data: bytes, expected_names: Sequence[str],
                 else:
                     seen[row_id] = no
                     result.rows.append(ExcelRow(no, canonical, texts["PRODUCT ID"], texts["PRODUCT NAME"],
-                                                texts["BPOM NUMBER"], qty,
+                                                texts[COL_ISI], texts["BPOM NUMBER"], qty,
                                                 additional=master is not None and known is None))
 
         if data_rows == 0:

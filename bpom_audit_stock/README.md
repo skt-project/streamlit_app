@@ -6,7 +6,7 @@ milik company itu beserta daftar SKU + nomor BPOM resmi, mengisi **QTY**, lalu m
 
 ## Alur di layar
 
-1. **Pilih Distributor Company** (dari `reference/Daftar Distributor.xlsx`). Tidak ada dropdown Distributor Name: semua Distributor Name milik company itu otomatis ada di template (satu blok baris per distributor).
+1. **Pilih Distributor Company** (dari `reference/Daftar Distributor.xlsx`). Tidak ada dropdown Distributor Name: semua Distributor Branch milik company itu otomatis ada di template (satu blok baris per distributor).
 2. **Tanggal Stock Opname + Nama PIC.** Kolom *Periode* di sheet diisi otomatis dari bulan-tahun tanggal itu (`YYYY-MM`).
 3. **Download template** (tombol merah; sheet kedua "Cara Pengisian" berisi panduan) dan isi hanya kolom QTY. BPOM tambahan: tambah baris baru dengan SKU yang sudah ada dan Distributor Name yang sesuai.
 4. **Upload .xlsx** - diperiksa otomatis; satu baris salah = seluruh upload dibatalkan (tidak ada data masuk).
@@ -15,14 +15,15 @@ milik company itu beserta daftar SKU + nomor BPOM resmi, mengisi **QTY**, lalu m
 ## Aturan validasi
 
 - Header persis sama dengan template (case-sensitive, urutan sama); tidak boleh ada kolom tambahan/hilang.
-- Kolom A tiap baris harus salah satu Distributor Name milik company yang dipilih; PRODUCT ID, PRODUCT NAME, BPOM NUMBER, QTY wajib.
+- Template punya 6 kolom: `Distributor Branch`, `PRODUCT ID`, `PRODUCT NAME`, `ISI (GR / ML)`, `BPOM NUMBER`, `QTY`.
+- Kolom A tiap baris harus salah satu Distributor Branch milik company yang dipilih; semua kolom wajib diisi.
 - QTY bilangan bulat (boleh negatif/0).
-- PRODUCT ID harus SKU dari `reference/Data SKU BPOM.xlsx`. Nomor BPOM di luar daftar diterima sebagai **BPOM tambahan**.
-  PRODUCT NAME untuk pasangan SKU+BPOM resmi harus sama dengan daftar.
-- Tidak ada kombinasi Distributor Name + PRODUCT ID + BPOM NUMBER ganda dalam satu file.
+- PRODUCT ID harus SKU yang ada di katalog (Sheet1 template resmi). Nomor BPOM di luar katalog diterima sebagai **BPOM tambahan**.
+  PRODUCT NAME dan ISI untuk pasangan SKU+BPOM resmi harus sama dengan katalog.
+- Tidak ada kombinasi Distributor Branch + PRODUCT ID + BPOM NUMBER ganda dalam satu file.
 - Kombinasi resmi (per distributor) yang tidak ada di file hanya diberi **peringatan** (tidak memblokir).
 - Setelah file valid, sheet dicek satu kali: bila periode yang sama sudah pernah menerima kombinasi
-  Distributor Name + PRODUCT ID + BPOM NUMBER yang sama, **seluruh input ditolak** (tidak ada revisi; hubungi BD).
+  Distributor Branch + PRODUCT ID + BPOM NUMBER yang sama, **seluruh input ditolak** (tidak ada revisi; hubungi BD).
 - Semua baris ditulis dalam satu request `batchUpdate` (atomik).
 
 ## Data referensi (dari BD)
@@ -30,10 +31,9 @@ milik company itu beserta daftar SKU + nomor BPOM resmi, mengisi **QTY**, lalu m
 | File | Isi |
 |---|---|
 | `reference/Daftar Distributor.xlsx` | `Distributor Company`, `Distributor Name` - sumber dropdown |
-| `reference/Data SKU BPOM.xlsx` | `SKU`, `BPOM Product Name`, `BPOM Number`, `Expired Date` - isi template & validasi |
-| `template/Contoh Excel Response.xlsx` | Template resmi (header/struktur dipakai apa adanya) |
+| `template/Contoh Excel Response.xlsx` | Template resmi **sekaligus katalog SKU**: `Sheet1` (PRODUCT ID, PRODUCT NAME, ISI, BPOM NUMBER) dipakai untuk mengisi template dan validasi. Sheet lain di file ini (daftar distributor, SKU tersembunyi) **tidak** ikut ke distributor |
 
-Memperbarui daftar: ganti file di `reference/` (header harus sama) lalu push. Baris kosong diabaikan.
+Memperbarui katalog SKU: ganti `Sheet1` pada file template (header harus sama persis). Memperbarui distributor: ganti file di `reference/`. Lalu push.
 
 ## Setup
 
@@ -42,9 +42,10 @@ Memperbarui daftar: ganti file di `reference/` (header harus sama) lalu push. Ba
 2. Share spreadsheet sebagai **Editor** ke `client_email` service account. Sheets API dan Drive API harus aktif.
 3. Service account tidak punya kuota Drive: spreadsheet harus dibuat manual dan ID-nya diisi di `google_sheet_id`.
 
-Skema worksheet (13 kolom): Distributor Company, Distributor Name, Periode Audit, Tanggal Audit, Nama PIC Distributor,
-PRODUCT ID, PRODUCT NAME, BPOM NUMBER, QTY, created_date, created_by, updated_date, updated_by. Header dibuat otomatis
-bila tab kosong, dan tidak pernah ditimpa bila sudah ada tetapi berbeda.
+Skema worksheet (14 kolom): Distributor Company, Distributor Name, Periode Audit, Tanggal Audit, Nama PIC Distributor,
+PRODUCT ID, PRODUCT NAME, BPOM NUMBER, QTY, created_date, created_by, updated_date, updated_by, ISI (GR / ML).
+Header dibuat otomatis bila tab kosong. Tab lama 13 kolom otomatis ditambah kolom `ISI (GR / ML)` di ujung (data tidak
+disentuh); header lain yang berbeda tidak pernah ditimpa.
 
 ## Menjalankan
 
