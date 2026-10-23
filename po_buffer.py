@@ -443,9 +443,9 @@ def _generate_store_page_elements(
     
     # ✅ Summary - NOW CALCULATED ON FILTERED DATA
     total_out_of_stock = len(sku_data_filtered[sku_data_filtered['estimated_actual_stock_adj'] == 0])
-    total_suggested = int(sku_data_filtered['buffer_plan_ver2'].sum())
+    total_suggested = int(sku_data_filtered['buffer_plan'].fillna(0).sum())
     total_value = int(
-    sku_data_filtered['buffer_plan_value_ver2']
+    sku_data_filtered['buffer_plan_value']
     .fillna(0)
     .sum()
     )
@@ -497,13 +497,13 @@ def _generate_store_page_elements(
     
     # ✅ Loop through filtered data - NO MORE if buffer_qty == 0 CHECK NEEDED
     for _, row in sku_data_filtered.iterrows():
-        buffer_qty = int(row['buffer_plan_ver2']) if pd.notna(row['buffer_plan_ver2']) else 0
+        buffer_qty = int(row['buffer_plan']) if pd.notna(row['buffer_plan']) else 0
         actual_stock = int(row['estimated_actual_stock_adj']) if not pd.isna(row['estimated_actual_stock_adj']) else 0
         buffer_val = (
-            int(row['buffer_plan_value_ver2'].item())
-            if hasattr(row['buffer_plan_value_ver2'], "item")
-            else int(row['buffer_plan_value_ver2'])
-            if not pd.isna(row['buffer_plan_value_ver2'])
+            int(row['buffer_plan_value'].item())
+            if hasattr(row['buffer_plan_value'], "item")
+            else int(row['buffer_plan_value'])
+            if not pd.isna(row['buffer_plan_value'])
             else 0
         )
         
@@ -925,8 +925,8 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         ANY_VALUE(TRIM(ib.distributor_g2g)) AS distributor,
         MAX(ib.stock_date) AS stock_date,
         COUNT(DISTINCT CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.product_code END) AS total_skus,
-        COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_ver2 ELSE 0 END), 0) AS total_buffer_qty,
-        COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_value_ver2 ELSE 0 END), 0) AS est_order_value
+        COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan ELSE 0 END), 0) AS total_buffer_qty,
+        COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_value ELSE 0 END), 0) AS est_order_value
     FROM combined_data ib
     WHERE TRIM(ib.distributor_g2g) IN UNNEST(@distributors)
     GROUP BY ib.store_code
@@ -983,7 +983,7 @@ def load_inventory_buffer_data() -> pd.DataFrame:
             ib.store_name,
             STRPOS('Must Have SKU, NPD, Discontinued', ib.priority_label),
             ib.SO_Bulanan DESC,
-            ib.buffer_plan_value_ver2 DESC
+            ib.buffer_plan_value DESC
         """
         
         df = client.query(query).to_dataframe()
