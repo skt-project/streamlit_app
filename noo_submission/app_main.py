@@ -1,7 +1,3 @@
-"""
-app_main.py — Dashboard + Store Validation + Submission History + Settings
-Jalankan: streamlit run app_main.py
-"""
 
 import datetime
 import json
@@ -833,7 +829,7 @@ def main():
     ss = st.session_state
 
     try:
-        with open("gaya.css", encoding="utf-8") as f:
+        with open("style_app.css", encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     except FileNotFoundError:
         pass
