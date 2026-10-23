@@ -41,6 +41,24 @@ section[data-testid="stSidebar"] [class*="st-key-navaktif"] button {
 .avatar-bulat { width:30px; height:30px; border-radius:50%; background:#dbeafe; color:#1e5cc8; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:10px; }
 .breadcrumb-nav { color:#99a5b5; font-size:10.5px; margin-bottom:6px; }
 .breadcrumb-nav b { color:#33445d; font-weight:600; }
+/* ---------- SIDEBAR / NAVIGATION ---------- */
+section[data-testid="stSidebar"] { background: #edf3fa; border-right: 1px solid #dce5f0; min-width: 255px !important; max-width: 255px !important; }
+section[data-testid="stSidebar"] > div { padding-top: 1.2rem; }
+.brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; color:#10213f; }
+.brand-sub { color:#758299; font-size:10.5px; line-height:1.4; margin:6px 0 18px; }
+section[data-testid="stSidebar"] .stButton > button {
+  justify-content:flex-start; text-align:left; border:none; background:transparent; color:#526078;
+  font-weight:500; font-size:12.5px; padding:10px 12px; border-radius:9px; box-shadow:none; width:100%; }
+section[data-testid="stSidebar"] .stButton > button > div { justify-content:flex-start; width:100%; }
+section[data-testid="stSidebar"] .stButton > button p { text-align:left; }
+section[data-testid="stSidebar"] .stButton > button:hover { background:#e4ebf5; color:#263957; }
+section[data-testid="stSidebar"] [class*="st-key-navaktif"] button {
+  background:#dbe9ff; color:#1f5fd2; font-weight:600; box-shadow: inset 3px 0 #2563eb; }
+.status-sidebar { color:#167648; font-size:11px; font-weight:600; margin-top:36vh; }
+.status-sidebar .titik { display:inline-block; width:7px; height:7px; background:#22a866; border-radius:50%; margin-right:8px; box-shadow:0 0 0 3px #d5f2e2; }
+.status-update { color:#8b97aa; font-size:9.5px; margin-top:4px; margin-left:15px; }
+
+
 /* ---------- SIDEBAR: Input NOO (link_button disamakan dgn nav button) ---------- */
 section[data-testid="stSidebar"] [data-testid="stLinkButton"] {
   margin-top: 0;
@@ -71,6 +89,10 @@ section[data-testid="stSidebar"] [data-testid="stLinkButton"] a:hover {
   background: #e4ebf5;
   color: #263957;
 }
+/* ★★★ SAMPAI SINI ★★★ */
+
+/* ---------- PAGE HEADER ---------- */
+.header-halaman { ... }
 /* ---------- KPI CARDS ---------- */
 .grid-kpi { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:16px; }
 .kartu-kpi { display:flex; align-items:center; min-height:91px; padding:17px 18px; border-radius:12px; border:1px solid; box-shadow:0 3px 10px rgba(19,40,72,.035); background:#f0f6ff; border-color:#dceaff; }
