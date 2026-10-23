@@ -59,9 +59,9 @@ def get_existing(store_id: str, iso_date: str, nonce: int):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def get_day_rows(iso_date: str, nonce: int):
-    """Transaksi satu tanggal penjualan, untuk tab Admin."""
-    return get_backends().bq_store.fetch_by_date(date.fromisoformat(iso_date))
+def get_range_rows(start_iso: str, end_iso: str, nonce: int):
+    """Transaksi pada rentang tanggal penjualan, untuk tab Admin."""
+    return get_backends().bq_store.fetch_by_date_range(date.fromisoformat(start_iso), date.fromisoformat(end_iso))
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
@@ -199,7 +199,7 @@ def main():
     with tab_input:
         render_input(be, master)
     with tab_admin:
-        render_admin(be, master, get_day_rows)
+        render_admin(be, master, get_range_rows)
 
 
 def render_input(be, master):

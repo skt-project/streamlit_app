@@ -72,12 +72,16 @@ login terkunci 60 detik (per sesi browser, bukan perlindungan penuh: kekuatan pa
 
 Isi (hanya membaca; tidak ada tombol hapus/ubah):
 
-- **Filter**: Tanggal Penjualan, Region, Status.
+- **Filter**: **Rentang** Tanggal Penjualan (default 7 hari terakhir, maksimal 92 hari), Region, Status. Rentang dipakai
+  karena satu store biasanya dikunjungi seminggu sekali.
 - **Ringkasan** total store, Lengkap, Belum lengkap, Belum submit; tabel **per region** (dengan % lengkap) dan **per store**
   (SKU terisi x/11, jumlah foto, supervisor, waktu submit terakhir WIB); unduh CSV.
-- **Status "Lengkap"** = semua SKU di master terisi (Sell Out + Stock) **dan** minimal 1 foto evidence.
-  "Belum lengkap" = ada data tapi ada SKU belum terisi dan/atau belum ada foto. "Belum submit" = belum ada data pada tanggal itu.
-- **Galeri evidence**: pilih store untuk melihat detail per SKU (terisi/belum) dan fotonya, atau lihat semua foto sesuai filter
+- **Satu kunjungan** = satu tanggal penjualan yang punya data untuk store itu. **Status "Lengkap"** = pada minimal satu
+  kunjungan dalam rentang, semua SKU di master terisi (Sell Out + Stock) **dan** ada minimal 1 foto evidence.
+  "Belum lengkap" = ada data tetapi tidak ada satu pun kunjungan yang lengkap. "Belum submit" = tidak ada data sama sekali di rentang itu.
+  Tabel per store menampilkan jumlah kunjungan, tanggal kunjungan terakhir, SKU terisi pada kunjungan terbaik, dan total foto.
+- **Galeri evidence**: pilih store untuk melihat detail per SKU (terisi/belum) pada tanggal kunjungan yang dipilih, dan fotonya
+  (dari semua kunjungan dalam rentang, lengkap dengan tanggalnya), atau lihat semua foto sesuai filter
   (8 foto per halaman). Yang tampil adalah foto **terbaru** per store + SKU; foto lama tetap ada di bucket.
 
 Foto ditampilkan lewat URL bertanda tangan (hanya-baca, kedaluwarsa 60 menit) yang dibuat service account, jadi user admin
@@ -214,4 +218,4 @@ Setiap perubahan secrets perlu *Reboot app*. File `.cache/master_snapshot.json` 
 | `master_cache.py` | Cadangan master: data valid terakhir dipakai bila spreadsheet error |
 | `timeutil.py` | Konversi dan format WIB |
 | `clients.py`, `config.py` | Kredensial dan konfigurasi dari secrets |
-| `tests/` | pytest (139 tes) |
+| `tests/` | pytest (157 tes) |

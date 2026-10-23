@@ -123,9 +123,10 @@ class BigQueryStore:
         return (f"SELECT {', '.join(COLUMNS)} FROM `{self.fqn}` "
                 "WHERE transaction_id IN UNNEST(@ids) ORDER BY tanggal_penjualan, store_id, sku_code")
 
-    def select_by_date_sql(self) -> str:
+    def select_by_range_sql(self) -> str:
         return (f"SELECT {', '.join(COLUMNS)} FROM `{self.fqn}` "
-                "WHERE tanggal_penjualan = @tanggal ORDER BY store_id, sku_code")
+                "WHERE tanggal_penjualan BETWEEN @mulai AND @selesai "
+                "ORDER BY tanggal_penjualan, store_id, sku_code")
 
     def duplicates_sql(self) -> str:
         return (f"SELECT sku_code, COUNT(*) AS n FROM `{self.fqn}` "
@@ -170,10 +171,11 @@ WHEN NOT MATCHED THEN INSERT ({cols})
             bigquery.ScalarQueryParameter("store_id", "STRING", store_id),
         ])
 
-    def fetch_by_date(self, sales_date: date) -> list[dict]:
-        """Seluruh transaksi satu tanggal penjualan (untuk tab Admin)."""
-        return self._run(self.select_by_date_sql(), [
-            bigquery.ScalarQueryParameter("tanggal", "DATE", sales_date),
+    def fetch_by_date_range(self, start: date, end: date) -> list[dict]:
+        """Seluruh transaksi pada rentang tanggal penjualan, batas ikut dihitung (untuk tab Admin)."""
+        return self._run(self.select_by_range_sql(), [
+            bigquery.ScalarQueryParameter("mulai", "DATE", start),
+            bigquery.ScalarQueryParameter("selesai", "DATE", end),
         ])
 
     def fetch_by_ids(self, transaction_ids: Sequence[str]) -> list[dict]:

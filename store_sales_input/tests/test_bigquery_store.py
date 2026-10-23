@@ -99,12 +99,14 @@ def test_fetch_by_ids_and_duplicates_use_params():
     assert EVIL not in sql and cfg.query_parameters[0].values == ["a", EVIL]
 
 
-def test_fetch_by_date_is_parameterized_and_scoped_to_one_date():
+def test_fetch_by_date_range_is_parameterized_and_inclusive():
     c = FakeClient()
-    BigQueryStore(c, FQN).fetch_by_date(date(2026, 10, 23))
+    BigQueryStore(c, FQN).fetch_by_date_range(date(2026, 10, 17), date(2026, 10, 23))
     sql, cfg = c.calls[0]
-    assert "WHERE tanggal_penjualan = @tanggal" in sql and "2026-10-23" not in sql
-    assert {p.name: p.value for p in cfg.query_parameters} == {"tanggal": date(2026, 10, 23)}
+    assert "tanggal_penjualan BETWEEN @mulai AND @selesai" in sql          # BETWEEN: kedua ujung ikut
+    assert "2026-10" not in sql                                             # tanggal tidak disambung ke SQL
+    assert {p.name: p.value for p in cfg.query_parameters} == {"mulai": date(2026, 10, 17),
+                                                               "selesai": date(2026, 10, 23)}
 
 
 def test_query_failure_wrapped():

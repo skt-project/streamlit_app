@@ -381,3 +381,84 @@ def test_single_page_gallery_has_no_pager(backend):
     at = admin_login(fresh())
     assert len(gallery_files(at)) == 6
     assert not [b for b in at.button if b.key and b.key.startswith("adm_prev_")]
+
+
+# ── Rentang tanggal di tab Admin ────────────────────────────────────────────
+
+def put_row(backend, d, sid, sku, photo=True):
+    from test_service import T1
+    from validation import make_transaction_id
+    backend.bq_store.rows[(d, sid, sku)] = dict(
+        transaction_id=make_transaction_id(d, sid, sku), tanggal_penjualan=d, store_id=sid, store_name=sid,
+        region="X", store_group="GT", sku_code=sku, sku_name=sku, sell_out_qty=1, stock_qty=2,
+        supervisor_name="Budi", evidence_file_id=f"{sid}-{sku}-{d.isoformat()}.jpg" if photo else None,
+        evidence_file_url="u", evidence_file_name="n.jpg", evidence_uploaded_at=T1, created_at=T1, updated_at=T1)
+
+
+def today_wib():
+    from datetime import datetime
+    from timeutil import WIB
+    return datetime.now(WIB).date()
+
+
+def test_admin_default_range_is_last_7_days_so_weekly_visits_are_found(backend):
+    from datetime import timedelta
+    t = today_wib()
+    for sku in ("K1", "K2"):
+        put_row(backend, t - timedelta(days=6), "S1", sku, photo=(sku == "K1"))     # 6 hari lalu: lengkap
+        put_row(backend, t - timedelta(days=7), "S2", sku)                          # 7 hari lalu: DI LUAR rentang
+    at = admin_login(fresh())
+    assert at.date_input(key="adm_range").value == (t - timedelta(days=6), t)
+    assert metrics(at) == {"Total store": "3", "Lengkap": "1", "Belum lengkap": "0", "Belum submit": "2"}
+    assert any("s/d" in c.value and "minimal satu tanggal kunjungan" in c.value for c in at.caption)
+
+
+def test_admin_visit_last_week_counts_when_range_covers_it_and_not_otherwise(backend):
+    from datetime import timedelta
+    t = today_wib()
+    for sku in ("K1", "K2"):
+        put_row(backend, t - timedelta(days=5), "S1", sku, photo=(sku == "K1"))
+    at = admin_login(fresh())
+    assert metrics(at)["Lengkap"] == "1"
+    at.date_input(key="adm_range").set_value((t - timedelta(days=2), t))               # rentang tidak mencakup kunjungan
+    at = at.run()
+    assert metrics(at) == {"Total store": "3", "Lengkap": "0", "Belum lengkap": "0", "Belum submit": "3"}
+    at.date_input(key="adm_range").set_value((t - timedelta(days=5), t - timedelta(days=5)))   # satu hari saja
+    at = at.run()
+    assert metrics(at)["Lengkap"] == "1"                                                # batas tanggal ikut dihitung
+
+
+def test_admin_store_with_two_visits_complete_one_partial_other(backend):
+    from datetime import timedelta
+    t = today_wib()
+    early, late = t - timedelta(days=4), t
+    for sku in ("K1", "K2"):
+        put_row(backend, early, "S1", sku, photo=(sku == "K1"))                         # lengkap
+    put_row(backend, late, "S1", "K1", photo=False)                                      # kunjungan terbaru: belum lengkap
+    at = admin_login(fresh())
+    assert metrics(at)["Lengkap"] == "1" and metrics(at)["Belum lengkap"] == "0"
+    # galeri menampilkan foto dari kunjungan di rentang, lengkap dengan tanggalnya
+    cards = " ".join(m.value for m in at.markdown)
+    assert f"Tanggal {early.isoformat()}" in cards
+    # detail store: default ke kunjungan TERBAIK (yang lengkap), bisa pindah ke kunjungan lain
+    store_pick = [s for s in at.selectbox if s.label == "Store"][0]
+    store_pick.set_value("S1 - Toko Satu")
+    at = at.run()
+    visit = [s for s in at.selectbox if s.label == "Tanggal kunjungan"][0]
+    assert visit.value == early
+    visit.set_value(late)
+    at = at.run()
+    frames = [d.value for d in at.dataframe if "Isian" in d.value.columns]
+    assert list(frames[-1]["Isian"]) == ["Terisi", "Belum terisi"]
+
+
+def test_admin_incomplete_range_selection_and_too_long_range(backend):
+    from datetime import timedelta
+    t = today_wib()
+    at = admin_login(fresh())
+    at.date_input(key="adm_range").set_value((t - timedelta(days=3),))                  # baru satu ujung dipilih
+    at = at.run()
+    assert any("Pilih tanggal mulai dan tanggal akhir" in i.value for i in at.info) and not metrics(at)
+    at.date_input(key="adm_range").set_value((t - timedelta(days=200), t))
+    at = at.run()
+    assert any("maksimal 92 hari" in w.value for w in at.warning) and not metrics(at)

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from completeness import (
     NO_REGION, STATUS_COMPLETE, STATUS_NONE, STATUS_PARTIAL, compute_completeness, evidence_items,
@@ -86,3 +86,55 @@ def test_evidence_items_only_rows_with_photo_sorted():
     assert [(i.store_id, i.sku_code, i.file_id) for i in items] == [
         ("A", "K1", "fa1"), ("A", "K2", "fa2"), ("B", "K1", "fb")]      # tanpa foto & store asing dibuang
     assert items[0].region == "JATENG" and items[0].sku_name == "Satu"
+
+
+# ── Rentang tanggal: beberapa kunjungan per store ───────────────────────────
+
+D1, D2, D3 = date(2026, 10, 16), date(2026, 10, 19), date(2026, 10, 23)
+
+
+def vrow(store, sku, d, file_id=None, so=1, st=1, at=T0):
+    r = row(store, sku, so, st, file_id, at)
+    r["tanggal_penjualan"] = d
+    return r
+
+
+def test_store_is_complete_if_any_visit_in_range_is_complete():
+    rows = [
+        vrow("A", "K1", D1, "f1"), vrow("A", "K2", D1),          # kunjungan 1: lengkap + foto
+        vrow("A", "K1", D3),                                     # kunjungan 2: baru 1 SKU, tanpa foto
+    ]
+    s = by_id(compute_completeness(STORES, SKUS, rows))["A"]
+    assert s.status == STATUS_COMPLETE and s.visits == 2
+    assert s.best_date == D1 and s.last_visit == D3                # kunjungan terbaik != terakhir
+    assert (s.sku_filled, s.missing_skus) == (2, ())               # statistik diambil dari kunjungan terbaik
+    assert s.photo_count == 1
+
+
+def test_no_complete_visit_is_partial_and_best_visit_has_most_skus():
+    rows = [vrow("A", "K1", D1, "f1"),                             # 1 SKU + foto
+            vrow("A", "K1", D2), vrow("A", "K2", D2)]              # 2 SKU, tanpa foto
+    s = by_id(compute_completeness(STORES, SKUS, rows))["A"]
+    assert s.status == STATUS_PARTIAL and s.visits == 2
+    assert s.best_date == D2 and s.sku_filled == 2 and s.missing_skus == ()
+    assert s.photo_count == 1                                      # foto dihitung dari seluruh rentang
+
+
+def test_two_visits_never_double_count_a_store_in_region_summary():
+    rows = [vrow("A", "K1", D1, "f1"), vrow("A", "K2", D1), vrow("A", "K1", D3), vrow("A", "K2", D3, "f2")]
+    statuses = compute_completeness(STORES, SKUS, rows)
+    assert sum(1 for s in statuses if s.store.store_id == "A") == 1
+    jt = {r["Region"]: r for r in summarize_by_region(statuses)}["JATENG"]
+    assert (jt["Total Store"], jt[STATUS_COMPLETE]) == (2, 1)
+
+
+def test_same_date_same_sku_is_not_counted_twice():
+    rows = [vrow("A", "K1", D1, "f1"), vrow("A", "K1", D1, "f1"), vrow("A", "K2", D1)]
+    s = by_id(compute_completeness(STORES, SKUS, rows))["A"]
+    assert s.visits == 1 and s.sku_filled == 2
+
+
+def test_evidence_items_carry_sales_date_and_sort_by_date_within_store():
+    rows = [vrow("A", "K1", D3, "late"), vrow("A", "K1", D1, "early"), vrow("A", "K2", D1, "early2")]
+    items = evidence_items(STORES, SKUS, rows)
+    assert [(i.sales_date, i.file_id) for i in items] == [(D1, "early"), (D1, "early2"), (D3, "late")]

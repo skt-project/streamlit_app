@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 import pandas as pd
@@ -25,6 +25,7 @@ from timeutil import WIB, fmt_wib
 
 log = logging.getLogger("store_sales.admin")
 
+MAX_RANGE_DAYS = 92                        # batasi rentang agar query dan tabel tetap ringan
 PAGE_SIZE = 8                              # 2 kolom x 4 baris: pas untuk layar HP
 ALL_REGIONS = "Semua region"
 ALL_STORES = "(Semua store sesuai filter)"
@@ -72,6 +73,7 @@ def _photo_card(evidence, it) -> None:
         log.exception("Gagal menampilkan foto %s", it.file_id)
         st.caption("Foto tidak dapat dimuat.")
     st.markdown(f"**{it.store_id}** · {it.store_name}  \n"
+                f"Tanggal {it.sales_date.isoformat() if it.sales_date else '-'}  \n"
                 f"{it.sku_code} · {it.sku_name}  \n"
                 f"Sell Out **{it.sell_out_qty}** · Stock **{it.stock_qty}**  \n"
                 f"{it.supervisor or '-'} · {fmt_wib(it.updated_at) if it.updated_at else '-'}")
@@ -83,7 +85,9 @@ def _store_table(statuses: list[StoreStatus]) -> pd.DataFrame:
     return pd.DataFrame([{
         "Status": f"{_STATUS_ICON[s.status]} {s.status}",
         "Region": s.region, "Store ID": s.store.store_id, "Store": s.store.store_name,
-        "SKU terisi": f"{s.sku_filled}/{s.sku_total}", "Foto": s.photo_count,
+        "Kunjungan": s.visits,
+        "Kunjungan terakhir": s.last_visit.isoformat() if s.last_visit else "",
+        "SKU terisi (terbaik)": f"{s.sku_filled}/{s.sku_total}", "Foto": s.photo_count,
         "Supervisor": s.supervisor or "",
         "Waktu submit terakhir (WIB)": fmt_wib(s.last_submit) if s.last_submit else "",
     } for s in statuses])
@@ -112,7 +116,7 @@ def _pager(pages: int, page: int, where: str) -> None:
                    width="stretch")
 
 
-def render_admin(be, master, fetch_rows: Callable[[str, int], list[dict]]) -> None:
+def render_admin(be, master, fetch_rows: Callable[[str, str, int], list[dict]]) -> None:
     cfg, ss = be.config, st.session_state
     if not (cfg.admin_username and cfg.admin_password):
         st.info("Tab admin belum aktif: isi bagian `[admin]` (username dan password) di secrets.")
@@ -127,20 +131,25 @@ def render_admin(be, master, fetch_rows: Callable[[str, int], list[dict]]) -> No
         st.subheader("Kelengkapan input & evidence")
     head[1].button("Logout", key="adm_logout", on_click=_logout)
 
+    today = datetime.now(WIB).date()
     f1, f2 = st.columns(2)
-    sales_date = f1.date_input("Tanggal Penjualan", value=datetime.now(WIB).date(), format="YYYY-MM-DD",
-                               key="adm_date")
+    picked = f1.date_input("Rentang Tanggal Penjualan", value=(today - timedelta(days=6), today),
+                           format="YYYY-MM-DD", key="adm_range")
     regions = sorted({region_of(s) for s in master.stores.values()})
     region = f2.selectbox("Region", [ALL_REGIONS, *regions], key="adm_region")
     wanted = st.multiselect("Status", list(STATUSES), default=list(STATUSES), key="adm_status")
     if st.button("Muat ulang data", key="adm_refresh"):
         ss["adm_nonce"] = ss.get("adm_nonce", 0) + 1
-    if not isinstance(sales_date, date):
-        st.info("Pilih tanggal penjualan.")
+    if not (isinstance(picked, (tuple, list)) and len(picked) == 2):
+        st.info("Pilih tanggal mulai dan tanggal akhir.")             # kalender range baru terisi satu ujung
+        return
+    start, end = picked
+    if (end - start).days > MAX_RANGE_DAYS:
+        st.warning(f"Rentang maksimal {MAX_RANGE_DAYS} hari. Persempit rentang tanggalnya.")
         return
 
     try:
-        rows = fetch_rows(sales_date.isoformat(), ss.get("adm_nonce", 0))
+        rows = fetch_rows(start.isoformat(), end.isoformat(), ss.get("adm_nonce", 0))
     except BigQueryError as exc:
         st.error(str(exc))
         return
@@ -158,8 +167,9 @@ def render_admin(be, master, fetch_rows: Callable[[str, int], list[dict]]) -> No
         keep_row()
         st.metric(f"{_STATUS_ICON[STATUS_PARTIAL]} {STATUS_PARTIAL}", sum(s.status == STATUS_PARTIAL for s in scoped))
     row2[1].metric(f"{_STATUS_ICON[STATUS_NONE]} {STATUS_NONE}", sum(s.status == STATUS_NONE for s in scoped))
-    st.caption(f"Lengkap = semua {len(master.skus)} SKU terisi (Sell Out + Stock) **dan** minimal 1 foto evidence. "
-               f"Tanggal penjualan {sales_date.isoformat()}.")
+    st.caption(f"Rentang {start.isoformat()} s/d {end.isoformat()}. **Lengkap** = pada minimal satu tanggal kunjungan "
+               f"dalam rentang, semua {len(master.skus)} SKU terisi (Sell Out + Stock) **dan** ada minimal 1 foto "
+               f"evidence. Store yang dikunjungi seminggu sekali cukup punya satu kunjungan lengkap.")
 
     st.markdown("##### Per region")
     st.dataframe(pd.DataFrame(summarize_by_region(statuses)), hide_index=True, width="stretch",
@@ -170,25 +180,34 @@ def render_admin(be, master, fetch_rows: Callable[[str, int], list[dict]]) -> No
     table = _store_table(shown)
     st.dataframe(table, hide_index=True, width="stretch")
     st.download_button("Unduh CSV (per store)", table.to_csv(index=False).encode("utf-8-sig"),
-                       file_name=f"kelengkapan_{sales_date.isoformat()}.csv", mime="text/csv", key="adm_csv")
+                       file_name=f"kelengkapan_{start.isoformat()}_{end.isoformat()}.csv", mime="text/csv",
+                       key="adm_csv")
 
     # Detail + galeri
     st.markdown("##### Galeri evidence")
+    span = f"{start.isoformat()}_{end.isoformat()}"
     by_label = {f"{s.store.store_id} - {s.store.store_name}": s for s in shown}
-    pick = st.selectbox("Store", [ALL_STORES, *by_label], key=f"adm_store_{region}_{sales_date.isoformat()}")
+    pick = st.selectbox("Store", [ALL_STORES, *by_label], key=f"adm_store_{region}_{span}")
     chosen = by_label.get(pick)
     if chosen is not None:
         sid = chosen.store.store_id
-        by_sku = {r["sku_code"]: r for r in rows if r["store_id"] == sid}
-        st.caption(f"{_STATUS_ICON[chosen.status]} {chosen.status} · {chosen.sku_filled}/{chosen.sku_total} SKU · "
-                   f"{chosen.photo_count} foto · supervisor {chosen.supervisor or '-'}")
-        st.dataframe(pd.DataFrame([{
-            "SKU": f"{sku.code} - {sku.name}",
-            "Sell Out": (by_sku.get(sku.code) or {}).get("sell_out_qty"),
-            "Stock": (by_sku.get(sku.code) or {}).get("stock_qty"),
-            "Isian": "Terisi" if sku.code in by_sku else "Belum terisi",
-            "Foto": "Ada" if (by_sku.get(sku.code) or {}).get("evidence_file_id") else "-",
-        } for sku in master.skus.values()]), hide_index=True, width="stretch")
+        st.caption(f"{_STATUS_ICON[chosen.status]} {chosen.status} · {chosen.visits} kunjungan dalam rentang · "
+                   f"{chosen.photo_count} foto · supervisor terakhir {chosen.supervisor or '-'}")
+        dates = sorted({r["tanggal_penjualan"] for r in rows if r["store_id"] == sid}, reverse=True)
+        if dates:
+            default = dates.index(chosen.best_date) if chosen.best_date in dates else 0
+            visit = st.selectbox("Tanggal kunjungan", dates, index=default, key=f"adm_visit_{sid}_{span}",
+                                 format_func=lambda d: d.isoformat())
+            by_sku = {r["sku_code"]: r for r in rows if r["store_id"] == sid and r["tanggal_penjualan"] == visit}
+            st.dataframe(pd.DataFrame([{
+                "SKU": f"{sku.code} - {sku.name}",
+                "Sell Out": (by_sku.get(sku.code) or {}).get("sell_out_qty"),
+                "Stock": (by_sku.get(sku.code) or {}).get("stock_qty"),
+                "Isian": "Terisi" if sku.code in by_sku else "Belum terisi",
+                "Foto": "Ada" if (by_sku.get(sku.code) or {}).get("evidence_file_id") else "-",
+            } for sku in master.skus.values()]), hide_index=True, width="stretch")
+        else:
+            st.info("Store ini belum submit pada rentang tanggal ini.")
 
     allowed = {s.store.store_id for s in shown} if chosen is None else {chosen.store.store_id}
     items = [i for i in evidence_items(master.stores, master.skus, rows) if i.store_id in allowed]
@@ -196,7 +215,7 @@ def render_admin(be, master, fetch_rows: Callable[[str, int], list[dict]]) -> No
         st.info("Belum ada foto evidence untuk filter ini.")
         return
     pages = max(1, math.ceil(len(items) / PAGE_SIZE))
-    sig = (region, pick, sales_date.isoformat(), tuple(sorted(wanted)))
+    sig = (region, pick, span, tuple(sorted(wanted)))
     if ss.get("adm_sig") != sig:                    # filter berubah → kembali ke halaman 1
         ss["adm_sig"], ss["adm_page"] = sig, 1
     ss["adm_pages"] = pages

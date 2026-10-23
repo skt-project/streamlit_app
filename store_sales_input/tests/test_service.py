@@ -47,8 +47,8 @@ class FakeBQ:
                         row[c] = old[c]
             self.rows[key] = row
 
-    def fetch_by_date(self, d):
-        return [r for k, r in self.rows.items() if k[0] == d]
+    def fetch_by_date_range(self, start, end):
+        return [r for k, r in sorted(self.rows.items(), key=lambda kv: kv[0]) if start <= k[0] <= end]
 
     def fetch_by_ids(self, ids):
         return [r for r in self.rows.values() if r["transaction_id"] in ids]
