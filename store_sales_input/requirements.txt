@@ -1,0 +1,8 @@
+streamlit==1.66.1
+google-cloud-bigquery
+google-cloud-storage
+db-dtypes
+gspread>=6.0
+google-auth
+pandas
+pillow
