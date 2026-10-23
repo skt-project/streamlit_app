@@ -1,5 +1,5 @@
 
-
+import os
 import datetime
 import re
 import time
@@ -932,13 +932,12 @@ def main():
     st.set_page_config(page_title="NOO Submission", page_icon="📦", layout="wide")
     inisialisasi_state()
     ss = st.session_state
-
+    CSS_PATH = os.path.join(os.path.dirname(__file__), "style_app.css")
     try:
-        with open("style_app.css", encoding="utf-8") as f:
+        with open(CSS_PATH, encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     except FileNotFoundError:
-        pass
-
+    st.error(f"CSS tidak ketemu di: {CSS_PATH}")
     if ss.get("pesan_toast"):
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon","✅"))
 
