@@ -189,6 +189,26 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
 .judul-bagian { display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#3d4c63; margin:10px 0 8px; font-weight:600; }
 .judul-bagian b { color:#2865c6; background:#eaf2ff; padding:3px 7px; border-radius:8px; font-size:8px; }
 
+/* ── NOO Upload: tabel lebih rapat ── */
+.st-key-kartu_noo [data-testid="stVerticalBlock"] { gap: 0.2rem; }
+
+.st-key-kartu_noo .catatan-kecil {
+    font-size: 0.78rem !important;
+    line-height: 1.2 !important;
+    margin-top: 5px !important;      /* override inline margin-top:8px */
+    white-space: nowrap;             /* 1 baris saja */
+    overflow: hidden;
+    text-overflow: ellipsis;         /* potong dengan "..." */
+}
+
+.st-key-kartu_noo [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+.st-key-kartu_noo [data-testid="stTextInput"] input {
+    min-height: 30px !important;
+    height: 30px !important;
+    font-size: 0.8rem !important;
+    padding-top: 2px; padding-bottom: 2px;
+}
+
 /* ---------- OPTION TITLES (1. Manual / 2. Upload) ---------- */
 .judul-opsi { display:flex; align-items:center; gap:10px; margin:14px 0 10px; }
 .judul-opsi .nomor-opsi {
