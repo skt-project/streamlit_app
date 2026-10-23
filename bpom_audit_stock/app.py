@@ -29,6 +29,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+MAX_ISSUES_LISTED = 10
 MAX_ISSUES_SHOWN = 300
 
 APP_DIR = Path(__file__).parent
@@ -41,8 +42,8 @@ TEMPLATE_CANDIDATES = (
 )
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-# Tombol download dibuat merah + tebal agar mencolok.
-DOWNLOAD_BUTTON_CSS = """
+# CSS global. Tombol download merah + tebal; di layar sempit (HP) tombol penuh lebar dan cukup besar untuk disentuh.
+APP_CSS = """
 <style>
 div[data-testid="stDownloadButton"] button {
     background-color: #D32F2F !important;
@@ -52,6 +53,18 @@ div[data-testid="stDownloadButton"] button {
 }
 div[data-testid="stDownloadButton"] button:hover { background-color: #B71C1C !important; }
 div[data-testid="stDownloadButton"] button * { color: #FFFFFF !important; font-weight: 700 !important; }
+
+@media (max-width: 640px) {
+    div[data-testid="stMainBlockContainer"], .block-container { padding: 1rem 0.8rem 4rem 0.8rem !important; }
+    h1 { font-size: 1.55rem !important; line-height: 1.25 !important; }
+    h3 { font-size: 1.15rem !important; }
+    div[data-testid="stElementContainer"]:has([data-testid="stDownloadButton"]),
+    div[data-testid="stElementContainer"]:has([data-testid="stButton"]),
+    div[data-testid="stDownloadButton"], div[data-testid="stButton"] { width: 100% !important; }
+    div[data-testid="stDownloadButton"] button, div[data-testid="stButton"] button {
+        width: 100% !important; min-height: 3rem !important; font-size: 1.05rem !important;
+    }
+}
 </style>
 """
 
@@ -173,18 +186,22 @@ def load_skus() -> list[val.Sku]:
 
 def show_issues(issues: list[val.Issue]) -> None:
     st.error(f"Ditemukan {len(issues)} masalah pada file. Upload dibatalkan: tidak ada data yang disimpan.")
-    shown = issues[:MAX_ISSUES_SHOWN]
-    st.dataframe(
-        pd.DataFrame({
-            "Baris Excel": [str(i.row) if i.row else "-" for i in shown],
-            "Kolom": [i.column for i in shown],
-            "Alasan": [i.message for i in shown],
-        }),
-        hide_index=True,
-        width="stretch",
-    )
-    if len(issues) > len(shown):
-        st.caption(f"Menampilkan {len(shown)} dari {len(issues)} masalah.")
+    # Daftar teks (terbaca di layar HP); tabel lengkap ada di expander.
+    for issue in issues[:MAX_ISSUES_LISTED]:
+        where = f"**Baris {issue.row}** · {issue.column}" if issue.row else f"**{issue.column}**"
+        st.markdown(f"- {where}: {issue.message}")
+    if len(issues) > MAX_ISSUES_LISTED:
+        shown = issues[:MAX_ISSUES_SHOWN]
+        with st.expander(f"Lihat tabel lengkap ({len(shown)} dari {len(issues)} masalah)"):
+            st.dataframe(
+                pd.DataFrame({
+                    "Baris Excel": [str(i.row) if i.row else "-" for i in shown],
+                    "Kolom": [i.column for i in shown],
+                    "Alasan": [i.message for i in shown],
+                }),
+                hide_index=True,
+                width="stretch",
+            )
 
 
 def show_preview(rows: list[val.ExcelRow]) -> None:
@@ -220,7 +237,6 @@ def template_button(cfg: Config, company: str | None, names: list[str], skus: li
         return
     data = template_builder.build_template(cfg.template_path.read_bytes(), company, names, skus)
     safe = re.sub(r'[\\/:*?"<>|]+', "_", company).strip()
-    st.markdown(DOWNLOAD_BUTTON_CSS, unsafe_allow_html=True)
     st.download_button(
         "**DOWNLOAD TEMPLATE**", data=data, file_name=f"BPOM Stock Opname - {safe}.xlsx", mime=XLSX_MIME,
         help="Template resmi berisi seluruh Distributor Name milik company Anda beserta daftar SKU + nomor BPOM. Isi kolom QTY saja.",
@@ -285,6 +301,7 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
 
 def main() -> None:
     st.set_page_config(page_title="BPOM Stock Opname", layout="wide")
+    st.markdown(APP_CSS, unsafe_allow_html=True)
     cfg = load_config()
     st.session_state.setdefault("upload_ver", 0)
 
