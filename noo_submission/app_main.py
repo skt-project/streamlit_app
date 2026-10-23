@@ -29,9 +29,9 @@ from shared import (
 KOLOM_ORDER_EDITOR = ["#","Pilih","Validasi","Penanda","Store ID"] + list(KOLOM[2:])
 
 NAVIGASI = [
-    ("Dashboard",          "📊", "dashboard"),
+    ("Dashboard",          "", "dashboard"),
     ("Store Validation",   "",   "validasi"),
-    ("Submission History", "🕒", "riwayat"),
+    ("Submission History", "", "riwayat"),
     ("Settings",           "⚙️", "pengaturan"),
    # ("Input NOO", "noo"),
 ]
@@ -850,7 +850,7 @@ def main():
         st.markdown(f'<div class="status-sidebar"><span class="titik"></span>Ready</div>'
                     f'<div class="status-update">Last updated: {ss.terakhir_update}</div>',
                     unsafe_allow_html=True)
-        st.link_button("🔍   Input NOO", "https://noo-validation.streamlit.app/",
+        st.link_button("🔍 Input NOO", "https://noo-submission.streamlit.app/",
                 use_container_width=True, key="nav_noo")
 
     {
