@@ -671,6 +671,10 @@ def halaman_pengajuan_noo():
             spv_sales_lookup = muat_spv_sales_lookup()
             semua_terisi = True
             data_noo = data_noo.reset_index(drop=True)
+            for _c in ["Customer Store Code","City","Store Address","SE/KAE","SPV","Store Type"]:
+                if _c not in data_noo.columns:
+                    data_noo[_c] = ""
+                data_noo[_c] = data_noo[_c].astype("object")
             for i, baris in data_noo.iterrows():
                 csn = str(baris.get("Customer Store Name",baris.get("Store Name",""))).strip().upper()
                 c_kode,c_nama,c_csn,c_city,c_alamat,c_sales,c_spv,c_tipe = st.columns([1.1,1.4,1.4,0.8,1.4,1.1,1.1,1.1])
