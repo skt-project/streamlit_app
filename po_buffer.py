@@ -204,6 +204,13 @@ load_custom_css()
 # BIGQUERY CLIENT INITIALIZATION
 # ============================================================================
 
+# po_store_suggestion_stagging is a Drive-backed external table. BigQuery can
+# read it only when the job credentials also carry a Drive scope.
+BQ_SCOPES = [
+    "https://www.googleapis.com/auth/bigquery",
+    "https://www.googleapis.com/auth/drive",
+]
+
 @st.cache_resource
 def get_bigquery_client() -> bigquery.Client:
     """
@@ -259,7 +266,10 @@ def _load_from_streamlit_secrets(key: str) -> Tuple:
     if "private_key" in gcp_secrets:
         gcp_secrets["private_key"] = gcp_secrets["private_key"].replace("\\n", "\n")
     
-    credentials = service_account.Credentials.from_service_account_info(gcp_secrets)
+    credentials = service_account.Credentials.from_service_account_info(
+        gcp_secrets,
+        scopes=BQ_SCOPES,
+    )
     project_id = gcp_secrets.get("project_id") or gcp_secrets.get("project") or Config.BQ_PROJECT
     
     return credentials, project_id
@@ -284,7 +294,10 @@ def _load_from_local_file() -> Tuple:
     if not credentials_path:
         raise FileNotFoundError("No credentials file found in expected locations")
     
-    credentials = service_account.Credentials.from_service_account_file(credentials_path)
+    credentials = service_account.Credentials.from_service_account_file(
+        credentials_path,
+        scopes=BQ_SCOPES,
+    )
     project_id = Config.BQ_PROJECT
     
     return credentials, project_id
