@@ -60,36 +60,36 @@ section[data-testid="stSidebar"] [class*="st-key-navaktif"] button {
 
 
 /* ---------- SIDEBAR: Input NOO (link_button disamakan dgn nav button) ---------- */
-section[data-testid="stSidebar"] [data-testid="stLinkButton"] {
+section[data-testid="stSidebar"] .stLinkButton {
   margin-top: 0;
 }
-section[data-testid="stSidebar"] [data-testid="stLinkButton"] a {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  text-align: left;
-  border: none;
-  background: transparent;
-  color: #526078;
-  font-weight: 500;
-  font-size: 12.5px;
-  padding: 10px 12px;
-  border-radius: 9px;
-  box-shadow: none;
-  width: 100%;
-  text-decoration: none;
-  min-height: auto;
+section[data-testid="stSidebar"] .stLinkButton a {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  text-align: left !important;
+  border: none !important;
+  background: transparent !important;
+  color: #526078 !important;
+  font-weight: 500 !important;
+  font-size: 12.5px !important;
+  padding: 10px 12px !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+  width: 100% !important;
+  text-decoration: none !important;
+  min-height: auto !important;
 }
-section[data-testid="stSidebar"] [data-testid="stLinkButton"] a p {
-  text-align: left;
-  color: inherit;
-  margin: 0;
+section[data-testid="stSidebar"] .stLinkButton a p,
+section[data-testid="stSidebar"] .stLinkButton a span {
+  text-align: left !important;
+  color: inherit !important;
+  margin: 0 !important;
 }
-section[data-testid="stSidebar"] [data-testid="stLinkButton"] a:hover {
-  background: #e4ebf5;
-  color: #263957;
+section[data-testid="stSidebar"] .stLinkButton a:hover {
+  background: #e4ebf5 !important;
+  color: #263957 !important;
 }
-/* ★★★ SAMPAI SINI ★★★ */
 
 /* ---------- PAGE HEADER ---------- */
 .header-halaman { ... }
