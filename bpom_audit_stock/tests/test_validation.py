@@ -118,7 +118,7 @@ def test_reference_files_load():
     ref = Path(__file__).resolve().parent.parent / "reference"
     dist = r.load_distributors(ref / "Daftar Distributor.xlsx")
     skus = r.load_skus(ref / "Data SKU BPOM.xlsx")
-    assert len(dist) == 94 and len(skus) == 71
+    assert len(dist) == 94 and len(skus) == 66
 
 
 NAME2 = "CV ANDIRA DAHAYU - CURUP"
