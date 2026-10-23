@@ -647,11 +647,13 @@ def generate_multi_store_pdf(
 def combined_inventory_sql() -> str:
     """
     Inventory buffer unioned with the current-month store suggestion staging
-    table, collapsed to one row per id_st + product_code.
+    table, collapsed to one row per store_code + id_st + product_code.
 
     Numeric, qty, value, and date columns use MAX. Text and bool columns use
     ANY_VALUE. Only rows with buffer_plan IS NOT NULL are returned.
-    Staging rows are limited to Kalimantan and Sulawesi.
+    Staging rows are limited to Kalimantan and Sulawesi. Their store_code is
+    taken from inventory for the same id_st, preferring the code equal to
+    id_st, so a plan is not copied across store codes that share an id_st.
     """
     inventory_table = f"`{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`"
     staging_table = (
@@ -686,7 +688,7 @@ def combined_inventory_sql() -> str:
         ANY_VALUE(assortment) AS assortment,
         ANY_VALUE(priority_label) AS priority_label,
         ANY_VALUE(product_name) AS product_name,
-        ANY_VALUE(store_code) AS store_code,
+        store_code,
         ANY_VALUE(distributor_g2g) AS distributor_g2g,
         ANY_VALUE(region) AS region,
         ANY_VALUE(store_name) AS store_name,
@@ -730,17 +732,17 @@ def combined_inventory_sql() -> str:
         FROM {inventory_table}
         UNION ALL
         SELECT
-            CAST(NULL AS STRING) AS store_code,
-            product_code,
+            map.store_code AS store_code,
+            staging.product_code,
             CAST(NULL AS STRING) AS product_life_cycle,
             CAST(NULL AS STRING) AS Stok_Principal,
             CAST(NULL AS STRING) AS assortment,
             CAST(NULL AS STRING) AS priority_label,
             CAST(NULL AS INT64) AS inner_pcs,
-            price_for_store,
-            product_name,
+            staging.price_for_store,
+            staging.product_name,
             CAST(NULL AS FLOAT64) AS actual_stock,
-            date AS stock_date,
+            staging.date AS stock_date,
             CAST(NULL AS FLOAT64) AS avg_daily_qty,
             CAST(NULL AS FLOAT64) AS so_since_stock_date,
             CAST(NULL AS FLOAT64) AS estimated_actual_stock,
@@ -749,28 +751,38 @@ def combined_inventory_sql() -> str:
             CAST(NULL AS INT64) AS SO_Bulanan,
             CAST(NULL AS FLOAT64) AS days_of_inventory,
             CAST(NULL AS INT64) AS standard_doi,
-            id_st,
-            distributor_g2g,
-            region,
-            store_name,
+            staging.id_st,
+            staging.distributor_g2g,
+            staging.region,
+            staging.store_name,
             CAST(NULL AS STRING) AS address,
             CAST(NULL AS FLOAT64) AS stok_distributor,
             CAST(NULL AS STRING) AS status_stok_distributor,
             CAST(NULL AS BOOL) AS is_topup,
-            buffer_plan,
+            staging.buffer_plan,
             CAST(NULL AS FLOAT64) AS buffer_plan_ver2,
             CAST(NULL AS DATETIME) AS last_updated_jkt,
-            buffer_plan_value,
+            staging.buffer_plan_value,
             CAST(NULL AS FLOAT64) AS buffer_plan_value_ver2
-        FROM {staging_table}
-        WHERE date >= DATE_TRUNC(CURRENT_DATE(), MONTH)
-          AND date < DATE_ADD(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 1 MONTH)
+        FROM {staging_table} AS staging
+        LEFT JOIN (
+            SELECT id_st, store_code
+            FROM {inventory_table}
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY id_st
+                ORDER BY IF(store_code = id_st, 0, 1), store_code
+            ) = 1
+        ) AS map
+            ON map.id_st = staging.id_st
+        WHERE staging.date >= DATE_TRUNC(CURRENT_DATE(), MONTH)
+          AND staging.date < DATE_ADD(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 1 MONTH)
           AND (
-              UPPER(region) LIKE '%KALIMANTAN%'
-              OR UPPER(region) LIKE '%SULAWESI%'
+              UPPER(staging.region) LIKE '%KALIMANTAN%'
+              OR UPPER(staging.region) LIKE '%SULAWESI%'
           )
     ) AS combined_data
     GROUP BY
+        store_code,
         id_st,
         product_code
     ) AS grouped_inventory
@@ -961,7 +973,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
 def load_inventory_buffer_data() -> pd.DataFrame:
     """
     Load inventory rows from rsa.inventory_buffer unioned with the current
-    month of gt_schema.po_store_suggestion_stagging, one row per id_st + product_code.
+    month of gt_schema.po_store_suggestion_stagging, one row per store_code + id_st + product_code.
     
     Returns:
         pd.DataFrame: Combined inventory buffer data
