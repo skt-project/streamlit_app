@@ -1,7 +1,4 @@
-"""
-app_submission.py — NOO Submission + SPV Confirmation
-Jalankan: streamlit run app_submission.py
-"""
+
 
 import datetime
 import re
@@ -937,7 +934,7 @@ def main():
     ss = st.session_state
 
     try:
-        with open("style_noo.css", encoding="utf-8") as f:
+        with open("style_app.css", encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     except FileNotFoundError:
         pass
