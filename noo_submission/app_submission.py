@@ -937,7 +937,7 @@ def main():
         with open(CSS_PATH, encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     except FileNotFoundError:
-    st.error(f"CSS tidak ketemu di: {CSS_PATH}")
+        st.error(f"CSS tidak ketemu di: {CSS_PATH}")
     if ss.get("pesan_toast"):
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon","✅"))
 
