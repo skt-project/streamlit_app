@@ -9,8 +9,9 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from io import BytesIO
-from typing import Any
+from typing import Any, Sequence
 
 import openpyxl
 
@@ -46,12 +47,26 @@ class Issue:
 
 
 @dataclass(frozen=True)
+class Sku:
+    """Satu kombinasi SKU + nomor BPOM resmi dari prinsipal."""
+    product_id: str
+    product_name: str
+    bpom_number: str
+    expired: date | None = None
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return row_key(self.product_id, self.bpom_number)
+
+
+@dataclass(frozen=True)
 class ExcelRow:
     excel_row: int
     product_id: str
     product_name: str
     bpom_number: str
     qty: int
+    additional: bool = False   # BPOM tambahan: tidak ada di daftar resmi prinsipal
 
     @property
     def key(self) -> tuple[str, str]:
@@ -63,6 +78,7 @@ class ParseResult:
     rows: list[ExcelRow] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    missing: list[Sku] = field(default_factory=list)   # kombinasi resmi yang tidak ada di file
 
     @property
     def ok(self) -> bool:
@@ -78,22 +94,27 @@ def normalize_name(name: Any) -> str:
     return _WS.sub(" ", text).strip()
 
 
+BULAN = ("Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus",
+         "September", "Oktober", "November", "Desember")
+
+
+def periode_label(d: date) -> str:
+    """Tampilan periode dari tanggal, mis. 'Oktober 2026' (disimpan di sheet sebagai 'YYYY-MM')."""
+    return f"{BULAN[d.month - 1]} {d.year}"
+
+
 def row_key(product_id: str, bpom_number: str) -> tuple[str, str]:
     """Kunci kombinasi PRODUCT ID + BPOM NUMBER (tidak peduli huruf besar/kecil)."""
     return (product_id.strip().upper(), bpom_number.strip().upper())
 
 
-def validate_form(
-    *, company, distributor, periode, tanggal, pic, has_file: bool
-) -> list[str]:
+def validate_form(*, company, distributor, tanggal, pic, has_file: bool) -> list[str]:
     """Validasi field form. Mengembalikan daftar pesan error (kosong = valid)."""
     errors = []
     if not company:
         errors.append("Distributor Company wajib dipilih.")
     if not distributor:
         errors.append("Distributor Name wajib dipilih.")
-    if not periode:
-        errors.append("Periode Stock Opname (bulan dan tahun) wajib dipilih.")
     if not tanggal:
         errors.append("Tanggal Stock Opname wajib diisi.")
     if not (pic and pic.strip()):
@@ -186,12 +207,19 @@ def parse_qty(value: Any) -> tuple[int | None, str | None]:
     return qty, None
 
 
-def parse_excel(data: bytes, expected_distributor_name: str) -> ParseResult:
+def parse_excel(data: bytes, expected_distributor_name: str,
+                skus: Sequence[Sku] | None = None) -> ParseResult:
     """Baca + validasi file Excel. Tidak ada efek samping; hasilnya `ParseResult`.
 
     Baris judul di atas header diabaikan. Baris yang sepenuhnya kosong dilewati.
     Semua baris data lain dicek; `result.ok` hanya True bila TIDAK ada masalah.
+
+    Bila `skus` diberikan: PRODUCT ID wajib salah satu SKU resmi; nomor BPOM boleh di luar daftar
+    resmi (ditandai `additional=True`, BPOM tambahan); untuk pasangan resmi, PRODUCT NAME harus
+    sama dengan daftar. Kombinasi resmi yang tidak ada di file dilaporkan di `result.missing`.
     """
+    master = {k.key: k for k in skus} if skus is not None else None
+    master_ids = {k.product_id.strip().upper() for k in skus} if skus is not None else None
     result = ParseResult()
     if len(data) > MAX_FILE_BYTES:
         result.issues.append(Issue(None, "File", f"Ukuran file melebihi {MAX_FILE_BYTES // (1024 * 1024)} MB."))
@@ -282,8 +310,20 @@ def parse_excel(data: bytes, expected_distributor_name: str) -> ParseResult:
             if err:
                 result.issues.append(Issue(no, "QTY", err))
 
+            key = row_key(texts["PRODUCT ID"], texts["BPOM NUMBER"])
+            known = master.get(key) if master is not None else None
+            if master is not None and len(result.issues) == before:
+                if key[0] not in master_ids:
+                    result.issues.append(Issue(
+                        no, "PRODUCT ID",
+                        f"'{texts['PRODUCT ID']}' bukan SKU yang ditetapkan prinsipal. BPOM tambahan hanya "
+                        "boleh untuk SKU yang sudah ada."))
+                elif known is not None and normalize_name(known.product_name) != normalize_name(texts["PRODUCT NAME"]):
+                    result.issues.append(Issue(
+                        no, "PRODUCT NAME",
+                        f"Tidak sesuai daftar prinsipal; seharusnya '{known.product_name}'."))
+
             if len(result.issues) == before:  # baris ini bersih -> cek duplikat
-                key = row_key(texts["PRODUCT ID"], texts["BPOM NUMBER"])
                 if key in seen:
                     result.issues.append(Issue(
                         no, "PRODUCT ID + BPOM NUMBER",
@@ -291,10 +331,13 @@ def parse_excel(data: bytes, expected_distributor_name: str) -> ParseResult:
                 else:
                     seen[key] = no
                     result.rows.append(ExcelRow(no, texts["PRODUCT ID"], texts["PRODUCT NAME"],
-                                                texts["BPOM NUMBER"], qty))
+                                                texts["BPOM NUMBER"], qty,
+                                                additional=master is not None and known is None))
 
         if data_rows == 0:
             result.issues.append(Issue(None, "File", "File tidak berisi baris data di bawah header."))
+        elif master is not None and not result.issues:
+            result.missing = [k for k in skus if k.key not in seen]
     finally:
         wb.close()
     return result

@@ -44,12 +44,6 @@ def test_name_match_ignores_case_and_spacing():
     assert res.ok
 
 
-def test_untouched_template_is_rejected_for_blank_name_and_qty():
-    res = v.parse_excel(TEMPLATE.read_bytes(), NAME)
-    assert not res.ok
-    assert len(res.rows) == 0 and any(i.column == "QTY" for i in res.issues)
-
-
 def test_header_case_sensitive():
     h = list(v.EXPECTED_HEADERS); h[4] = "Qty"
     res = v.parse_excel(make([good()], headers=h), NAME)
@@ -97,21 +91,51 @@ def test_not_xlsx():
     assert not v.parse_excel(b"bukan excel", NAME).ok
 
 
-def test_prefilled_template_keeps_structure_and_original_untouched():
-    from template_builder import build_prefilled_template
+SKUS = [v.Sku("P-1", "Produk", "NA1"), v.Sku("P-1", "Produk", "NA2"), v.Sku("P-2", "Lain", "NB1")]
+
+
+def test_sku_rules_known_additional_and_missing():
+    rows = [good(), good(bpom="NA2"), [NAME, "P-1", "Produk", "NA-BARU", 3]]
+    res = v.parse_excel(make(rows), NAME, SKUS)
+    assert res.ok and [r.additional for r in res.rows] == [False, False, True]
+    assert [k.product_id for k in res.missing] == ["P-2"]
+
+
+def test_unknown_sku_and_name_mismatch_rejected():
+    res = v.parse_excel(make([[NAME, "P-9", "X", "NA1", 1]]), NAME, SKUS)
+    assert not res.ok and any(i.column == "PRODUCT ID" for i in res.issues)
+    res = v.parse_excel(make([[NAME, "P-1", "Nama Lain", "NA1", 1]]), NAME, SKUS)
+    assert not res.ok and any(i.column == "PRODUCT NAME" for i in res.issues)
+
+
+def test_form_validation_has_no_period():
+    assert v.validate_form(company="A", distributor="B", tanggal="d", pic="x", has_file=True) == []
+    assert len(v.validate_form(company=None, distributor=None, tanggal=None, pic="", has_file=False)) == 5
+
+
+def test_reference_files_load():
+    import reference_data as r
+    ref = Path(__file__).resolve().parent.parent / "reference"
+    dist = r.load_distributors(ref / "Daftar Distributor.xlsx")
+    skus = r.load_skus(ref / "Data SKU BPOM.xlsx")
+    assert len(dist) == 94 and len(skus) == 71
+
+
+def test_template_is_built_from_sku_list_and_original_untouched():
+    import reference_data as r
+    from template_builder import build_template
+    ref = Path(__file__).resolve().parent.parent / "reference"
+    skus = r.load_skus(ref / "Data SKU BPOM.xlsx")
     raw = TEMPLATE.read_bytes()
-    out = build_prefilled_template(raw, NAME)
+    out = build_template(raw, NAME, skus)
     assert raw == TEMPLATE.read_bytes()
     ws = openpyxl.load_workbook(BytesIO(out)).active
-    src = openpyxl.load_workbook(BytesIO(raw)).active
-    assert [c.value for c in ws[2]] == list(v.EXPECTED_HEADERS)
-    assert ws.max_row == src.max_row and ws["E1"].value == "Filled by Distributor"
-    for r in range(3, ws.max_row + 1):
-        assert ws.cell(r, 1).value == NAME
-        assert [ws.cell(r, c).value for c in range(2, 6)] == [src.cell(r, c).value for c in range(2, 6)]
-    # setelah QTY diisi, file lolos validasi
-    for r in range(3, ws.max_row + 1):
-        ws.cell(r, 5).value = r
+    assert [c.value for c in ws[2]] == list(v.EXPECTED_HEADERS) and ws["E1"].value == "Filled by Distributor"
+    assert ws.max_row == 2 + len(skus)
+    for i, sku in enumerate(skus, start=3):
+        assert [c.value for c in ws[i]] == [NAME, sku.product_id, sku.product_name, sku.bpom_number, None]
+    for i in range(3, ws.max_row + 1):   # isi QTY -> lolos validasi terhadap daftar SKU
+        ws.cell(i, 5).value = i
     buf = BytesIO(); ws.parent.save(buf)
-    res = v.parse_excel(buf.getvalue(), NAME)
-    assert res.ok and len(res.rows) == ws.max_row - 2
+    res = v.parse_excel(buf.getvalue(), NAME, skus)
+    assert res.ok and len(res.rows) == len(skus) and not res.missing
