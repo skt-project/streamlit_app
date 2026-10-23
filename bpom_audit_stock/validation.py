@@ -189,7 +189,7 @@ def _text(value: Any) -> tuple[str, str | None]:
 
 
 def parse_qty(value: Any) -> tuple[int | None, str | None]:
-    """QTY harus bilangan bulat (boleh positif, nol, atau negatif)."""
+    """QTY harus bilangan bulat dan tidak boleh negatif (0 atau lebih)."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None, "QTY wajib diisi."
     if isinstance(value, bool):
@@ -207,7 +207,9 @@ def parse_qty(value: Any) -> tuple[int | None, str | None]:
         qty = int(text)
     else:
         return None, f"QTY harus bilangan bulat, ditemukan {value!r}."
-    if abs(qty) > MAX_ABS_QTY:
+    if qty < 0:
+        return None, f"QTY tidak boleh negatif (ditemukan {qty}). Isi 0 bila tidak ada stok."
+    if qty > MAX_ABS_QTY:
         return None, "QTY terlalu besar."
     return qty, None
 

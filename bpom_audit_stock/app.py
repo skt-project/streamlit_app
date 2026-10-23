@@ -101,7 +101,7 @@ mengacu pada SKU yang telah ditetapkan oleh prinsipal.
 - Distributor tidak diperkenankan mengubah header, nama kolom, atau urutan kolom. Baris judul di atas header boleh dibiarkan.
 - Kolom **Distributor Branch** sudah terisi otomatis untuk seluruh distributor milik company yang dipilih; jangan diubah.
 - **PRODUCT ID, PRODUCT NAME, ISI (GR / ML), BPOM NUMBER** sudah terisi di template; jangan dikosongkan.
-- Yang perlu Anda isi hanya **QTY** di setiap baris dengan bilangan bulat (boleh positif, 0, atau negatif; tanpa desimal atau huruf).
+- Yang perlu Anda isi hanya **QTY** di setiap baris dengan bilangan bulat 0 atau lebih (tidak boleh negatif; tanpa desimal atau huruf).
 - Satu kombinasi **Distributor Branch + PRODUCT ID + BPOM NUMBER** hanya boleh muncul satu kali dalam satu file.
 """
 GUIDE_RULES = GUIDE_RULES.replace("**\n", "**  \n")  # judul + paragraf: pindah baris tanpa paragraf baru
@@ -349,7 +349,7 @@ def main() -> None:
     # Langkah 3 - template
     st.subheader("Langkah 3 - Download template dan isi hanya data QTY")
     st.caption(f"Template berisi {len(skus)} kombinasi SKU + nomor BPOM untuk setiap Distributor Branch. Isi hanya kolom "
-               "**QTY** (bilangan bulat; boleh positif, 0, atau negatif). Jangan mengubah header atau urutan kolom.")
+               "**QTY** (bilangan bulat 0 atau lebih; tidak boleh negatif). Jangan mengubah header atau urutan kolom.")
     st.markdown(GUIDE_EXTRA_BPOM)
     template_button(cfg, company, names, skus)
 

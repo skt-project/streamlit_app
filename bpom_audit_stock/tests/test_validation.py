@@ -47,8 +47,8 @@ def catalogue():
 # ── parsing & aturan kolom ──────────────────────────────────────────────────
 
 def test_valid_file_with_title_row():
-    res = v.parse_excel(make([good(), good(qty=0, bpom="NA2"), good(qty=-3, bpom="NA3")]), [NAME])
-    assert res.ok and [x.qty for x in res.rows] == [5, 0, -3]
+    res = v.parse_excel(make([good(), good(qty=0, bpom="NA2"), good(qty=3, bpom="NA3")]), [NAME])
+    assert res.ok and [x.qty for x in res.rows] == [5, 0, 3]
     assert res.rows[0].excel_row == 3 and res.rows[0].isi == "10g"
 
 
@@ -72,12 +72,19 @@ def test_extra_missing_and_reordered_columns():
     assert "Urutan" in messages(v.parse_excel(make([good()], headers=swapped), [NAME]))
 
 
-def test_qty_rules():
-    for bad in (None, "", 1.5, "abc", "1,5", True):
+def test_qty_rules_whole_non_negative():
+    for bad in (None, "", 1.5, "abc", "1,5", True, -1, -12.0, "-12", -2**40):
         assert v.parse_qty(bad)[0] is None, bad
+    assert "negatif" in v.parse_qty(-3)[1]
     assert v.parse_qty(7.0) == (7, None)
-    assert v.parse_qty("-12") == (-12, None)
+    assert v.parse_qty("12") == (12, None)
     assert v.parse_qty(0) == (0, None)
+    assert v.parse_qty("-0") == (0, None)
+
+
+def test_negative_qty_row_is_rejected_with_row_number():
+    res = v.parse_excel(make([good(), good(qty=-3, bpom="NA2")]), [NAME])
+    assert not res.ok and [(i.row, i.column) for i in res.issues] == [(4, "QTY")] and "negatif" in messages(res)
 
 
 def test_all_or_nothing_and_row_numbers():
@@ -162,6 +169,9 @@ def test_template_has_a_block_per_distributor_and_only_guide_extra_sheet():
     assert [c.value for c in ws[2]] == list(v.EXPECTED_HEADERS) and ws["F1"].value == "Filled by Distributor"
     rows = [[c.value for c in row] for row in ws.iter_rows(min_row=3)]
     assert rows == [[n, k.product_id, k.product_name, k.isi, k.bpom_number, None] for n in (NAME, NAME2) for k in skus]
+    (dv,) = ws.data_validations.dataValidation                  # QTY: bilangan bulat >= 0 di Excel
+    assert (dv.type, dv.operator, dv.formula1) == ("whole", "greaterThanOrEqual", "0")
+    assert str(dv.sqref) == f"F3:F{ws.max_row}"
     guide = " ".join(str(c.value) for c in wb[v.INSTRUCTION_SHEET]["A"] if c.value)
     assert NAME in guide and NAME2 in guide and "ISI (GR / ML)" in guide and "BPOM tambahan" in guide
 

@@ -12,6 +12,7 @@ from typing import Sequence
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from validation import EXPECTED_HEADERS, HEADER_SEARCH_ROWS, INSTRUCTION_SHEET, Sku, _looks_like_header
 
@@ -24,7 +25,7 @@ _GUIDE = [
     ("b", "4. Simpan sebagai .xlsx lalu upload di form. File diperiksa otomatis; jika ada error, perbaiki lalu upload ulang."),
     ("h", "Aturan kolom QTY"),
     ("b", "- Wajib diisi di setiap baris. Jika tidak ada stok, isi 0 (jangan dikosongkan)."),
-    ("b", "- Harus bilangan bulat. Boleh positif, 0, atau negatif. Tidak boleh desimal (mis. 2,5) atau huruf."),
+    ("b", "- Harus bilangan bulat 0 atau lebih. Tidak boleh negatif, desimal (mis. 2,5), atau huruf."),
     ("h", "Pencatatan per SKU dan nomor BPOM"),
     ("b", "- SKU yang sama dengan nomor BPOM berbeda harus dicatat di baris terpisah dan tidak boleh digabung."),
     ("b", "- Satu kombinasi Distributor Branch + PRODUCT ID + BPOM NUMBER hanya boleh muncul satu kali dalam satu file."),
@@ -103,6 +104,15 @@ def build_template(template_bytes: bytes, company: str, names: Sequence[str], sk
                 cell = ws.cell(row, c, value)
                 cell._style = copy(styles[c - 1])
             row += 1
+    if row > first:   # Excel menolak QTY negatif/desimal/huruf saat diketik (validasi tetap diulang saat upload)
+        qty_col = openpyxl.utils.get_column_letter(len(EXPECTED_HEADERS))
+        dv = DataValidation(type="whole", operator="greaterThanOrEqual", formula1="0", allow_blank=True,
+                            showErrorMessage=True, errorTitle="QTY tidak valid",
+                            error="QTY harus bilangan bulat 0 atau lebih (tidak boleh negatif).",
+                            showInputMessage=True, promptTitle="QTY",
+                            prompt="Isi bilangan bulat 0 atau lebih. Isi 0 bila tidak ada stok.")
+        dv.add(f"{qty_col}{first}:{qty_col}{max(row - 1, first)}")
+        ws.add_data_validation(dv)
     _add_guide_sheet(wb, company, names, row - first)
     wb.active = 0   # tetap membuka sheet data
     out = BytesIO()

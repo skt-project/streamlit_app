@@ -17,7 +17,7 @@ milik company itu beserta daftar SKU + nomor BPOM resmi, mengisi **QTY**, lalu m
 - Header persis sama dengan template (case-sensitive, urutan sama); tidak boleh ada kolom tambahan/hilang.
 - Template punya 6 kolom: `Distributor Branch`, `PRODUCT ID`, `PRODUCT NAME`, `ISI (GR / ML)`, `BPOM NUMBER`, `QTY`.
 - Kolom A tiap baris harus salah satu Distributor Branch milik company yang dipilih; semua kolom wajib diisi.
-- QTY bilangan bulat (boleh negatif/0).
+- QTY bilangan bulat 0 atau lebih (**tidak boleh negatif**). Template juga memasang validasi Excel pada kolom QTY.
 - PRODUCT ID harus SKU yang ada di katalog (Sheet1 template resmi). Nomor BPOM di luar katalog diterima sebagai **BPOM tambahan**.
   PRODUCT NAME dan ISI untuk pasangan SKU+BPOM resmi harus sama dengan katalog.
 - Tidak ada kombinasi Distributor Branch + PRODUCT ID + BPOM NUMBER ganda dalam satu file.
