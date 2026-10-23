@@ -139,3 +139,21 @@ def test_template_is_built_from_sku_list_and_original_untouched():
     buf = BytesIO(); ws.parent.save(buf)
     res = v.parse_excel(buf.getvalue(), NAME, skus)
     assert res.ok and len(res.rows) == len(skus) and not res.missing
+
+
+def test_template_has_guide_sheet_that_upload_ignores():
+    import reference_data as r
+    from template_builder import build_template
+    ref = Path(__file__).resolve().parent.parent / "reference"
+    skus = r.load_skus(ref / "Data SKU BPOM.xlsx")
+    out = build_template(TEMPLATE.read_bytes(), NAME, skus)
+    wb = openpyxl.load_workbook(BytesIO(out))
+    assert wb.sheetnames == ["Sheet1", v.INSTRUCTION_SHEET] and wb.active.title == "Sheet1"
+    guide = " ".join(str(c.value) for c in wb[v.INSTRUCTION_SHEET]["A"] if c.value)
+    assert NAME in guide and "QTY" in guide and "BPOM tambahan" in guide
+    ws = wb["Sheet1"]
+    for i in range(3, ws.max_row + 1):
+        ws.cell(i, 5).value = 1
+    buf = BytesIO(); wb.save(buf)
+    res = v.parse_excel(buf.getvalue(), NAME, skus)
+    assert res.ok and res.warnings == []   # sheet panduan tidak memicu peringatan

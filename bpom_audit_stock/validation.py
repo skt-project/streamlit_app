@@ -25,6 +25,7 @@ EXPECTED_HEADERS: tuple[str, ...] = (
 )
 _HEADERS_FOLDED = {h.casefold() for h in EXPECTED_HEADERS}
 
+INSTRUCTION_SHEET = "Cara Pengisian"   # sheet panduan di template; tidak dibaca saat upload
 HEADER_SEARCH_ROWS = 10      # baris judul/title boleh ada di atas header
 MAX_DATA_ROWS = 5000
 MAX_BLANK_RUN = 2000         # berhenti membaca setelah sekian baris kosong berturut-turut
@@ -234,9 +235,10 @@ def parse_excel(data: bytes, expected_distributor_name: str,
         if not wb.worksheets:
             result.issues.append(Issue(None, "File", "File tidak memiliki worksheet."))
             return result
-        if len(wb.worksheets) > 1:
+        others = [w.title for w in wb.worksheets[1:] if w.title != INSTRUCTION_SHEET]
+        if others:
             result.warnings.append(
-                f"File punya {len(wb.worksheets)} sheet; hanya sheet pertama ('{wb.worksheets[0].title}') yang dibaca."
+                f"File punya sheet lain ({', '.join(others)}); hanya sheet pertama ('{wb.worksheets[0].title}') yang dibaca."
             )
         ws = wb.worksheets[0]
         ws.reset_dimensions()
