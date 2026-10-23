@@ -1,4 +1,4 @@
-# BPOM Audit Stock Distributor
+# BPOM Stock Opname Distributor
 
 Distributor meng-upload template Excel (PRODUCT ID + BPOM NUMBER + QTY). Master distributor dibaca dari
 BigQuery (`gt_schema.master_distributor`), hasil disimpan ke **satu** Google Spreadsheet utama (satu worksheet).
@@ -6,7 +6,7 @@ BigQuery (`gt_schema.master_distributor`), hasil disimpan ke **satu** Google Spr
 ## Panduan pengguna (urutan di layar)
 
 1. **Pilih distributor** - Distributor Company, lalu Distributor Name (dari master, **hanya yang status Active**, tidak bisa diketik bebas).
-2. **Periode audit, tanggal audit, nama PIC** - periode disimpan sebagai `YYYY-MM` (mis. `2026-01`).
+2. **Periode stock opname, tanggal stock opname, nama PIC** - periode disimpan sebagai `YYYY-MM` (mis. `2026-01`).
 3. **Pilih mode** - *Input* untuk pengiriman pertama; *Revisi* untuk mengoreksi data yang sudah terkirim.
 4. **(Revisi) Periksa data lama** - tampil otomatis dari Google Sheets.
 5. **Download template & isi** - kolom A (nama distributor) sudah terisi otomatis; Anda hanya mengisi QTY. Jangan ubah header/urutan kolom.

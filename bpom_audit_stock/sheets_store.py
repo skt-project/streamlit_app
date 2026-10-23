@@ -1,4 +1,4 @@
-"""Penyimpanan hasil audit ke satu Google Spreadsheet utama (satu worksheet).
+"""Penyimpanan hasil stock opname ke satu Google Spreadsheet utama (satu worksheet).
 
 Semua penulisan dikirim sebagai SATU request `spreadsheets.batchUpdate`, yang
 atomik di sisi Google: kalau gagal, tidak ada perubahan sebagian yang masuk.

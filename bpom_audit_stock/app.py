@@ -1,4 +1,4 @@
-"""BPOM Audit Stock Distributor.
+"""BPOM Stock Opname Distributor.
 
 Distributor mengisi template Excel (PRODUCT ID + BPOM NUMBER + QTY), lalu meng-upload-nya.
 Master distributor dibaca dari BigQuery; hasil disimpan ke satu Google Spreadsheet utama.
@@ -31,13 +31,13 @@ SCOPES = [
 ]
 BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus",
          "September", "Oktober", "November", "Desember"]
-# Periode audit yang dibuka saat ini (tahun, bulan). Tambahkan tuple baru untuk membuka periode berikutnya.
+# Periode stock opname yang dibuka saat ini (tahun, bulan). Tambahkan tuple baru untuk membuka periode berikutnya.
 OPEN_PERIODS = ((2026, 10),)
 MODES = ("Input", "Revisi")
 MAX_ISSUES_SHOWN = 300
 
 GUIDE_OVERVIEW = """
-1. **Pilih distributor** (company lalu nama distributor), **periode audit**, **tanggal audit**, dan isi **nama PIC**.
+1. **Pilih distributor** (company lalu nama distributor), **periode stock opname**, **tanggal stock opname**, dan isi **nama PIC**.
 2. **Pilih mode**: *Input* untuk pengiriman pertama, *Revisi* untuk memperbaiki data yang sudah terkirim.
 3. **Download template** (kolom nama distributor sudah terisi otomatis), isi kolom **QTY**, jangan mengubah header atau urutan kolom.
 4. **Upload** file, tunggu pemeriksaan otomatis, perbaiki jika ada error.
@@ -217,7 +217,7 @@ def template_button(cfg: Config, distributor_name: str | None) -> None:
     data = template_builder.build_prefilled_template(cfg.template_path.read_bytes(), distributor_name)
     safe = re.sub(r'[\\/:*?"<>|]+', "_", distributor_name).strip()
     st.download_button(
-        "Download Template", data=data, file_name=f"BPOM Audit - {safe}.xlsx", mime=XLSX_MIME,
+        "Download Template", data=data, file_name=f"BPOM Stock Opname - {safe}.xlsx", mime=XLSX_MIME,
         help="Template resmi dengan kolom nama distributor sudah terisi. Struktur dan header tidak diubah.",
     )
 
@@ -301,11 +301,11 @@ def handle_submit(cfg: Config, mode: str, meta: store.AuditMeta | None, form_err
 # ── Halaman ────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    st.set_page_config(page_title="BPOM Audit Stock", layout="wide")
+    st.set_page_config(page_title="BPOM Stock Opname", layout="wide")
     cfg = load_config()
     st.session_state.setdefault("upload_ver", 0)
 
-    st.title("BPOM Audit Stock Distributor")
+    st.title("BPOM Stock Opname Distributor")
     if not cfg.sheet_id:
         st.warning("`google_sheet_id` belum terbaca dari Secrets. Pastikan ada di bagian `[app]` "
                    "(`[app]` lalu baris `google_sheet_id = \"...\"`). Tanpa itu, aplikasi mencari spreadsheet "
@@ -336,22 +336,22 @@ def main() -> None:
                                      disabled=not company, placeholder="Pilih Distributor Company dulu")
 
     # 3-5. Periode, tanggal, PIC
-    st.subheader("Langkah 2 - Periode audit, tanggal audit, dan PIC")
-    st.caption("**Periode Audit** = bulan dan tahun stock yang diaudit. **Tanggal Audit** = tanggal pengecekan "
+    st.subheader("Langkah 2 - Periode stock opname, tanggal stock opname, dan PIC")
+    st.caption("**Periode Stock Opname** = bulan dan tahun stock opname. **Tanggal Stock Opname** = tanggal penghitungan "
                "fisik dilakukan. **Nama PIC** = nama Anda; akan tercatat sebagai pembuat/pengubah data.")
     col_period, col_date, col_pic = st.columns([2, 2, 3])
-    period = col_period.selectbox("Periode Audit", OPEN_PERIODS, index=0 if len(OPEN_PERIODS) == 1 else None,
+    period = col_period.selectbox("Periode Stock Opname", OPEN_PERIODS, index=0 if len(OPEN_PERIODS) == 1 else None,
                                   format_func=lambda p: f"{BULAN[p[1] - 1]} {p[0]}", placeholder="Pilih periode")
-    tanggal = col_date.date_input("Tanggal Audit", value=None, format="DD/MM/YYYY")
+    tanggal = col_date.date_input("Tanggal Stock Opname", value=None, format="DD/MM/YYYY")
     pic = col_pic.text_input("Nama PIC Distributor", max_chars=100)
 
     periode = f"{period[0]}-{period[1]:02d}" if period else None
     if periode:
-        st.caption(f"Periode Audit: {BULAN[period[1] - 1]} {period[0]} (disimpan sebagai `{periode}`)")
+        st.caption(f"Periode Stock Opname: {BULAN[period[1] - 1]} {period[0]} (disimpan sebagai `{periode}`)")
 
     # 6. Mode
     st.subheader("Langkah 3 - Pilih mode")
-    st.caption("Pilih **Input** untuk mengirim hasil audit periode ini untuk pertama kali. Pilih **Revisi** hanya jika "
+    st.caption("Pilih **Input** untuk mengirim hasil stock opname periode ini untuk pertama kali. Pilih **Revisi** hanya jika "
                "data periode ini sudah pernah dikirim dan ada yang perlu dikoreksi. Jangan memakai Input untuk "
                "mengirim ulang, karena akan membuat data ganda.")
     mode = st.radio("Mode", MODES, horizontal=True,

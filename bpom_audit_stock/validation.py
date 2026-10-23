@@ -1,4 +1,4 @@
-"""Validasi form dan file Excel BPOM Audit Stock.
+"""Validasi form dan file Excel BPOM Stock Opname.
 
 Modul ini murni (tanpa Streamlit / Google API) supaya mudah dites. Semua
 validasi dijalankan SEBELUM ada data yang dikirim ke Google Sheets: satu
@@ -93,9 +93,9 @@ def validate_form(
     if not distributor:
         errors.append("Distributor Name wajib dipilih.")
     if not periode:
-        errors.append("Periode Audit (bulan dan tahun) wajib dipilih.")
+        errors.append("Periode Stock Opname (bulan dan tahun) wajib dipilih.")
     if not tanggal:
-        errors.append("Tanggal Audit wajib diisi.")
+        errors.append("Tanggal Stock Opname wajib diisi.")
     if not (pic and pic.strip()):
         errors.append("Nama PIC Distributor wajib diisi.")
     elif len(pic.strip()) > 100:
