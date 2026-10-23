@@ -36,8 +36,8 @@ from shared import (
 # NAVIGASI
 # ═════════════════════════════════════════════════════════════════════════════
 NAVIGASI = [
-    ("NOO Submission",    "📦", "pengajuan"),
-    ("SPV Confirmation",  "🛡️", "spv"),
+    ("NOO Submission",    "⭐", "pengajuan"),
+    ("SPV Confirmation",  "⭐", "spv"),
 ]
 
 def tuju_halaman(nama):
