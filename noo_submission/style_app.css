@@ -426,10 +426,8 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 /* NOO Upload Option: lebar minimum + scroll horizontal */
 .st-key-tabel_noo_scroll {
   overflow-x: auto;
-  padding-bottom: 8px;
-}
-.st-key-tabel_noo_scroll > div[data-testid="stVerticalBlock"] {
-  min-width: 1300px;
+  overflow-y: hidden;
+  padding-bottom: 12px;
 }
 .st-key-tabel_noo_scroll [data-testid="stHorizontalBlock"] {
   min-width: 1300px;
@@ -451,7 +449,8 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 /* SPV Confirmation: lebar minimum + scroll horizontal */
 .st-key-tabel_spv_scroll {
   overflow-x: auto;
-  padding-bottom: 8px;
+  overflow-y: hidden;
+  padding-bottom: 12px;
 }
 .st-key-tabel_spv_scroll > div[data-testid="stVerticalBlock"],
 .st-key-tabel_spv_scroll [data-testid="stHorizontalBlock"] {
@@ -464,3 +463,19 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 .st-key-tabel_spv_scroll [data-testid="stMarkdownContainer"] b { white-space: nowrap; }
 /* dropdown NOO/Existing: teks pilihan tidak terpotong */
 .st-key-tabel_spv_scroll [data-baseweb="select"] > div { min-width: 120px; }
+
+/* Scroll hanya ke samping, tidak ada scroll vertikal */
+.st-key-tabel_spv_scroll,
+.st-key-tabel_noo_scroll {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  height: auto !important;
+  max-height: none !important;
+  padding-bottom: 12px;
+}
+.st-key-tabel_spv_scroll > div[data-testid="stVerticalBlock"],
+.st-key-tabel_noo_scroll > div[data-testid="stVerticalBlock"] {
+  overflow: visible !important;
+  height: auto !important;
+}
+.st-key-kartu_spv, .st-key-kartu_noo { overflow-y: visible !important; }
