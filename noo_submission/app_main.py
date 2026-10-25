@@ -311,7 +311,7 @@ def tab_noo():
         if "Created At" in ss.df_toko.columns else pd.NaT
     tgl_awal = hari_ini if pd.isna(tgl_min) else tgl_min.date()
 
-    c_tgl1,c_tgl2,c_distri,c_brand,c_status,c_refresh,c_unduh,c_simpan = st.columns([1.1,1.1,1.4,1.0,1.2,1.0,1.5,1.4])
+    c_tgl1,c_tgl2,c_distri,c_brand,c_status = st.columns([1.3,1.3,1.8,1.2,1.4])
     with c_tgl1:
         tgl_dari = st.date_input("Date from", value=tgl_awal, key="f_tgl_awal",
                                   format="YYYY-MM-DD", on_change=reset_halaman_data)
@@ -329,17 +329,15 @@ def tab_noo():
     with c_status:
         status = st.selectbox("Status",["All statuses"] + KOLOM_VALIDASI, key="f_status",
                                on_change=reset_halaman_data)
-    with c_refresh:
-        st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
-        st.button("🔄 Refresh", width="stretch", key="tombol_refresh", on_click=refresh_data_toko,
-                   help="Reload data from Supabase. Unsaved changes will be lost.")
-    with c_unduh:
-        st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
-        tempat_unduh = st.empty()      # diisi setelah hasil filter dihitung
-    with c_simpan:
-        st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
-        st.button("Save changes", type="primary", width="stretch", key="tombol_simpan",
-                   on_click=simpan_perubahan)
+    with st.container(key="noo_toolbar"):
+        b1, b2, b3, info = st.columns([1, 1.4, 1.5, 6], vertical_alignment="center")
+        b1.button("🔄 Refresh", width="stretch", key="tombol_refresh", on_click=refresh_data_toko,
+                  help="Reload data from Supabase. Unsaved changes will be lost.")
+        tempat_unduh = b2.empty()      # diisi setelah hasil filter dihitung
+        b3.button("Save changes", type="primary", width="stretch", key="tombol_simpan",
+                  on_click=simpan_perubahan)
+        info.markdown(f'<div class="teks-showing">{len(ss.baris_kotor)} rows unsaved</div>'
+                      if ss.baris_kotor else "", unsafe_allow_html=True)
 
     hasil_filter = terapkan_filter(ss.df_toko, status, distributor, tuple(rentang), brand)
     total_filter = len(hasil_filter)
