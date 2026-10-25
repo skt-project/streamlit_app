@@ -1,30 +1,17 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 html, body, [class*="css"], .stApp { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
-.stApp { background: #f1f5f9 !important; color: #172033; }
+.stApp { background: #f5f8fc; color: #172033; }
 header[data-testid="stHeader"] { background: transparent; height: 0; }
 .block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 100%; }
+/* note: the hamburger menu (Rerun / Clear cache / Settings / change theme) is intentionally
+   NOT hidden here so users can still access the theme switcher. */
 
 /* ---------- SIDEBAR / NAVIGATION ---------- */
-section[data-testid="stSidebar"] {
-  background: #ffffff !important;
-  border-right: 1px solid #dce5f0;
-  min-width: 255px !important;
-  max-width: 255px !important;
-  box-shadow: 2px 0 12px rgba(15,23,42,.06);
-}
+section[data-testid="stSidebar"] { background: #edf3fa; border-right: 1px solid #dce5f0; min-width: 255px !important; max-width: 255px !important; }
 section[data-testid="stSidebar"] > div { padding-top: 1.2rem; }
-
 .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; color:#10213f; }
-.brand-icon {
-  width: 36px; height: 36px; border-radius: 8px;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-  display: inline-grid; place-items: center;
-  font-size: 18px; flex-shrink: 0;
-  box-shadow: 0 4px 10px rgba(37,99,235,.3);
-}
 .brand-sub { color:#758299; font-size:10.5px; line-height:1.4; margin:6px 0 18px; }
-
 section[data-testid="stSidebar"] .stButton > button {
   justify-content:flex-start; text-align:left; border:none; background:transparent; color:#526078;
   font-weight:500; font-size:12.5px; padding:10px 12px; border-radius:9px; box-shadow:none; width:100%; }
@@ -33,44 +20,9 @@ section[data-testid="stSidebar"] .stButton > button p { text-align:left; }
 section[data-testid="stSidebar"] .stButton > button:hover { background:#e4ebf5; color:#263957; }
 section[data-testid="stSidebar"] [class*="st-key-navaktif"] button {
   background:#dbe9ff; color:#1f5fd2; font-weight:600; box-shadow: inset 3px 0 #2563eb; }
-
-.status-sidebar {
-  color:#167648; font-size:11px; font-weight:600; margin-top:36vh;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 20px;
-  padding: 5px 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-.status-sidebar .titik {
-  display:inline-block; width:7px; height:7px; background:#22a866;
-  border-radius:50%; box-shadow:0 0 0 3px #d5f2e2;
-  animation: pulse 2s infinite;
-}
-@keyframes pulse {
-  0%,100% { box-shadow: 0 0 0 3px rgba(22,163,74,.2); }
-  50%      { box-shadow: 0 0 0 5px rgba(22,163,74,.08); }
-}
+.status-sidebar { color:#167648; font-size:11px; font-weight:600; margin-top:36vh; }
+.status-sidebar .titik { display:inline-block; width:7px; height:7px; background:#22a866; border-radius:50%; margin-right:8px; box-shadow:0 0 0 3px #d5f2e2; }
 .status-update { color:#8b97aa; font-size:9.5px; margin-top:4px; margin-left:15px; }
-
-/* ---------- SIDEBAR: Input NOO (link_button disamakan dgn nav button) ---------- */
-section[data-testid="stSidebar"] .stLinkButton { margin-top: 0; }
-section[data-testid="stSidebar"] .stLinkButton a {
-  display: flex !important; align-items: center !important;
-  justify-content: flex-start !important; text-align: left !important;
-  border: none !important; background: transparent !important;
-  color: #526078 !important; font-weight: 500 !important;
-  font-size: 12.5px !important; padding: 10px 12px !important;
-  border-radius: 9px !important; box-shadow: none !important;
-  width: 100% !important; text-decoration: none !important; min-height: auto !important;
-}
-section[data-testid="stSidebar"] .stLinkButton a p,
-section[data-testid="stSidebar"] .stLinkButton a span {
-  text-align: left !important; color: inherit !important; margin: 0 !important;
-}
-section[data-testid="stSidebar"] .stLinkButton a:hover { background: #e4ebf5 !important; color: #263957 !important; }
 
 /* ---------- PAGE HEADER ---------- */
 .header-halaman { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; }
@@ -82,34 +34,86 @@ section[data-testid="stSidebar"] .stLinkButton a:hover { background: #e4ebf5 !im
 .header-judul { font-size:21px; font-weight:700; color:#12213b; letter-spacing:-.45px; line-height:1.3; }
 .header-sub { color:#768398; font-size:11.5px; margin-top:3px; }
 .pengguna-box { display: none !important; }
+.pengguna-box {
+  display:flex; align-items:center; gap:9px; font-weight:600; color:#33435c; font-size:12px;
+  padding:5px 9px 5px 5px; border:1px solid #e0e7f0; border-radius:24px; background:#fff; box-shadow:0 2px 7px rgba(17,35,65,.04);
+}
+.avatar-bulat { width:30px; height:30px; border-radius:50%; background:#dbeafe; color:#1e5cc8; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:10px; }
 .breadcrumb-nav { color:#99a5b5; font-size:10.5px; margin-bottom:6px; }
 .breadcrumb-nav b { color:#33445d; font-weight:600; }
+/* ---------- SIDEBAR / NAVIGATION ---------- */
+section[data-testid="stSidebar"] { background: #edf3fa; border-right: 1px solid #dce5f0; min-width: 255px !important; max-width: 255px !important; }
+section[data-testid="stSidebar"] > div { padding-top: 1.2rem; }
+.brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; color:#10213f; }
+.brand-sub { color:#758299; font-size:10.5px; line-height:1.4; margin:6px 0 18px; }
+section[data-testid="stSidebar"] .stButton > button {
+  justify-content:flex-start; text-align:left; border:none; background:transparent; color:#526078;
+  font-weight:500; font-size:12.5px; padding:10px 12px; border-radius:9px; box-shadow:none; width:100%; }
+section[data-testid="stSidebar"] .stButton > button > div { justify-content:flex-start; width:100%; }
+section[data-testid="stSidebar"] .stButton > button p { text-align:left; }
+section[data-testid="stSidebar"] .stButton > button:hover { background:#e4ebf5; color:#263957; }
+section[data-testid="stSidebar"] [class*="st-key-navaktif"] button {
+  background:#dbe9ff; color:#1f5fd2; font-weight:600; box-shadow: inset 3px 0 #2563eb; }
+.status-sidebar { color:#167648; font-size:11px; font-weight:600; margin-top:36vh; }
+.status-sidebar .titik { display:inline-block; width:7px; height:7px; background:#22a866; border-radius:50%; margin-right:8px; box-shadow:0 0 0 3px #d5f2e2; }
+.status-update { color:#8b97aa; font-size:9.5px; margin-top:4px; margin-left:15px; }
 
+
+/* ---------- SIDEBAR: Input NOO (link_button disamakan dgn nav button) ---------- */
+section[data-testid="stSidebar"] .stLinkButton {
+  margin-top: 0;
+}
+section[data-testid="stSidebar"] .stLinkButton a {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  text-align: left !important;
+  border: none !important;
+  background: transparent !important;
+  color: #526078 !important;
+  font-weight: 500 !important;
+  font-size: 12.5px !important;
+  padding: 10px 12px !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+  width: 100% !important;
+  text-decoration: none !important;
+  min-height: auto !important;
+}
+section[data-testid="stSidebar"] .stLinkButton a p,
+section[data-testid="stSidebar"] .stLinkButton a span {
+  text-align: left !important;
+  color: inherit !important;
+  margin: 0 !important;
+}
+section[data-testid="stSidebar"] .stLinkButton a:hover {
+  background: #e4ebf5 !important;
+  color: #263957 !important;
+}
+
+/* ---------- PAGE HEADER ---------- */
+.header-halaman { ... }
 /* ---------- KPI CARDS ---------- */
 .grid-kpi { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:16px; }
-.kartu-kpi {
-  display:flex; align-items:center; min-height:91px; padding:17px 18px;
-  border-radius:12px; border:1px solid; box-shadow:0 1px 4px rgba(19,40,72,.06);
-  background:#f0f6ff; border-color:#dceaff;
-  transition: transform .18s ease, box-shadow .18s ease;
-}
-.kartu-kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(15,23,42,.1); }
+.kartu-kpi { display:flex; align-items:center; min-height:91px; padding:17px 18px; border-radius:12px; border:1px solid; box-shadow:0 3px 10px rgba(19,40,72,.035); background:#f0f6ff; border-color:#dceaff; }
 .kartu-kpi.hijau { background:#f0faf5; border-color:#d8f0e4; }
 .kartu-kpi.kuning { background:#fff9ec; border-color:#f5e8c2; }
-.kartu-kpi.merah { background:#fff1f2; border-color:#fbd5d8; }
-
 .kpi-ikon { width:42px; height:42px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; margin-right:13px; color:#2563eb; background:#dceaff; }
 .hijau .kpi-ikon { color:#188856; background:#d9f2e5; }
 .kuning .kpi-ikon { color:#c47b08; background:#f9e9bd; }
-.merah .kpi-ikon { color:#d6383f; background:#fde0e2; }
-
 .kpi-label { color:#617087; font-size:11px; font-weight:500; margin-bottom:5px; }
 .kpi-nilai { color:#152541; font-size:20px; font-weight:700; letter-spacing:-.3px; line-height:1.2; }
 .kpi-nilai small { padding:3px 6px; border-radius:10px; font-size:9px; margin-left:4px; }
-.hijau .kpi-nilai small { color:#17784e; background:#d7f2e3; }
-.kuning .kpi-nilai small { color:#a96808; background:#f7e6b6; }
-.merah .kpi-nilai small { color:#b42a31; background:#fcd9db; }
+.hijau .kpi-nilai small { color:#17784e; background:#d7f2e3; } .kuning .kpi-nilai small { color:#a96808; background:#f7e6b6; }
 
+/* red card (Need Review) */
+.kartu-kpi.merah { background:#fff1f2; border-color:#fbd5d8; }
+.merah .kpi-ikon { color:#d6383f; background:#fde0e2; }
+.merah .kpi-nilai small { color:#b42a31; background:#fcd9db; }
+/* red card (Need Review) */
+.kartu-kpi.merah { background:#fff1f2; border-color:#fbd5d8; }
+.merah .kpi-ikon { color:#d6383f; background:#fde0e2; }
+.merah .kpi-nilai small { color:#b42a31; background:#fcd9db; }
 .donut {
   width:51px; height:51px; margin-right:14px; border-radius:50%; position:relative; flex-shrink:0;
   background:conic-gradient(#2563eb 0 88%, #dbe5f5 88% 100%);
@@ -119,41 +123,36 @@ section[data-testid="stSidebar"] .stLinkButton a:hover { background: #e4ebf5 !im
 /* ---------- FILTER / TOOLBAR ---------- */
 div[data-testid="stTextInput"] input, div[data-baseweb="select"] > div { border-radius:8px; border-color:#d7e0ea !important; color:#33435c; }
 div[data-testid="stWidgetLabel"] p { font-size:9px; color:#6a778c; font-weight:600; }
+/* Select All: bigger label */
 div[data-testid="stCheckbox"] div[data-testid="stWidgetLabel"] p { font-size:15px; color:#33435c; font-weight:600; }
+/* Select All: bigger checkbox box */
 div[data-testid="stCheckbox"] label > span:first-child { transform: scale(1.35); transform-origin: left center; margin-right: 8px; }
 
-/* ---------- DROPDOWN: tampilkan teks opsi penuh ---------- */
-ul[role="listbox"] li { height: auto !important; min-height: 38px; }
-ul[role="listbox"] li div { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
-
-/* ---------- BUTTONS ---------- */
 .stButton > button[kind="primary"] {
   display: flex !important; align-items: center !important; justify-content: center !important;
   height: 38px !important; min-height: 38px !important; width: 100%;
   padding: 0 16px !important; margin: 0 !important;
-  border-radius: 8px !important;
-  border: none !important;
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
-  box-shadow: 0 4px 12px rgba(37,99,235,.3) !important;
+  border-radius: 8px !important; border: 1px solid #2563eb !important;
+  background: #2563eb !important; box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
   line-height: normal !important;
-  transition: all .2s ease !important;
 }
+/* ---------- DROPDOWN: tampilkan teks opsi penuh ---------- */
+ul[role="listbox"] li { height: auto !important; min-height: 38px; }
+ul[role="listbox"] li div { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
 .stButton > button[kind="primary"] div[data-testid="stMarkdownContainer"],
 .stButton > button[kind="primary"] p {
   margin: 0 !important; padding: 0 !important;
   color: #ffffff !important; font-size: 13px !important; font-weight: 700 !important;
   line-height: normal !important;
 }
-.stButton > button[kind="primary"]:hover {
-  background: linear-gradient(135deg, #2563eb, #1e40af) !important;
-  box-shadow: 0 6px 18px rgba(37,99,235,.4) !important;
-  transform: translateY(-1px) !important;
-}
-.stButton > button[kind="primary"]:active { transform: translateY(0px) !important; }
+.stButton > button[kind="primary"]:hover { background: #1e56d1 !important; border-color: #1e56d1 !important; }
 .stButton > button[kind="primary"]:disabled {
   background: #e9edf2 !important; border-color: #d9e0e9 !important; box-shadow: none !important;
 }
 .stButton > button[kind="primary"]:disabled p { color: #9ca7b6 !important; }
+.stButton > button[kind="primary"]:hover { background:#1e56d1; border-color:#1e56d1; }
+.stButton > button[kind="primary"]:disabled { background:#e9edf2 !important; border-color:#d9e0e9 !important; color:#9ca7b6 !important; box-shadow:none; }
+.stButton > button[kind="primary"]:disabled p { color:#9ca7b6 !important; }
 
 .stButton > button[kind="secondary"] { height: 38px; padding: 0 16px; border-radius:8px; font-weight:500; border-color:#ccd7e5; color:#3d4e67; }
 .stButton > button[kind="secondary"]:hover { border-color:#adbbcc; background:#f7f9fc; }
@@ -163,22 +162,12 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
 .teks-showing { color:#7d899b; font-size:9.5px; padding-top:8px; }
 .teks-belumsimpan { color:#9b650e; font-size:9.5px; margin-left:10px; }
 
-/* ---------- DATA EDITOR ---------- */
-[data-testid="stDataEditor"] thead th {
-  background: #f8fafc !important;
-  font-size: 10px !important;
-  font-weight: 700 !important;
-  text-transform: uppercase !important;
-  letter-spacing: .05em !important;
-  color: #64748b !important;
-}
-[data-testid="stDataEditor"] tbody tr:hover td { background: #f8fafc !important; }
-
 /* ---------- UPLOAD / DROPZONE (NOO Submission) ---------- */
 .kotak-unggah [data-testid="stFileUploaderDropzone"] {
   background: #f5f9ff; border: 1.5px dashed #8eb5ed; border-radius: 12px;
 }
 .kotak-unggah [data-testid="stFileUploaderDropzone"]:hover { border-color: #2563eb; background: #eaf3ff; }
+
 .st-key-kotak_unggah_tersembunyi { display: none !important; }
 .info-file {
   display: flex; align-items: center; gap: 14px; background: #f8fbff; border: 1px solid #bfd4f1; border-radius: 10px;
@@ -200,16 +189,24 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
 .judul-bagian { display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#3d4c63; margin:10px 0 8px; font-weight:600; }
 .judul-bagian b { color:#2865c6; background:#eaf2ff; padding:3px 7px; border-radius:8px; font-size:8px; }
 
-/* NOO Upload compact */
+/* ── NOO Upload: tabel lebih rapat ── */
 .st-key-kartu_noo [data-testid="stVerticalBlock"] { gap: 0.2rem; }
+
 .st-key-kartu_noo .catatan-kecil {
-  font-size: 0.78rem !important; line-height: 1.2 !important;
-  margin-top: 5px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 0.78rem !important;
+    line-height: 1.2 !important;
+    margin-top: 5px !important;      /* override inline margin-top:8px */
+    white-space: nowrap;             /* 1 baris saja */
+    overflow: hidden;
+    text-overflow: ellipsis;         /* potong dengan "..." */
 }
+
 .st-key-kartu_noo [data-testid="stSelectbox"] [data-baseweb="select"] > div,
 .st-key-kartu_noo [data-testid="stTextInput"] input {
-  min-height: 30px !important; height: 30px !important;
-  font-size: 0.8rem !important; padding-top: 2px; padding-bottom: 2px;
+    min-height: 30px !important;
+    height: 30px !important;
+    font-size: 0.8rem !important;
+    padding-top: 2px; padding-bottom: 2px;
 }
 
 /* ---------- OPTION TITLES (1. Manual / 2. Upload) ---------- */
@@ -269,8 +266,11 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
 [class*="st-key-baris_spv_"]:hover { background: #f8fafc; }
 
 .sel-teks { min-height: 40px; display: flex; align-items: center; font-size: .88rem; line-height: 1.3; word-break: break-word; }
-.sel-baca { background: #f3f4f6; color: #4b5563; border-radius: 8px; padding: .35rem .6rem; min-height: 40px; }
+.sel-baca {
+  background: #f3f4f6; color: #4b5563; border-radius: 8px; padding: .35rem .6rem; min-height: 40px;
+}
 .sel-tebal { font-weight: 600; }
+
 .pesan-error-kecil { color: #b42318; font-size: .75rem; font-weight: 600; margin: -.35rem 0 .35rem; }
 
 [class*="st-key-spv_jenis_"] [data-baseweb="select"] > div,
@@ -282,18 +282,6 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
 }
 .info-region-kosong { background: #f1f5f9; color: var(--teks-redup); }
 .info-region-kosong span { font-size: .75rem; }
-
-/* ---------- SCROLLBAR ---------- */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-
-/* ---------- TOAST ---------- */
-[data-testid="stToast"] {
-  border-radius: 10px !important;
-  box-shadow: 0 10px 30px rgba(15,23,42,.12) !important;
-}
 
 /* ---------- Responsif ---------- */
 @media (max-width: 900px) {
