@@ -261,8 +261,13 @@ def template_csv() -> bytes:
 
 def terapkan_filter(df, status, distributor="All distributors", rentang=None, brand="All brands"):
     m = pd.Series(True, index=df.index)
-    if brand != "All brands" and "Customer Store Code" in df.columns:
-        awal = df["Customer Store Code"].astype(str).str.strip().str[:2]
+    if brand != "All brands":
+        if "Customer Code" in df.columns:
+            awal = df["Customer Code"].astype(str).str.strip().str[:2]
+        elif "Customer Store Code" in df.columns:
+            awal = df["Customer Store Code"].astype(str).str.strip().str[:2]
+        else:
+            awal = pd.Series("", index=df.index)
         m &= awal == ("17" if brand == "NXP" else "12")
     if rentang and "Created At" in df.columns:
         tgl = ke_wib_naive(df["Created At"]).dt.normalize()
@@ -383,6 +388,7 @@ def tab_noo():
         "Generated At":          st.column_config.TextColumn("Generated At",width=150,disabled=True),
         "Distributor":           st.column_config.SelectboxColumn("Distributor",options=[""] + daftar_distributor(),width=220),
         "Store Name":            st.column_config.TextColumn("Store Name",width=170,required=True),
+        "Customer Code":         st.column_config.TextColumn("Customer Code",width=160,disabled=True),
         "Customer Store Code":   st.column_config.TextColumn("Customer Store Code",width=200),
         "Customer Store Name":   st.column_config.TextColumn("Customer Store Name",width=170),
         "City":                  st.column_config.TextColumn("City",width=110),
