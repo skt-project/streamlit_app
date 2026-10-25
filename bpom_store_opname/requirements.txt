@@ -1,0 +1,6 @@
+streamlit>=1.50
+gspread>=6.0
+google-auth
+google-cloud-bigquery
+pandas
+openpyxl

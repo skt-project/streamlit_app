@@ -1,0 +1,16 @@
+# Pengaturan ringan untuk banyak pengguna bersamaan (di-commit; berbeda dari secrets.toml yang di-gitignore).
+[server]
+maxUploadSize = 5            # MB; sama dengan batas di validation.MAX_FILE_BYTES
+fileWatcherType = "none"     # tidak memantau file sumber di server produksi
+runOnSave = false
+enableStaticServing = false
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = "none"    # pengguna tidak melihat stack trace; detail ada di log server
+
+[runner]
+magicEnabled = false

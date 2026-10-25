@@ -1,0 +1,314 @@
+"""Tes UI end-to-end (Streamlit AppTest) dengan Google Sheets di-mock. Tidak menyentuh spreadsheet asli.
+
+Daftar store di sini adalah DATA BUATAN di folder sementara; tidak ada yang ditulis ke reference/.
+"""
+import sys
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import openpyxl
+import pytest
+from streamlit.testing.v1 import AppTest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import app  # noqa: E402
+import master_product as mp  # noqa: E402
+import reference_data as r  # noqa: E402
+import sheets_store as store  # noqa: E402
+import validation as v  # noqa: E402
+from template_builder import build_template  # noqa: E402
+
+TEMPLATE = ROOT / "template" / "Contoh Excel Response.xlsx"
+DISTRIBUTORS = r.load_distributors(ROOT / "reference" / "Daftar Distributor.xlsx")
+COMPANY, DIST = DISTRIBUTORS[0]
+SKUS = r.load_catalogue(TEMPLATE)
+# master_product buatan: satu SKU yang ada di template (nama beda), satu SKU baru di luar template
+PRODUCTS = [mp.Product(SKUS[0].product_id, "NAMA MASTER BEDA", "999ml"), mp.Product("ZZ-NEW-01", "PRODUK BARU ZZ", "25ml")]
+
+
+def _run():
+    import app as module
+    module.main()
+
+
+def _store_file(tmp_path, rows=None):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Store Name", "Distributor Name", "Store ID"])
+    for row in rows or [["TOKO MAJU", DIST, "00123"], ["TOKO BARU", DIST, 456.0]]:
+        ws.append(row)
+    path = tmp_path / "Daftar Store.xlsx"
+    wb.save(path)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def wiring(monkeypatch, tmp_path):
+    """Credential palsu, Google Sheets palsu, daftar store buatan."""
+    monkeypatch.setattr(app, "load_config", lambda: app.Config(
+        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
+    monkeypatch.setattr(app, "get_gspread_client", lambda: MagicMock())
+    monkeypatch.setattr(app, "load_products", lambda table: (PRODUCTS, 0, None))
+    monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
+    monkeypatch.setattr(store, "WRITE_INTERVAL", 0.0)       # tanpa jeda penulisan di tes
+    for cached in (app.load_stores_by_company, app.load_skus, app.load_distributors, app.get_opname_store):
+        cached.clear()
+    yield
+    for cached in (app.load_stores_by_company, app.get_opname_store):
+        cached.clear()
+
+
+def _columns(lines):
+    """Isi balasan ws.batch_get (4 kolom kunci) dari daftar baris {header: nilai}."""
+    return [[[ln.get(h, "")] for ln in lines] for h in store._KEY_COLUMNS]
+
+
+def _fake_sheet(monkeypatch, existing=None):
+    sh, ws = MagicMock(), MagicMock()
+    ws.id, ws.title = 7, "W"
+    ws.batch_get.return_value = _columns(existing or [])
+    sh.ws = ws
+    monkeypatch.setattr(store, "open_spreadsheet", lambda *a, **k: (sh, False))
+    monkeypatch.setattr(store, "ensure_worksheet", lambda *a, **k: ws)
+    return sh
+
+
+def _filled(label, dist, qty=lambda i: i):
+    wb = openpyxl.load_workbook(BytesIO(build_template(TEMPLATE.read_bytes(), label, dist, SKUS)))
+    ws = wb["Sheet1"]
+    for i in range(3, ws.max_row + 1):
+        ws.cell(i, 6).value = qty(i)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _fill_form(at, upload=None):
+    at.selectbox[0].select(COMPANY)
+    at.run()
+    at.selectbox[1].select_index(0)
+    at.date_input[0].set_value(__import__("datetime").date(2026, 10, 25))
+    at.text_input[0].input("Budi")
+    if upload is not None:
+        at.file_uploader[0].upload("isi.xlsx", upload, "application/octet-stream")
+    at.run()
+    return at
+
+
+def _click(at, label):
+    next(b for b in at.button if b.label == label).click()
+    at.run()
+
+
+def _add_extra(at, product_index, bpom, qty):
+    at.selectbox[2].select_index(product_index)
+    next(t for t in at.text_input if t.label == "Nomor BPOM").input(bpom)
+    at.number_input[0].set_value(qty)
+    _click(at, "Tambah ke daftar")
+
+
+def _at():
+    at = AppTest.from_function(_run, default_timeout=60)
+    at.run()
+    return at
+
+
+def test_missing_store_list_shows_message_and_no_form(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "STORE_FILE", tmp_path / "tidak-ada.xlsx")
+    app.load_stores_by_company.clear()
+    at = _at()
+    assert not at.exception
+    assert any("Daftar store belum tersedia" in w.value for w in at.warning)
+    assert len(at.selectbox) == 0 and len(at.button) == 0
+
+
+def test_two_step_selection_store_label_and_download_button():
+    at = _at()
+    assert not at.exception
+    assert [s.label for s in at.selectbox] == ["Distributor Company", "Store", "SKU"] and at.selectbox[1].disabled
+    assert not at.download_button            # belum ada store -> belum ada template
+    at.selectbox[0].select(COMPANY)
+    at.run()
+    store_box = at.selectbox[1]
+    assert not store_box.disabled and len(store_box.options) == 2
+    assert store_box.options[0] == f"00123 - TOKO MAJU  ·  {DIST}"
+    assert store_box.options[1].startswith("456 - TOKO BARU")        # 456.0 dari Excel -> "456"
+    at.selectbox[1].select_index(0)
+    at.run()
+    assert len(at.download_button) == 1
+
+
+def test_submit_valid_file_writes_one_atomic_batch(monkeypatch):
+    sh = _fake_sheet(monkeypatch)
+    at = _fill_form(_at(), _filled("00123 - TOKO MAJU", DIST))
+    assert not at.exception and not at.error
+    assert any("File valid" in s.value for s in at.success)
+    _click(at, "Submit")
+    assert not at.exception and not at.error
+    assert sh.batch_update.call_count == 1                           # SATU batchUpdate, atomik
+    rows = sh.batch_update.call_args[0][0]["requests"][0]["appendCells"]["rows"]
+    assert len(rows) == len(SKUS)
+    cells = {h: c["userEnteredValue"] for h, c in zip(store.HEADERS, rows[0]["values"])}
+    assert cells["Distributor Company"] == {"stringValue": COMPANY} and cells["Distributor Name"] == {"stringValue": DIST}
+    assert cells["Store ID"] == {"stringValue": "00123"} and cells["Store Name"] == {"stringValue": "TOKO MAJU"}
+    assert cells["Periode Stock Opname"] == {"stringValue": "2026-10"} and cells["created_by"] == {"stringValue": "Budi"}
+    assert isinstance(cells["QTY"].get("numberValue"), int)
+    assert any("Berhasil menyimpan" in s.value for s in at.success)
+
+
+def test_invalid_row_blocks_everything_with_row_number_and_nothing_written(monkeypatch):
+    sh = _fake_sheet(monkeypatch)
+    data = _filled("00123 - TOKO MAJU", DIST, qty=lambda i: -4 if i == 5 else 1)
+    at = _fill_form(_at(), data)
+    assert any("Baris 5" in m.value and "negatif" in m.value for m in at.markdown)
+    _click(at, "Submit")
+    assert not at.exception and sh.batch_update.call_count == 0
+    assert any("belum valid" in e.value for e in at.error)
+
+
+def test_file_of_another_store_distributor_is_rejected(monkeypatch):
+    sh = _fake_sheet(monkeypatch)
+    other = next(n for _, n in DISTRIBUTORS if n != DIST)
+    at = _fill_form(_at(), _filled("X - Y", other))
+    assert any("bukan distributor milik store" in m.value for m in at.markdown)
+    _click(at, "Submit")
+    assert sh.batch_update.call_count == 0
+
+
+def test_duplicate_in_sheet_rejects_whole_input(monkeypatch):
+    first = SKUS[0]
+    line = {"Store ID": "00123", "Periode Stock Opname": "2026-10", "PRODUCT ID": first.product_id,
+            "BPOM NUMBER": first.bpom_number}
+    sh = _fake_sheet(monkeypatch, existing=[line])
+    at = _fill_form(_at(), _filled("00123 - TOKO MAJU", DIST))
+    _click(at, "Submit")
+    assert sh.batch_update.call_count == 0
+    assert any("hubungi BD" in e.value for e in at.error)
+
+
+def test_form_fields_are_all_required(monkeypatch):
+    sh = _fake_sheet(monkeypatch)
+    at = _at()
+    _click(at, "Submit")
+    msgs = " ".join(e.value for e in at.error)
+    for needle in ("Distributor Company", "Store wajib", "Tanggal", "Nama PIC", "File Excel"):
+        assert needle in msgs
+    assert sh.batch_update.call_count == 0
+
+
+def test_large_company_uses_search_box_and_stays_fast(tmp_path, monkeypatch):
+    import time
+    rows = [[f"TOKO {i}", DIST, f"{i:06d}"] for i in range(20000)]
+    monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path, rows))
+    app.load_stores_by_company.clear()
+    t0 = time.perf_counter()
+    at = _at()
+    cold = time.perf_counter() - t0
+    at.selectbox[0].select(COMPANY)
+    t1 = time.perf_counter()
+    at.run()
+    warm = time.perf_counter() - t1
+    print(f"\n20000 store: cold load {cold:.2f}s, rerun setelah pilih company {warm:.2f}s")
+    assert cold < 15 and warm < 5
+    search = next(t for t in at.text_input if t.label == "Cari Store")
+    assert at.selectbox[1].options == [] and at.selectbox[1].disabled         # belum mengetik -> tidak ada opsi dikirim
+    search.input("to").run()
+    assert at.selectbox[1].options == []                                      # < 3 huruf
+    next(t for t in at.text_input if t.label == "Cari Store").input("toko 1999").run()
+    opts = list(at.selectbox[1].options)
+    assert 0 < len(opts) <= app.STORE_SEARCH_RESULTS and all("1999" in o for o in opts)
+    assert "019990 - TOKO 19990" in opts[0] or any("019990" in o for o in opts)
+    at.selectbox[1].select_index(0).run()
+    assert len(at.download_button) == 1
+
+
+def test_company_below_threshold_keeps_plain_dropdown(tmp_path, monkeypatch):
+    rows = [[f"TOKO {i}", DIST, f"{i:05d}"] for i in range(app.STORE_SEARCH_THRESHOLD)]
+    monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path, rows))
+    app.load_stores_by_company.clear()
+    at = _at()
+    at.selectbox[0].select(COMPANY).run()
+    assert not any(t.label == "Cari Store" for t in at.text_input)
+    assert len(at.selectbox[1].options) == app.STORE_SEARCH_THRESHOLD
+
+
+def test_sheets_calls_per_submit_are_minimal_and_handle_is_reused(monkeypatch):
+    """Submit kedua tidak membuka spreadsheet/worksheet lagi dan tidak membaca sheet lagi (indeks di memori)."""
+    sh = _fake_sheet(monkeypatch)
+    opened = []
+    real = store.open_spreadsheet
+    monkeypatch.setattr(store, "open_spreadsheet", lambda *a, **k: (opened.append(1), real(*a, **k))[1])
+    for _ in range(2):
+        at = _fill_form(_at(), _filled("456 - TOKO BARU", DIST))
+        _click(at, "Submit")
+    # submit kedua: store yang sama + periode sama -> ditolak dari INDEKS, tanpa membaca sheet lagi
+    assert any("hubungi BD" in e.value for e in at.error)
+    assert len(opened) == 1 and sh.ws.batch_get.call_count == 1 and sh.batch_update.call_count == 1
+
+
+
+# ── fitur tambah SKU / BPOM langsung (SKU dari master_product) ──────────────
+
+def test_extra_form_lists_sku_dash_product_name_and_adds_to_list():
+    at = _at()
+    assert list(at.selectbox[2].options) == [f"{SKUS[0].product_id} - NAMA MASTER BEDA", "ZZ-NEW-01 - PRODUK BARU ZZ"]
+    _add_extra(at, 1, " NA999 ", 4)
+    assert not at.exception and not at.error
+    assert any("ZZ-NEW-01" in m.value and "NA999" in m.value and "ISI 25ml" in m.value for m in at.markdown)
+    assert any("Ditambahkan" in x.value for x in at.success)
+
+
+def test_extra_form_validation_errors():
+    at = _at()
+    _click(at, "Tambah ke daftar")
+    assert any("SKU wajib" in e.value for e in at.error)
+    at.selectbox[2].select_index(1); _click(at, "Tambah ke daftar")
+    assert any("Nomor BPOM wajib" in e.value for e in at.error)
+
+
+def test_extras_are_saved_with_file_rows_in_one_batch(monkeypatch):
+    sh = _fake_sheet(monkeypatch)
+    at = _at()
+    _add_extra(at, 1, "NA999", 4)        # SKU baru di luar template
+    _add_extra(at, 0, "NA-BARU-77", 0)   # SKU template + BPOM baru, QTY 0 sah
+    at = _fill_form(at, _filled("00123 - TOKO MAJU", DIST))
+    assert not at.error and any("2 SKU/BPOM tambahan" in x.value for x in at.success)
+    _click(at, "Submit")
+    assert not at.exception and not at.error and sh.batch_update.call_count == 1
+    rows = sh.batch_update.call_args[0][0]["requests"][0]["appendCells"]["rows"]
+    assert len(rows) == len(SKUS) + 2
+    last = [{h: c["userEnteredValue"] for h, c in zip(store.HEADERS, r["values"])} for r in rows[-2:]]
+    assert last[0]["PRODUCT ID"] == {"stringValue": "ZZ-NEW-01"} and last[0]["PRODUCT NAME"] == {"stringValue": "PRODUK BARU ZZ"}
+    assert last[0]["ISI (GR / ML)"] == {"stringValue": "25ml"} and last[0]["QTY"] == {"numberValue": 4}
+    assert last[0]["Store ID"] == {"stringValue": "00123"} and last[0]["Distributor Name"] == {"stringValue": DIST}
+    # SKU yang ada di template memakai nama + ISI resmi template, bukan master_product
+    assert last[1]["PRODUCT NAME"] == {"stringValue": SKUS[0].product_name}
+    assert last[1]["ISI (GR / ML)"] == {"stringValue": SKUS[0].isi} and last[1]["QTY"] == {"numberValue": 0}
+    assert not at.session_state["extras"]            # daftar dikosongkan setelah sukses
+
+
+def test_extra_duplicating_file_row_blocks_submit(monkeypatch):
+    sh = _fake_sheet(monkeypatch)
+    at = _at()
+    _add_extra(at, 0, SKUS[0].bpom_number, 3)        # pasangan resmi yang sudah ada di file
+    at = _fill_form(at, _filled("00123 - TOKO MAJU", DIST))
+    assert any("sudah ada" in m.value and "SKU tambahan #1" in m.value for m in at.markdown)
+    _click(at, "Submit")
+    assert sh.batch_update.call_count == 0
+
+
+def test_extra_can_be_removed():
+    at = _at()
+    _add_extra(at, 1, "NA999", 4)
+    _click(at, "Hapus")
+    assert not at.session_state["extras"]
+
+
+def test_master_product_failure_disables_only_the_extra_feature(monkeypatch):
+    monkeypatch.setattr(app, "load_products", lambda table: ([], 0, "Forbidden: 403 no access"))
+    at = _at()
+    assert not at.exception
+    assert any("master product tidak dapat dibaca" in w.value and "403" in w.value for w in at.warning)
+    assert len(at.selectbox) == 2 and len(at.download_button) == 0     # form company/store tetap jalan
