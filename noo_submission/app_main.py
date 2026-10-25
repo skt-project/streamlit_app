@@ -139,6 +139,7 @@ def inisialisasi_state():
     ss.setdefault("sku_df", None)
     ss.setdefault("sku_pending", {})      # {row_key: "Done"}
     ss.setdefault("sku_ver", 0)
+    ss.setdefault("sku_pilih", set())     # key baris yang dicentang
     ss.setdefault("baris_kotor", set())
     ss.setdefault("riwayat", [])
     ss.setdefault("versi_impor", 0)
@@ -290,7 +291,6 @@ def terapkan_edit(master: pd.DataFrame, hasil_edit: pd.DataFrame):
 
 def tab_noo():
     ss = st.session_state
-    tempat_unduh = st.empty()
     tempat_kpi   = st.empty()
 
     if ss.get("err_tagging"):
@@ -308,7 +308,7 @@ def tab_noo():
         if "Created At" in ss.df_toko.columns else pd.NaT
     tgl_awal = hari_ini if pd.isna(tgl_min) else tgl_min.date()
 
-    c_tgl1,c_tgl2,c_distri,c_status,c_refresh,c_simpan = st.columns([1.3,1.3,1.6,1.4,1.1,1.5])
+    c_tgl1,c_tgl2,c_distri,c_status,c_refresh,c_unduh,c_simpan = st.columns([1.2,1.2,1.5,1.3,1.1,1.6,1.5])
     with c_tgl1:
         tgl_dari = st.date_input("Date from", value=tgl_awal, key="f_tgl_awal",
                                   format="YYYY-MM-DD", on_change=reset_halaman_data)
@@ -327,8 +327,11 @@ def tab_noo():
         st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
         st.button("🔄 Refresh", width="stretch", key="tombol_refresh", on_click=refresh_data_toko,
                    help="Reload data from Supabase. Unsaved changes will be lost.")
+    with c_unduh:
+        st.markdown('<div style="height:1.2rem"></div>', unsafe_allow_html=True)
+        tempat_unduh = st.empty()      # diisi setelah hasil filter dihitung
     with c_simpan:
-        st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="height:1.2rem"></div>', unsafe_allow_html=True)
         st.button("Save changes", type="primary", width="stretch", key="tombol_simpan",
                    on_click=simpan_perubahan)
 
@@ -337,10 +340,9 @@ def tab_noo():
 
     data_unduh = bangun_download_noo(hasil_filter)
     with tempat_unduh.container():
-        _, c_unduh = st.columns([5,1.6])
-        c_unduh.download_button("⬇️ Download NOO", hasil_ke_excel(data_unduh), "hasil_noo.xlsx",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                disabled=data_unduh.empty, width="stretch", key="unduh_noo_validasi")
+        st.download_button("⬇️ Download NOO", hasil_ke_excel(data_unduh), "hasil_noo.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           disabled=data_unduh.empty, width="stretch", key="unduh_noo_validasi")
 
     ukuran       = ss.ukuran_halaman
     total_halaman = max(1, math.ceil(total_filter / ukuran))
@@ -524,7 +526,7 @@ def tab_noo():
 SKU_TABLE    = "sku_mapping"
 SKU_TAGGING  = ["Not Yet", "Done"]
 KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_distri", "f_status")
-KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_dari", "sku_f_sampai")
+KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_dari", "sku_f_sampai", "sku_select_all")
 
 SKU_DL_HEADERS = ["Customer Code", "Customer Name", "Product", "Product Chinese Short Name",
                   "Product English Name", "Customer Product Code", "Customer Product Name",
@@ -592,14 +594,32 @@ def _sku_on_change():
     ed = ss.get(f"editor_sku_{ss.sku_ver}", {}).get("edited_rows", {})
     tag = ss.sku_tag_col
     for pos, ch in ed.items():
-        if tag not in ch:
-            continue
         k = ss.sku_view_keys[int(pos)]
-        if ch[tag] == ss.sku_asli.get(k):
+        if "Pilih" in ch:
+            (ss.sku_pilih.add if ch["Pilih"] else ss.sku_pilih.discard)(k)
+        if tag in ch:
+            if ch[tag] == ss.sku_asli.get(k):
+                ss.sku_pending.pop(k, None)
+            else:
+                ss.sku_pending[k] = ch[tag]
+    ss.sku_select_all = bool(ss.sku_view_keys) and all(k in ss.sku_pilih for k in ss.sku_view_keys)
+    ss.sku_ver += 1      # remount editor supaya menampilkan overlay pending
+
+def _sku_pilih_semua():
+    ss = st.session_state
+    ss.sku_pilih = set(ss.sku_view_keys) if ss.sku_select_all else set()
+    ss.sku_ver += 1
+
+def _sku_mark_done():
+    ss = st.session_state
+    for k in ss.sku_pilih & set(ss.sku_view_keys):
+        if ss.sku_asli.get(k) == "Done":
             ss.sku_pending.pop(k, None)
         else:
-            ss.sku_pending[k] = ch[tag]
-    ss.sku_ver += 1      # remount editor supaya menampilkan overlay pending
+            ss.sku_pending[k] = "Done"
+    ss.sku_pilih = set()
+    ss.sku_select_all = False
+    ss.sku_ver += 1
 
 def reset_filter_sku(tgl_min, tgl_max):
     ss = st.session_state
@@ -644,9 +664,9 @@ def _simpan_sku(df, kc_pk, tag, rk):
     ss.sku_ver += 1
     return ok, gagal
 
-def _warna_tagging(v):
+def warna_tagging(v):
     return ("background-color:#dcfce7;color:#166534;font-weight:600" if v == "Done"
-            else "background-color:#fef3c7;color:#92400e;font-weight:600")
+            else "background-color:#fee2e2;color:#b91c1c;font-weight:600")
 
 def _tab_sku():
     ss = st.session_state
@@ -763,6 +783,8 @@ def _tab_sku():
     if simpan:
         with st.spinner("Saving changes..."):
             ok, gagal = _simpan_sku(df, kc_pk, tag, rk)
+            if not gagal:
+                ss.sku_df = ambil_sku_mapping()   # tarik ulang dari Supabase
         ss.sku_pesan = (("ok", f"{ok} record(s) saved") if not gagal else
                         ("error", f"{ok} saved, {len(gagal)} failed (kept as pending): " + "; ".join(gagal[:5])))
         st.rerun()
@@ -775,18 +797,29 @@ def _tab_sku():
     view = df_f.reset_index(drop=True).copy()
     view[tag] = [ss.sku_pending.get(k, v) for k, v in zip(keys, view[tag].fillna("Not Yet"))]
     pend_pos = {i for i, k in enumerate(keys) if k in ss.sku_pending}
+    view.insert(0, "Pilih", [k in ss.sku_pilih for k in keys])
 
     styler = (view.style
               .apply(lambda r: ["background-color:#eff6ff" if r.name in pend_pos else "" for _ in r], axis=1)
-              .map(_warna_tagging, subset=[tag]))
+              .map(warna_tagging, subset=[tag]))
     tampil = [c for c in view.columns if _norm(c) not in SKU_HIDE_VIEW]
     if kc_cc in tampil:
         tampil.remove(kc_cc); tampil.insert(0, kc_cc)      
+    if "Pilih" in tampil:
+        tampil.remove("Pilih")
+    tampil.insert(0, "Pilih")
+    s1, s2, _ = st.columns([1, 1.8, 6], vertical_alignment="center")
+    s1.checkbox("Select All", key="sku_select_all", on_change=_sku_pilih_semua)
+    s2.button("✅ Mark as Done", type="primary", key="sku_mark_done", on_click=_sku_mark_done,
+              disabled=not (ss.sku_pilih & set(keys)))
     st.data_editor(
         styler, key=f"editor_sku_{ss.sku_ver}", on_change=_sku_on_change,
         column_order=tampil,
-        column_config={tag: st.column_config.SelectboxColumn(tag, options=SKU_TAGGING, required=True, width=130)},
-        disabled=[c for c in view.columns if c != tag],
+        column_config={
+            "Pilih": st.column_config.CheckboxColumn("✅", width=50, default=False),
+            tag: st.column_config.SelectboxColumn(tag, options=SKU_TAGGING, required=True, width=130),
+        },
+        disabled=[c for c in view.columns if c not in (tag, "Pilih")],
         hide_index=True, num_rows="fixed", width="stretch",
         height=min(len(view) * 35 + 38, 560),
     )
