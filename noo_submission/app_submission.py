@@ -452,6 +452,29 @@ def render_manual_sku():
 # ═════════════════════════════════════════════════════════════════════════════
 # HALAMAN: NOO SUBMISSION
 # ═════════════════════════════════════════════════════════════════════════════
+def koreksi_cc_upload(df: pd.DataFrame):
+    """Samakan prefix Customer Code (12/17) dengan aturan manual option."""
+    if df.empty:
+        return df, []
+    try:
+        map_raw  = muat_distri_customer_code_raw()
+        map_nama = muat_distri_customer_name()
+    except Exception:
+        return df, []
+    nama_ke_distri = {str(v).strip(): k for k, v in map_nama.items() if v}
+    df, diubah = df.copy(), []
+    for i, r in df.iterrows():
+        distri = nama_ke_distri.get(str(r["Customer Name"]).strip())
+        produk = _sku_str(r["Product"])
+        lama   = _sku_str(r["Customer Code"])
+        if not distri or not produk:
+            continue
+        benar = bangun_customer_code(map_raw.get(distri, ""), produk)
+        if benar and benar[:2] != lama[:2]:
+            df.at[i, "Customer Code"] = benar
+            diubah.append((produk, lama, benar))
+    return df, diubah
+
 def halaman_pengajuan_noo():
     ss = st.session_state
     st.markdown(komponen.html_breadcrumb("NOO Submission"), unsafe_allow_html=True)
@@ -482,6 +505,7 @@ def halaman_pengajuan_noo():
                     st.markdown(komponen.html_info_file(berkas.name, uk), unsafe_allow_html=True)
                 df_gabungan = pd.concat(semua, ignore_index=True)
                 data_sku  = pivot_sku_mapping(df_gabungan)
+                data_sku, ss.sku_cc_diubah = koreksi_cc_upload(data_sku)
                 data_noo  = pivot_noo(df_gabungan)
                 file_siap = True
             except Exception as e:
@@ -501,6 +525,10 @@ def halaman_pengajuan_noo():
         st.markdown(judul_opsi(2,"Upload Option","extracted from Failure List file"),
                     unsafe_allow_html=True)
         if file_siap and len(data_sku):
+            if ss.get("sku_cc_diubah"):
+                contoh = ", ".join(f"{p}: {a}→{b}" for p, a, b in ss.sku_cc_diubah[:5])
+                st.caption(f"⚠️ {len(ss.sku_cc_diubah)} Customer Code dikoreksi otomatis "
+                           f"sesuai brand produk ({contoh}).")
             st.dataframe(data_sku.head(5), hide_index=True, width="stretch")
         else:
             st.markdown('<div class="preview-kosong">📄 No data yet, please upload a file first</div>',
@@ -512,12 +540,37 @@ def halaman_pengajuan_noo():
                                 disabled=not file_siap, width="stretch", key="unduh_sku")
     if c_submit_sku.button("📨 Submit SKU Mapping", disabled=not file_siap, type="primary",
                             width="stretch", key="submit_sku"):
-        with st.spinner("Sending..."):
-            time.sleep(0.8)
-        catat_riwayat("Submit SKU Mapping", f"{len(data_sku)} rows")
-        ss.pesan_toast = "SKU Mapping submission successfully sent"
-        st.rerun()
-
+        rows = data_sku.fillna("").to_dict("records")
+        with st.spinner("Checking duplicates..."):
+            dup_db, gagal_cek = sb_cari_duplikat_sku(
+                "sku_mapping", [(_sku_str(r["Customer Code"]), _sku_str(r["Product"])) for r in rows])
+        if gagal_cek:
+            ss.pesan_toast = "Cancelled — could not check duplicates: " + ", ".join(sorted(gagal_cek))
+            ss.pesan_toast_icon = "⚠️"
+            st.rerun()
+        seen, baru = set(), []
+        for r in rows:
+            k = _sku_kunci(r["Customer Code"], r["Product"])
+            if k in dup_db or k in seen:
+                continue
+            seen.add(k); baru.append(r)
+        if not baru:
+            ss.pesan_toast = "All rows already exist in sku_mapping. Nothing saved."
+            ss.pesan_toast_icon = "⚠️"
+            st.rerun()
+        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        kolom_ada = [k for k in SKU_KOLOM_DB if k in data_sku.columns]
+        payload = [{**{SKU_KOLOM_DB[k]: (_sku_str(r[k]) or None) for k in kolom_ada},
+                    "created_at": ts} for r in baru]
+        with st.spinner("Saving to Supabase..."):
+            result = sb_insert("sku_mapping", payload)
+        if isinstance(result, dict) and "_error" in result:
+            st.error(f"Failed to save: {result['_error']}")
+        else:
+            catat_riwayat("Submit SKU Mapping", f"{len(payload)} rows (skipped: {len(rows)-len(baru)})")
+            ss.pesan_toast = (f"SKU Mapping saved — {len(payload)} rows"
+                              + (f", {len(rows)-len(baru)} duplicates skipped" if len(baru) < len(rows) else ""))
+            st.rerun()
     st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
 
     # ── NOO ──────────────────────────────────────────────────────────────────
