@@ -259,8 +259,11 @@ def normalisasi_impor(mentah: pd.DataFrame) -> pd.DataFrame:
 def template_csv() -> bytes:
     return pd.DataFrame(columns=WAJIB_ISI).to_csv(index=False).encode("utf-8")
 
-def terapkan_filter(df, status, distributor="All distributors", rentang=None):
+def terapkan_filter(df, status, distributor="All distributors", rentang=None, brand="All brands"):
     m = pd.Series(True, index=df.index)
+    if brand != "All brands" and "Customer Store Code" in df.columns:
+        awal = df["Customer Store Code"].astype(str).str.strip().str[:2]
+        m &= awal == ("17" if brand == "NXP" else "12")
     if rentang and "Created At" in df.columns:
         tgl = ke_wib_naive(df["Created At"]).dt.normalize()
         m  &= tgl >= pd.Timestamp(rentang[0])
@@ -296,7 +299,7 @@ def tab_noo():
     if ss.get("err_tagging"):
         st.error(ss.pop("err_tagging"))
     if ss.pop("reset_filter", False):
-        ss.f_status = "All statuses"; ss.f_distri = "All distributors"
+        ss.f_status = "All statuses"; ss.f_distri = "All distributors"; ss.f_brand = "All brands"
         ss.pop("f_tgl_awal",None); ss.pop("f_tgl_akhir",None)
 
     opsi_jenis  = sorted(set(JENIS_TOKO_DEFAULT) | set(ss.df_toko["Store Type"].dropna().astype(str)) - {""})
@@ -308,7 +311,7 @@ def tab_noo():
         if "Created At" in ss.df_toko.columns else pd.NaT
     tgl_awal = hari_ini if pd.isna(tgl_min) else tgl_min.date()
 
-    c_tgl1,c_tgl2,c_distri,c_status,c_refresh,c_unduh,c_simpan = st.columns([1.2,1.2,1.5,1.3,1.1,1.6,1.5])
+    c_tgl1,c_tgl2,c_distri,c_brand,c_status,c_refresh,c_unduh,c_simpan = st.columns([1.1,1.1,1.4,1.0,1.2,1.0,1.5,1.4])
     with c_tgl1:
         tgl_dari = st.date_input("Date from", value=tgl_awal, key="f_tgl_awal",
                                   format="YYYY-MM-DD", on_change=reset_halaman_data)
@@ -320,6 +323,9 @@ def tab_noo():
     rentang = (min(tgl_dari,tgl_sampai), max(tgl_dari,tgl_sampai))
     with c_distri:
         distributor = st.selectbox("Distributor", daftar_distri, key="f_distri", on_change=reset_halaman_data)
+    with c_brand:
+        brand = st.selectbox("Brand", ["All brands", "NXP", "G2G"], key="f_brand",
+                             on_change=reset_halaman_data)
     with c_status:
         status = st.selectbox("Status",["All statuses"] + KOLOM_VALIDASI, key="f_status",
                                on_change=reset_halaman_data)
@@ -335,7 +341,7 @@ def tab_noo():
         st.button("Save changes", type="primary", width="stretch", key="tombol_simpan",
                    on_click=simpan_perubahan)
 
-    hasil_filter = terapkan_filter(ss.df_toko, status, distributor, tuple(rentang))
+    hasil_filter = terapkan_filter(ss.df_toko, status, distributor, tuple(rentang), brand)
     total_filter = len(hasil_filter)
 
     data_unduh = bangun_download_noo(hasil_filter)
@@ -355,7 +361,7 @@ def tab_noo():
         st.info("No stores match the filter.")
         return
 
-    tanda = (status, distributor, tuple(rentang), ss.halaman_data, ukuran, ss.versi_impor)
+    tanda = (status, distributor, brand, tuple(rentang), ss.halaman_data, ukuran, ss.versi_impor)
     if ss.tanda_tangan != tanda or ss.snapshot is None:
         ss.snapshot        = hasil_filter.iloc[mulai:akhir][KOLOM_TAMPIL].copy()
         ss.snapshot["Pilih"] = False
@@ -525,7 +531,7 @@ def tab_noo():
 # ═════════════════════════════════════════════════════════════════════════════
 SKU_TABLE    = "sku_mapping"
 SKU_TAGGING  = ["Not Yet", "Done"]
-KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_distri", "f_status")
+KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_distri", "f_brand", "f_status")
 KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_dari", "sku_f_sampai", "sku_select_all")
 
 SKU_DL_HEADERS = ["Customer Code", "Customer Name", "Product", "Product Chinese Short Name",
