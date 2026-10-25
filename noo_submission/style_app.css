@@ -423,3 +423,27 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   text-align: left !important;
   width: 100% !important;
 }
+/* NOO Upload Option: lebar minimum + scroll horizontal */
+.st-key-tabel_noo_scroll {
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.st-key-tabel_noo_scroll > div[data-testid="stVerticalBlock"] {
+  min-width: 1300px;
+}
+.st-key-tabel_noo_scroll [data-testid="stHorizontalBlock"] {
+  min-width: 1300px;
+  flex-wrap: nowrap;
+}
+.st-key-tabel_noo_scroll [data-testid="stColumn"] {
+  min-width: 0;
+}
+/* teks nama panjang tidak terpotong "..." */
+.st-key-kartu_noo .st-key-tabel_noo_scroll .catatan-kecil {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.3 !important;
+}
+/* header kolom satu baris */
+.st-key-tabel_noo_scroll [data-testid="stMarkdownContainer"] b { white-space: nowrap; }
