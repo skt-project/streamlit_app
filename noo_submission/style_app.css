@@ -321,5 +321,75 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
   box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
 }
 [class*="st-key-pill_"] .stButton > button[kind="secondary"] p { color: #475569 !important; }
-.st-key-sku_toolbar .stButton > button,
-.st-key-sku_toolbar .stDownloadButton > button { border-radius: 999px !important; font-size: .82rem; }
+.st-key-sku_toolbar button { border-radius: 999px; font-size: .82rem; }
+
+/* NOO toolbar: Refresh, Download NOO, Save changes -> pill kecil seragam */
+.st-key-tombol_refresh .stButton > button[kind],
+.st-key-tombol_simpan  .stButton > button[kind],
+.st-key-unduh_noo_validasi .stDownloadButton > button[kind] {
+  border-radius: 999px !important;
+  height: 32px !important; min-height: 32px !important;
+  padding: 0 14px !important;
+  background: #2563eb !important; border: 1px solid #2563eb !important;
+  box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
+}
+.st-key-tombol_refresh .stButton > button[kind] p,
+.st-key-tombol_simpan  .stButton > button[kind] p,
+.st-key-unduh_noo_validasi .stDownloadButton > button[kind] p {
+  color: #fff !important; font-size: 12px !important; font-weight: 700 !important; margin: 0 !important;
+}
+.st-key-tombol_refresh .stButton > button[kind]:hover,
+.st-key-tombol_simpan  .stButton > button[kind]:hover,
+.st-key-unduh_noo_validasi .stDownloadButton > button[kind]:hover {
+  background: #1e56d1 !important; border-color: #1e56d1 !important;
+}
+/* Download NOO saat tidak ada data */
+.st-key-unduh_noo_validasi .stDownloadButton > button[kind]:disabled {
+  background: #e9edf2 !important; border-color: #d9e0e9 !important; box-shadow: none !important;
+}
+.st-key-unduh_noo_validasi .stDownloadButton > button[kind]:disabled p { color: #9ca7b6 !important; }
+
+/* SKU toolbar: Refresh, Download, Save, Mark as Done, Reset -> pill kecil seragam */
+.st-key-sku_refresh .stButton > button[kind],
+.st-key-sku_simpan  .stButton > button[kind],
+.st-key-sku_mark_done .stButton > button[kind],
+.st-key-sku_reset   .stButton > button[kind],
+.st-key-sku_discard .stButton > button[kind],
+.st-key-sku_cancel  .stButton > button[kind],
+.st-key-unduh_sku   .stDownloadButton > button[kind] {
+  border-radius: 999px !important;
+  height: 32px !important; min-height: 32px !important;
+  padding: 0 14px !important;
+  background: #2563eb !important; border: 1px solid #2563eb !important;
+  box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
+}
+.st-key-sku_refresh .stButton > button[kind] p,
+.st-key-sku_simpan  .stButton > button[kind] p,
+.st-key-sku_mark_done .stButton > button[kind] p,
+.st-key-sku_reset   .stButton > button[kind] p,
+.st-key-sku_discard .stButton > button[kind] p,
+.st-key-sku_cancel  .stButton > button[kind] p,
+.st-key-unduh_sku   .stDownloadButton > button[kind] p {
+  color: #fff !important; font-size: 12px !important; font-weight: 700 !important; margin: 0 !important;
+}
+.st-key-sku_refresh .stButton > button[kind]:hover,
+.st-key-sku_simpan  .stButton > button[kind]:hover,
+.st-key-sku_mark_done .stButton > button[kind]:hover,
+.st-key-sku_reset   .stButton > button[kind]:hover,
+.st-key-sku_discard .stButton > button[kind]:hover,
+.st-key-sku_cancel  .stButton > button[kind]:hover,
+.st-key-unduh_sku   .stDownloadButton > button[kind]:hover {
+  background: #1e56d1 !important; border-color: #1e56d1 !important;
+}
+/* Disabled (Save changes tanpa perubahan, Mark as Done tanpa pilihan, Download kosong) */
+.st-key-sku_refresh .stButton > button[kind]:disabled,
+.st-key-sku_simpan  .stButton > button[kind]:disabled,
+.st-key-sku_mark_done .stButton > button[kind]:disabled,
+.st-key-sku_reset   .stButton > button[kind]:disabled,
+.st-key-unduh_sku   .stDownloadButton > button[kind]:disabled {
+  background: #e9edf2 !important; border-color: #d9e0e9 !important; box-shadow: none !important;
+}
+.st-key-sku_simpan  .stButton > button[kind]:disabled p,
+.st-key-sku_mark_done .stButton > button[kind]:disabled p,
+.st-key-sku_reset   .stButton > button[kind]:disabled p,
+.st-key-unduh_sku   .stDownloadButton > button[kind]:disabled p { color: #9ca7b6 !important; }
