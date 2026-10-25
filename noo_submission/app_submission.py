@@ -920,8 +920,8 @@ def halaman_konfirmasi_spv():
     tempat_ringkasan = st.empty()
     
     n_sudah = len(semua) - len(baris_tampil)
-    if n_sudah:
-        st.success(f"✅ {n_sudah} already confirmed, {len(baris_tampil)} remaining.")
+    if n_sudah and baris_tampil and distributor:
+        st.success(f"✅ {n_sudah} outlet(s) already confirmed, {len(baris_tampil)} remaining.")
 
     with st.container(key="kartu_spv"):
         st.markdown(komponen.html_catatan_spv(), unsafe_allow_html=True)
