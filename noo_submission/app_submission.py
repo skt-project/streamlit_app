@@ -452,28 +452,29 @@ def render_manual_sku():
 # ═════════════════════════════════════════════════════════════════════════════
 # HALAMAN: NOO SUBMISSION
 # ═════════════════════════════════════════════════════════════════════════════
-def koreksi_cc_upload(df: pd.DataFrame):
-    """Samakan prefix Customer Code (12/17) dengan aturan manual option."""
-    if df.empty:
-        return df, []
-    try:
-        map_raw  = muat_distri_customer_code_raw()
-        map_nama = muat_distri_customer_name()
-    except Exception:
-        return df, []
-    nama_ke_distri = {str(v).strip(): k for k, v in map_nama.items() if v}
-    df, diubah = df.copy(), []
+def cc_salah(df: pd.DataFrame) -> list:
+    """Return [(index, product, customer_code, prefix_benar)] untuk baris yang prefix-nya salah."""
+    hasil = []
+    if df.empty or not {"Product", "Customer Code"} <= set(df.columns):
+        return hasil
     for i, r in df.iterrows():
-        distri = nama_ke_distri.get(str(r["Customer Name"]).strip())
-        produk = _sku_str(r["Product"])
-        lama   = _sku_str(r["Customer Code"])
-        if not distri or not produk:
+        p  = _sku_str(r["Product"]).upper()
+        cc = _sku_str(r["Customer Code"])
+        if not p or not cc:
             continue
-        benar = bangun_customer_code(map_raw.get(distri, ""), produk)
-        if benar and benar[:2] != lama[:2]:
-            df.at[i, "Customer Code"] = benar
-            diubah.append((produk, lama, benar))
-    return df, diubah
+        benar = "12" if p.startswith("G2G-") else "17"
+        if cc[:2] != benar:
+            hasil.append((i, p, cc, benar))
+    return hasil
+
+def perbaiki_cc(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    for i, p, cc, benar in cc_salah(df):
+        df.at[i, "Customer Code"] = benar + cc[2:]
+    return df
+
+def _aktifkan_fix_cc():
+    st.session_state.sku_fix_on = True
 
 def halaman_pengajuan_noo():
     ss = st.session_state
@@ -494,6 +495,7 @@ def halaman_pengajuan_noo():
         kebesaran = [b for b in daftar_berkas if b.size > 10*1024*1024]
         if kebesaran:
             nama_k = ", ".join(b.name for b in kebesaran)
+        
             st.markdown(komponen.html_error_unggah(f"Exceeds 10 MB: {nama_k}"), unsafe_allow_html=True)
         else:
             try:
@@ -505,12 +507,15 @@ def halaman_pengajuan_noo():
                     st.markdown(komponen.html_info_file(berkas.name, uk), unsafe_allow_html=True)
                 df_gabungan = pd.concat(semua, ignore_index=True)
                 data_sku  = pivot_sku_mapping(df_gabungan)
-                data_sku, ss.sku_cc_diubah = koreksi_cc_upload(data_sku)
+                if ss.get("sku_fix_on"):
+                    data_sku = perbaiki_cc(data_sku)
                 data_noo  = pivot_noo(df_gabungan)
                 file_siap = True
             except Exception as e:
                 st.markdown(komponen.html_error_unggah(f"Failed to read file: {e}"), unsafe_allow_html=True)
-
+    if not daftar_berkas:
+        ss.sku_fix_on = False
+    salah_cc = cc_salah(data_sku)
     st.markdown('<hr class="pemisah-tipis">', unsafe_allow_html=True)
 
     # ── SKU MAPPING ──────────────────────────────────────────────────────────
@@ -525,11 +530,15 @@ def halaman_pengajuan_noo():
         st.markdown(judul_opsi(2,"Upload Option","extracted from Failure List file"),
                     unsafe_allow_html=True)
         if file_siap and len(data_sku):
-            if ss.get("sku_cc_diubah"):
-                contoh = ", ".join(f"{p}: {a}→{b}" for p, a, b in ss.sku_cc_diubah[:5])
-                st.caption(f"⚠️ {len(ss.sku_cc_diubah)} Customer Code dikoreksi otomatis "
-                           f"sesuai brand produk ({contoh}).")
             st.dataframe(data_sku.head(5), hide_index=True, width="stretch")
+            if salah_cc:
+                contoh = ", ".join(f"{p}: {cc}→{b}…" for _, p, cc, b in salah_cc[:5])
+                st.error(f"❌ {len(salah_cc)} row(s) have an invalid Customer Code prefix "
+                         f"(G2G- products must use 12, all others must use 17). Examples: {contoh}. "
+                         f"Submit is locked until this is fixed.")
+                st.button("🔧 Fix Customer Code", key="sku_fix", on_click=_aktifkan_fix_cc)
+            elif ss.get("sku_fix_on"):
+                st.success("✅ Customer Code has been corrected to match the product brand.")
         else:
             st.markdown('<div class="preview-kosong">📄 No data yet, please upload a file first</div>',
                         unsafe_allow_html=True)
@@ -538,8 +547,11 @@ def halaman_pengajuan_noo():
     c_unduh_sku.download_button("⬇️ Download Result", hasil_ke_excel(data_sku), "hasil_sku_mapping.xlsx",
                                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 disabled=not file_siap, width="stretch", key="unduh_sku")
-    if c_submit_sku.button("📨 Submit SKU Mapping", disabled=not file_siap, type="primary",
-                            width="stretch", key="submit_sku"):
+    if c_submit_sku.button("📨 Submit SKU Mapping", disabled=not file_siap or bool(salah_cc),
+                            type="primary", width="stretch", key="submit_sku"):
+        if cc_salah(data_sku):          
+            st.error("Submit cancelled: some Customer Codes still have an invalid prefix.")
+            st.stop()
         rows = data_sku.fillna("").to_dict("records")
         with st.spinner("Checking duplicates..."):
             dup_db, gagal_cek = sb_cari_duplikat_sku(
@@ -715,7 +727,10 @@ def halaman_pengajuan_noo():
                         unsafe_allow_html=True)
         else:
             st.markdown(komponen.html_catatan_noo(), unsafe_allow_html=True)
-            header = st.columns([1.1,1.4,1.4,0.8,1.4,1.1,1.1,1.1])
+            LEBAR_NOO = [1.4,1.8,1.8,1.2,1.8,1.5,1.5,1.4]
+            tabel_noo = st.container(key="tabel_noo_scroll")
+            tabel_noo.__enter__()
+            header = st.columns(LEBAR_NOO)
             for kolom, (teks, wajib) in zip(header,[
                 ("Customer Store Code",True),("Store Name",False),("Customer Store Name",False),
                 ("City",True),("Store Address",True),("Sales Name",True),("SPV",True),("Store Type",True)]):
@@ -730,7 +745,7 @@ def halaman_pengajuan_noo():
                 data_noo[_c] = data_noo[_c].astype("object")
             for i, baris in data_noo.iterrows():
                 csn = str(baris.get("Customer Store Name",baris.get("Store Name",""))).strip().upper()
-                c_kode,c_nama,c_csn,c_city,c_alamat,c_sales,c_spv,c_tipe = st.columns([1.1,1.4,1.4,0.8,1.4,1.1,1.1,1.1])
+                c_kode,c_nama,c_csn,c_city,c_alamat,c_sales,c_spv,c_tipe = st.columns(LEBAR_NOO)
                 kode_val = str(baris["Customer Store Code"])
                 c_kode.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{kode_val}</div>', unsafe_allow_html=True)
                 c_nama.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{baris["Store Name"]}</div>', unsafe_allow_html=True)
@@ -751,6 +766,7 @@ def halaman_pengajuan_noo():
                 data_noo.loc[i,"Store Type"] = tipe_noo
                 if not (kode_val.strip() and city_noo.strip() and tipe_noo and spv_noo.strip() and sales_noo.strip()):
                     semua_terisi = False
+            tabel_noo.__exit__(None, None, None)
             noo_siap = semua_terisi
 
         if st.button("📨 Submit NOO", disabled=not (file_siap and noo_siap), type="primary",
