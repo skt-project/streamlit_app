@@ -447,3 +447,20 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 }
 /* header kolom satu baris */
 .st-key-tabel_noo_scroll [data-testid="stMarkdownContainer"] b { white-space: nowrap; }
+
+/* SPV Confirmation: lebar minimum + scroll horizontal */
+.st-key-tabel_spv_scroll {
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.st-key-tabel_spv_scroll > div[data-testid="stVerticalBlock"],
+.st-key-tabel_spv_scroll [data-testid="stHorizontalBlock"] {
+  min-width: 1500px;
+  flex-wrap: nowrap;
+}
+.st-key-tabel_spv_scroll [data-testid="stColumn"] { min-width: 0; }
+/* header satu baris, nama distributor tidak terpotong */
+.st-key-tabel_spv_scroll .kepala-kolom,
+.st-key-tabel_spv_scroll [data-testid="stMarkdownContainer"] b { white-space: nowrap; }
+/* dropdown NOO/Existing: teks pilihan tidak terpotong */
+.st-key-tabel_spv_scroll [data-baseweb="select"] > div { min-width: 120px; }
