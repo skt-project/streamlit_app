@@ -986,10 +986,9 @@ def halaman_konfirmasi_spv():
         + _css_status_spv(baris_tampil, ss.spv_tampil_error),
         unsafe_allow_html=True)
 
-    n_bermasalah = total - n_lengkap
+    n_bermasalah = sum(any(_masalah_baris_spv(b).values()) for b in baris_tampil)
     if ss.spv_tampil_error and n_bermasalah:
-        st.error(f"Belum bisa submit: {n_bermasalah} outlet belum lengkap.")
-
+        st.error(f"{n_bermasalah} outlet(s) incomplete, please fill all required fields.")
     st.markdown('<hr class="pemisah-tipis">', unsafe_allow_html=True)
     c_kembali,_,c_draft,c_submit = st.columns([1.2,3.6,1.4,1.8])
     if c_kembali.button("← Kembali", key="spv_kembali"):
@@ -1000,11 +999,11 @@ def halaman_konfirmasi_spv():
         catat_riwayat("SPV - Save as Draft", f"{len(semua)} rows")
         ss.pesan_toast = "SPV Confirmation draft saved"
         st.rerun()
-    if c_submit.button("📨 Submit Confirmation", type="primary", key="spv_submit", disabled=not semua):
+    if c_submit.button("📨 Submit Confirmation", type="primary", key="spv_submit", disabled=not baris_tampil):
         if n_bermasalah:
             ss.spv_tampil_error = True; st.rerun()
         with st.spinner("Sending confirmation..."):
-            berhasil, gagal = simpan_konfirmasi_spv(semua)
+            berhasil, gagal = simpan_konfirmasi_spv(baris_tampil)
             if berhasil:
                 ambil_raw_noo.clear()          # paksa reload supaya Store Validation lihat data terbaru
                 ss.sim_tanda = None; ss.sim_hasil = {}
