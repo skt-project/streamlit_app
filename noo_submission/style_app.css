@@ -411,3 +411,15 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
   background: #1e56d1 !important; border-color: #1e56d1 !important; color: #fff !important;
   box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
 }
+
+/* Input NOO: ratakan kiri semua wrapper di dalam link button */
+section[data-testid="stSidebar"] .stLinkButton a,
+section[data-testid="stSidebar"] .stLinkButton a > div,
+section[data-testid="stSidebar"] .stLinkButton a > span,
+section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContainer"] {
+  display: flex !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  text-align: left !important;
+  width: 100% !important;
+}
