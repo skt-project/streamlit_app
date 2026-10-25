@@ -616,6 +616,7 @@ def halaman_dashboard():
         pct_gen    = round(n_generate/total_noo*100) if total_noo else 0
         pct_rev    = round(n_review/total_noo*100) if total_noo else 0
         pct_ext    = round(n_existing/total_noo*100) if total_noo else 0
+
         st.markdown(f"""
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
   <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px 16px">
@@ -840,16 +841,21 @@ def main():
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon","✅"))
 
     with st.sidebar:
-        st.markdown('<div class="brand">🏪 Store Validation</div>'
-                    '<div class="brand-sub">Review and update store details before submission.</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="brand">'
+            '  <div class="brand-icon">🏪</div>'
+            '  Store Validation'
+            '</div>'
+            '<div class="brand-sub">NOO & SKU Mapping Dashboard</div>',
+            unsafe_allow_html=True
+        )
         for label, ikon, kunci in NAVIGASI:
             nama_tombol = f"navaktif_{kunci}" if ss.halaman_aktif == kunci else f"nav_{kunci}"
             st.button(f"{ikon}   {label}", key=nama_tombol, on_click=tuju_halaman,
                       args=(kunci,), width="stretch")
-        st.markdown(f'<div class="status-sidebar"><span class="titik"></span>Ready</div>'
-                    f'<div class="status-update">Last updated: {ss.terakhir_update}</div>',
-                    unsafe_allow_html=True)
+            st.markdown(f'<div class="status-sidebar"><span class="titik"></span> Ready</div>'
+            f'<div class="status-update">🕐 {ss.terakhir_update}</div>',
+            unsafe_allow_html=True)
         st.link_button("🔍 Input NOO", "https://noo-submission.streamlit.app/",
                 use_container_width=True, key="nav_noo")
 
