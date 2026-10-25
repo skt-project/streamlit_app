@@ -849,19 +849,19 @@ def main():
             '<div class="brand-sub">NOO & SKU Mapping Dashboard</div>',
             unsafe_allow_html=True
         )
-    for label, ikon, kunci in NAVIGASI:
-        nama_tombol = f"navaktif_{kunci}" if ss.halaman_aktif == kunci else f"nav_{kunci}"
-        st.button(f"{ikon}   {label}", key=nama_tombol, on_click=tuju_halaman,
-                  args=(kunci,), width="stretch")
+        for label, ikon, kunci in NAVIGASI:
+            nama_tombol = f"navaktif_{kunci}" if ss.halaman_aktif == kunci else f"nav_{kunci}"
+            st.button(f"{ikon}   {label}", key=nama_tombol, on_click=tuju_halaman,
+                      args=(kunci,), width="stretch")
 
-    st.link_button("🔍 Input NOO", "https://noo-submission.streamlit.app/",
-            use_container_width=True, key="nav_noo")
+        st.link_button("🔍 Input NOO", "https://noo-submission.streamlit.app/",
+                use_container_width=True, key="nav_noo")
 
-    st.markdown(
-        f'<div class="status-sidebar"><span class="titik"></span> Ready</div>'
-        f'<div class="status-update">🕐 {ss.terakhir_update}</div>',
-        unsafe_allow_html=True
-    )
+        st.markdown(
+            f'<div class="status-sidebar"><span class="titik"></span> Ready</div>'
+            f'<div class="status-update">🕐 {ss.terakhir_update}</div>',
+            unsafe_allow_html=True
+        )
 
     {
         "dashboard":  halaman_dashboard,
