@@ -639,11 +639,30 @@ def _tab_sku():
     if ss.sku_df is None:
         try:
             ss.sku_df = ambil_sku_mapping()
+            if ss.sku_df.empty:
+                ambil_sku_mapping.clear()      # jangan cache hasil kosong
         except Exception as e:
             st.error(f"Failed to load SKU Mapping: {e}"); return
     df = ss.sku_df
     if df.empty:
-        st.info("No SKU Mapping data."); return
+        with st.container(key="sku_filters"):
+            f1, f2, f3, f4, f5 = st.columns([2.2, 1.2, 1.2, 1.2, 0.8], vertical_alignment="bottom")
+            f1.selectbox("Customer Store Name", ["All customers"], disabled=True, key="sku_f_nama_x")
+            f2.selectbox("Brand", ["All brands"], disabled=True, key="sku_f_brand_x")
+            f3.date_input("Date From", disabled=True, key="sku_f_dari_x", format="YYYY-MM-DD")
+            f4.date_input("Date To", disabled=True, key="sku_f_sampai_x", format="YYYY-MM-DD")
+            f5.button("Reset", disabled=True, key="sku_reset_x", width="stretch")
+        if msg := ss.pop("sku_pesan", None):
+            (st.success if msg[0] == "ok" else st.error)(msg[1])
+        with st.container(key="sku_toolbar"):
+            b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
+            if b1.button("🔄 Refresh", key="sku_refresh_empty", width="stretch"):
+                _refresh_sku()
+            b2.button("⬇️ Download", disabled=True, key="sku_dl_x", width="stretch")
+            b3.button("💾 Save changes", type="primary", disabled=True, key="sku_save_x", width="stretch")
+            info.markdown('<div class="teks-showing">Showing 0 of 0 records</div>', unsafe_allow_html=True)
+        st.info("No SKU Mapping data returned from Supabase.")
+        return
 
     tag     = _kolom(df, "tagging")
     if not tag:
@@ -759,7 +778,10 @@ def halaman_validasi_toko():
               on_click=_pilih_tab, args=("sku",),
               type="primary" if ss.tab_validasi == "sku" else "secondary")
 
-    tab_noo() if ss.tab_validasi == "noo" else _tab_sku()
+    if ss.tab_validasi == "noo":
+        tab_noo()
+    else:
+        _tab_sku()
 # ═══════════════════════════════════════
 # HALAMAN: DASHBOARD
 # ═══════════════════════════════════════
