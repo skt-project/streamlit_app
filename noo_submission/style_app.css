@@ -91,8 +91,6 @@ section[data-testid="stSidebar"] .stLinkButton a:hover {
   color: #263957 !important;
 }
 
-/* ---------- PAGE HEADER ---------- */
-.header-halaman { ... }
 /* ---------- KPI CARDS ---------- */
 .grid-kpi { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:16px; }
 .kartu-kpi { display:flex; align-items:center; min-height:91px; padding:17px 18px; border-radius:12px; border:1px solid; box-shadow:0 3px 10px rgba(19,40,72,.035); background:#f0f6ff; border-color:#dceaff; }
@@ -119,6 +117,27 @@ section[data-testid="stSidebar"] .stLinkButton a:hover {
   background:conic-gradient(#2563eb 0 88%, #dbe5f5 88% 100%);
 }
 .donut::after { content:''; position:absolute; inset:6px; background:#f5f8ff; border-radius:50%; }
+/* ---------- TAB PILLS (NOO / SKU Mapping) ---------- */
+.tab-container { display: flex; gap: 8px; margin-bottom: 16px; }
+.tab-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 18px; border-radius: 999px;
+  font-weight: 600; font-size: 13px; cursor: pointer;
+  border: 1px solid #e2e8f0; background: #fff; color: #475569;
+  transition: all .2s ease;
+}
+.tab-pill.aktif {
+  background: #2563eb; color: #fff; border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37,99,235,.3);
+}
+.tab-pill .tab-badge {
+  background: rgba(255,255,255,.25); color: inherit;
+  padding: 1px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 700;
+}
+.tab-pill:not(.aktif) .tab-badge {
+  background: #f1f5f9; color: #64748b;
+}
 
 /* ---------- FILTER / TOOLBAR ---------- */
 div[data-testid="stTextInput"] input, div[data-baseweb="select"] > div { border-radius:8px; border-color:#d7e0ea !important; color:#33435c; }
@@ -285,6 +304,22 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
 
 /* ---------- Responsif ---------- */
 @media (max-width: 900px) {
-  .kpi-baris { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .header-judul { font-size: 1.3rem; }
 }
+
+/* Pill nav */
+[class*="st-key-pill_"] .stButton > button {
+  border-radius: 999px !important; height: 34px !important; min-height: 0 !important;
+  padding: 0 20px !important; font-weight: 600; font-size: .85rem; box-shadow: none !important;
+}
+[class*="st-key-pill_"] .stButton > button[kind="secondary"] {
+  background: #eef2f7 !important; border: 1px solid #e2e8f0 !important; color: #475569 !important;
+}
+[class*="st-key-pill_"] .stButton > button[kind="primary"] {
+  background: #2563eb !important; border: 1px solid #2563eb !important;
+  box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
+}
+[class*="st-key-pill_"] .stButton > button[kind="secondary"] p { color: #475569 !important; }
+.st-key-sku_toolbar .stButton > button,
+.st-key-sku_toolbar .stDownloadButton > button { border-radius: 999px !important; font-size: .82rem; }
