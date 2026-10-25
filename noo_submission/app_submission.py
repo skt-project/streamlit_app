@@ -220,7 +220,7 @@ def bangun_baris_spv(distributor: str = "") -> list:
             "id":               i,
             "no":               i,
             "store_code":       peta.get("customerstorecode","") or "",
-            "distributor":      peta.get("customerstorename","") or distributor,
+            "distributor":      peta.get("customerstorename","") or "",
             "nama":             peta.get("storename","") or "",
             "alamat":           peta.get("storeaddress","") or "",
             "kota":             peta.get("city","") or "",
@@ -486,6 +486,14 @@ def halaman_pengajuan_noo():
         daftar_berkas = st.file_uploader(
             "Upload Failure List (.xlsx / .xls, max 10 MB per file)",
             type=["xlsx","xls"], key="unggah_pengajuan", accept_multiple_files=True)
+
+    tanda_file = tuple((b.name, b.size) for b in (daftar_berkas or []))
+    if ss.get("tanda_file_upload") != tanda_file:
+        for k in ["sku_staged", "sku_last_batch", "sku_last_n", "sku_msg",
+                  "sku_fix_on", "noo_batch_terkirim"]:
+            ss.pop(k, None)
+        ss.sku_editor_key = ss.get("sku_editor_key", 0) + 1
+        ss.tanda_file_upload = tanda_file
 
     file_siap  = False
     data_sku   = pd.DataFrame(columns=KOLOM_SKU_OUTPUT)
@@ -900,6 +908,11 @@ def halaman_konfirmasi_spv():
             st.rerun()
 
     semua = bangun_baris_spv(distributor)
+    if distributor:
+        _nk = lambda s: re.sub(r"\s+", " ", str(s or "")).strip().upper()
+        semua = [b for b in semua if _nk(b["distributor"]) == _nk(distributor)]
+    for n, b in enumerate(semua, 1):
+        b["no"] = n                      # nomor urut ulang; "id" tetap (key widget stabil)
     isi_similarity_spv(semua, region_noo)
     ss.baris_spv = semua
     baris_tampil = semua
@@ -908,7 +921,8 @@ def halaman_konfirmasi_spv():
     with st.container(key="kartu_spv"):
         st.markdown(komponen.html_catatan_spv(), unsafe_allow_html=True)
         if not baris_tampil:
-            st.info("No NOO outlet data to display.")
+            st.info(f"No NOO outlet data for {distributor}." if distributor
+                    else "No NOO outlet data to display.")
         else:
             kepala = st.columns(LEBAR_KOLOM_SPV)
             for kolom, (teks, wajib) in zip(kepala,[
