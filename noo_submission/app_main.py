@@ -135,6 +135,10 @@ def reset_halaman_data():
 def inisialisasi_state():
     ss = st.session_state
     ss.setdefault("baris_perlu_push", set())
+    ss.setdefault("tab_validasi", "noo")
+    ss.setdefault("sku_df", None)
+    ss.setdefault("sku_pending", {})      # {row_key: "Done"}
+    ss.setdefault("sku_ver", 0)
     ss.setdefault("baris_kotor", set())
     ss.setdefault("riwayat", [])
     ss.setdefault("versi_impor", 0)
@@ -284,10 +288,8 @@ def terapkan_edit(master: pd.DataFrame, hasil_edit: pd.DataFrame):
 # HALAMAN: STORE VALIDATION
 # ═════════════════════════════════════════════════════════════════════════════
 
-def halaman_validasi_toko():
+def tab_noo():
     ss = st.session_state
-    st.markdown(komponen.html_header("Store Validation","Review and update store details before submission."),
-                unsafe_allow_html=True)
     tempat_unduh = st.empty()
     tempat_kpi   = st.empty()
 
@@ -516,11 +518,251 @@ def halaman_validasi_toko():
         kolom_footer[2+i].button(str(n),key=kunci,on_click=atur_halaman_data,args=(n,),width="stretch")
     kolom_footer[-1].button("›",key="hal_lanjut",disabled=ss.halaman_data>=total_halaman,
                              on_click=atur_halaman_data,args=(ss.halaman_data+1,),width="stretch")
-
 # ═════════════════════════════════════════════════════════════════════════════
+# HALAMAN: STORE VALIDATION (wrapper) + SKU MAPPING
+# ═════════════════════════════════════════════════════════════════════════════
+SKU_TABLE    = "sku_mapping"
+SKU_TAGGING  = ["Not Yet", "Done"]
+KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_distri", "f_status")
+KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_dari", "sku_f_sampai")
+_norm        = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+def _kolom(df, *names):
+    peta = {_norm(c): c for c in df.columns}
+    for n in names:
+        if _norm(n) in peta:
+            return peta[_norm(n)]
+    return None
+
+def _pertahankan(kunci):
+    # widget yang tidak dirender di run ini akan kehilangan state -> re-assign
+    for k in kunci:
+        if k in st.session_state:
+            st.session_state[k] = st.session_state[k]
+def _pilih_tab(nama):
+    ss = st.session_state
+    ss.tab_validasi = nama
+    ss.snapshot = None          # bangun ulang dari df_toko (sudah berisi edit)
+    ss.tanda_tangan = None
+
+@st.cache_data(ttl=300, show_spinner=False)
+def ambil_sku_mapping() -> pd.DataFrame:
+    rows, start, step = [], 0, 1000
+    while True:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{SKU_TABLE}",
+            headers={**_SB_HEADERS, "Prefer": "", "Range-Unit": "items",
+                     "Range": f"{start}-{start+step-1}"},
+            params={"select": "*", "order": "created_at.desc"}, timeout=15)
+        if r.status_code == 416:      # offset melewati total baris = selesai
+            break
+        r.raise_for_status()
+        batch = r.json()
+        rows += batch
+        if len(batch) < step:
+            break
+        start += step
+    return pd.DataFrame(rows)          # urutan kolom = urutan dari Supabase
+
+def _kolom_kunci(df):
+    pk = _kolom(df, "id")
+    if pk:
+        return [pk]
+    return [c for c in (_kolom(df, "customer_code"), _kolom(df, "customer_product_code")) if c]
+
+def _kunci_baris(df, cols):
+    return df[cols].astype(str).agg("||".join, axis=1)
+
+def _sku_on_change():
+    ss = st.session_state
+    ed = ss.get(f"editor_sku_{ss.sku_ver}", {}).get("edited_rows", {})
+    tag = ss.sku_tag_col
+    for pos, ch in ed.items():
+        if tag not in ch:
+            continue
+        k = ss.sku_view_keys[int(pos)]
+        if ch[tag] == ss.sku_asli.get(k):
+            ss.sku_pending.pop(k, None)
+        else:
+            ss.sku_pending[k] = ch[tag]
+    ss.sku_ver += 1      # remount editor supaya menampilkan overlay pending
+
+def reset_filter_sku(tgl_min, tgl_max):
+    ss = st.session_state
+    ss.sku_f_nama, ss.sku_f_brand = "All customers", "All brands"
+    ss.sku_f_dari, ss.sku_f_sampai = tgl_min, tgl_max
+
+def _refresh_sku():
+    ss = st.session_state
+    with st.spinner("Refreshing SKU Mapping..."):
+        try:
+            ambil_sku_mapping.clear()
+            ss.sku_df = ambil_sku_mapping()
+            ss.sku_pending = {}
+            ss.sku_ver += 1
+            ss.sku_konfirmasi = False
+            ss.sku_pesan = ("ok", "SKU Mapping refreshed from Supabase")
+        except Exception as e:
+            ss.sku_pesan = ("error", f"Refresh failed: {e}")
+    st.rerun()
+
+def _simpan_sku(df, kc_pk, tag, rk):
+    ss, ok, gagal = st.session_state, 0, []
+    for k, val in list(ss.sku_pending.items()):
+        if (rk == k).sum() != 1:                       # key tidak unik -> jangan update
+            gagal.append(f"{k} (key not unique)"); continue
+        row = df.loc[rk == k].iloc[0]
+        try:
+            r = requests.patch(
+                f"{SUPABASE_URL}/rest/v1/{SKU_TABLE}",
+                headers={**_SB_HEADERS, "Prefer": "return=representation"},
+                params={c: f"eq.{row[c]}" for c in kc_pk},
+                json={tag: val}, timeout=10)
+            if r.ok and len(r.json()) == 1:            # harus tepat 1 baris
+                df.loc[rk == k, tag] = val
+                ss.sku_pending.pop(k)
+                ok += 1
+            else:
+                gagal.append(f"{k} (HTTP {r.status_code})")
+        except Exception as e:
+            gagal.append(f"{k} ({e})")
+    ambil_sku_mapping.clear()
+    ss.sku_ver += 1
+    return ok, gagal
+
+def _warna_tagging(v):
+    return ("background-color:#dcfce7;color:#166534;font-weight:600" if v == "Done"
+            else "background-color:#fef3c7;color:#92400e;font-weight:600")
+
+def _tab_sku():
+    ss = st.session_state
+    if ss.sku_df is None:
+        try:
+            ss.sku_df = ambil_sku_mapping()
+        except Exception as e:
+            st.error(f"Failed to load SKU Mapping: {e}"); return
+    df = ss.sku_df
+    if df.empty:
+        st.info("No SKU Mapping data."); return
+
+    tag     = _kolom(df, "tagging")
+    if not tag:
+        st.error("Column `tagging` not found in `sku_mapping`. Run the SQL migration in Supabase first.")
+        return
+    kc_nama = _kolom(df, "customer_store_name", "customer_name")
+    kc_cc   = _kolom(df, "customer_code")
+    kc_tgl  = _kolom(df, "created_at")
+    kc_pk   = _kolom_kunci(df)
+    if not kc_pk:
+        st.error("Cannot determine a safe row key (need `id` or customer_code + customer_product_code)."); return
+    rk = _kunci_baris(df, kc_pk)
+    ss.sku_tag_col = tag
+    ss.sku_asli    = dict(zip(rk, df[tag].fillna("Not Yet")))
+
+    hari_ini = datetime.datetime.now(ZONA_WAKTU).date()
+    tgl = ke_wib_naive(df[kc_tgl]).dt.normalize() if kc_tgl else None
+    tgl_min = tgl.min().date() if tgl is not None and tgl.notna().any() else hari_ini
+    brand = df[kc_cc].astype(str).map(_brand_dari_cc) if kc_cc else pd.Series("Other", index=df.index)
+
+    nama_opts  = ["All customers"] + (sorted(df[kc_nama].dropna().astype(str).str.strip().unique()) if kc_nama else [])
+    brand_opts = ["All brands"] + sorted(brand.unique())
+    ss.setdefault("sku_f_nama", "All customers"); ss.setdefault("sku_f_brand", "All brands")
+    ss.setdefault("sku_f_dari", tgl_min);         ss.setdefault("sku_f_sampai", hari_ini)
+    if ss.sku_f_nama  not in nama_opts:  ss.sku_f_nama  = "All customers"
+    if ss.sku_f_brand not in brand_opts: ss.sku_f_brand = "All brands"
+
+    # ── Filters ──
+    with st.container(key="sku_filters"):
+        f1, f2, f3, f4, f5 = st.columns([2.2, 1.2, 1.2, 1.2, 0.8], vertical_alignment="bottom")
+        f1.selectbox("Customer Store Name", nama_opts, key="sku_f_nama")
+        f2.selectbox("Brand", brand_opts, key="sku_f_brand")
+        f3.date_input("Date From", key="sku_f_dari", format="YYYY-MM-DD")
+        f4.date_input("Date To",   key="sku_f_sampai", format="YYYY-MM-DD")
+        f5.button("Reset", key="sku_reset", on_click=reset_filter_sku,
+                  args=(tgl_min, hari_ini), width="stretch")
+
+    m = pd.Series(True, index=df.index)
+    if kc_nama and ss.sku_f_nama != "All customers":
+        m &= df[kc_nama].astype(str).str.strip() == ss.sku_f_nama
+    if ss.sku_f_brand != "All brands":
+        m &= brand == ss.sku_f_brand
+    if tgl is not None:
+        d1, d2 = sorted([ss.sku_f_dari, ss.sku_f_sampai])
+        m &= (tgl >= pd.Timestamp(d1)) & (tgl <= pd.Timestamp(d2))
+    df_f = df[m]
+
+    # ── Toolbar ──
+    if msg := ss.pop("sku_pesan", None):
+        (st.success if msg[0] == "ok" else st.error)(msg[1])
+    kolom_dl = [c for c in df.columns if _norm(c) not in {"createdat", "tagging"}]
+    with st.container(key="sku_toolbar"):
+        b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
+        refresh = b1.button("🔄 Refresh", key="sku_refresh", width="stretch")
+        b2.download_button("⬇️ Download", hasil_ke_excel(df_f[kolom_dl]), "hasil_sku_mapping.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           disabled=df_f.empty, key="unduh_sku", width="stretch")
+        simpan = b3.button("💾 Save changes", type="primary", key="sku_simpan",
+                           disabled=not ss.sku_pending, width="stretch")
+        belum = (f' <span class="teks-belumsimpan">● {len(ss.sku_pending)} unsaved</span>'
+                 if ss.sku_pending else "")
+        info.markdown(f'<div class="teks-showing">Showing {len(df_f):,} of {len(df):,} records{belum}</div>',
+                      unsafe_allow_html=True)
+
+    if refresh:
+        if ss.sku_pending: ss.sku_konfirmasi = True
+        else: _refresh_sku()
+    if ss.get("sku_konfirmasi"):
+        st.warning(f"{len(ss.sku_pending)} unsaved change(s) will be lost if you refresh.")
+        a, b, _ = st.columns([1.6, 1, 6])
+        if a.button("Discard & refresh", key="sku_discard"): _refresh_sku()
+        if b.button("Cancel", key="sku_cancel"):
+            ss.sku_konfirmasi = False; st.rerun()
+
+    if simpan:
+        with st.spinner("Saving changes..."):
+            ok, gagal = _simpan_sku(df, kc_pk, tag, rk)
+        ss.sku_pesan = (("ok", f"{ok} record(s) saved") if not gagal else
+                        ("error", f"{ok} saved, {len(gagal)} failed (kept as pending): " + "; ".join(gagal[:5])))
+        st.rerun()
+
+    # ── Table ──
+    if df_f.empty:
+        st.info("No SKU Mapping records match the filters."); return
+    keys = rk[m].tolist()
+    ss.sku_view_keys = keys
+    view = df_f.reset_index(drop=True).copy()
+    view[tag] = [ss.sku_pending.get(k, v) for k, v in zip(keys, view[tag].fillna("Not Yet"))]
+    pend_pos = {i for i, k in enumerate(keys) if k in ss.sku_pending}
+
+    styler = (view.style
+              .apply(lambda r: ["background-color:#eff6ff" if r.name in pend_pos else "" for _ in r], axis=1)
+              .map(_warna_tagging, subset=[tag]))
+    st.data_editor(
+        styler, key=f"editor_sku_{ss.sku_ver}", on_change=_sku_on_change,
+        column_config={tag: st.column_config.SelectboxColumn(tag, options=SKU_TAGGING, required=True, width=130)},
+        disabled=[c for c in view.columns if c != tag],
+        hide_index=True, num_rows="fixed", width="stretch",
+        height=min(len(view) * 35 + 38, 560),
+    )
+
+def halaman_validasi_toko():
+    ss = st.session_state
+    st.markdown(komponen.html_header("Store Validation", "Review and update store details before submission."),
+                unsafe_allow_html=True)
+    _pertahankan(KUNCI_SKU if ss.tab_validasi == "noo" else KUNCI_NOO)
+
+    n = len(ss.sku_pending)
+    c1, c2, _ = st.columns([0.8, 1.8, 8])
+    c1.button("NOO", key="pill_noo", width="stretch", on_click=_pilih_tab, args=("noo",),
+              type="primary" if ss.tab_validasi == "noo" else "secondary")
+    c2.button("SKU Mapping" + (f"  ● {n}" if n else ""), key="pill_sku", width="stretch",
+              on_click=_pilih_tab, args=("sku",),
+              type="primary" if ss.tab_validasi == "sku" else "secondary")
+
+    tab_noo() if ss.tab_validasi == "noo" else _tab_sku()
+# ═══════════════════════════════════════
 # HALAMAN: DASHBOARD
-# ═════════════════════════════════════════════════════════════════════════════
-
+# ═══════════════════════════════════════
 @st.cache_data(ttl=60, show_spinner=False)
 def ambil_data_dashboard() -> dict:
     rows_noo = sb_select(TABLE_SUBMIT_NOO, order="created_at.desc", limit=1000)
@@ -535,11 +777,14 @@ def ambil_data_dashboard() -> dict:
     df_sku = pd.DataFrame(rows_sku) if rows_sku else pd.DataFrame()
     return {"noo":df_noo,"sku":df_sku}
 
+
+
 def _brand_dari_cc(cc: str) -> str:
     s = str(cc).strip()
     if s.startswith("12"): return "G2G"
     if s.startswith("17"): return "NXP"
     return "Other"
+
 
 def halaman_dashboard():
     ss = st.session_state
