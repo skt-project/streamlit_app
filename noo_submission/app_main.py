@@ -328,10 +328,10 @@ def tab_noo():
         st.button("🔄 Refresh", width="stretch", key="tombol_refresh", on_click=refresh_data_toko,
                    help="Reload data from Supabase. Unsaved changes will be lost.")
     with c_unduh:
-        st.markdown('<div style="height:1.2rem"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
         tempat_unduh = st.empty()      # diisi setelah hasil filter dihitung
     with c_simpan:
-        st.markdown('<div style="height:1.2rem"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
         st.button("Save changes", type="primary", width="stretch", key="tombol_simpan",
                    on_click=simpan_perubahan)
 
