@@ -229,6 +229,7 @@ def bangun_baris_spv(distributor: str = "") -> list:
             "keterangan":       "",
             "similarity_kode":  "",
             "similarity_nama":  "",
+            "tagging":          peta.get("tagging","") or "",   # ← tambah ini
         })
     return hasil
 
@@ -915,8 +916,12 @@ def halaman_konfirmasi_spv():
         b["no"] = n                      # nomor urut ulang; "id" tetap (key widget stabil)
     isi_similarity_spv(semua, region_noo)
     ss.baris_spv = semua
-    baris_tampil = semua
+    baris_tampil = [b for b in semua if b.get("tagging","") == STATUS_REVIEW]
     tempat_ringkasan = st.empty()
+    
+    n_sudah = len(semua) - len(baris_tampil)
+    if n_sudah:
+        st.success(f"✅ {n_sudah} already confirmed, {len(baris_tampil)} remaining.")
 
     with st.container(key="kartu_spv"):
         st.markdown(komponen.html_catatan_spv(), unsafe_allow_html=True)
