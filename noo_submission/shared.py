@@ -1,15 +1,10 @@
-"""
-shared.py — Konstanta, Supabase helpers, Google Sheets loaders, dan fungsi bersama
-Diimpor oleh app_submission.py dan app_main.py
-"""
-
 import datetime
 import io
 import re
 import math
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
-
+import os
 import numpy as np
 import pandas as pd
 import requests
@@ -22,7 +17,7 @@ PENGGUNA   = "Shaltsa"
 # ─────────────────────────────── GOOGLE SHEETS ────────────────────────────────
 HISTORY_GENERATOR = "https://docs.google.com/spreadsheets/d/1O5En6dz8AU5H6LEQCm2MGIxIF89VNv10Ehu96C26B7U/edit?gid=265011411#gid=265011411"
 SHEET_DISTRI      = "Distributor Mapping!A2:H"
-FILE_PREFIX_ID    = r"C:\Users\Shaltsa Nadya\Documents\try python\streamlit\Prefix id.xlsx"
+FILE_PREFIX_ID    = os.path.join(os.path.dirname(__file__), "Prefix id.xlsx")
 HISTORY_NOO       = "https://docs.google.com/spreadsheets/d/1JZ025vZHwAo1Y3GljIvuXH0WC_pZeo5DfaXDqr6ANVk/edit?gid=0#gid=0"
 SHEET_HISTORY     = "history!A1:G"
 SHEET_PRODUCT     = "Product Mapping!A2:B"
