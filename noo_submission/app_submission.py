@@ -821,7 +821,7 @@ def halaman_pengajuan_noo():
 # ═════════════════════════════════════════════════════════════════════════════
 OPSI_JENIS_SPV  = ["NOO","Existing"]
 LABEL_KOSONG    = "\u200b"
-LEBAR_KOLOM_SPV = [0.5,1.5,1.6,2.0,2.6,1.9,1.6,1.5,1.9,2.0]
+LEBAR_KOLOM_SPV = [0.5,1.8,2.0,2.2,2.8,2.0,1.8,1.8,2.0,2.2]
 IDX_JENIS, IDX_STORE_ID = 7, 8
 
 def _kid(baris) -> str:
@@ -924,6 +924,7 @@ def halaman_konfirmasi_spv():
             st.info(f"No NOO outlet data for {distributor}." if distributor
                     else "No NOO outlet data to display.")
         else:
+          with st.container(key="tabel_spv_scroll"):
             kepala = st.columns(LEBAR_KOLOM_SPV)
             for kolom, (teks, wajib) in zip(kepala,[
                 ("No.",False),("Customer Store Code",False),("Distributor",False),
