@@ -273,7 +273,9 @@ MAPPED_KOLOM = {
     "Coverage":        "coverage",
     "Store ID [copy paste value]": "store_id",
 }
+
 MAPPING_SUPABASE_KE_VALIDASI = {
+    "customer_code":       "Customer Code",
     "store_id":            "Store ID",
     "store_name":          "Store Name",
     "customer_store_code": "Customer Store Code",
@@ -287,9 +289,9 @@ MAPPING_SUPABASE_KE_VALIDASI = {
     "generated_at":        "Generated At",
 }
 KOLOM = [
-    "Validasi","Store ID","Distributor","Store Name","Customer Store Code",
-    "Customer Store Name","City","Store Address","Longitude","Latitude","Store Type",
-    "Created At","Generated At",
+    "Validasi","Store ID","Distributor","Store Name","Customer Code",
+    "Customer Store Code","Customer Store Name","City","Store Address",
+    "Longitude","Latitude","Store Type","Created At","Generated At",
 ]
 KOLOM_EDIT   = KOLOM
 WAJIB_ISI    = KOLOM[1:]
