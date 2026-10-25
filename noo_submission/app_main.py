@@ -525,6 +525,20 @@ SKU_TABLE    = "sku_mapping"
 SKU_TAGGING  = ["Not Yet", "Done"]
 KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_distri", "f_status")
 KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_dari", "sku_f_sampai")
+
+SKU_DL_HEADERS = ["Customer Code", "Customer Name", "Product", "Product Chinese Short Name",
+                  "Product English Name", "Customer Product Code", "Customer Product Name",
+                  "Specification", "Barcode", "Description"]
+SKU_HIDE_VIEW  = {"productchineseshortname", "productenglishname",
+                  "specification", "barcode", "description"}
+
+def _bangun_download_sku(df_f):
+    peta = {_norm(c): c for c in df_f.columns}
+    out = pd.DataFrame(index=df_f.index)
+    for h in SKU_DL_HEADERS:
+        asli = peta.get(_norm(h))          
+        out[h] = df_f[asli] if asli else ""
+    return out.reset_index(drop=True)
 _norm        = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
 
 def _kolom(df, *names):
@@ -681,10 +695,16 @@ def _tab_sku():
     hari_ini = datetime.datetime.now(ZONA_WAKTU).date()
     tgl = ke_wib_naive(df[kc_tgl]).dt.normalize() if kc_tgl else None
     tgl_min = tgl.min().date() if tgl is not None and tgl.notna().any() else hari_ini
-    brand = df[kc_cc].astype(str).map(_brand_dari_cc) if kc_cc else pd.Series("Other", index=df.index)
+    cc2 = df[kc_cc].astype(str).str.strip().str[:2] if kc_cc else pd.Series("", index=df.index)
 
-    nama_opts  = ["All customers"] + (sorted(df[kc_nama].dropna().astype(str).str.strip().unique()) if kc_nama else [])
-    brand_opts = ["All brands"] + sorted(brand.unique())
+    try:
+        _sh = muat_distributor_dari_sheet()
+        daftar_sheet = (_sh.iloc[:, 0].astype(str).str.strip()
+                        .replace("", np.nan).dropna().unique().tolist())
+    except Exception:
+        daftar_sheet = []
+    nama_opts  = ["All customers"] + sorted(daftar_sheet)
+    brand_opts = ["All brands", "NXP", "G2G"]
     ss.setdefault("sku_f_nama", "All customers"); ss.setdefault("sku_f_brand", "All brands")
     ss.setdefault("sku_f_dari", tgl_min);         ss.setdefault("sku_f_sampai", hari_ini)
     if ss.sku_f_nama  not in nama_opts:  ss.sku_f_nama  = "All customers"
@@ -702,9 +722,12 @@ def _tab_sku():
 
     m = pd.Series(True, index=df.index)
     if kc_nama and ss.sku_f_nama != "All customers":
-        m &= df[kc_nama].astype(str).str.strip() == ss.sku_f_nama
-    if ss.sku_f_brand != "All brands":
-        m &= brand == ss.sku_f_brand
+        m &= (df[kc_nama].astype(str).str.strip().str.lower()
+              == ss.sku_f_nama.strip().lower())
+    if ss.sku_f_brand == "NXP":
+        m &= cc2 == "17"
+    elif ss.sku_f_brand == "G2G":
+        m &= cc2 == "12"
     if tgl is not None:
         d1, d2 = sorted([ss.sku_f_dari, ss.sku_f_sampai])
         m &= (tgl >= pd.Timestamp(d1)) & (tgl <= pd.Timestamp(d2))
@@ -713,11 +736,11 @@ def _tab_sku():
     # ── Toolbar ──
     if msg := ss.pop("sku_pesan", None):
         (st.success if msg[0] == "ok" else st.error)(msg[1])
-    kolom_dl = [c for c in df.columns if _norm(c) not in {"createdat", "tagging"}]
+    data_dl = _bangun_download_sku(df_f)
     with st.container(key="sku_toolbar"):
         b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
         refresh = b1.button("🔄 Refresh", key="sku_refresh", width="stretch")
-        b2.download_button("⬇️ Download", hasil_ke_excel(df_f[kolom_dl]), "hasil_sku_mapping.xlsx",
+        b2.download_button("⬇️ Download", hasil_ke_excel(data_dl), "hasil_sku_mapping.xlsx",
                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                            disabled=df_f.empty, key="unduh_sku", width="stretch")
         simpan = b3.button("💾 Save changes", type="primary", key="sku_simpan",
@@ -756,8 +779,12 @@ def _tab_sku():
     styler = (view.style
               .apply(lambda r: ["background-color:#eff6ff" if r.name in pend_pos else "" for _ in r], axis=1)
               .map(_warna_tagging, subset=[tag]))
+    tampil = [c for c in view.columns if _norm(c) not in SKU_HIDE_VIEW]
+    if kc_cc in tampil:
+        tampil.remove(kc_cc); tampil.insert(0, kc_cc)      
     st.data_editor(
         styler, key=f"editor_sku_{ss.sku_ver}", on_change=_sku_on_change,
+        column_order=tampil,
         column_config={tag: st.column_config.SelectboxColumn(tag, options=SKU_TAGGING, required=True, width=130)},
         disabled=[c for c in view.columns if c != tag],
         hide_index=True, num_rows="fixed", width="stretch",
