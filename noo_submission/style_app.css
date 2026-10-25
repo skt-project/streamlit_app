@@ -393,3 +393,21 @@ ul[role="listbox"] li div { white-space: normal !important; overflow: visible !i
 .st-key-sku_mark_done .stButton > button[kind]:disabled p,
 .st-key-sku_reset   .stButton > button[kind]:disabled p,
 .st-key-unduh_sku   .stDownloadButton > button[kind]:disabled p { color: #9ca7b6 !important; }
+
+/* Refresh NOO: punya tooltip (help=) jadi button bukan anak langsung .stButton */
+.st-key-tombol_refresh button {
+  border-radius: 999px !important;
+  height: 32px !important; min-height: 32px !important;
+  padding: 0 14px !important;
+  background: #2563eb !important; border: 1px solid #2563eb !important;
+  box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
+}
+.st-key-tombol_refresh button p {
+  color: #fff !important; font-size: 12px !important; font-weight: 700 !important; margin: 0 !important;
+}
+.st-key-tombol_refresh button:hover,
+.st-key-tombol_refresh button:focus,
+.st-key-tombol_refresh button:active {
+  background: #1e56d1 !important; border-color: #1e56d1 !important; color: #fff !important;
+  box-shadow: 0 4px 10px rgba(37,99,235,.2) !important;
+}
