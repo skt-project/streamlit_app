@@ -543,6 +543,16 @@ def _bangun_download_sku(df_f):
     return out.reset_index(drop=True)
 _norm        = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
 
+SKU_LABEL = {
+    "customercode": "Customer Code", "customername": "Customer Name",
+    "product": "Product", "customerproductcode": "Customer Product Code",
+    "customerproductname": "Customer Product Name",
+    "createdat": "Created At", "tagging": "Tagging",
+}
+
+def label_kolom(c):
+    return SKU_LABEL.get(_norm(c), str(c).replace("_", " ").title())
+
 def _kolom(df, *names):
     peta = {_norm(c): c for c in df.columns}
     for n in names:
@@ -816,8 +826,11 @@ def _tab_sku():
         styler, key=f"editor_sku_{ss.sku_ver}", on_change=_sku_on_change,
         column_order=tampil,
         column_config={
+            **{c: st.column_config.TextColumn(label_kolom(c))
+               for c in view.columns if c not in (tag, "Pilih")},
             "Pilih": st.column_config.CheckboxColumn("✅", width=50, default=False),
-            tag: st.column_config.SelectboxColumn(tag, options=SKU_TAGGING, required=True, width=130),
+            tag: st.column_config.SelectboxColumn(label_kolom(tag), options=SKU_TAGGING,
+                                                  required=True, width=130),
         },
         disabled=[c for c in view.columns if c not in (tag, "Pilih")],
         hide_index=True, num_rows="fixed", width="stretch",
