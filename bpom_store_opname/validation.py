@@ -17,7 +17,7 @@ import openpyxl
 
 # Header template resmi. Harus persis sama (case-sensitive, urutan sama).
 EXPECTED_HEADERS: tuple[str, ...] = (
-    "Distributor Branch",
+    "Nama Toko (By Group)",
     "PRODUCT ID",
     "PRODUCT NAME",
     "ISI (GR / ML)",
@@ -25,6 +25,7 @@ EXPECTED_HEADERS: tuple[str, ...] = (
     "QTY",
 )
 COL_ISI = EXPECTED_HEADERS[3]
+LEGACY_FIRST_HEADER = "Distributor Branch"   # header kolom A di template lama (hanya diterima saat membaca katalog)
 _HEADERS_FOLDED = {h.casefold() for h in EXPECTED_HEADERS}
 
 INSTRUCTION_SHEET = "Cara Pengisian"   # sheet panduan di template; tidak dibaca saat upload
@@ -66,7 +67,7 @@ class Sku:
 @dataclass(frozen=True)
 class ExcelRow:
     excel_row: int
-    distributor_name: str      # nama kanonik dari daftar BD (bukan ketikan user)
+    toko_name: str             # nama kanonik dari daftar BD (bukan ketikan user)
     product_id: str
     product_name: str
     isi: str
@@ -76,8 +77,8 @@ class ExcelRow:
 
     @property
     def key(self) -> tuple[str, str, str]:
-        """Distributor + PRODUCT ID + BPOM NUMBER (tidak peduli huruf besar/kecil)."""
-        return (normalize_name(self.distributor_name), *row_key(self.product_id, self.bpom_number))
+        """Nama toko + PRODUCT ID + BPOM NUMBER (tidak peduli huruf besar/kecil)."""
+        return (normalize_name(self.toko_name), *row_key(self.product_id, self.bpom_number))
 
 
 @dataclass
@@ -115,12 +116,12 @@ def row_key(product_id: str, bpom_number: str) -> tuple[str, str]:
     return (product_id.strip().upper(), bpom_number.strip().upper())
 
 
-def validate_form(*, company, store, tanggal, pic, has_file: bool) -> list[str]:
+def validate_form(*, region, toko, tanggal, pic, has_file: bool) -> list[str]:
     """Validasi field form. Mengembalikan daftar pesan error (kosong = valid)."""
     errors = []
-    if not company:
-        errors.append("Distributor Company wajib dipilih.")
-    if not store:
+    if not region:
+        errors.append("Region wajib dipilih.")
+    if not toko:
         errors.append("Toko wajib dipilih.")
     if not tanggal:
         errors.append("Tanggal Stock Opname wajib diisi.")
@@ -218,7 +219,7 @@ def parse_qty(value: Any) -> tuple[int | None, str | None]:
 
 def _name_list(names: Sequence[str], limit: int = 3) -> str:
     shown = ", ".join(f"'{n}'" for n in names[:limit])
-    return shown + (f", ... ({len(names)} distributor)" if len(names) > limit else "")
+    return shown + (f", ... ({len(names)} nama)" if len(names) > limit else "")
 
 
 def parse_excel(data: bytes, expected_names: Sequence[str],
@@ -228,8 +229,8 @@ def parse_excel(data: bytes, expected_names: Sequence[str],
     Baris judul di atas header diabaikan. Baris yang sepenuhnya kosong dilewati.
     Semua baris data lain dicek; `result.ok` hanya True bila TIDAK ada masalah.
 
-    `expected_names` = Distributor Name milik store yang dipilih. Kolom A tiap baris harus salah
-    satunya; nama kanonik disimpan di `ExcelRow.distributor_name`.
+    `expected_names` = nama toko (By Group) yang dipilih. Kolom A tiap baris harus salah
+    satunya; nama kanonik disimpan di `ExcelRow.toko_name`.
 
     Bila `skus` diberikan: PRODUCT ID wajib salah satu SKU resmi; nomor BPOM boleh di luar daftar
     resmi (ditandai `additional=True`, BPOM tambahan); untuk pasangan resmi, PRODUCT NAME harus
@@ -307,11 +308,11 @@ def parse_excel(data: bytes, expected_names: Sequence[str],
                 result.issues.append(Issue(no, EXPECTED_HEADERS[0], err.capitalize() + "."))
             elif not dist:
                 result.issues.append(Issue(no, EXPECTED_HEADERS[0],
-                                           f"Wajib diisi dengan nama distributor toko ini: {_name_list(list(expected_names))}."))
+                                           f"Wajib diisi dengan nama toko ini: {_name_list(list(expected_names))}."))
             elif normalize_name(dist) not in names_by_norm:
                 result.issues.append(Issue(
                     no, EXPECTED_HEADERS[0],
-                    f"'{dist}' bukan distributor milik toko yang dipilih. Seharusnya: {_name_list(list(expected_names))}."))
+                    f"'{dist}' bukan toko yang dipilih. Seharusnya: {_name_list(list(expected_names))}."))
 
             texts = {}
             for label, cell in (("PRODUCT ID", pid_cell), ("PRODUCT NAME", pname_cell), (COL_ISI, isi_cell),

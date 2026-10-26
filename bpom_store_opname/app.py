@@ -1,6 +1,6 @@
 """BPOM Stock Opname Toko.
 
-Pengisi memilih company dan toko (daftar dari BD), men-download template yang sudah terisi SKU + nomor BPOM
+Pengisi memilih region dan toko (daftar dari BD), men-download template yang sudah terisi SKU + nomor BPOM
 resmi, mengisi QTY, lalu meng-upload-nya. Hasil disimpan ke satu Google Spreadsheet utama.
 Tidak ada mode revisi: data yang sudah terkirim tidak bisa dikirim ulang dari form ini.
 
@@ -35,15 +35,14 @@ SCOPES = [
 ]
 BQ_SCOPE = ["https://www.googleapis.com/auth/bigquery"]
 PRODUCTS_RETRY_SECONDS = 60   # setelah BigQuery gagal, jangan coba lagi di setiap rerun
-STORE_SEARCH_THRESHOLD = 1500   # company dengan store lebih banyak: pakai kotak cari (dropdown ribuan opsi berat dikirim ke HP)
+STORE_SEARCH_THRESHOLD = 1500   # region dengan toko lebih banyak: pakai kotak cari (dropdown ribuan opsi berat dikirim ke HP)
 STORE_SEARCH_MIN_CHARS = 3
 STORE_SEARCH_RESULTS = 50
 MAX_ISSUES_LISTED = 10
 MAX_ISSUES_SHOWN = 300
 
 APP_DIR = Path(__file__).parent
-DISTRIBUTOR_FILE = APP_DIR / "reference" / "Daftar Distributor.xlsx"
-STORE_FILE = APP_DIR / "reference" / "Daftar Store.xlsx"   # dari BD: Distributor Name, Store ID, Store Name
+STORE_FILE = APP_DIR / "reference" / "Daftar Store.xlsx"   # dari BD: Region, Nama Group Toko (opsional), Nama Toko
 TEMPLATE_FILENAME = "Contoh Excel Response.xlsx"
 TEMPLATE_CANDIDATES = (
     APP_DIR / "template" / TEMPLATE_FILENAME,  # salinan yang ikut ter-deploy
@@ -105,14 +104,14 @@ mengacu pada SKU yang telah ditetapkan oleh prinsipal.
 
 **Ketentuan Pengisian**
 
-1. Pilih **Distributor Company** dan **Toko** (jika toko adalah grup, maka pilih nama grup), lalu isi **tanggal stock opname** dan **nama PIC** Stock Opname
-2. **Download template** (kolom Distributor Branch akan terisi otomatis), isi kolom **QTY**, jangan mengubah header atau urutan kolom.
+1. Pilih **Region** dan **Toko** (jika toko adalah grup, maka pilih nama grup), lalu isi **tanggal stock opname** dan **nama PIC** Stock Opname
+2. **Download template** (kolom Nama Toko (By Group) akan terisi otomatis), isi kolom **QTY**, jangan mengubah header atau urutan kolom.
 3. **Upload** file, tunggu pemeriksaan otomatis, perbaiki jika ada error.
 4. Klik **Submit**. Data hanya disimpan jika seluruh isi file valid.
 
 - Toko tidak diperkenankan mengubah header, nama kolom, atau urutan kolom. Baris judul di atas header boleh dibiarkan.
 - Satu file = satu toko. Untuk toko lain, pilih toko tersebut lalu download template-nya.
-- Kolom **Distributor Branch** sudah terisi otomatis sesuai distributor dari toko yang dipilih; jangan diubah.
+- Kolom **Nama Toko (By Group)** sudah terisi otomatis sesuai toko yang dipilih; jangan diubah.
 - **PRODUCT ID, PRODUCT NAME, ISI (GR / ML), BPOM NUMBER** sudah terisi di template; jangan dikosongkan.
 - Yang perlu Anda isi hanya **QTY** di setiap baris dengan bilangan bulat 0 atau lebih (tidak boleh negatif; tanpa desimal atau huruf).
 - Satu kombinasi **PRODUCT ID + BPOM NUMBER** hanya boleh muncul satu kali dalam satu file.
@@ -222,17 +221,12 @@ def load_products(table: str) -> tuple[list[master_product.Product], int, str | 
 
 
 @st.cache_resource(show_spinner=False)
-def load_distributors() -> list[tuple[str, str]]:
-    return reference_data.load_distributors(DISTRIBUTOR_FILE)
-
-
-@st.cache_resource(show_spinner=False)
-def load_stores_by_company() -> dict[str, list[reference_data.Store]]:
-    """{company: [store, ...]} - dibaca dari file BD sekali, lalu di-cache (dropdown tetap ringan)."""
-    grouped: dict[str, list[reference_data.Store]] = {}
-    for s in reference_data.load_stores(STORE_FILE, load_distributors()):
-        grouped.setdefault(s.company, []).append(s)
-    return dict(sorted(grouped.items()))
+def load_tokos_by_region() -> dict[str, list[reference_data.Toko]]:
+    """{region: [toko, ...]} - dibaca dari file BD sekali, lalu di-cache (dropdown tetap ringan)."""
+    grouped: dict[str, list[reference_data.Toko]] = {}
+    for t in reference_data.load_stores(STORE_FILE):
+        grouped.setdefault(t.region, []).append(t)
+    return {r: sorted(v, key=lambda t: t.name.casefold()) for r, v in sorted(grouped.items())}
 
 
 @st.cache_resource(show_spinner=False)
@@ -246,10 +240,10 @@ def template_bytes(template_path: str) -> bytes:
 
 
 @st.cache_resource(max_entries=300, show_spinner=False)
-def build_template_cached(template_path: str, store_label: str, distributor: str) -> bytes:
+def build_template_cached(template_path: str, region: str, toko: str) -> bytes:
     """Template per store, dibangun sekali lalu di-cache (bukan di setiap rerun). Data dikirim langsung (bukan callable
     deferred): callable gagal bila halaman rerun tepat saat tombol ditekan ('Deferred file not found')."""
-    return template_builder.build_template(template_bytes(template_path), store_label, distributor, load_skus(template_path))
+    return template_builder.build_template(template_bytes(template_path), region, toko, load_skus(template_path))
 
 
 @st.cache_resource(show_spinner=False)
@@ -260,13 +254,13 @@ def get_opname_store(sheet_id, sheet_name: str, worksheet_title: str, share_with
     return store.OpnameStore(sh, ws, assume_empty=created)
 
 
-def parse_upload(data: bytes, distributor: str, skus: list[val.Sku]) -> val.ParseResult:
-    """parse_excel sekali per (isi file, distributor): rerun karena widget lain tidak mengulang pembacaan file."""
-    key = (hashlib.blake2b(data, digest_size=16).hexdigest(), distributor)
+def parse_upload(data: bytes, toko: str, skus: list[val.Sku]) -> val.ParseResult:
+    """parse_excel sekali per (isi file, toko): rerun karena widget lain tidak mengulang pembacaan file."""
+    key = (hashlib.blake2b(data, digest_size=16).hexdigest(), toko)
     memo = st.session_state.get("parse_memo")
     if memo and memo[0] == key:
         return memo[1]
-    result = val.parse_excel(data, [distributor], skus)
+    result = val.parse_excel(data, [toko], skus)
     st.session_state["parse_memo"] = (key, result)
     return result
 
@@ -297,7 +291,7 @@ def show_preview(rows: list[val.ExcelRow]) -> None:
     st.dataframe(
         pd.DataFrame({
             "Baris Excel": [str(r.excel_row) if r.excel_row else "Tambahan" for r in rows],
-            "Distributor Branch": [r.distributor_name for r in rows],
+            "Nama Toko (By Group)": [r.toko_name for r in rows],
             "PRODUCT ID": [r.product_id for r in rows],
             "PRODUCT NAME": [r.product_name for r in rows],
             "ISI (GR / ML)": [r.isi for r in rows],
@@ -316,18 +310,18 @@ def show_flash() -> None:
         st.success(flash)
 
 
-def template_button(cfg: Config, picked: reference_data.Store | None, skus: list[val.Sku]) -> None:
+def template_button(cfg: Config, picked: reference_data.Toko | None, skus: list[val.Sku]) -> None:
     if cfg.template_path is None:
         st.warning(f"File template '{TEMPLATE_FILENAME}' tidak ditemukan. Letakkan di folder `template/` "
                    "atau atur `template_path` di `[app]`.")
         return
     if not picked:
-        st.info("Pilih Distributor Company dan Toko (Langkah 1) agar template bisa di-download.")
+        st.info("Pilih Region dan Toko (Langkah 1) agar template bisa di-download.")
         return
-    safe = re.sub(r'[\\/:*?"<>|]+', "_", picked.label).strip()
+    safe = re.sub(r'[\\/:*?"<>|]+', "_", f"{picked.region} - {picked.name}").strip()
     path = str(cfg.template_path)
 
-    data = build_template_cached(path, picked.label, picked.distributor)
+    data = build_template_cached(path, picked.region, picked.name)
 
     st.download_button(
         "**DOWNLOAD TEMPLATE**", data=data, on_click="ignore", file_name=f"BPOM Stock Opname - {safe}.xlsx",
@@ -410,7 +404,7 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
         st.error(str(exc))
         st.dataframe(
             pd.DataFrame({"Baris Excel": [str(r.excel_row) if r.excel_row else "Tambahan" for r in exc.conflicts],
-                          "Distributor Branch": [r.distributor_name for r in exc.conflicts],
+                          "Nama Toko (By Group)": [r.toko_name for r in exc.conflicts],
                           "PRODUCT ID": [r.product_id for r in exc.conflicts],
                           "BPOM NUMBER": [r.bpom_number for r in exc.conflicts]}),
             hide_index=True, width="stretch")
@@ -428,8 +422,7 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
                  "agar tidak terjadi duplikasi.")
         return
 
-    msg = (f"Berhasil menyimpan {summary.inserted} baris stock opname untuk toko "
-           f"{meta.store_id} - {meta.store_name}.")
+    msg = f"Berhasil menyimpan {summary.inserted} baris stock opname untuk toko {meta.toko} (region {meta.region})."
     if summary.additional:
         msg += f" Termasuk {summary.additional} baris BPOM tambahan."
     msg += " Data yang sudah terkirim tidak dapat direvisi dari form ini; hubungi BD bila ada kesalahan."
@@ -459,11 +452,11 @@ def main() -> None:
                  "atau atur `template_path` di `[app]`.")
         st.stop()
     try:
-        stores_by_company = load_stores_by_company()
+        tokos_by_region = load_tokos_by_region()
         skus = load_skus(str(cfg.template_path))
     except reference_data.StoreListMissing:
-        st.warning("**Daftar store belum tersedia.** Form belum bisa dipakai; hubungi BD untuk menyediakan "
-                   "daftar store (kolom Distributor Name, Store ID, Store Name).")
+        st.warning("**Daftar toko belum tersedia.** Form belum bisa dipakai; hubungi BD untuk menyediakan "
+                   "daftar toko (kolom Region, Nama Group Toko, Nama Toko).")
         st.stop()
     except reference_data.ReferenceDataError as exc:
         st.error(f"Data referensi dari BD bermasalah: {exc}")
@@ -472,32 +465,30 @@ def main() -> None:
     with st.expander("Ketentuan dan panduan pengisian", expanded=True):
         st.markdown(GUIDE_RULES)
 
-    # Langkah 1 - distributor company -> store (daftar dari BD)
-    st.subheader("Langkah 1 - Pilih Distributor Company dan Toko")
-    st.caption("Pilih **Distributor Company**, lalu **Toko** (jika toko adalah grup, pilih nama grup) yang melakukan stock opname. Pilihan berasal dari daftar "
-               "yang disediakan BD. Klik kolom lalu ketik ID atau nama toko untuk mencari.")
-    company = st.selectbox("Distributor Company", list(stores_by_company), index=None,
-                           placeholder="Pilih atau ketik untuk mencari")
-    company_stores = stores_by_company.get(company, []) if company else []
-    options, placeholder, searching = company_stores, "Pilih Distributor Company dulu", False
-    if company and len(company_stores) > STORE_SEARCH_THRESHOLD:
-        # Company dengan ribuan store: jangan kirim semua opsi ke browser di setiap rerun; cari dulu, tampilkan hasil teratas.
+    # Langkah 1 - region -> toko (daftar dari BD)
+    st.subheader("Langkah 1 - Pilih Region dan Toko")
+    st.caption("Pilih **Region**, lalu **Toko** (jika toko adalah grup, pilih nama grup) yang melakukan stock opname. "
+               "Pilihan berasal dari daftar yang disediakan BD. Klik kolom lalu ketik nama toko untuk mencari.")
+    region = st.selectbox("Region", list(tokos_by_region), index=None, placeholder="Pilih atau ketik untuk mencari")
+    region_tokos = tokos_by_region.get(region, []) if region else []
+    options, placeholder, searching = region_tokos, "Pilih Region dulu", False
+    if region and len(region_tokos) > STORE_SEARCH_THRESHOLD:
+        # Region dengan ribuan pilihan: jangan kirim semua opsi ke browser di setiap rerun; cari dulu, tampilkan hasil teratas.
         searching = True
-        query = st.text_input("Cari Toko", key=f"q_{company}", max_chars=60,
-                              placeholder=f"Ketik ID atau nama toko (min. {STORE_SEARCH_MIN_CHARS} huruf) dari {len(company_stores)} toko"
+        query = st.text_input("Cari Toko", key=f"q_{region}", max_chars=60,
+                              placeholder=f"Ketik nama toko (min. {STORE_SEARCH_MIN_CHARS} huruf) dari {len(region_tokos)} pilihan"
                               ).strip().lower()
-        options = ([s for s in company_stores if query in s.search_text][:STORE_SEARCH_RESULTS]
+        options = ([s for s in region_tokos if query in s.search_text][:STORE_SEARCH_RESULTS]
                    if len(query) >= STORE_SEARCH_MIN_CHARS else [])
         placeholder = (f"Ketik minimal {STORE_SEARCH_MIN_CHARS} huruf di kotak Cari Toko" if len(query) < STORE_SEARCH_MIN_CHARS
                        else f"{len(options)} hasil" + (f" (menampilkan {STORE_SEARCH_RESULTS} teratas; persempit pencarian)"
                                                       if len(options) == STORE_SEARCH_RESULTS else "")
                        if options else "Tidak ada toko yang cocok")
-    elif company:
-        placeholder = f"Ketik ID / nama toko ({len(company_stores)} toko)"
+    elif region:
+        placeholder = f"Ketik nama toko ({len(region_tokos)} pilihan)"
     picked = st.selectbox(
-        "Toko", options, index=None, key=f"store_{company}", disabled=not company or (searching and not options),
-        format_func=lambda s: f"{s.label}  ·  {s.distributor}", placeholder=placeholder)
-    names = [picked.distributor] if picked else []
+        "Toko", options, index=None, key=f"toko_{region}", disabled=not region or (searching and not options),
+        format_func=lambda t: t.label, placeholder=placeholder)
 
     # Langkah 2 - tanggal + PIC
     st.subheader("Langkah 2 - Isi Tanggal Stock Opname dan PIC")
@@ -525,10 +516,10 @@ def main() -> None:
     parsed = None
     if uploaded is not None:
         if not picked:
-            st.info("Pilih Distributor Company dan Toko dulu agar isi file bisa divalidasi.")
+            st.info("Pilih Region dan Toko dulu agar isi file bisa divalidasi.")
         else:
-            parsed = val.merge_extras(parse_upload(uploaded.getvalue(), picked.distributor, skus), extras,
-                                      picked.distributor, skus)
+            parsed = val.merge_extras(parse_upload(uploaded.getvalue(), picked.name, skus), extras,
+                                      picked.name, skus)
             for warning in parsed.warnings:
                 st.warning(warning)
             if parsed.issues:
@@ -545,7 +536,7 @@ def main() -> None:
                                "Pastikan seluruh SKU dan nomor BPOM di toko ini sudah dilaporkan.")
                     with st.expander("Lihat yang belum ada di file"):
                         st.dataframe(pd.DataFrame({
-                            "Distributor Branch": [n for n, _ in parsed.missing],
+                            "Nama Toko (By Group)": [n for n, _ in parsed.missing],
                             "PRODUCT ID": [k.product_id for _, k in parsed.missing],
                             "PRODUCT NAME": [k.product_name for _, k in parsed.missing],
                             "BPOM NUMBER": [k.bpom_number for _, k in parsed.missing],
@@ -562,12 +553,11 @@ def main() -> None:
     st.caption("Pastikan semua isian benar dan file sudah berstatus **valid**, lalu klik Submit satu kali dan tunggu "
                "sampai muncul pesan hasil. Data yang sudah terkirim **tidak dapat direvisi** dari form ini.")
     if st.button("Submit", type="primary"):
-        form_errors = val.validate_form(company=company, store=picked, tanggal=tanggal, pic=pic,
+        form_errors = val.validate_form(region=region, toko=picked, tanggal=tanggal, pic=pic,
                                         has_file=uploaded is not None)
         meta = None
         if not form_errors:
-            meta = store.OpnameMeta(company=picked.company, store_id=picked.store_id, store_name=picked.store_name,
-                                    tanggal=tanggal.isoformat(), pic=pic.strip())
+            meta = store.OpnameMeta(region=picked.region, toko=picked.name, tanggal=tanggal.isoformat(), pic=pic.strip())
         handle_submit(cfg, meta, form_errors, parsed)
 
 

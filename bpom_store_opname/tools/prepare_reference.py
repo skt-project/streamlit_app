@@ -4,7 +4,8 @@
     python tools/prepare_reference.py --stores X.xlsx --catalogue Y.xlsx --install       # memeriksa lalu memasang
 
 Tanpa --install tidak ada file yang ditulis. Pemasangan hanya terjadi bila SEMUA pemeriksaan lolos (tanpa ERROR).
-- Daftar store -> reference/Daftar Store.xlsx (disalin apa adanya setelah lolos).
+- Daftar toko  -> reference/Daftar Store.xlsx (disalin apa adanya setelah lolos). Kolom: Region, Nama Group Toko (opsional),
+  Nama Toko; baris dengan grup menjadi SATU pilihan atas nama grup.
 - Daftar SKU   -> Sheet1 pada template/Contoh Excel Response.xlsx (katalog SKU + BPOM; sheet lain tidak disentuh).
   Format yang diterima: (a) kolom PRODUCT ID, PRODUCT NAME, ISI (GR / ML), BPOM NUMBER (urutan bebas), atau
   (b) format BD: SKU, BPOM Number [, BPOM Product Name, Expired Date] - PRODUCT NAME dan ISI diisi dari katalog saat ini,
@@ -13,7 +14,6 @@ Tanpa --install tidak ada file yang ditulis. Pemasangan hanya terjadi bila SEMUA
 from __future__ import annotations
 
 import argparse
-import difflib
 import json
 import re
 import shutil
@@ -34,7 +34,6 @@ import reference_data  # noqa: E402
 import validation as val  # noqa: E402
 
 STORE_TARGET = ROOT / "reference" / "Daftar Store.xlsx"
-DIST_FILE = ROOT / "reference" / "Daftar Distributor.xlsx"
 TEMPLATE_TARGET = ROOT / "template" / "Contoh Excel Response.xlsx"
 SEARCH_THRESHOLD = 1500          # sama dengan app.STORE_SEARCH_THRESHOLD (app.py mengimpor streamlit, jadi tidak diimpor di sini)
 _BPOM_RE = re.compile(r"^N[A-Z]\d{11}$")
@@ -62,48 +61,41 @@ def _clean(v) -> str:
 
 # ── daftar store ────────────────────────────────────────────────────────────
 
-def check_stores(path: Path, distributors: list[tuple[str, str]]) -> tuple[Report, list]:
-    rep, stores = Report(), []
+def check_stores(path: Path) -> tuple[Report, list]:
+    rep, tokos = Report(), []
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         sheets = [(w.title, w.sheet_state) for w in wb.worksheets]
         wb.close()
     except Exception as exc:
         rep.errors.append(f"File tidak dapat dibaca: {exc}")
-        return rep, stores
+        return rep, tokos
     if len(sheets) > 1:
         rep.warnings.append(f"File punya {len(sheets)} sheet {sheets}; HANYA sheet pertama ('{sheets[0][0]}') yang dibaca.")
     try:
-        stores = reference_data.load_stores(path, distributors, max_listed=10_000)
+        tokos = reference_data.load_stores(path, max_listed=10_000)
     except reference_data.ReferenceDataError as exc:
-        message = str(exc)
-        # satu per masalah supaya mudah dibaca; tambahkan saran nama distributor yang mirip
-        for part in message.split("; "):
+        for part in str(exc).split("; "):          # satu baris per masalah
             rep.errors.append(part)
-        by_name = [n for _, n in distributors]
-        for name in re.findall(r"'([^']+)' \(baris \d+\)", message):
-            near = difflib.get_close_matches(name, by_name, n=1, cutoff=0.6)
-            if near:
-                rep.errors.append(f"   saran untuk '{name}': mungkin '{near[0]}'")
-        return rep, stores
-    per_company = Counter(s.company for s in stores)
-    rep.info.append(f"{len(stores)} store valid dari {len(per_company)} distributor company.")
-    biggest = per_company.most_common(3)
-    rep.info.append("Company terbesar: " + ", ".join(f"{c} ({n})" for c, n in biggest))
-    over = [c for c, n in per_company.items() if n > SEARCH_THRESHOLD]
-    rep.info.append(f"{len(over)} company memakai mode kotak-cari di aplikasi (>{SEARCH_THRESHOLD} store)." if over
-                    else f"Semua company <= {SEARCH_THRESHOLD} store: dropdown biasa.")
-    zero = sum(1 for s in stores if s.store_id.startswith("0"))
-    if zero:
-        rep.info.append(f"{zero} Store ID berawalan 0 (dipertahankan sebagai teks).")
-    names = Counter(s.store_name.upper() for s in stores)
-    same_name = sum(1 for n in names.values() if n > 1)
-    if same_name:
-        rep.warnings.append(f"{same_name} Store Name muncul lebih dari sekali (Store ID berbeda) - label di dropdown tetap unik "
-                            "karena memuat Store ID.")
-    no_dist_store = sorted({n for _, n in distributors} - {s.distributor for s in stores})
-    rep.info.append(f"{len(no_dist_store)} dari {len(distributors)} distributor belum punya store di daftar ini.")
-    return rep, stores
+        return rep, tokos
+    per_region = Counter(t.region for t in tokos)
+    groups = [t for t in tokos if t.is_group]
+    rep.info.append(f"{len(tokos)} pilihan toko valid di {len(per_region)} region "
+                    f"({len(groups)} grup menggabungkan {sum(t.outlets for t in groups)} baris toko; "
+                    f"{len(tokos) - len(groups)} toko tanpa grup).")
+    rep.info.append("Region terbesar: " + ", ".join(f"{r} ({n})" for r, n in per_region.most_common(3)))
+    over = [r for r, n in per_region.items() if n > SEARCH_THRESHOLD]
+    rep.info.append(f"{len(over)} region memakai mode kotak-cari di aplikasi (>{SEARCH_THRESHOLD} pilihan)." if over
+                    else f"Semua region <= {SEARCH_THRESHOLD} pilihan: dropdown biasa.")
+    dup = [t for t in tokos if not t.is_group and t.outlets > 1]
+    if dup:
+        rep.warnings.append(f"{len(dup)} nama toko tanpa grup muncul lebih dari sekali di region yang sama (digabung jadi satu pilihan): "
+                            + ", ".join(f"{t.name} ({t.region})" for t in dup[:8]) + (" ..." if len(dup) > 8 else ""))
+    names = Counter(t.name.casefold() for t in tokos)
+    shared = sorted(n for n, c in names.items() if c > 1)
+    if shared:
+        rep.info.append(f"{len(shared)} nama muncul di lebih dari satu region (dibedakan oleh Region), mis. {shared[:3]}.")
+    return rep, tokos
 
 
 # ── daftar SKU + BPOM ───────────────────────────────────────────────────────
@@ -219,7 +211,7 @@ def write_catalogue(template_path: Path, skus: list[val.Sku]) -> None:
     wb = openpyxl.load_workbook(template_path)
     ws = wb.worksheets[0]
     header_row = next((no for no, cells in enumerate(ws.iter_rows(max_row=val.HEADER_SEARCH_ROWS, values_only=True), start=1)
-                       if tuple(_clean(c) for c in cells[: len(val.EXPECTED_HEADERS)]) == val.EXPECTED_HEADERS), None)
+                       if reference_data._header_matches(cells)), None)
     if header_row is None:
         raise ValueError("Header template tidak ditemukan.")
     first = header_row + 1
@@ -237,7 +229,7 @@ def write_catalogue(template_path: Path, skus: list[val.Sku]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--stores", type=Path, help="file daftar store dari BD (.xlsx)")
+    ap.add_argument("--stores", type=Path, help="file daftar toko dari BD (.xlsx): Region, Nama Group Toko, Nama Toko")
     ap.add_argument("--catalogue", type=Path, help="file daftar SKU + BPOM dari BD (.xlsx)")
     ap.add_argument("--bq", action="store_true", help="lengkapi PRODUCT NAME/ISI dari gt_schema.master_product (perintah bq, SELECT saja)")
     ap.add_argument("--install", action="store_true", help="pasang ke reference/ dan template/ bila semua pemeriksaan lolos")
@@ -250,9 +242,8 @@ def main(argv: list[str] | None = None) -> int:
     all_ok, actions = True, []
 
     if args.stores:
-        print(f"== Daftar store: {args.stores}")
-        distributors = reference_data.load_distributors(root / "reference" / "Daftar Distributor.xlsx")
-        rep, _ = check_stores(args.stores, distributors)
+        print(f"== Daftar toko: {args.stores}")
+        rep, _ = check_stores(args.stores)
         rep.print()
         all_ok &= rep.ok
         if rep.ok:

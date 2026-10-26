@@ -12,8 +12,6 @@ sys.path.insert(0, str(ROOT / "tools"))
 import prepare_reference as pr  # noqa: E402
 import reference_data as r  # noqa: E402
 
-DIST = r.load_distributors(ROOT / "reference" / "Daftar Distributor.xlsx")
-D1, D2 = DIST[0][1], DIST[1][1]
 CURRENT = r.load_catalogue(ROOT / "template" / "Contoh Excel Response.xlsx")
 
 
@@ -30,7 +28,6 @@ def xlsx(path, rows):
 def sandbox(tmp_path):
     """Salinan struktur proyek (reference + template) supaya --install tidak menyentuh file asli."""
     (tmp_path / "reference").mkdir(); (tmp_path / "template").mkdir()
-    shutil.copyfile(ROOT / "reference" / "Daftar Distributor.xlsx", tmp_path / "reference" / "Daftar Distributor.xlsx")
     shutil.copyfile(ROOT / "template" / "Contoh Excel Response.xlsx", tmp_path / "template" / "Contoh Excel Response.xlsx")
     return tmp_path
 
@@ -39,41 +36,49 @@ def run(sandbox, *argv):
     return pr.main(["--root", str(sandbox), *map(str, argv)])
 
 
-HEAD = ["Distributor Name", "Store ID", "Store Name"]
+HEAD = ["Region", "Nama Group Toko", "Nama Toko"]
 
 
 def test_store_file_with_title_rows_blank_tail_and_extra_columns_is_accepted(tmp_path):
-    path = xlsx(tmp_path / "s.xlsx", [["DAFTAR STORE BD"], [], ["Area", *HEAD, "Catatan"],
-                                      ["x", D1, "00123", "TOKO A", "-"], ["x", D2, 77.0, "TOKO B", None], [None] * 5])
-    rep, stores = pr.check_stores(path, DIST)
-    assert rep.ok and [(s.store_id, s.store_name) for s in stores] == [("00123", "TOKO A"), ("77", "TOKO B")]
-    assert any("2 store valid" in i for i in rep.info)
+    path = xlsx(tmp_path / "s.xlsx", [["DAFTAR TOKO BD"], [], ["Area", "Nama Toko", "Region", "Nama Group Toko", "Catatan"],
+                                      ["x", "Alfa 1", "Jawa", "ALFAMART", "-"], ["x", "Alfa 2", "Jawa", "ALFAMART", None],
+                                      ["x", "Toko Budi", "Sumatera", None, None], [None] * 5])
+    rep, tokos = pr.check_stores(path)
+    assert rep.ok and [(t.region, t.name, t.outlets) for t in tokos] == [("Jawa", "ALFAMART", 2), ("Sumatera", "Toko Budi", 1)]
+    assert any("2 pilihan toko valid di 2 region (1 grup menggabungkan 2 baris toko; 1 toko tanpa grup)" in i for i in rep.info)
 
 
-def test_store_problems_are_all_listed_with_suggestions(tmp_path):
-    typo = D1[:-1] + "X"
-    path = xlsx(tmp_path / "s.xlsx", [HEAD, [typo, "1", "A"], ["DISTRIBUTOR ASING", "2", "B"], [D1, "3", "C"], [D1, "3", "D"], [D1, "", "E"]])
-    rep, _ = pr.check_stores(path, DIST)
+def test_store_problems_are_all_listed(tmp_path):
+    path = xlsx(tmp_path / "s.xlsx", [HEAD, ["", None, "A"], ["Jawa", None, ""], ["Jawa", "ALFA", "x"], ["Jawa", None, "ALFA"]])
+    rep, _ = pr.check_stores(path)
     text = "\n".join(rep.errors)
-    assert not rep.ok and "ganda" in text and "wajib diisi" in text
-    assert "DISTRIBUTOR ASING" in text and typo in text and f"mungkin '{D1}'" in text   # saran nama mirip
+    assert not rep.ok and "baris 2" in text and "baris 3" in text and "grup dan sebagai toko tunggal" in text
 
 
-def test_store_extra_sheets_are_warned(tmp_path):
-    wb = openpyxl.Workbook(); wb.active.append(HEAD); wb.active.append([D1, "1", "A"]); wb.create_sheet("Lain")
-    wb.save(tmp_path / "s.xlsx")
-    rep, _ = pr.check_stores(tmp_path / "s.xlsx", DIST)
+def test_missing_required_column_is_an_error_and_extra_sheets_are_warned(tmp_path):
+    rep, _ = pr.check_stores(xlsx(tmp_path / "a.xlsx", [["Nama Toko"], ["x"]]))
+    assert not rep.ok and any("Region" in e for e in rep.errors)
+    wb = openpyxl.Workbook(); wb.active.append(HEAD); wb.active.append(["Jawa", None, "A"]); wb.create_sheet("Lain")
+    wb.save(tmp_path / "b.xlsx")
+    rep, _ = pr.check_stores(tmp_path / "b.xlsx")
     assert rep.ok and any("HANYA sheet pertama" in w for w in rep.warnings)
 
 
-def test_install_only_when_everything_passes(sandbox, tmp_path, capsys):
-    bad = xlsx(tmp_path / "bad.xlsx", [HEAD, ["TIDAK ADA", "1", "A"]])
+def test_ungrouped_duplicate_names_in_one_region_are_warned_and_shared_names_noted(tmp_path):
+    path = xlsx(tmp_path / "s.xlsx", [HEAD, ["Jawa", None, "Toko A"], ["Jawa", None, "toko a"], ["Sumatera", None, "Toko A"]])
+    rep, tokos = pr.check_stores(path)
+    assert rep.ok and len(tokos) == 2 and any("lebih dari sekali di region yang sama" in w for w in rep.warnings)
+    assert any("lebih dari satu region" in i for i in rep.info)
+
+
+def test_install_only_when_everything_passes(sandbox, tmp_path):
+    bad = xlsx(tmp_path / "bad.xlsx", [HEAD, ["", None, "A"]])
     assert run(sandbox, "--stores", bad, "--install") == 1
     assert not (sandbox / "reference" / "Daftar Store.xlsx").exists()
-    good = xlsx(tmp_path / "good.xlsx", [HEAD, [D1, "1", "A"]])
+    good = xlsx(tmp_path / "good.xlsx", [HEAD, ["Jawa", None, "A"]])
     assert run(sandbox, "--stores", good) == 0 and not (sandbox / "reference" / "Daftar Store.xlsx").exists()   # tanpa --install
     assert run(sandbox, "--stores", good, "--install") == 0
-    assert r.load_stores(sandbox / "reference" / "Daftar Store.xlsx", DIST)[0].store_id == "1"
+    assert r.load_stores(sandbox / "reference" / "Daftar Store.xlsx")[0].name == "A"
 
 
 def test_catalogue_in_template_format_replaces_sheet1_and_keeps_header_and_other_sheets(sandbox, tmp_path):
@@ -88,7 +93,8 @@ def test_catalogue_in_template_format_replaces_sheet1_and_keeps_header_and_other
     assert [(s.product_id, s.bpom_number) for s in new] == [(first.product_id, first.bpom_number), ("ZZ-1", "NA11260100001")]
     wb = openpyxl.load_workbook(tpl)
     assert wb.sheetnames == ["Sheet1", "Distributor Name", "SKU", "Sheet3"]            # sheet lain tidak disentuh
-    assert [c.value for c in wb["Sheet1"][2]] == list(pr.val.EXPECTED_HEADERS)
+    header = [c.value for c in wb["Sheet1"][2]]
+    assert header[1:] == list(pr.val.EXPECTED_HEADERS[1:]) and header[0] in (pr.val.EXPECTED_HEADERS[0], pr.val.LEGACY_FIRST_HEADER)
     assert wb["Sheet1"]["F1"].value == "Filled by Distributor"
 
 

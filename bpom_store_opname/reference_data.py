@@ -1,16 +1,19 @@
-"""Data referensi dari BD: daftar distributor dan daftar store (`reference/`) serta katalog SKU + nomor BPOM
-(Sheet1 template resmi)."""
+"""Data referensi dari BD: daftar toko (`reference/Daftar Store.xlsx`) serta katalog SKU + nomor BPOM (Sheet1 template resmi)."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import openpyxl
 
-from validation import EXPECTED_HEADERS, HEADER_SEARCH_ROWS, Sku, normalize_name, row_key
+from validation import (EXPECTED_HEADERS, HEADER_SEARCH_ROWS, LEGACY_FIRST_HEADER, Sku, normalize_name, row_key)
 
-DISTRIBUTOR_HEADERS = ("Distributor Company", "Distributor Name")
-STORE_HEADERS = ("Distributor Name", "Store ID", "Store Name")   # kolom wajib; kolom lain diabaikan
+# Kolom daftar toko dari BD. Nama kolom dibandingkan tanpa peduli huruf besar/kecil dan spasi; kolom lain diabaikan.
+REGION_COLS = ("region",)
+GROUP_COLS = ("nama group toko", "nama grup toko", "group toko", "grup toko", "nama group", "nama grup", "group", "grup")
+TOKO_COLS = ("nama toko", "toko", "store name")
+STORE_HEADERS_HELP = ("Region", "Nama Group Toko", "Nama Toko")      # untuk pesan error
 
 
 class ReferenceDataError(Exception):
@@ -18,143 +21,115 @@ class ReferenceDataError(Exception):
 
 
 class StoreListMissing(ReferenceDataError):
-    """Daftar store dari BD belum diletakkan di reference/ (bukan file rusak)."""
+    """Daftar toko dari BD belum diletakkan di reference/ (bukan file rusak)."""
 
 
 def _clean(value) -> str:
     return "" if value is None else str(value).strip()
 
 
-def _read(path: Path, headers: tuple[str, ...]):
-    """Hasilkan (nomor_baris, nilai-nilai) untuk baris yang tidak kosong."""
-    try:
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    except Exception as exc:
-        raise ReferenceDataError(f"File '{path.name}' tidak dapat dibaca: {exc}") from None
-    try:
-        ws = wb.worksheets[0]
-        ws.reset_dimensions()
-        rows = ws.iter_rows(values_only=True)
-        header = tuple(_clean(c) for c in (next(rows, ()) or ())[: len(headers)])
-        if header != headers:
-            raise ReferenceDataError(f"Header '{path.name}' harus {list(headers)}, ditemukan {list(header)}.")
-        for no, row in enumerate(rows, start=2):
-            row = tuple(row) + (None,) * (len(headers) - len(row))
-            if all(_clean(c) == "" for c in row[: len(headers)]):
-                continue
-            yield no, row[: len(headers)]
-    finally:
-        wb.close()
-
-
-def load_distributors(path: Path) -> list[tuple[str, str]]:
-    """[(Distributor Company, Distributor Name)] sesuai file BD."""
-    result, seen = [], set()
-    for no, (company, name) in _read(path, DISTRIBUTOR_HEADERS):
-        company, name = _clean(company), _clean(name)
-        if not company or not name:
-            raise ReferenceDataError(f"'{path.name}' baris {no}: company dan nama distributor wajib diisi.")
-        norm = normalize_name(name)
-        if norm in seen:
-            raise ReferenceDataError(f"'{path.name}' baris {no}: nama distributor ganda '{name}'.")
-        seen.add(norm)
-        result.append((company, name))
-    if not result:
-        raise ReferenceDataError(f"'{path.name}' tidak berisi distributor.")
-    return result
+def _col_key(value) -> str:
+    return re.sub(r"\s+", " ", _clean(value)).casefold()
 
 
 @dataclass(frozen=True)
-class Store:
-    company: str        # diturunkan dari daftar distributor (berdasarkan Distributor Name)
-    distributor: str    # nama kanonik dari daftar distributor
-    store_id: str       # teks (nol di depan dipertahankan)
-    store_name: str
-    search_text: str = ""   # huruf kecil, untuk kotak cari (dihitung sekali saat memuat)
+class Toko:
+    """Satu pilihan di dropdown: nama grup bila toko milik grup, selain itu nama toko ("Nama Toko (By Group)")."""
+    region: str
+    name: str                  # nama grup bila ada, selain itu nama toko; ini yang masuk kolom A template dan ke sheet
+    is_group: bool = False
+    outlets: int = 1           # jumlah baris toko di daftar BD yang digabung ke pilihan ini
+    search_text: str = ""      # huruf kecil, untuk kotak cari (dihitung sekali saat memuat)
 
     @property
     def label(self) -> str:
-        return f"{self.store_id} - {self.store_name}"
+        return f"{self.name}  ·  grup ({self.outlets} toko)" if self.is_group and self.outlets > 1 else self.name
 
 
-def _id_text(value) -> str:
-    """Store ID sebagai teks; angka bulat dari Excel (mis. 1234.0) dibersihkan menjadi '1234'."""
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return _clean(value)
+def load_stores(path: Path, *, max_listed: int = 8) -> list[Toko]:
+    """Daftar toko dari BD. Kolom wajib: Region dan Nama Toko; Nama Group Toko opsional (urutan kolom bebas, kolom lain diabaikan).
 
-
-def load_stores(path: Path, distributors: list[tuple[str, str]], *, max_listed: int = 8) -> list[Store]:
-    """Daftar store dari BD. Kolom wajib: Distributor Name, Store ID, Store Name (urutan bebas, kolom lain diabaikan).
-
-    Distributor Name harus ada di daftar distributor (Company diturunkan dari sana); Store ID wajib dan unik.
-    Satu masalah saja menggagalkan seluruh pemuatan, supaya tidak ada store yang diam-diam hilang.
+    Baris dengan Nama Group Toko terisi menjadi SATU pilihan atas nama grup itu (semua toko dalam grup digabung);
+    baris tanpa grup menjadi pilihan atas nama toko. Pilihan unik per (Region, nama). Satu masalah saja menggagalkan seluruh
+    pemuatan supaya tidak ada toko yang diam-diam hilang. Baris judul di atas header (10 baris pertama) diperbolehkan.
     """
     if not path.is_file():
         raise StoreListMissing(
-            f"Daftar store belum tersedia: letakkan file '{path.name}' di folder '{path.parent.name}/' "
-            f"dengan kolom {list(STORE_HEADERS)}.")
-    by_norm = {normalize_name(name): (company, name) for company, name in distributors}
+            f"Daftar toko belum tersedia: letakkan file '{path.name}' di folder '{path.parent.name}/' "
+            f"dengan kolom {list(STORE_HEADERS_HELP)}.")
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except Exception as exc:
         raise ReferenceDataError(f"File '{path.name}' tidak dapat dibaca: {exc}") from None
+    problems: list[str] = []
+    merged: dict[tuple[str, str], list] = {}      # (region, nama) -> [Region asli, nama asli, is_group, jumlah baris]
     try:
         ws = wb.worksheets[0]
         ws.reset_dimensions()
         rows = ws.iter_rows(values_only=True)
-        # Header boleh di baris mana pun dalam HEADER_SEARCH_ROWS baris pertama (file BD kadang punya baris judul).
-        header, header_no = [], 0
+        header, header_no, cols = [], 0, None
         for no, cells in enumerate(rows, start=1):
-            candidate = [_clean(c) for c in (cells or ())]
+            candidate = [_col_key(c) for c in (cells or ())]
             if not header:
-                header, header_no = candidate, no       # kandidat pertama dipakai untuk pesan error bila tidak ada yang cocok
-            if all(h in candidate for h in STORE_HEADERS):
                 header, header_no = candidate, no
+            found = _find_store_columns(candidate)
+            if found:
+                header, header_no, cols = candidate, no, found
                 break
             if no >= HEADER_SEARCH_ROWS:
                 break
-        missing = [h for h in STORE_HEADERS if h not in header]
-        if missing:
-            raise ReferenceDataError(f"Header '{path.name}' kurang kolom {missing}; ditemukan {header}.")
-        i_dist, i_id, i_name = (header.index(h) for h in STORE_HEADERS)
-        result, seen, unknown, problems = [], {}, {}, []
+        if cols is None:
+            raise ReferenceDataError(
+                f"Header '{path.name}' tidak ditemukan. Perlu kolom Region dan Nama Toko (opsional Nama Group Toko); "
+                f"ditemukan {header}.")
+        i_region, i_group, i_toko = cols
         for no, row in enumerate(rows, start=header_no + 1):
             row = tuple(row) + (None,) * (len(header) - len(row))
             if all(_clean(c) == "" for c in row):
                 continue
-            dist, store_id, store_name = _clean(row[i_dist]), _id_text(row[i_id]), _clean(row[i_name])
-            if not (dist and store_id and store_name):
-                problems.append(f"baris {no}: Distributor Name, Store ID, dan Store Name wajib diisi")
+            region, toko = _clean(row[i_region]), _clean(row[i_toko])
+            group = _clean(row[i_group]) if i_group is not None else ""
+            name = group or toko
+            if not (region and name):
+                problems.append(f"baris {no}: Region dan Nama Toko wajib diisi")
                 continue
-            if store_id.upper() in seen:
-                problems.append(f"baris {no}: Store ID '{store_id}' ganda (juga di baris {seen[store_id.upper()]})")
-                continue
-            if normalize_name(dist) not in by_norm:
-                unknown.setdefault(dist, no)
-                continue
-            seen[store_id.upper()] = no
-            company, canonical = by_norm[normalize_name(dist)]
-            result.append(Store(company, canonical, store_id, store_name, f"{store_id} {store_name}".lower()))
+            key = (normalize_name(region), normalize_name(name))
+            entry = merged.setdefault(key, [region, name, bool(group), 0])
+            entry[3] += 1
+            if bool(group) != entry[2]:
+                problems.append(f"baris {no}: '{name}' di region '{region}' muncul sebagai grup dan sebagai toko tunggal")
     finally:
         wb.close()
-    if unknown:
-        names = [(n, r) for n, r in unknown.items()]
-        sample = ", ".join(f"'{n}' (baris {r})" for n, r in names[:max(5, max_listed)])
-        problems.append(f"{len(unknown)} Distributor Name tidak ada di daftar distributor: {sample}")
     if problems:
         shown = "; ".join(problems[:max_listed]) + (
             f"; ... (+{len(problems) - max_listed} masalah lain)" if len(problems) > max_listed else "")
         raise ReferenceDataError(f"'{path.name}' bermasalah: {shown}.")
-    if not result:
-        raise ReferenceDataError(f"'{path.name}' tidak berisi store.")
-    return result
+    if not merged:
+        raise ReferenceDataError(f"'{path.name}' tidak berisi toko.")
+    return [Toko(region, name, is_group, n, f"{name}".lower()) for region, name, is_group, n in merged.values()]
+
+
+def _find_store_columns(header: list[str]):
+    """(indeks region, indeks grup | None, indeks toko) bila header lengkap, selain itu None."""
+    def find(aliases):
+        return next((header.index(a) for a in aliases if a in header), None)
+    region, toko = find(REGION_COLS), find(TOKO_COLS)
+    if region is None or toko is None:
+        return None
+    return region, find(GROUP_COLS), toko
+
+
+def _header_matches(cells) -> bool:
+    cells = tuple(_clean(c) for c in cells[: len(EXPECTED_HEADERS)])
+    return len(cells) == len(EXPECTED_HEADERS) and cells[1:] == EXPECTED_HEADERS[1:] and \
+        cells[0] in (EXPECTED_HEADERS[0], LEGACY_FIRST_HEADER)
 
 
 def load_catalogue(path: Path) -> list[Sku]:
     """Daftar SKU + nama produk + isi + nomor BPOM resmi, dibaca dari Sheet1 template resmi dari BD.
 
-    Template adalah sumber tunggal: yang di-download distributor dan yang dipakai validasi selalu sama.
+    Template adalah sumber tunggal: yang di-download pengguna dan yang dipakai validasi selalu sama.
+    Header kolom A boleh "Nama Toko (By Group)" atau "Distributor Branch" (template lama).
     """
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -168,7 +143,7 @@ def load_catalogue(path: Path) -> list[Sku]:
         for no, cells in rows:
             if no > HEADER_SEARCH_ROWS:
                 break
-            if tuple(_clean(c) for c in cells[: len(EXPECTED_HEADERS)]) == EXPECTED_HEADERS:
+            if _header_matches(cells):
                 header_no = no
                 break
         if header_no is None:

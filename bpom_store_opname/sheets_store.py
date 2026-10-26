@@ -21,13 +21,11 @@ from datetime import datetime, timedelta, timezone
 
 import gspread
 
-from validation import ExcelRow, row_key
+from validation import ExcelRow, normalize_name, row_key
 
 HEADERS: list[str] = [
-    "Distributor Company",
-    "Distributor Name",
-    "Store ID",
-    "Store Name",
+    "Region",
+    "Nama Toko (By Group)",
     "Periode Stock Opname",
     "Tanggal Stock Opname",
     "Nama PIC",
@@ -50,7 +48,7 @@ class SheetsError(Exception):
 
 
 class DuplicateDataError(SheetsError):
-    """Input ditolak karena kombinasi Store ID + PRODUCT ID + BPOM NUMBER sudah ada pada periode ini."""
+    """Input ditolak karena kombinasi Region + Nama Toko + PRODUCT ID + BPOM NUMBER sudah ada pada periode ini."""
 
     def __init__(self, conflicts: list[ExcelRow], periode: str):
         self.conflicts = conflicts
@@ -62,12 +60,15 @@ class DuplicateDataError(SheetsError):
         )
 
 
+def _toko_key(region: str, toko: str) -> str:
+    return f"{normalize_name(region)}|{normalize_name(toko)}"
+
+
 @dataclass(frozen=True)
 class OpnameMeta:
     """Metadata dari form Streamlit, ikut disimpan di setiap baris."""
-    company: str
-    store_id: str
-    store_name: str
+    region: str
+    toko: str               # nama toko (By Group)
     tanggal: str            # YYYY-MM-DD
     pic: str
 
@@ -75,6 +76,10 @@ class OpnameMeta:
     def periode(self) -> str:
         """Periode (YYYY-MM) diturunkan dari tanggal stock opname."""
         return self.tanggal[:7]
+
+    @property
+    def key(self) -> str:
+        return _toko_key(self.region, self.toko)
 
 
 @dataclass(frozen=True)
@@ -172,7 +177,7 @@ def _cell(value) -> dict:
 
 def _row_values(meta: OpnameMeta, row: ExcelRow, ts: str) -> list:
     return [
-        meta.company, row.distributor_name, meta.store_id, meta.store_name, meta.periode, meta.tanggal, meta.pic,
+        meta.region, row.toko_name, meta.periode, meta.tanggal, meta.pic,
         row.product_id, row.product_name, row.isi, row.bpom_number, row.qty,
         ts, meta.pic, ts, meta.pic,
     ]
@@ -218,7 +223,7 @@ _WRITE_RETRY, _READ_RETRY = (429,), (429, 500, 502, 503, 504)
 _BACKOFF = (2.0, 4.0, 8.0, 16.0, 30.0)
 INDEX_TTL = 120.0            # detik; indeks duplikat dimuat ulang dari sheet bila lebih tua dari ini
 WRITE_INTERVAL = 1.1         # detik antar penulisan (~54/menit, di bawah kuota 60/menit)
-_KEY_COLUMNS = ("Store ID", "Periode Stock Opname", "PRODUCT ID", "BPOM NUMBER")
+_KEY_COLUMNS = ("Region", "Nama Toko (By Group)", "Periode Stock Opname", "PRODUCT ID", "BPOM NUMBER")
 
 
 class OpnameStore:
@@ -250,9 +255,9 @@ class OpnameStore:
         index: dict[tuple[str, str], set[tuple[str, str]]] = {}
         n = max((len(c) for c in columns), default=0)
         for i in range(n):
-            store_id, periode, pid, bpom = (cell(c, i) for c in columns)
-            if store_id or periode or pid or bpom:
-                index.setdefault((store_id.upper(), periode), set()).add(row_key(pid, bpom))
+            region, toko, periode, pid, bpom = (cell(c, i) for c in columns)
+            if region or toko or periode or pid or bpom:
+                index.setdefault((_toko_key(region, toko), periode), set()).add(row_key(pid, bpom))
         self._index, self._loaded_at = index, self._clock()
 
     def _ensure_index(self) -> None:
@@ -304,9 +309,9 @@ class OpnameStore:
     def insert_rows(self, meta: "OpnameMeta", rows: list[ExcelRow]) -> "SaveSummary":
         """Cek duplikat (indeks) lalu tambahkan semua baris dalam satu request atomik.
 
-        Bila Store ID + periode + PRODUCT ID + BPOM NUMBER sudah ada -> `DuplicateDataError`, tidak ada yang ditulis.
+        Bila Region + Nama Toko + periode + PRODUCT ID + BPOM NUMBER sudah ada -> `DuplicateDataError`, tidak ada yang ditulis.
         """
-        key = (meta.store_id.strip().upper(), meta.periode)
+        key = (meta.key, meta.periode)
         with self._key_lock(key):
             self._ensure_index()
             existing = self._index.get(key, set())

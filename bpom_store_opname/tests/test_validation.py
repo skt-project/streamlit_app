@@ -16,7 +16,6 @@ from template_builder import build_template  # noqa: E402
 NAME = "CV ANDIRA DAHAYU - BENGKULU"
 NAME2 = "CV ANDIRA DAHAYU - CURUP"
 TEMPLATE = ROOT / "template" / "Contoh Excel Response.xlsx"
-DIST_FILE = ROOT / "reference" / "Daftar Distributor.xlsx"
 
 
 def make(rows, headers=v.EXPECTED_HEADERS, title=True):
@@ -60,9 +59,9 @@ def test_header_exact_case_sensitive_and_new_name():
     h = list(v.EXPECTED_HEADERS); h[5] = "Qty"
     res = v.parse_excel(make([good()], headers=h), [NAME])
     assert not res.ok and "persis" in messages(res)
-    old = ["Distributor Name (Company - Region)", *v.EXPECTED_HEADERS[1:]]      # header lama ditolak
+    old = ["Distributor Branch", *v.EXPECTED_HEADERS[1:]]                       # header lama ("Distributor Branch") ditolak saat upload
     assert not v.parse_excel(make([good()], headers=old), [NAME]).ok
-    assert v.EXPECTED_HEADERS[0] == "Distributor Branch"
+    assert v.EXPECTED_HEADERS[0] == "Nama Toko (By Group)"
 
 
 def test_extra_missing_and_reordered_columns():
@@ -110,8 +109,8 @@ def test_blank_rows_skipped_empty_and_non_xlsx_rejected():
 
 
 def test_form_validation():
-    assert v.validate_form(company="A", store="S", tanggal="d", pic="x", has_file=True) == []
-    assert len(v.validate_form(company=None, store=None, tanggal=None, pic="", has_file=False)) == 5
+    assert v.validate_form(region="A", toko="S", tanggal="d", pic="x", has_file=True) == []
+    assert len(v.validate_form(region=None, toko=None, tanggal=None, pic="", has_file=False)) == 5
 
 
 # ── aturan SKU / BPOM tambahan / multi distributor ──────────────────────────
@@ -138,7 +137,7 @@ def test_unknown_sku_name_and_isi_mismatch_rejected():
 
 def test_distributor_must_belong_to_company_and_same_sku_allowed_per_distributor():
     res = v.parse_excel(make([good(name="CV LAIN - X")]), [NAME, NAME2])
-    assert not res.ok and "bukan distributor milik toko" in messages(res)
+    assert not res.ok and "bukan toko yang dipilih" in messages(res)
     assert v.parse_excel(make([good(), good(name=NAME2, qty=2)]), [NAME, NAME2]).ok
     rows = [good(), good(name=NAME2, qty=2), good(name=NAME2.lower(), pid="p-1", bpom="na1", qty=3)]
     assert "Duplikat" in messages(v.parse_excel(make(rows), [NAME, NAME2]))
@@ -151,7 +150,8 @@ def test_missing_is_reported_per_distributor():
 
 # ── data referensi & template ───────────────────────────────────────────────
 
-STORE_LABEL = "ST0001 - TOKO MAJU JAYA"
+TOKO_LABEL = "TOKO MAJU JAYA"
+REGION = "SUMATERA"
 
 
 def _xlsx(tmp_path, name, rows):
@@ -163,73 +163,86 @@ def _xlsx(tmp_path, name, rows):
     return path
 
 
-def test_reference_data_loads():
-    dist = r.load_distributors(DIST_FILE)
-    assert len(dist) == 94
+def test_catalogue_loads_from_current_template():
     skus = catalogue()
     assert len(skus) == 66 and all(s.isi and s.product_name for s in skus)
 
 
-def test_load_stores_ok_company_derived_and_ids_kept_as_text(tmp_path):
-    dist = [("CV ANDIRA DAHAYU", NAME), ("PT B", "PT B - X")]
+def test_load_stores_region_group_and_toko_columns_any_order_with_title_rows(tmp_path):
     path = _xlsx(tmp_path, "s.xlsx", [
-        ["Store Name", "Area", "Store ID", "Distributor Name"],                  # urutan kolom bebas, kolom lain diabaikan
-        ["TOKO A", "n/a", "00123", "cv andira dahayu - bengkulu"],               # nol di depan + nama beda huruf
-        ["TOKO B", "n/a", 456.0, "PT B - X"],                                    # angka bulat dari Excel -> "456"
-        [None, None, None, None],                                                # baris kosong dilewati
+        ["DAFTAR TOKO"], [None],
+        ["Nama Toko", "Catatan", "NAMA GROUP TOKO", "Region"],                 # urutan bebas, huruf bebas, kolom lain diabaikan
+        ["Alfa Cabang 1", "-", "ALFAMART", "Sumatera"],
+        ["Alfa Cabang 2", "-", "ALFAMART", "Sumatera"],                         # satu grup = SATU pilihan
+        ["Alfa Cabang 3", "-", "ALFAMART", "Jawa"],                             # grup yang sama di region lain = pilihan lain
+        ["Toko Budi", None, None, "Sumatera"],                                  # tanpa grup -> nama toko
+        [None, None, None, None],
     ])
-    stores = r.load_stores(path, dist)
-    assert [(s.company, s.distributor, s.store_id, s.store_name) for s in stores] == [
-        ("CV ANDIRA DAHAYU", NAME, "00123", "TOKO A"), ("PT B", "PT B - X", "456", "TOKO B")]
-    assert stores[0].label == "00123 - TOKO A"
+    tokos = r.load_stores(path)
+    assert [(t.region, t.name, t.is_group, t.outlets) for t in tokos] == [
+        ("Sumatera", "ALFAMART", True, 2), ("Jawa", "ALFAMART", True, 1), ("Sumatera", "Toko Budi", False, 1)]
+    assert tokos[0].label == "ALFAMART  ·  grup (2 toko)" and tokos[2].label == "Toko Budi"
+
+
+def test_load_stores_works_without_group_column(tmp_path):
+    path = _xlsx(tmp_path, "s.xlsx", [["Region", "Nama Toko"], ["Jawa", "Toko A"], ["jawa", "TOKO A"]])
+    (t,) = r.load_stores(path)
+    assert (t.name, t.outlets) == ("Toko A", 2)                                 # nama sama di region sama = satu pilihan
 
 
 def test_load_stores_rejects_bad_files(tmp_path):
-    dist = [("CV ANDIRA DAHAYU", NAME)]
     import pytest
-    with pytest.raises(r.ReferenceDataError, match="belum tersedia"):
-        r.load_stores(tmp_path / "tidak-ada.xlsx", dist)
-    with pytest.raises(r.ReferenceDataError, match="kurang kolom"):
-        r.load_stores(_xlsx(tmp_path, "a.xlsx", [["Store ID", "Store Name"], ["1", "x"]]), dist)
-    head = ["Distributor Name", "Store ID", "Store Name"]
-    with pytest.raises(r.ReferenceDataError, match="ganda"):
-        r.load_stores(_xlsx(tmp_path, "b.xlsx", [head, [NAME, "1", "A"], [NAME, "1", "B"]]), dist)
-    with pytest.raises(r.ReferenceDataError, match="tidak ada di daftar distributor"):
-        r.load_stores(_xlsx(tmp_path, "c.xlsx", [head, ["DISTRIBUTOR ASING", "1", "A"]]), dist)
-    with pytest.raises(r.ReferenceDataError, match="wajib diisi"):
-        r.load_stores(_xlsx(tmp_path, "d.xlsx", [head, [NAME, "", "A"]]), dist)
+    with pytest.raises(r.StoreListMissing, match="belum tersedia"):
+        r.load_stores(tmp_path / "tidak-ada.xlsx")
+    with pytest.raises(r.ReferenceDataError, match="Header"):
+        r.load_stores(_xlsx(tmp_path, "a.xlsx", [["Nama Toko"], ["x"]]))                     # tanpa Region
+    head = ["Region", "Nama Group Toko", "Nama Toko"]
+    with pytest.raises(r.ReferenceDataError, match="wajib diisi") as exc:
+        r.load_stores(_xlsx(tmp_path, "b.xlsx", [head, ["", None, "A"], ["Jawa", None, ""], ["Jawa", "G", "B"]]))
+    assert "baris 2" in str(exc.value) and "baris 3" in str(exc.value)                      # semua masalah, bukan satu
+    with pytest.raises(r.ReferenceDataError, match="grup dan sebagai toko tunggal"):
+        r.load_stores(_xlsx(tmp_path, "c.xlsx", [head, ["Jawa", "ALFA", "x"], ["Jawa", None, "ALFA"]]))
+    with pytest.raises(r.ReferenceDataError, match="tidak berisi toko"):
+        r.load_stores(_xlsx(tmp_path, "d.xlsx", [head]))
 
 
-def test_template_is_for_one_store_and_original_untouched():
+def test_template_is_for_one_toko_and_original_untouched():
     skus = catalogue()
     raw = TEMPLATE.read_bytes()
-    out = build_template(raw, STORE_LABEL, NAME, skus)
+    out = build_template(raw, REGION, TOKO_LABEL, skus)
     assert raw == TEMPLATE.read_bytes()                         # template asli tidak berubah
     wb = openpyxl.load_workbook(BytesIO(out))
     assert wb.sheetnames == ["Sheet1", v.INSTRUCTION_SHEET]      # sheet kerja BD tidak ikut
     ws = wb["Sheet1"]
     assert [c.value for c in ws[2]] == list(v.EXPECTED_HEADERS) and ws["F1"].value == "Filled by Distributor"
+    assert ws["A2"].value == "Nama Toko (By Group)"             # template lama "Distributor Branch" -> header toko
     rows = [[c.value for c in row] for row in ws.iter_rows(min_row=3)]
-    assert rows == [[NAME, k.product_id, k.product_name, k.isi, k.bpom_number, None] for k in skus]
+    assert rows == [[TOKO_LABEL, k.product_id, k.product_name, k.isi, k.bpom_number, None] for k in skus]
     (dv,) = ws.data_validations.dataValidation                  # QTY: bilangan bulat >= 0 di Excel
     assert (dv.type, dv.operator, dv.formula1) == ("whole", "greaterThanOrEqual", "0")
     assert str(dv.sqref) == f"F3:F{ws.max_row}"
     guide = " ".join(str(c.value) for c in wb[v.INSTRUCTION_SHEET]["A"] if c.value)
-    assert STORE_LABEL in guide and NAME in guide and "Satu file = satu toko" in guide
+    assert TOKO_LABEL in guide and REGION in guide and "Satu file = satu toko" in guide and "26 Oktober" in guide
+    assert "Distributor Branch" not in guide and "23 Oktober" not in guide
 
 
 def test_filled_template_passes_and_ignores_guide_sheet():
     skus = catalogue()
-    wb = openpyxl.load_workbook(BytesIO(build_template(TEMPLATE.read_bytes(), STORE_LABEL, NAME, skus)))
+    wb = openpyxl.load_workbook(BytesIO(build_template(TEMPLATE.read_bytes(), REGION, TOKO_LABEL, skus)))
     ws = wb["Sheet1"]
     for i in range(3, ws.max_row + 1):
         ws.cell(i, 6).value = i
     buf = BytesIO(); wb.save(buf)
-    res = v.parse_excel(buf.getvalue(), [NAME], skus)
+    res = v.parse_excel(buf.getvalue(), [TOKO_LABEL], skus)
     assert res.ok and len(res.rows) == len(skus) and not res.missing and res.warnings == []
-    # file milik store dari distributor lain ditolak
-    other = v.parse_excel(buf.getvalue(), ["PT LAIN - KOTA"], skus)
-    assert not other.ok and "bukan distributor milik toko" in messages(other)
+    other = v.parse_excel(buf.getvalue(), ["TOKO LAIN"], skus)                  # file milik toko lain ditolak
+    assert not other.ok and "bukan toko yang dipilih" in messages(other)
+
+
+def test_catalogue_still_loads_when_template_has_new_header(tmp_path):
+    out = build_template(TEMPLATE.read_bytes(), REGION, TOKO_LABEL, catalogue())      # header baru "Nama Toko (By Group)"
+    path = tmp_path / "t.xlsx"; path.write_bytes(out)
+    assert len(r.load_catalogue(path)) == 66
 
 
 # ── Google Sheets (mock) ────────────────────────────────────────────────────
@@ -247,36 +260,35 @@ def _store(lines=(), **kw):
     return sh, store.OpnameStore(sh, _ws(lines), **kw)
 
 
-def _meta(tanggal="2026-10-25", store_id="ST0001"):
-    return store.OpnameMeta("CV ANDIRA DAHAYU", store_id, "TOKO MAJU JAYA", tanggal, "Budi")
+def _meta(tanggal="2026-10-25", toko="TOKO A", region="Sumatera"):
+    return store.OpnameMeta(region, toko, tanggal, "Budi")
 
 
-def _line(store_id, periode, pid="P-1", bpom="NA1"):
-    return {"Store ID": store_id, "Periode Stock Opname": periode, "PRODUCT ID": pid, "BPOM NUMBER": bpom}
+def _line(toko, periode, pid="P-1", bpom="NA1", region="Sumatera"):
+    return {"Region": region, "Nama Toko (By Group)": toko, "Periode Stock Opname": periode, "PRODUCT ID": pid, "BPOM NUMBER": bpom}
 
 
-def test_insert_writes_16_columns_store_metadata_and_period_from_date():
+def test_insert_writes_14_columns_region_toko_and_period_from_date():
     sh, opname = _store()
     row = v.ExcelRow(3, NAME, "P-1", "Produk", "10g", "NA1", 5, additional=True)
     summary = opname.insert_rows(_meta(), [row])
     cells = sh.batch_update.call_args[0][0]["requests"][0]["appendCells"]["rows"][0]["values"]
     vals = {h: c["userEnteredValue"] for h, c in zip(store.HEADERS, cells)}
-    assert len(cells) == len(store.HEADERS) == 16
-    assert vals["Store ID"] == {"stringValue": "ST0001"} and vals["Store Name"] == {"stringValue": "TOKO MAJU JAYA"}
-    assert vals["Distributor Name"] == {"stringValue": NAME}
+    assert len(cells) == len(store.HEADERS) == 14
+    assert vals["Region"] == {"stringValue": "Sumatera"} and vals["Nama Toko (By Group)"] == {"stringValue": NAME}
     assert vals["Periode Stock Opname"] == {"stringValue": "2026-10"} and vals["Tanggal Stock Opname"] == {"stringValue": "2026-10-25"}
     assert vals["ISI (GR / ML)"] == {"stringValue": "10g"} and vals["QTY"] == {"numberValue": 5}
     assert (summary.inserted, summary.additional) == (1, 1)
 
 
-def test_duplicates_are_per_store_and_period():
+def test_duplicates_are_per_region_toko_and_period():
     import pytest
-    sh, opname = _store([_line("ST0001", "2026-10")])
+    sh, opname = _store([_line("TOKO A", "2026-10")])
     row = v.ExcelRow(3, NAME, "p-1", "Produk", "10g", "na1", 5)
     with pytest.raises(store.DuplicateDataError) as exc:
         opname.insert_rows(_meta("2026-10-26"), [row])
     assert len(exc.value.conflicts) == 1 and not sh.batch_update.called
-    assert opname.insert_rows(_meta("2026-10-26", "ST0002"), [row]).inserted == 1   # store lain
+    assert opname.insert_rows(_meta("2026-10-26", "TOKO B"), [row]).inserted == 1   # toko lain
     assert opname.insert_rows(_meta("2026-11-02"), [row]).inserted == 1             # periode lain
 
 
@@ -286,14 +298,14 @@ def test_index_is_loaded_once_updated_by_own_writes_and_reloaded_after_ttl():
     sh, opname = _store(index_ttl=120, clock=lambda: clock[0])
     row = v.ExcelRow(3, NAME, "P-1", "Produk", "10g", "NA1", 5)
     ws = opname.ws
-    opname.insert_rows(_meta(store_id="A"), [row]); opname.insert_rows(_meta(store_id="B"), [row])
+    opname.insert_rows(_meta(toko="A"), [row]); opname.insert_rows(_meta(toko="B"), [row])
     assert ws.batch_get.call_count == 1                                  # satu pembacaan untuk banyak submit
-    assert len(ws.batch_get.call_args[0][0]) == 4                        # hanya 4 kolom kunci, bukan seluruh sheet
+    assert len(ws.batch_get.call_args[0][0]) == 5                        # hanya 5 kolom kunci, bukan seluruh sheet
     with pytest.raises(store.DuplicateDataError):                        # penulisan sendiri langsung masuk indeks
-        opname.insert_rows(_meta(store_id="a"), [row])
+        opname.insert_rows(_meta(toko="a"), [row])
     assert ws.batch_get.call_count == 1
     clock[0] = 121
-    opname.insert_rows(_meta(store_id="C"), [row])
+    opname.insert_rows(_meta(toko="C"), [row])
     assert ws.batch_get.call_count == 2                                  # TTL lewat -> baca ulang
 
 
@@ -321,10 +333,10 @@ def test_429_on_write_is_retried_with_backoff_but_5xx_is_not_and_forces_reread()
     sh.batch_update.reset_mock(); sh.batch_update.side_effect = _api_error(503)       # hasil tidak pasti
     reads = opname.ws.batch_get.call_count
     with pytest.raises(Exception):
-        opname.insert_rows(_meta(store_id="Z"), [row])
+        opname.insert_rows(_meta(toko="Z"), [row])
     assert sh.batch_update.call_count == 1                                            # tidak diulang otomatis
     sh.batch_update.side_effect = None
-    opname.insert_rows(_meta(store_id="Y"), [row])
+    opname.insert_rows(_meta(toko="Y"), [row])
     assert opname.ws.batch_get.call_count == reads + 1                                # indeks dibaca ulang setelahnya
 
 
@@ -345,15 +357,15 @@ def test_pacer_spaces_out_concurrent_writes_below_quota():
     assert [round(x, 1) for x in slept] == [1.1, 2.2, 3.3, 4.4]            # tersebar ~54/menit (< kuota 60)
 
 
-def test_concurrent_submits_of_same_store_only_one_wins_and_other_stores_all_write():
+def test_concurrent_submits_of_same_toko_only_one_wins_and_other_tokos_all_write():
     import threading
     sh, opname = _store()
     row = v.ExcelRow(3, NAME, "P-1", "Produk", "10g", "NA1", 5)
     results = []
 
-    def go(store_id):
+    def go(toko):
         try:
-            results.append(opname.insert_rows(_meta(store_id=store_id), [row]).inserted)
+            results.append(opname.insert_rows(_meta(toko=toko), [row]).inserted)
         except store.DuplicateDataError:
             results.append("dup")
     threads = [threading.Thread(target=go, args=("SAMA",)) for _ in range(20)]
@@ -371,7 +383,7 @@ def test_burst_of_100_submits_is_group_committed_into_few_requests():
     sh.batch_update.side_effect = lambda body: time.sleep(0.05)
     row = v.ExcelRow(3, NAME, "P-1", "Produk", "10g", "NA1", 5)
     done = []
-    threads = [threading.Thread(target=lambda i=i: done.append(opname.insert_rows(_meta(store_id=f"S{i}"), [row]).inserted))
+    threads = [threading.Thread(target=lambda i=i: done.append(opname.insert_rows(_meta(toko=f"S{i}"), [row]).inserted))
                for i in range(100)]
     t0 = time.time(); [t.start() for t in threads]; [t.join() for t in threads]
     assert len(done) == 100 and sum(done) == 100
@@ -390,7 +402,7 @@ def test_failure_of_a_group_commit_reaches_every_submit_in_it_and_forces_reread(
 
     def go(i):
         try:
-            opname.insert_rows(_meta(store_id=f"E{i}"), [row]); outcomes.append("ok")
+            opname.insert_rows(_meta(toko=f"E{i}"), [row]); outcomes.append("ok")
         except Exception as exc:
             outcomes.append(type(exc).__name__)
     ts_ = [threading.Thread(target=go, args=(i,)) for i in range(6)]
@@ -398,7 +410,7 @@ def test_failure_of_a_group_commit_reaches_every_submit_in_it_and_forces_reread(
     assert outcomes == ["APIError"] * 6                           # tidak ada yang dilaporkan sukses palsu
     sh.batch_update.side_effect = None
     reads = opname.ws.batch_get.call_count
-    assert opname.insert_rows(_meta(store_id="E0"), [row]).inserted == 1     # tidak tercatat -> boleh submit ulang
+    assert opname.insert_rows(_meta(toko="E0"), [row]).inserted == 1     # tidak tercatat -> boleh submit ulang
     assert opname.ws.batch_get.call_count == reads + 1                       # setelah membaca ulang sheet
 
 
@@ -417,7 +429,7 @@ def test_narrow_grid_is_widened_before_header_is_written():
     store.ensure_worksheet(sh, "W")
     ws.add_cols.assert_called_once_with(len(store.HEADERS) - 10)
     ws.update.assert_called_once()
-    assert ws.update.call_args[0][0] == [store.HEADERS] and ws.update.call_args[0][1] == "A1:P1"
+    assert ws.update.call_args[0][0] == [store.HEADERS] and ws.update.call_args[0][1] == "A1:N1"
 
 
 # ── SKU / BPOM tambahan + master_product ────────────────────────────────────
