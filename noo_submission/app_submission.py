@@ -742,7 +742,7 @@ def halaman_pengajuan_noo():
             header = st.columns(LEBAR_NOO)
             for kolom, (teks, wajib) in zip(header,[
                 ("Customer Store Code",True),("Store Name",False),("Customer Store Name",False),
-                ("City",True),("Store Address",True),("Sales Name",True),("SPV",True),("Store Type",True)]):
+                ("City",True),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True)]):
                 tanda = ' <b style="color:#ef4f58">*</b>' if wajib else ""
                 kolom.markdown(f"<b>{teks}</b>{tanda}", unsafe_allow_html=True)
             spv_sales_lookup = muat_spv_sales_lookup()
