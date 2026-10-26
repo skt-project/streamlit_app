@@ -1,6 +1,6 @@
 """Daftar SKU untuk form "Tambah SKU / nomor BPOM langsung".
 
-Sumber utama: BigQuery `gt_schema.master_product` (kolom sku, product_name, pack_size), HANYA brand tertentu (default SKINTIFIC), dibaca dengan SATU query berparameter. Cadangan bila BigQuery gagal: `reference/Daftar SKU.xlsx`
+Sumber utama: BigQuery `gt_schema.master_product` (kolom sku, product_name, pack_size), HANYA brand tertentu (default SKINTIFIC) dan TANPA status Discontinue, dibaca dengan SATU query berparameter. Cadangan bila BigQuery gagal: `reference/Daftar SKU.xlsx`
 (kolom SKU, Product Name, Pack Size). Hanya fitur tambah SKU yang bergantung pada daftar ini; bagian aplikasi lain tidak.
 """
 from __future__ import annotations
@@ -13,6 +13,7 @@ import openpyxl
 
 DEFAULT_TABLE = "skintific-data-warehouse.gt_schema.master_product"
 DEFAULT_BRANDS = ("SKINTIFIC",)
+DEFAULT_EXCLUDE_STATUSES = ("Discontinue", "Discontinued")   # tabel memakai dua ejaan; dibandingkan tanpa peduli huruf besar/kecil
 _TABLE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 HEADER_SEARCH_ROWS = 10
 SKU_COLS = ("sku", "product id")
@@ -106,8 +107,12 @@ def load_products(path: Path) -> tuple[list[Product], int]:
     return products, skipped
 
 
-def fetch_products(client, table: str = DEFAULT_TABLE, brands: tuple[str, ...] = DEFAULT_BRANDS) -> tuple[list[Product], int]:
-    """SELECT sku, product_name, pack_size dari master_product untuk `brands` saja (query berparameter, hanya baca)."""
+def fetch_products(client, table: str = DEFAULT_TABLE, brands: tuple[str, ...] = DEFAULT_BRANDS,
+                   exclude_statuses: tuple[str, ...] = DEFAULT_EXCLUDE_STATUSES) -> tuple[list[Product], int]:
+    """SELECT sku, product_name, pack_size dari master_product untuk `brands` saja, tanpa `exclude_statuses` (query berparameter, hanya baca).
+
+    SKU dengan status kosong (NULL) tetap ikut: yang dikecualikan hanya status yang disebut.
+    """
     from google.cloud import bigquery     # impor di sini: berat, hanya dibutuhkan saat daftar SKU benar-benar dibaca
 
     if not _TABLE_RE.match(table):
@@ -115,10 +120,14 @@ def fetch_products(client, table: str = DEFAULT_TABLE, brands: tuple[str, ...] =
     wanted = [b.strip().upper() for b in brands if b and b.strip()]
     if not wanted:
         raise ValueError("Daftar brand master_product kosong.")
+    excluded = [x.strip().upper() for x in exclude_statuses if x and x.strip()]
     job = client.query(
-        f"SELECT sku, product_name, pack_size FROM `{table}` WHERE UPPER(TRIM(brand)) IN UNNEST(@brands)",
-        job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ArrayQueryParameter("brands", "STRING", wanted)]))
+        f"SELECT sku, product_name, pack_size FROM `{table}` WHERE UPPER(TRIM(brand)) IN UNNEST(@brands) "
+        "AND (status IS NULL OR UPPER(TRIM(status)) NOT IN UNNEST(@exclude_status))",
+        job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ArrayQueryParameter("brands", "STRING", wanted),
+            bigquery.ArrayQueryParameter("exclude_status", "STRING", excluded)]))
     products, skipped = products_from_rows(job.result())
     if not products:
-        raise ValueError(f"Tabel {table} tidak berisi SKU untuk brand {wanted}.")
+        raise ValueError(f"Tabel {table} tidak berisi SKU untuk brand {wanted} (status {excluded} dikecualikan).")
     return products, skipped

@@ -321,7 +321,7 @@ def test_missing_sku_list_disables_only_the_extra_feature(monkeypatch, tmp_path)
 
 def _bq_fails(monkeypatch, exc):
     monkeypatch.setattr(app, "service_account_info", lambda: {"client_email": "sa@proj.iam.gserviceaccount.com"})
-    def boom(table, brands):
+    def boom(table, brands, exclude):
         raise exc
     monkeypatch.setattr(app, "_fetch_products_bq", boom)
     monkeypatch.setattr(app, "_bq_failure", None)
@@ -331,15 +331,15 @@ def _bq_fails(monkeypatch, exc):
 def test_products_come_from_bigquery_for_the_skintific_brand_only(monkeypatch):
     monkeypatch.undo()
     calls = []
-    def fake_fetch(table, brands):
-        calls.append((table, brands))
+    def fake_fetch(table, brands, exclude):
+        calls.append((table, brands, exclude))
         return [mp.Product("SKU-A", "PRODUK A", "5ml")], 0
     monkeypatch.setattr(app, "_fetch_products_bq", fake_fetch)
     monkeypatch.setattr(app, "_bq_failure", None)
     products, skipped, error = app.load_products(app.Config(
         worksheet_title="T", sheet_id="X", template_path=TEMPLATE))
     assert error is None and [p.sku for p in products] == ["SKU-A"]
-    assert calls == [("skintific-data-warehouse.gt_schema.master_product", ("SKINTIFIC",))]
+    assert calls == [("skintific-data-warehouse.gt_schema.master_product", ("SKINTIFIC",), ("Discontinue", "Discontinued"))]
 
 
 def test_bigquery_failure_is_remembered_so_sessions_do_not_hammer_it(monkeypatch, tmp_path):
@@ -347,7 +347,7 @@ def test_bigquery_failure_is_remembered_so_sessions_do_not_hammer_it(monkeypatch
     monkeypatch.setattr(app, "SKU_LIST_FILE", tmp_path / "tidak-ada.xlsx")
     n = []
     monkeypatch.setattr(app, "service_account_info", lambda: {"client_email": "sa@x"})
-    monkeypatch.setattr(app, "_fetch_products_bq", lambda t, b: (n.append(1), (_ for _ in ()).throw(RuntimeError("down")))[1])
+    monkeypatch.setattr(app, "_fetch_products_bq", lambda t, b, x: (n.append(1), (_ for _ in ()).throw(RuntimeError("down")))[1])
     monkeypatch.setattr(app, "_bq_failure", None)
     app._read_products_file.clear()
     cfg = app.Config(worksheet_title="T", sheet_id="X", template_path=TEMPLATE)

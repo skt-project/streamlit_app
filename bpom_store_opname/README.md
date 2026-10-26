@@ -31,8 +31,8 @@ Spreadsheet utama (satu worksheet). Tidak ada mode revisi. Redaksi di layar meng
 ## Tambah SKU / nomor BPOM langsung
 
 Di Langkah 3 ada form **Tambah SKU / nomor BPOM langsung (opsional)**: pilih SKU (label `SKU - product name`, bisa diketik) dari
-BigQuery `skintific-data-warehouse.gt_schema.master_product`, **hanya brand SKINTIFIC**, isi nomor BPOM dan QTY,
-lalu **Tambah ke daftar**. Daftar dibaca dengan satu query berparameter (`SELECT sku, product_name, pack_size ... WHERE brand IN (...)`),
+BigQuery `skintific-data-warehouse.gt_schema.master_product`, **hanya brand SKINTIFIC dan tanpa status Discontinue**, isi nomor BPOM dan QTY,
+lalu **Tambah ke daftar**. Daftar dibaca dengan satu query berparameter (`SELECT sku, product_name, pack_size ... WHERE brand IN (...) AND status NOT IN (Discontinue, Discontinued)`),
 di-cache 1 jam; bila BigQuery gagal, dicoba lagi paling cepat tiap 60 detik. Baris yang ditambahkan digabung
 dengan isi file saat validasi dan ikut tersimpan dalam satu `batchUpdate` yang sama (dikosongkan setelah sukses).
 
@@ -42,11 +42,11 @@ dengan isi file saat validasi dan ikut tersimpan dalam satu `batchUpdate` yang s
 - **Izin:** service account butuh `BigQuery Data Viewer` pada tabel itu dan `BigQuery Job User` pada project. Tanpa itu, dipakai file
   cadangan `reference/Daftar SKU.xlsx` bila ada; bila tidak, hanya fitur ini yang nonaktif (pesan menyebut email yang harus diberi izin).
   Bagian aplikasi lain (daftar toko, template, upload, simpan) tidak bergantung pada BigQuery. Brand/tabel dapat diubah lewat
-  `[app] master_product_brands` / `master_product_table`.
+  `[app] master_product_brands` / `master_product_exclude_statuses` / `master_product_table`. SKU dengan status kosong tetap ikut. File cadangan `Daftar SKU.xlsx` tidak punya status, jadi tidak difilter.
 
 ## Efek samping aplikasi (dikunci oleh `tests/test_side_effects.py`)
 
-- **BigQuery:** hanya SATU `SELECT sku, product_name, pack_size` berparameter ke `master_product` (brand SKINTIFIC). Tidak ada DML/DDL.
+- **BigQuery:** hanya SATU `SELECT sku, product_name, pack_size` berparameter ke `master_product` (brand SKINTIFIC, tanpa status Discontinue). Tidak ada DML/DDL.
 - **Saat submit:** satu-satunya perubahan di spreadsheet output adalah **menambah baris** (`appendCells`). Persiapan sekali-jalan, semuanya di
   dalam spreadsheet output itu sendiri: membuat tab bila belum ada, melebarkan kolom tab yang sempit, menulis header di tab kosong.
   Header yang sudah ada tidak pernah ditimpa; data yang sudah ada tidak pernah diubah atau dihapus.

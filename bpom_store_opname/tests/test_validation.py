@@ -551,8 +551,13 @@ def test_fetch_products_uses_a_parameterised_query_limited_to_the_given_brands()
             return Job()
     products, skipped = mp.fetch_products(Client(), "p.d.t", (" skintific ", "TIMEPHORIA", "FACERINNA", ""))
     assert [p.label for p in products] == ["S-1 - Satu", "S-2 - Dua"] and skipped == 1
-    assert seen["params"] == [("brands", ["SKINTIFIC", "TIMEPHORIA", "FACERINNA"])]            # nilai TIDAK disisipkan ke teks SQL
-    assert "UNNEST(@brands)" in seen["sql"] and "SKINTIFIC" not in seen["sql"] and "`p.d.t`" in seen["sql"]
+    assert seen["params"] == [("brands", ["SKINTIFIC", "TIMEPHORIA", "FACERINNA"]),
+                              ("exclude_status", ["DISCONTINUE", "DISCONTINUED"])]                  # nilai TIDAK disisipkan ke teks SQL
+    assert "UNNEST(@brands)" in seen["sql"] and "UNNEST(@exclude_status)" in seen["sql"]
+    assert "SKINTIFIC" not in seen["sql"] and "DISCONTINU" not in seen["sql"].upper() and "`p.d.t`" in seen["sql"]
+    assert "status IS NULL OR" in seen["sql"]                                                      # status kosong tidak ikut dikecualikan
+    mp.fetch_products(Client(), "p.d.t", ("A",), (" Obsolete ", ""))
+    assert seen["params"][1] == ("exclude_status", ["OBSOLETE"])
     with pytest.raises(ValueError, match="tidak valid"):
         mp.fetch_products(Client(), "x; DROP TABLE y", ("A",))
     with pytest.raises(ValueError, match="brand master_product kosong"):

@@ -31,10 +31,11 @@ def src(name):
 def test_bigquery_is_called_in_exactly_one_place_with_a_single_select():
     hits = [(n, m.group(0)) for n in SOURCES for m in re.finditer(r"\bclient\.query\(|\.query_and_wait\(|\bclient\.insert_rows|\.load_table|\.create_table|\.delete_table|\.update_table|\.extract_table|\.copy_table", src(n))]
     assert hits == [("master_product.py", "client.query(")]
-    sql = re.search(r'client\.query\(\s*f"([^"]+)"', src("master_product.py")).group(1)
+    call = src("master_product.py").split("client.query(", 1)[1].split("job_config", 1)[0]
+    sql = " ".join(re.findall(r'f?"([^"]*)"', call))
     assert sql.lstrip().upper().startswith("SELECT ") and ";" not in sql
     assert not re.search(r"\b(INSERT|UPDATE|DELETE|MERGE|DROP|CREATE|ALTER|TRUNCATE|EXPORT|CALL|GRANT|REVOKE)\b", sql.upper())
-    assert "@brands" in sql and "SKINTIFIC" not in sql                       # nilai brand lewat parameter, bukan teks SQL
+    assert "@brands" in sql and "@exclude_status" in sql and "SKINTIFIC" not in sql and "DISCONTINU" not in sql.upper()   # nilai lewat parameter
 
 
 # ── 2/3. Sheets/Drive: hanya menambah baris ─────────────────────────────────

@@ -139,6 +139,7 @@ class Config:
     # Daftar SKU untuk form tambah SKU langsung: BigQuery master_product (brand terbatas), cadangan reference/Daftar SKU.xlsx
     master_product_table: str = master_product.DEFAULT_TABLE
     master_product_brands: tuple[str, ...] = master_product.DEFAULT_BRANDS
+    master_product_exclude_statuses: tuple[str, ...] = master_product.DEFAULT_EXCLUDE_STATUSES
 
 
 def service_account_info() -> dict | None:
@@ -191,6 +192,7 @@ def load_config() -> Config:
         store_filter_column=str(app.get("store_filter_column", "H")).strip(),
         master_product_table=str(app.get("master_product_table", master_product.DEFAULT_TABLE)).strip(),
         master_product_brands=tuple(str(b).strip() for b in app.get("master_product_brands", master_product.DEFAULT_BRANDS)),
+        master_product_exclude_statuses=tuple(str(x).strip() for x in app.get("master_product_exclude_statuses", master_product.DEFAULT_EXCLUDE_STATUSES)),
     )
 
 
@@ -211,8 +213,8 @@ def get_bq_client():
 
 
 @st.cache_resource(ttl=3600, show_spinner=False)
-def _fetch_products_bq(table: str, brands: tuple[str, ...]) -> tuple[list[master_product.Product], int]:
-    return master_product.fetch_products(get_bq_client(), table, brands)
+def _fetch_products_bq(table: str, brands: tuple[str, ...], exclude_statuses: tuple[str, ...]) -> tuple[list[master_product.Product], int]:
+    return master_product.fetch_products(get_bq_client(), table, brands, exclude_statuses)
 
 
 @st.cache_resource(show_spinner=False)
@@ -235,7 +237,7 @@ def load_products(cfg: Config) -> tuple[list[master_product.Product], int, str |
         bq_error = failure[1]
     else:
         try:
-            products, skipped = _fetch_products_bq(cfg.master_product_table, cfg.master_product_brands)
+            products, skipped = _fetch_products_bq(cfg.master_product_table, cfg.master_product_brands, cfg.master_product_exclude_statuses)
             _bq_failure = None
             return products, skipped, None
         except Exception as exc:                  # izin, jaringan, tabel hilang, dsb.
