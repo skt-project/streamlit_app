@@ -754,7 +754,7 @@ def halaman_pengajuan_noo():
                 data_noo[_c] = data_noo[_c].astype("object")
             for i, baris in data_noo.iterrows():
                 csn = str(baris.get("Customer Store Name",baris.get("Store Name",""))).strip().upper()
-                c_kode,c_nama,c_csn,c_city,c_alamat,c_sales,c_spv,c_tipe = st.columns(LEBAR_NOO)
+                c_kode,c_nama,c_csn,c_city,c_alamat,c_spv,c_sales,c_tipe = st.columns(LEBAR_NOO)
                 kode_val = str(baris["Customer Store Code"])
                 c_kode.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{kode_val}</div>', unsafe_allow_html=True)
                 c_nama.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{baris["Store Name"]}</div>', unsafe_allow_html=True)
@@ -765,7 +765,7 @@ def halaman_pengajuan_noo():
                 alamat_val = "" if alamat_raw.strip() in ("nan","None","","NaN") else alamat_raw.strip()
                 alamat_noo = c_alamat.text_input(lbl,value=alamat_val,label_visibility="collapsed",
                                                   key=f"noo_alamat_{i}",placeholder="Store address...")
-                spv_noo, sales_noo = input_spv_sales(csn, f"noo_{i}", c_spv,spv_sales_lookup, c_sales)
+                spv_noo, sales_noo = input_spv_sales(csn, f"noo_{i}", c_spv, c_sales, spv_sales_lookup)
                 tipe_noo = c_tipe.selectbox(lbl,[""] + JENIS_TOKO_DEFAULT,label_visibility="collapsed",key=f"noo_tipe_{i}")
                 data_noo.loc[i,"Customer Store Code"] = kode_val
                 data_noo.loc[i,"City"]       = city_noo
