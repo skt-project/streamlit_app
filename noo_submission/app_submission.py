@@ -36,7 +36,7 @@ from shared import (
 # NAVIGASI
 # ═════════════════════════════════════════════════════════════════════════════
 NAVIGASI = [
-    ("NOO Submission",    "⭐", "pengajuan"),
+    ("NOO & SKU Submission",    "⭐", "pengajuan"),
     ("SPV Confirmation",  "⭐", "spv"),
 ]
 
@@ -1021,7 +1021,7 @@ def halaman_konfirmasi_spv():
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
-    st.set_page_config(page_title="NOO Submission", page_icon="📦", layout="wide")
+    st.set_page_config(page_title="NOO & SKU Submission", page_icon="📦", layout="wide")
     inisialisasi_state()
     ss = st.session_state
     CSS_PATH = os.path.join(os.path.dirname(__file__), "style_app.css")
