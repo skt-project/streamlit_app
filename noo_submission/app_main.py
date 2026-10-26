@@ -536,7 +536,7 @@ def tab_noo():
 SKU_TABLE    = "sku_mapping"
 SKU_TAGGING  = ["Not Yet", "Done"]
 KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_distri", "f_brand", "f_status")
-KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_dari", "sku_f_sampai", "sku_select_all")
+KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_tagging", "sku_f_dari", "sku_f_sampai", "sku_select_all")
 
 SKU_DL_HEADERS = ["Customer Code", "Customer Name", "Product", "Product Chinese Short Name",
                   "Product English Name", "Customer Product Code", "Customer Product Name",
@@ -644,6 +644,7 @@ def _sku_mark_done():
 def reset_filter_sku(tgl_min, tgl_max):
     ss = st.session_state
     ss.sku_f_nama, ss.sku_f_brand = "All customers", "All brands"
+    ss.sku_f_tagging = "All tagging"
     ss.sku_f_dari, ss.sku_f_sampai = tgl_min, tgl_max
 
 def _refresh_sku():
@@ -745,7 +746,9 @@ def _tab_sku():
         daftar_sheet = []
     nama_opts  = ["All customers"] + sorted(daftar_sheet)
     brand_opts = ["All brands", "NXP", "G2G"]
+    tagging_opts = ["All tagging"] + SKU_TAGGING
     ss.setdefault("sku_f_nama", "All customers"); ss.setdefault("sku_f_brand", "All brands")
+    ss.setdefault("sku_f_tagging", "All tagging")
     ss.setdefault("sku_f_dari", tgl_min);         ss.setdefault("sku_f_sampai", hari_ini)
     if ss.sku_f_nama  not in nama_opts:  ss.sku_f_nama  = "All customers"
     if ss.sku_f_brand not in brand_opts: ss.sku_f_brand = "All brands"
