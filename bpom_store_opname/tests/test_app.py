@@ -495,12 +495,13 @@ def test_final_review_lists_form_values_file_rows_and_added_skus(monkeypatch):
     assert f"Total baris yang akan disimpan:** {n_file + 2} ({n_file} dari file Excel + 2 SKU/BPOM tambahan dari form)" in text
     assert "Total QTY:** " + f"{expected_qty:,}".replace(",", ".") in text and "Baris dengan QTY 0:** 1" in text
     assert "Baris BPOM tambahan (di luar daftar resmi):** 2" in text
-    expanders = [e for e in at.expander if e.label.startswith("Semua baris yang akan disimpan")]
-    assert expanders and expanders[0].label.endswith(f"({n_file + 2})")
-    frame = next(d for d in at.dataframe if "Sumber" in d.value.columns)
-    assert len(frame.value) == n_file + 2
-    assert list(frame.value["Sumber"][-2:]) == ["Form tambahan", "Form tambahan"]
-    assert frame.value["Sumber"][0].startswith("Excel baris ") and list(frame.value["PRODUCT ID"][-2:]) == ["ZZ-NEW-01", SKUS[0].product_id]
+    assert f"Daftar SKU yang akan disimpan ({n_file + 2} baris)" in text
+    table = next(m.value for m in at.markdown if m.value.startswith("<div") and "<table" in m.value)      # tabel langsung terlihat (bukan di expander)
+    assert table.count("<tr") == n_file + 2 + 1                                                           # + baris header
+    assert table.count("Form tambahan") == 2 and "Excel baris 3" in table
+    assert f"<b>{SKUS[0].product_id}</b> - {SKUS[0].product_name}" in table                               # SKU - Product Name utuh, tidak dipotong
+    assert "<b>ZZ-NEW-01</b> - PRODUK BARU ZZ" in table and "BPOM tambahan" in table
+    assert "overflow-x:auto" in table and "word-break:break-word" in table                                # membungkus + bisa digeser
 
 
 def test_submit_requires_the_confirmation_checkbox_and_writes_nothing_without_it(monkeypatch):
@@ -511,3 +512,10 @@ def test_submit_requires_the_confirmation_checkbox_and_writes_nothing_without_it
     _click(at, "Submit")                                                    # sekarang dicentang -> tersimpan
     assert sh.batch_update.call_count == 1 and any("Berhasil menyimpan" in s.value for s in at.success)
     assert at.checkbox[0].value is False                                    # konfirmasi harus diulang untuk pengiriman berikutnya
+
+
+def test_review_table_escapes_user_typed_values():
+    row = v.ExcelRow(0, "T", "SKU<1>", "A & B <script>x</script>", "10g", '"><img src=x onerror=alert(1)>', 3, additional=True)
+    html_out = app.review_table_html([row])
+    assert "<script>" not in html_out and "<img" not in html_out
+    assert "&lt;script&gt;" in html_out and "&amp;" in html_out and "SKU&lt;1&gt;" in html_out

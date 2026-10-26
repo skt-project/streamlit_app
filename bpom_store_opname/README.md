@@ -14,7 +14,8 @@ Spreadsheet utama (satu worksheet). Tidak ada mode revisi. Redaksi di layar meng
 4. **Upload .xlsx** - diperiksa otomatis; satu baris salah = seluruh upload dibatalkan (tidak ada data masuk).
 5. **Rincian final lalu Submit.** Sebelum Submit, halaman menampilkan rincian: isian form (region, toko, tanggal, periode, PIC, nama file),
    total baris (dari file + SKU tambahan), total QTY, jumlah baris QTY 0 dan BPOM tambahan, serta tabel SEMUA baris yang akan disimpan
-   dengan kolom Sumber (`Excel baris n` / `Form tambahan`). Submit baru diproses setelah kotak konfirmasi dicentang; centang diulang
+   dengan SKU - nama produk yang terbaca penuh (teks membungkus, muat di layar 375 px; bila lebih sempit bisa digeser ke samping) dan
+   keterangan Sumber (`Excel baris n` / `Form tambahan`) di bawah nama produk. Submit baru diproses setelah kotak konfirmasi dicentang; centang diulang
    untuk setiap pengiriman.
 
 ## Aturan validasi

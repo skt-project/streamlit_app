@@ -9,6 +9,7 @@ Jalankan:  streamlit run app.py
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
 import re
 import time
@@ -345,6 +346,32 @@ def show_issues(issues: list[val.Issue]) -> None:
             )
 
 
+def review_table_html(rows: list[val.ExcelRow]) -> str:
+    """Tabel rincian final sebagai HTML: teks membungkus (SKU - nama produk terbaca PENUH di layar sempit, 375 px muat tanpa
+    menggeser) dan, bila layar lebih sempit lagi, tabel bisa digeser ke samping. Sumber baris ada di bawah nama produk.
+    Semua nilai di-escape (nomor BPOM diketik pengguna)."""
+    th = "padding:.3rem .3rem;text-align:left;border-bottom:2px solid rgba(128,128,128,.55);white-space:nowrap"
+    td = "padding:.3rem .3rem;vertical-align:top;border-bottom:1px solid rgba(128,128,128,.3)"
+    head = "".join(f'<th style="{th}">{h}</th>' for h in ("No", "SKU - Product Name", "ISI", "BPOM", "QTY"))
+    body = []
+    for no, r in enumerate(rows, start=1):
+        from_form = not r.excel_row
+        bg = "background:rgba(255,193,7,.16);" if from_form else ""
+        sumber = "<b>Form tambahan</b>" if from_form else f"Excel baris {r.excel_row}"
+        bpom = html.escape(r.bpom_number) + ('<br><small style="color:#C62828">BPOM tambahan</small>' if r.additional else "")
+        body.append(
+            f'<tr style="{bg}">'
+            f'<td style="{td};text-align:right">{no}</td>'
+            f'<td style="{td};min-width:7rem;word-break:break-word"><b>{html.escape(r.product_id)}</b> - {html.escape(r.product_name)}'
+            f'<br><small style="opacity:.75">{sumber}</small></td>'
+            f'<td style="{td};white-space:nowrap">{html.escape(r.isi)}</td>'
+            f'<td style="{td};{"white-space:nowrap" if len(r.bpom_number) <= 16 else "min-width:4.5rem;word-break:break-all"}">{bpom}</td>'
+            f'<td style="{td};text-align:right;font-weight:700;white-space:nowrap">{r.qty}</td></tr>')
+    return ('<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
+            '<table style="border-collapse:collapse;width:100%;font-size:.82rem;line-height:1.3">'
+            f'<thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>')
+
+
 def show_final_review(*, region, picked, tanggal, pic, uploaded, parsed) -> None:
     """Rincian final sebelum Submit: isian form + SEMUA baris yang akan disimpan (file Excel dan SKU tambahan dari form)."""
     st.markdown("**Rincian final - periksa dulu sebelum Submit**")
@@ -369,21 +396,8 @@ def show_final_review(*, region, picked, tanggal, pic, uploaded, parsed) -> None
     if parsed.missing:
         st.warning(f"{len(parsed.missing)} kombinasi SKU + BPOM dari daftar prinsipal tidak ada di file/tambahan. "
                    "Pastikan seluruh SKU dan nomor BPOM di toko ini sudah dilaporkan.")
-    with st.expander(f"Semua baris yang akan disimpan ({len(rows)})", expanded=True):
-        st.dataframe(
-            pd.DataFrame({
-                "No": range(1, len(rows) + 1),
-                "Sumber": [f"Excel baris {r.excel_row}" if r.excel_row else "Form tambahan" for r in rows],
-                "PRODUCT ID": [r.product_id for r in rows],
-                "PRODUCT NAME": [r.product_name for r in rows],
-                "ISI (GR / ML)": [r.isi for r in rows],
-                "BPOM NUMBER": [r.bpom_number for r in rows],
-                "QTY": [r.qty for r in rows],
-                "BPOM Tambahan": ["Ya" if r.additional else "" for r in rows],
-            }),
-            hide_index=True,
-            width="stretch",
-        )
+    st.markdown(f"**Daftar SKU yang akan disimpan ({len(rows)} baris)** - periksa kode SKU, nama produk, nomor BPOM, dan QTY")
+    st.markdown(review_table_html(rows), unsafe_allow_html=True)
 
 
 def show_flash() -> None:
