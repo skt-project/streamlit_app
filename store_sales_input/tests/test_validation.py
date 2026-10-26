@@ -216,3 +216,13 @@ def test_blank_rows_ignored_and_empty_submission_rejected(stores, skus):
     r = run(stores, skus, [LineInput(1)])
     assert not r.ok and any("minimal satu SKU" in e.message for e in r.errors)
     assert not any("Foto evidence wajib" in e.message for e in r.errors)
+
+
+def test_renamed_store_headers_kode_toko_nama_toko_are_accepted():
+    """Master Oktober 2026: 'Cust. ID' -> 'Kode Toko', 'Store Name' -> 'Nama Toko' (data sama)."""
+    hdr = ["Store/Group ID", "Kode Toko", "Nama Toko", "Region", "Channel", "Group", "Budget Q4", "BA/ Non BA", "Program"]
+    stores, _ = parse_stores([[""] * 7 + ["129,604,432"], hdr,
+                              ["G", "C1", "Toko A ", "R", "GT", "G", "1", "Non BA", "JCP"],
+                              ["G", "C2", "Toko B", "R", "GT", "G", "1", "BA", "JCP"]])
+    assert list(stores) == ["C1"] and stores["C1"].store_name == "Toko A" and stores["C1"].region == "R"
+    assert find_table([hdr], ["Cust. ID", "Store Name"]) is not None

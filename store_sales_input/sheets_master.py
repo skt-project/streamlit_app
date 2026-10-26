@@ -25,6 +25,9 @@ STORE_HEADERS = [
 STORE_REQUIRED = ["Cust. ID", "Store Name", "Region", "Group", "BA/ Non BA"]
 SKU_HEADERS = ["SKU Code", "SKU Name", "STP"]
 _HEADER_SCAN_ROWS = 10
+# Tim kadang mengganti nama kolom di spreadsheet master (mis. 2026-10: "Cust. ID" -> "Kode Toko",
+# "Store Name" -> "Nama Toko"). Nama alternatif dipetakan ke nama yang dipakai kode, jadi dua-duanya diterima.
+HEADER_ALIASES = {"Kode Toko": "Cust. ID", "Nama Toko": "Store Name"}
 
 
 class MasterError(Exception):
@@ -47,6 +50,7 @@ def find_table(values: Sequence[Sequence[Any]], required: Sequence[str]) -> tupl
         pos: dict[str, int] = {}
         for c, cell in enumerate(row):
             text = str(cell).strip()
+            text = HEADER_ALIASES.get(text, text)
             if text in required and text not in pos:
                 pos[text] = c
         if len(pos) == len(required):
@@ -131,7 +135,8 @@ def _locate(spreadsheet, preferred: str, required: Sequence[str], label: str):
             return values, ws.title
     raise MasterError(
         f"Worksheet master {label} tidak ditemukan: tidak ada worksheet dengan header "
-        + " | ".join(required) + f" (nama yang dikonfigurasi: '{preferred}')."
+        + " | ".join(required) + " (atau padanannya: " + ", ".join(f"{k} = {v}" for k, v in HEADER_ALIASES.items())
+        + f") (nama yang dikonfigurasi: '{preferred}')."
     )
 
 
