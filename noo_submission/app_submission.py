@@ -1034,7 +1034,7 @@ def main():
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon","✅"))
 
     with st.sidebar:
-        st.markdown('<div class="brand">📦 NOO Submission</div>'
+        st.markdown('<div class="brand">📦 NOO & SKU Submission</div>'
                     '<div class="brand-sub">Submit and confirm NOO data.</div>',
                     unsafe_allow_html=True)
         for label, ikon, kunci in NAVIGASI:
