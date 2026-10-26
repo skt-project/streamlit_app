@@ -127,11 +127,9 @@ Tes: `.\.venv\Scripts\python -m pip install pytest` lalu `.\.venv\Scripts\python
 | Data ke browser | Region dengan lebih dari 1.500 pilihan toko memakai kotak cari (maks. 50 hasil), bukan dropdown ribuan opsi. |
 | Konfigurasi | `.streamlit/config.toml`: tanpa file watcher, toolbar minimal, tanpa stack trace ke pengguna. |
 
-Uji beban lokal (server Streamlit asli, Google Sheets tiruan dengan kuota 60/60 per menit, 100 browser sekaligus, versi sebelum perubahan
-Region -> Toko): 88 dari 100 sesi selesai sampai "Berhasil menyimpan" dengan baris tepat; 0 error 429; 1 kali baca sheet untuk seluruh sesi;
-31 `batchUpdate` untuk 88 submit; memori server puncak sekitar 250 MB. Sisanya gagal di sisi browser pada rig yang jenuh.
+Uji beban 100 pengguna (browser sungguhan, alur lengkap, server Streamlit asli dikunci 2 inti CPU, Google Sheets tiruan berkuota 60/60 per menit): **100/100 selesai, 0 HTTP 429, 6.630 baris tepat tanpa duplikat, memori server puncak sekitar 235 MB**. Perjalanan penuh median 63 dtk bila pengguna masuk 2 per detik, 98 dtk bila 100 orang masuk dalam 20 detik. Temuan terpenting: Streamlit memaksa `gc.collect(2)` setelah setiap eksekusi script (59% waktu GIL server); dimatikan lewat `runner.postScriptGC = false` di `.streamlit/config.toml`, CPU server per pengguna turun 44%. Angka, cara menjalankan, dan keterbatasan: `perf/README.md`.
 
 ## File
 
 `app.py` (UI) · `validation.py` (validasi form + Excel) · `reference_data.py` (baca daftar toko + katalog) · `master_product.py` (daftar SKU: BigQuery + file cadangan) ·
-`tools/prepare_reference.py` (periksa + pasang data BD) · `template_builder.py` (template per toko) · `sheets_store.py` (Google Sheets) · `tests/`
+`tools/prepare_reference.py` (periksa + pasang data BD) · `perf/` (uji beban) · `template_builder.py` (template per toko) · `sheets_store.py` (Google Sheets) · `tests/`

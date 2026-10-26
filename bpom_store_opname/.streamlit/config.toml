@@ -14,3 +14,6 @@ showErrorDetails = "none"    # pengguna tidak melihat stack trace; detail ada di
 
 [runner]
 magicEnabled = false
+# Streamlit memaksa gc.collect(2) (GC penuh, menahan GIL) setelah SETIAP eksekusi script. Pada uji 100 pengguna ini memakan 59% waktu GIL
+# server. GC otomatis Python tetap berjalan; memori puncak uji beban hanya ~200 MB.
+postScriptGC = false
