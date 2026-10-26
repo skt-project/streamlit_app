@@ -49,7 +49,7 @@ def _store_file(tmp_path, rows=None):
 def wiring(monkeypatch, tmp_path):
     """Credential palsu, Google Sheets palsu, daftar store buatan."""
     monkeypatch.setattr(app, "load_config", lambda: app.Config(
-        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
+        worksheet_title="T", sheet_id="FAKE_ID", template_path=TEMPLATE))
     monkeypatch.setattr(app, "get_gspread_client", lambda: MagicMock())
     monkeypatch.setattr(app, "load_products", lambda cfg: (PRODUCTS, 0, None))
     monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
@@ -71,7 +71,7 @@ def _fake_sheet(monkeypatch, existing=None):
     ws.id, ws.title = 7, "W"
     ws.batch_get.return_value = _columns(existing or [])
     sh.ws = ws
-    monkeypatch.setattr(store, "open_spreadsheet", lambda *a, **k: (sh, False))
+    monkeypatch.setattr(store, "open_spreadsheet", lambda *a, **k: sh)
     monkeypatch.setattr(store, "ensure_worksheet", lambda *a, **k: ws)
     return sh
 
@@ -309,7 +309,7 @@ def test_extra_can_be_removed():
 def test_missing_sku_list_disables_only_the_extra_feature(monkeypatch, tmp_path):
     monkeypatch.undo()                                                    # pakai load_products asli, bukan tiruan
     monkeypatch.setattr(app, "load_config", lambda: app.Config(
-        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
+        worksheet_title="T", sheet_id="FAKE_ID", template_path=TEMPLATE))
     monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
     monkeypatch.setattr(app, "SKU_LIST_FILE", tmp_path / "tidak-ada.xlsx")
     _bq_fails(monkeypatch, PermissionError("403 Access Denied: BigQuery"))
@@ -328,7 +328,7 @@ def _bq_fails(monkeypatch, exc):
     app.load_tokos_by_region.clear(); app._read_products_file.clear()
 
 
-def test_products_come_from_bigquery_for_the_three_brands_only(monkeypatch):
+def test_products_come_from_bigquery_for_the_skintific_brand_only(monkeypatch):
     monkeypatch.undo()
     calls = []
     def fake_fetch(table, brands):
@@ -337,9 +337,9 @@ def test_products_come_from_bigquery_for_the_three_brands_only(monkeypatch):
     monkeypatch.setattr(app, "_fetch_products_bq", fake_fetch)
     monkeypatch.setattr(app, "_bq_failure", None)
     products, skipped, error = app.load_products(app.Config(
-        sheet_name="T", worksheet_title="T", sheet_id="X", share_with=(), template_path=TEMPLATE))
+        worksheet_title="T", sheet_id="X", template_path=TEMPLATE))
     assert error is None and [p.sku for p in products] == ["SKU-A"]
-    assert calls == [("skintific-data-warehouse.gt_schema.master_product", ("SKINTIFIC", "TIMEPHORIA", "FACERINNA"))]
+    assert calls == [("skintific-data-warehouse.gt_schema.master_product", ("SKINTIFIC",))]
 
 
 def test_bigquery_failure_is_remembered_so_sessions_do_not_hammer_it(monkeypatch, tmp_path):
@@ -350,7 +350,7 @@ def test_bigquery_failure_is_remembered_so_sessions_do_not_hammer_it(monkeypatch
     monkeypatch.setattr(app, "_fetch_products_bq", lambda t, b: (n.append(1), (_ for _ in ()).throw(RuntimeError("down")))[1])
     monkeypatch.setattr(app, "_bq_failure", None)
     app._read_products_file.clear()
-    cfg = app.Config(sheet_name="T", worksheet_title="T", sheet_id="X", share_with=(), template_path=TEMPLATE)
+    cfg = app.Config(worksheet_title="T", sheet_id="X", template_path=TEMPLATE)
     for _ in range(5):
         assert app.load_products(cfg)[2] is not None
     assert len(n) == 1                                                     # 5 sesi -> hanya 1 percobaan BigQuery dalam 60 detik
@@ -359,7 +359,7 @@ def test_bigquery_failure_is_remembered_so_sessions_do_not_hammer_it(monkeypatch
 def test_sku_list_file_feeds_the_dropdown(monkeypatch, tmp_path):
     monkeypatch.undo()
     monkeypatch.setattr(app, "load_config", lambda: app.Config(
-        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
+        worksheet_title="T", sheet_id="FAKE_ID", template_path=TEMPLATE))
     monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
     wb = openpyxl.Workbook(); ws = wb.active
     ws.append(["Pack Size", "SKU", "Product Name"]); ws.append(["25ml", "ZZ-NEW-01", "PRODUK BARU ZZ"]); ws.append(["5g", "AA-1", "PRODUK A"])
@@ -384,7 +384,7 @@ def _store_sheet(monkeypatch, values, **cfg_extra):
     monkeypatch.setattr(app, "get_gspread_client", lambda: gc)
     monkeypatch.setattr(app, "service_account_info", lambda: {"client_email": "sa@proj.iam.gserviceaccount.com"})
     monkeypatch.setattr(app, "load_config", lambda: app.Config(
-        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE,
+        worksheet_title="T", sheet_id="FAKE_ID", template_path=TEMPLATE,
         store_sheet_id=STORE_SHEET_ID, **cfg_extra))
     app._tokos_from_sheet.clear()
     return gc, sh, ws
@@ -447,4 +447,4 @@ def test_results_sheet_403_is_reported_without_crash(monkeypatch):
     gc = MagicMock(); gc.open_by_key.side_effect = PermissionError()
     import pytest
     with pytest.raises(store.SheetsError, match="belum di-share sebagai Editor"):
-        store.open_spreadsheet(gc, "T", sheet_id="X")
+        store.open_spreadsheet(gc, "X")

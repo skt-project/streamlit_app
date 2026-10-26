@@ -95,36 +95,19 @@ def now_str() -> str:
 
 # ── Spreadsheet / worksheet ────────────────────────────────────────────────
 
-def open_spreadsheet(
-    gc: gspread.Client,
-    title: str,
-    *,
-    sheet_id: str | None = None,
-    share_with: tuple[str, ...] = (),
-) -> tuple[gspread.Spreadsheet, bool]:
-    """Buka spreadsheet utama. Mengembalikan (spreadsheet, baru_dibuat).
+def open_spreadsheet(gc: gspread.Client, sheet_id: str | None) -> gspread.Spreadsheet:
+    """Buka spreadsheet output HANYA lewat ID (`open_by_key`).
 
-    Urutan: `sheet_id` bila diset, lalu cari berdasarkan judul; bila tidak ada, buat satu yang baru.
+    Sengaja tidak ada pencarian berdasarkan judul, pembuatan spreadsheet baru, atau share lewat Drive: aplikasi ini tidak boleh
+    berdampak di luar spreadsheet output yang ditunjuk `google_sheet_id`.
     """
+    if not sheet_id:
+        raise SheetsError("`google_sheet_id` belum diatur di Secrets (bagian `[app]`), jadi hasil tidak bisa disimpan.")
     try:
-        if sheet_id:
-            return gc.open_by_key(sheet_id), False
-        return gc.open(title), False
+        return gc.open_by_key(sheet_id)
     except (gspread.SpreadsheetNotFound, PermissionError):     # gspread: HTTP 403 -> PermissionError
-        if sheet_id:
-            raise SheetsError(f"Spreadsheet dengan id '{sheet_id}' tidak ditemukan atau service account belum di-share "
-                              "sebagai Editor.") from None
-    try:
-        sh = gc.create(title)
-    except gspread.exceptions.APIError as exc:
-        raise SheetsError(
-            f"Spreadsheet '{title}' tidak ditemukan dan service account tidak bisa membuat yang baru ({exc}). "
-            "Service account tidak punya kuota Drive, jadi spreadsheet harus dibuat manual, di-share sebagai Editor "
-            "ke service account, lalu ID-nya diisi sebagai `google_sheet_id` di bagian `[app]` pada Secrets."
-        ) from None
-    for email in share_with:
-        sh.share(email, perm_type="user", role="writer", notify=False)
-    return sh, True
+        raise SheetsError(f"Spreadsheet dengan id '{sheet_id}' tidak ditemukan atau service account belum di-share "
+                          "sebagai Editor.") from None
 
 
 def _check_header(ws: gspread.Worksheet, current: list[str]) -> None:
@@ -138,19 +121,15 @@ def _check_header(ws: gspread.Worksheet, current: list[str]) -> None:
         )
 
 
-def ensure_worksheet(sh: gspread.Spreadsheet, title: str, *, fresh: bool = False) -> gspread.Worksheet:
-    """Ambil worksheet utama; buat bila belum ada dan tulis header bila kosong.
-
-    Header yang sudah ada tapi berbeda dari skema TIDAK ditimpa (error).
+def ensure_worksheet(sh: gspread.Spreadsheet, title: str) -> gspread.Worksheet:
+    """Ambil worksheet output; satu-satunya perubahan selain penambahan baris data, SEMUA di dalam spreadsheet output:
+    membuat tab `title` bila belum ada, melebarkan kolom tab yang terlalu sempit, dan menulis header (+ membekukan baris 1)
+    bila baris 1 kosong. Header yang sudah ada tapi berbeda dari skema TIDAK ditimpa (error).
     """
     try:
         ws = sh.worksheet(title)
     except gspread.WorksheetNotFound:
-        if fresh:  # spreadsheet baru: pakai tab bawaan daripada meninggalkan "Sheet1" kosong
-            ws = sh.sheet1
-            ws.update_title(title)
-        else:
-            ws = sh.add_worksheet(title, rows=1000, cols=len(HEADERS))
+        ws = sh.add_worksheet(title, rows=1000, cols=len(HEADERS))
     first_row = ws.row_values(1)
     if not any(str(c).strip() for c in first_row):
         if ws.col_count < len(HEADERS):   # batas kolom grid tab: lebarkan sebelum menulis header

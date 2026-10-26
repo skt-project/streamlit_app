@@ -1,7 +1,6 @@
 """Daftar SKU untuk form "Tambah SKU / nomor BPOM langsung".
 
-Sumber utama: BigQuery `gt_schema.master_product` (kolom sku, product_name, pack_size), HANYA brand tertentu (default SKINTIFIC,
-TIMEPHORIA, FACERINNA), dibaca dengan SATU query berparameter. Cadangan bila BigQuery gagal: `reference/Daftar SKU.xlsx`
+Sumber utama: BigQuery `gt_schema.master_product` (kolom sku, product_name, pack_size), HANYA brand tertentu (default SKINTIFIC), dibaca dengan SATU query berparameter. Cadangan bila BigQuery gagal: `reference/Daftar SKU.xlsx`
 (kolom SKU, Product Name, Pack Size). Hanya fitur tambah SKU yang bergantung pada daftar ini; bagian aplikasi lain tidak.
 """
 from __future__ import annotations
@@ -13,7 +12,7 @@ from pathlib import Path
 import openpyxl
 
 DEFAULT_TABLE = "skintific-data-warehouse.gt_schema.master_product"
-DEFAULT_BRANDS = ("SKINTIFIC", "TIMEPHORIA", "FACERINNA")
+DEFAULT_BRANDS = ("SKINTIFIC",)
 _TABLE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 HEADER_SEARCH_ROWS = 10
 SKU_COLS = ("sku", "product id")

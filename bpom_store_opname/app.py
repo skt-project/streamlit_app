@@ -28,10 +28,7 @@ import validation as val
 
 log = logging.getLogger("bpom_opname")
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]   # hanya Sheets: tanpa Drive (tidak ada cari/buat/share file)
 STORE_SEARCH_THRESHOLD = 1500   # region dengan toko lebih banyak: pakai kotak cari (dropdown ribuan opsi berat dikirim ke HP)
 STORE_SEARCH_MIN_CHARS = 3
 STORE_SEARCH_RESULTS = 50
@@ -130,10 +127,8 @@ yang sama), **BPOM NUMBER** baru, dan **QTY**. Baris tambahan ditandai pada prat
 
 @dataclass(frozen=True)
 class Config:
-    sheet_name: str
     worksheet_title: str
     sheet_id: str | None
-    share_with: tuple[str, ...]
     template_path: Path | None
     # Daftar toko dari Google Sheet (opsional; bila kosong dipakai reference/Daftar Store.xlsx)
     store_sheet_id: str | None = None
@@ -186,10 +181,8 @@ def load_config() -> Config:
     configured = app.get("template_path")
     candidates = ((Path(configured),) if configured else ()) + TEMPLATE_CANDIDATES
     return Config(
-        sheet_name=app.get("google_sheet_name", "BPOM Stock Opname Store"),
         worksheet_title=app.get("worksheet_name", "BPOM Stock Opname Store"),
         sheet_id=_sheet_id(app.get("google_sheet_id")),
-        share_with=tuple(app.get("share_with", [])),
         template_path=next((p for p in candidates if p.is_file()), None),
         store_sheet_id=_sheet_id(app.get("store_sheet_id")),
         store_sheet_gid=int(app["store_sheet_gid"]) if app.get("store_sheet_gid") not in (None, "") else _sheet_gid(app.get("store_sheet_id")),
@@ -310,11 +303,11 @@ def build_template_cached(template_path: str, region: str, toko: str) -> bytes:
 
 
 @st.cache_resource(show_spinner=False)
-def get_opname_store(sheet_id, sheet_name: str, worksheet_title: str, share_with: tuple) -> store.OpnameStore:
+def get_opname_store(sheet_id, worksheet_title: str) -> store.OpnameStore:
     """Satu handle Sheets per proses: spreadsheet, worksheet, dan header diperiksa SEKALI (bukan tiap submit)."""
-    sh, created = store.open_spreadsheet(get_gspread_client(), sheet_name, sheet_id=sheet_id, share_with=share_with)
-    ws = store.ensure_worksheet(sh, worksheet_title, fresh=created)
-    return store.OpnameStore(sh, ws, assume_empty=created)
+    sh = store.open_spreadsheet(get_gspread_client(), sheet_id)
+    ws = store.ensure_worksheet(sh, worksheet_title)
+    return store.OpnameStore(sh, ws)
 
 
 def parse_upload(data: bytes, toko: str, skus: list[val.Sku]) -> val.ParseResult:
@@ -438,7 +431,7 @@ def extras_section(cfg: Config, skus: list[val.Sku]) -> list[val.ExtraSku]:
 # ── Submit ─────────────────────────────────────────────────────────────────
 
 def save(cfg: Config, meta: store.OpnameMeta, rows: list[val.ExcelRow]) -> store.SaveSummary:
-    opname = get_opname_store(cfg.sheet_id, cfg.sheet_name, cfg.worksheet_title, cfg.share_with)
+    opname = get_opname_store(cfg.sheet_id, cfg.worksheet_title)
     try:
         return opname.insert_rows(meta, rows)
     except store.DuplicateDataError:
@@ -506,8 +499,7 @@ def main() -> None:
     st.title("BPOM Stock Opname Toko")
     if not cfg.sheet_id:
         st.warning("`google_sheet_id` belum terbaca dari Secrets. Pastikan ada di bagian `[app]` "
-                   "(`[app]` lalu baris `google_sheet_id = \"...\"`). Tanpa itu, aplikasi mencari spreadsheet "
-                   f"berjudul '{cfg.sheet_name}' dan mencoba membuatnya, yang akan gagal.")
+                   "(`[app]` lalu baris `google_sheet_id = \"...\"`). Tanpa itu hasil tidak bisa disimpan.")
     show_flash()
 
     if cfg.template_path is None:
