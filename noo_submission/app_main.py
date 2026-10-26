@@ -752,16 +752,18 @@ def _tab_sku():
     ss.setdefault("sku_f_dari", tgl_min);         ss.setdefault("sku_f_sampai", hari_ini)
     if ss.sku_f_nama  not in nama_opts:  ss.sku_f_nama  = "All customers"
     if ss.sku_f_brand not in brand_opts: ss.sku_f_brand = "All brands"
+    if ss.sku_f_tagging not in tagging_opts: ss.sku_f_tagging = "All tagging"
 
     # ── Filters ──
     with st.container(key="sku_filters"):
-        f1, f2, f3, f4, f5 = st.columns([2.2, 1.2, 1.2, 1.2, 0.8], vertical_alignment="bottom")
+        f1, f2, f3, f4, f5, f6 = st.columns([2.2, 1.2, 1.2, 1.2, 1.2, 0.8], vertical_alignment="bottom")
         f1.selectbox("Customer Store Name", nama_opts, key="sku_f_nama")
         f2.selectbox("Brand", brand_opts, key="sku_f_brand")
-        f3.date_input("Date From", key="sku_f_dari", format="YYYY-MM-DD")
-        f4.date_input("Date To",   key="sku_f_sampai", format="YYYY-MM-DD")
-        f5.button("Reset", key="sku_reset", on_click=reset_filter_sku,
-                  args=(tgl_min, hari_ini), width="stretch")
+        f3.selectbox("Tagging", tagging_opts, key="sku_f_tagging")
+        f4.date_input("Date From", key="sku_f_dari", format="YYYY-MM-DD")
+        f5.date_input("Date To",   key="sku_f_sampai", format="YYYY-MM-DD")
+        f6.button("Reset", key="sku_reset", on_click=reset_filter_sku,
+          args=(tgl_min, hari_ini), width="stretch")
 
     m = pd.Series(True, index=df.index)
     if kc_nama and ss.sku_f_nama != "All customers":
@@ -771,6 +773,8 @@ def _tab_sku():
         m &= cc2 == "17"
     elif ss.sku_f_brand == "G2G":
         m &= cc2 == "12"
+    if ss.sku_f_tagging != "All tagging":
+        m &= df[tag].fillna("Not Yet").astype(str).str.strip() == ss.sku_f_tagging
     if tgl is not None:
         d1, d2 = sorted([ss.sku_f_dari, ss.sku_f_sampai])
         m &= (tgl >= pd.Timestamp(d1)) & (tgl <= pd.Timestamp(d2))
