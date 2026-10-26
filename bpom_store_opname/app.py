@@ -1,6 +1,6 @@
-"""BPOM Stock Opname Store.
+"""BPOM Stock Opname Toko.
 
-Distributor memilih company dan store (daftar dari BD), men-download template yang sudah terisi SKU + nomor BPOM
+Pengisi memilih company dan toko (daftar dari BD), men-download template yang sudah terisi SKU + nomor BPOM
 resmi, mengisi QTY, lalu meng-upload-nya. Hasil disimpan ke satu Google Spreadsheet utama.
 Tidak ada mode revisi: data yang sudah terkirim tidak bisa dikirim ulang dari form ini.
 
@@ -81,39 +81,38 @@ div[data-testid="stDownloadButton"] button * { color: #FFFFFF !important; font-w
 
 GUIDE_RULES = """
 **Pelaksanaan stock opname**
-Distributor wajib memastikan stock opname fisik dilakukan di setiap store terhadap seluruh produk yang terdaftar, dengan
-pemisahan data untuk setiap SKU dan masing-masing nomor BPOM sesuai dengan data yang telah ditetapkan oleh prinsipal.
-Pengisian dilakukan **per store**: satu file hanya untuk satu store.
+Toko wajib melakukan stock opname fisik terhadap produk yang terdaftar, dengan pemisahan data untuk setiap SKU dan
+masing-masing nomor BPOM sesuai dengan data yang telah ditetapkan oleh prinsipal.
 
 **Periode pelaksanaan dan pengisian form**
 Stock opname dilakukan dengan menggunakan posisi stok fisik per tanggal yang ditentukan, dan hasilnya wajib diinput
-ke dalam form yang disediakan oleh prinsipal pada periode **23 Oktober – 8 November 2026**.
+ke dalam form yang disediakan oleh prinsipal pada periode **26 Oktober – 8 November 2026**.
 
 **Kesesuaian SKU dan nomor BPOM**
-Distributor wajib memastikan bahwa setiap SKU dicatat berdasarkan nomor BPOM yang sesuai. Produk dengan SKU yang sama
+Toko wajib memastikan bahwa setiap SKU dicatat berdasarkan nomor BPOM yang sesuai. Produk dengan SKU yang sama
 tetapi memiliki nomor BPOM berbeda harus dicatat secara terpisah dan tidak boleh digabungkan.
 
 **Kelengkapan dan keakuratan data**
-Distributor bertanggung jawab memastikan bahwa seluruh data yang diinput telah diperiksa, lengkap, akurat, dan sesuai
+Toko bertanggung jawab memastikan bahwa seluruh data yang diinput telah diperiksa, lengkap, akurat, dan sesuai
 dengan kondisi persediaan fisik pada saat stock opname dilakukan.
 
 **Batas waktu dan konfirmasi penyelesaian**
-Seluruh pengisian form wajib diselesaikan paling lambat tanggal **8 November 2026**. Distributor diharapkan memastikan
-bahwa seluruh SKU dan nomor BPOM di setiap store yang menjadi tanggung jawabnya telah dilaporkan sebelum batas waktu tersebut.
+Seluruh pengisian form wajib diselesaikan paling lambat tanggal **8 November 2026**. Toko diharapkan memastikan
+bahwa seluruh SKU dan nomor BPOM yang menjadi tanggung jawabnya telah dilaporkan sebelum batas waktu tersebut.
 
-Apabila terdapat nomor BPOM tambahan, distributor diperbolehkan menambahkan baris baru pada form, dengan SKU tetap
+Apabila terdapat nomor BPOM tambahan, Toko diperbolehkan menambahkan baris baru pada form, dengan SKU tetap
 mengacu pada SKU yang telah ditetapkan oleh prinsipal.
 
 **Ketentuan Pengisian**
 
-1. Pilih **distributor company** dan **store**, lalu isi **tanggal stock opname** dan **nama PIC** Stock Opname
+1. Pilih **Distributor Company** dan **Toko** (jika toko adalah grup, maka pilih nama grup), lalu isi **tanggal stock opname** dan **nama PIC** Stock Opname
 2. **Download template** (kolom Distributor Branch akan terisi otomatis), isi kolom **QTY**, jangan mengubah header atau urutan kolom.
 3. **Upload** file, tunggu pemeriksaan otomatis, perbaiki jika ada error.
 4. Klik **Submit**. Data hanya disimpan jika seluruh isi file valid.
 
-- Distributor tidak diperkenankan mengubah header, nama kolom, atau urutan kolom. Baris judul di atas header boleh dibiarkan.
-- Satu file = satu store. Untuk store lain, pilih store tersebut lalu download template-nya.
-- Kolom **Distributor Branch** sudah terisi otomatis sesuai distributor dari store yang dipilih; jangan diubah.
+- Toko tidak diperkenankan mengubah header, nama kolom, atau urutan kolom. Baris judul di atas header boleh dibiarkan.
+- Satu file = satu toko. Untuk toko lain, pilih toko tersebut lalu download template-nya.
+- Kolom **Distributor Branch** sudah terisi otomatis sesuai distributor dari toko yang dipilih; jangan diubah.
 - **PRODUCT ID, PRODUCT NAME, ISI (GR / ML), BPOM NUMBER** sudah terisi di template; jangan dikosongkan.
 - Yang perlu Anda isi hanya **QTY** di setiap baris dengan bilangan bulat 0 atau lebih (tidak boleh negatif; tanpa desimal atau huruf).
 - Satu kombinasi **PRODUCT ID + BPOM NUMBER** hanya boleh muncul satu kali dalam satu file.
@@ -323,7 +322,7 @@ def template_button(cfg: Config, picked: reference_data.Store | None, skus: list
                    "atau atur `template_path` di `[app]`.")
         return
     if not picked:
-        st.info("Pilih Distributor Company dan Store (Langkah 1) agar template bisa di-download.")
+        st.info("Pilih Distributor Company dan Toko (Langkah 1) agar template bisa di-download.")
         return
     safe = re.sub(r'[\\/:*?"<>|]+', "_", picked.label).strip()
     path = str(cfg.template_path)
@@ -333,7 +332,7 @@ def template_button(cfg: Config, picked: reference_data.Store | None, skus: list
     st.download_button(
         "**DOWNLOAD TEMPLATE**", data=data, on_click="ignore", file_name=f"BPOM Stock Opname - {safe}.xlsx",
         mime=XLSX_MIME,
-        help="Template resmi untuk store ini berisi daftar SKU + nomor BPOM. Isi kolom QTY saja.",
+        help="Template resmi untuk toko ini berisi daftar SKU + nomor BPOM. Isi kolom QTY saja.",
     )
 
 
@@ -429,7 +428,7 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
                  "agar tidak terjadi duplikasi.")
         return
 
-    msg = (f"Berhasil menyimpan {summary.inserted} baris stock opname untuk store "
+    msg = (f"Berhasil menyimpan {summary.inserted} baris stock opname untuk toko "
            f"{meta.store_id} - {meta.store_name}.")
     if summary.additional:
         msg += f" Termasuk {summary.additional} baris BPOM tambahan."
@@ -443,12 +442,12 @@ def handle_submit(cfg: Config, meta: store.OpnameMeta | None, form_errors: list[
 # ── Halaman ────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    st.set_page_config(page_title="BPOM Stock Opname Store", layout="wide")
+    st.set_page_config(page_title="BPOM Stock Opname Toko", layout="wide")
     st.markdown(APP_CSS, unsafe_allow_html=True)
     cfg = load_config()
     st.session_state.setdefault("upload_ver", 0)
 
-    st.title("BPOM Stock Opname Store")
+    st.title("BPOM Stock Opname Toko")
     if not cfg.sheet_id:
         st.warning("`google_sheet_id` belum terbaca dari Secrets. Pastikan ada di bagian `[app]` "
                    "(`[app]` lalu baris `google_sheet_id = \"...\"`). Tanpa itu, aplikasi mencari spreadsheet "
@@ -474,9 +473,9 @@ def main() -> None:
         st.markdown(GUIDE_RULES)
 
     # Langkah 1 - distributor company -> store (daftar dari BD)
-    st.subheader("Langkah 1 - Pilih Distributor Company dan Store")
-    st.caption("Pilih **Distributor Company**, lalu **Store** yang melakukan stock opname. Pilihan berasal dari daftar "
-               "yang disediakan BD. Klik kolom lalu ketik ID atau nama store untuk mencari.")
+    st.subheader("Langkah 1 - Pilih Distributor Company dan Toko")
+    st.caption("Pilih **Distributor Company**, lalu **Toko** (jika toko adalah grup, pilih nama grup) yang melakukan stock opname. Pilihan berasal dari daftar "
+               "yang disediakan BD. Klik kolom lalu ketik ID atau nama toko untuk mencari.")
     company = st.selectbox("Distributor Company", list(stores_by_company), index=None,
                            placeholder="Pilih atau ketik untuk mencari")
     company_stores = stores_by_company.get(company, []) if company else []
@@ -484,19 +483,19 @@ def main() -> None:
     if company and len(company_stores) > STORE_SEARCH_THRESHOLD:
         # Company dengan ribuan store: jangan kirim semua opsi ke browser di setiap rerun; cari dulu, tampilkan hasil teratas.
         searching = True
-        query = st.text_input("Cari Store", key=f"q_{company}", max_chars=60,
-                              placeholder=f"Ketik ID atau nama store (min. {STORE_SEARCH_MIN_CHARS} huruf) dari {len(company_stores)} store"
+        query = st.text_input("Cari Toko", key=f"q_{company}", max_chars=60,
+                              placeholder=f"Ketik ID atau nama toko (min. {STORE_SEARCH_MIN_CHARS} huruf) dari {len(company_stores)} toko"
                               ).strip().lower()
         options = ([s for s in company_stores if query in s.search_text][:STORE_SEARCH_RESULTS]
                    if len(query) >= STORE_SEARCH_MIN_CHARS else [])
-        placeholder = (f"Ketik minimal {STORE_SEARCH_MIN_CHARS} huruf di kotak Cari Store" if len(query) < STORE_SEARCH_MIN_CHARS
+        placeholder = (f"Ketik minimal {STORE_SEARCH_MIN_CHARS} huruf di kotak Cari Toko" if len(query) < STORE_SEARCH_MIN_CHARS
                        else f"{len(options)} hasil" + (f" (menampilkan {STORE_SEARCH_RESULTS} teratas; persempit pencarian)"
                                                       if len(options) == STORE_SEARCH_RESULTS else "")
-                       if options else "Tidak ada store yang cocok")
+                       if options else "Tidak ada toko yang cocok")
     elif company:
-        placeholder = f"Ketik ID / nama store ({len(company_stores)} store)"
+        placeholder = f"Ketik ID / nama toko ({len(company_stores)} toko)"
     picked = st.selectbox(
-        "Store", options, index=None, key=f"store_{company}", disabled=not company or (searching and not options),
+        "Toko", options, index=None, key=f"store_{company}", disabled=not company or (searching and not options),
         format_func=lambda s: f"{s.label}  ·  {s.distributor}", placeholder=placeholder)
     names = [picked.distributor] if picked else []
 
@@ -511,7 +510,7 @@ def main() -> None:
 
     # Langkah 3 - template
     st.subheader("Langkah 3 - Download template dan isi hanya data QTY")
-    st.caption(f"Template berisi {len(skus)} kombinasi SKU + nomor BPOM untuk satu store. Isi hanya kolom "
+    st.caption(f"Template berisi {len(skus)} kombinasi SKU + nomor BPOM untuk satu toko. Isi hanya kolom "
                "**QTY** (bilangan bulat 0 atau lebih; tidak boleh negatif). Jangan mengubah header atau urutan kolom.")
     st.markdown(GUIDE_EXTRA_BPOM)
     template_button(cfg, picked, skus)
@@ -526,7 +525,7 @@ def main() -> None:
     parsed = None
     if uploaded is not None:
         if not picked:
-            st.info("Pilih Distributor Company dan Store dulu agar isi file bisa divalidasi.")
+            st.info("Pilih Distributor Company dan Toko dulu agar isi file bisa divalidasi.")
         else:
             parsed = val.merge_extras(parse_upload(uploaded.getvalue(), picked.distributor, skus), extras,
                                       picked.distributor, skus)
@@ -543,7 +542,7 @@ def main() -> None:
                            + (f", termasuk {extra} baris BPOM tambahan." if extra else "."))
                 if parsed.missing:
                     st.warning(f"{len(parsed.missing)} kombinasi SKU + BPOM dari daftar prinsipal tidak ada di file. "
-                               "Pastikan seluruh SKU dan nomor BPOM di store ini sudah dilaporkan.")
+                               "Pastikan seluruh SKU dan nomor BPOM di toko ini sudah dilaporkan.")
                     with st.expander("Lihat yang belum ada di file"):
                         st.dataframe(pd.DataFrame({
                             "Distributor Branch": [n for n, _ in parsed.missing],

@@ -127,7 +127,7 @@ def test_missing_store_list_shows_message_and_no_form(monkeypatch, tmp_path):
 def test_two_step_selection_store_label_and_download_button():
     at = _at()
     assert not at.exception
-    assert [s.label for s in at.selectbox] == ["Distributor Company", "Store", "SKU"] and at.selectbox[1].disabled
+    assert [s.label for s in at.selectbox] == ["Distributor Company", "Toko", "SKU"] and at.selectbox[1].disabled
     assert not at.download_button            # belum ada store -> belum ada template
     at.selectbox[0].select(COMPANY)
     at.run()
@@ -172,7 +172,7 @@ def test_file_of_another_store_distributor_is_rejected(monkeypatch):
     sh = _fake_sheet(monkeypatch)
     other = next(n for _, n in DISTRIBUTORS if n != DIST)
     at = _fill_form(_at(), _filled("X - Y", other))
-    assert any("bukan distributor milik store" in m.value for m in at.markdown)
+    assert any("bukan distributor milik toko" in m.value for m in at.markdown)
     _click(at, "Submit")
     assert sh.batch_update.call_count == 0
 
@@ -193,7 +193,7 @@ def test_form_fields_are_all_required(monkeypatch):
     at = _at()
     _click(at, "Submit")
     msgs = " ".join(e.value for e in at.error)
-    for needle in ("Distributor Company", "Store wajib", "Tanggal", "Nama PIC", "File Excel"):
+    for needle in ("Distributor Company", "Toko wajib", "Tanggal", "Nama PIC", "File Excel"):
         assert needle in msgs
     assert sh.batch_update.call_count == 0
 
@@ -212,11 +212,11 @@ def test_large_company_uses_search_box_and_stays_fast(tmp_path, monkeypatch):
     warm = time.perf_counter() - t1
     print(f"\n20000 store: cold load {cold:.2f}s, rerun setelah pilih company {warm:.2f}s")
     assert cold < 15 and warm < 5
-    search = next(t for t in at.text_input if t.label == "Cari Store")
+    search = next(t for t in at.text_input if t.label == "Cari Toko")
     assert at.selectbox[1].options == [] and at.selectbox[1].disabled         # belum mengetik -> tidak ada opsi dikirim
     search.input("to").run()
     assert at.selectbox[1].options == []                                      # < 3 huruf
-    next(t for t in at.text_input if t.label == "Cari Store").input("toko 1999").run()
+    next(t for t in at.text_input if t.label == "Cari Toko").input("toko 1999").run()
     opts = list(at.selectbox[1].options)
     assert 0 < len(opts) <= app.STORE_SEARCH_RESULTS and all("1999" in o for o in opts)
     assert "019990 - TOKO 19990" in opts[0] or any("019990" in o for o in opts)
@@ -230,7 +230,7 @@ def test_company_below_threshold_keeps_plain_dropdown(tmp_path, monkeypatch):
     app.load_stores_by_company.clear()
     at = _at()
     at.selectbox[0].select(COMPANY).run()
-    assert not any(t.label == "Cari Store" for t in at.text_input)
+    assert not any(t.label == "Cari Toko" for t in at.text_input)
     assert len(at.selectbox[1].options) == app.STORE_SEARCH_THRESHOLD
 
 

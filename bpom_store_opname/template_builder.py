@@ -19,7 +19,7 @@ from validation import EXPECTED_HEADERS, HEADER_SEARCH_ROWS, INSTRUCTION_SHEET, 
 # (jenis, teks): "title" | "h" = judul bagian | "p" = paragraf | "b" = butir | "ex" = contoh | "warn" = peringatan
 _GUIDE = [
     ("h", "Langkah pengisian"),
-    ("b", "1. Buka sheet pertama (data). Template ini khusus untuk satu store (lihat di atas). Kolom Distributor Branch sudah terisi; jangan diubah."),
+    ("b", "1. Buka sheet pertama (data). Template ini khusus untuk satu toko (lihat di atas). Kolom Distributor Branch sudah terisi; jangan diubah."),
     ("b", "2. Kolom PRODUCT ID, PRODUCT NAME, ISI (GR / ML), dan BPOM NUMBER sudah terisi dari daftar prinsipal; jangan dikosongkan atau diubah."),
     ("b", "3. Isi kolom QTY di setiap baris dengan jumlah stok fisik hasil stock opname untuk SKU + nomor BPOM pada baris tersebut."),
     ("b", "4. Simpan sebagai .xlsx lalu upload di form. File diperiksa otomatis; jika ada error, perbaiki lalu upload ulang."),
@@ -42,7 +42,7 @@ _GUIDE = [
     ("warn", "- Menambah kolom lain, atau mengisi data di luar enam kolom template."),
     ("h", "Penting"),
     ("b", "- Jika ada satu baris saja yang tidak valid, seluruh upload dibatalkan dan tidak ada data yang tersimpan."),
-    ("b", "- Satu file = satu store. Untuk store lain, pilih store tersebut di form lalu download template-nya."),
+    ("b", "- Satu file = satu toko. Untuk toko lain, pilih toko tersebut di form lalu download template-nya."),
     ("b", "- Data yang sudah terkirim tidak dapat direvisi dari form. Periksa kembali sebelum Submit; hubungi BD bila ada kesalahan."),
     ("b", "- Sheet ini hanya panduan dan tidak ikut dibaca saat upload."),
 ]
@@ -53,9 +53,9 @@ def _add_guide_sheet(wb: openpyxl.Workbook, store_label: str, distributor: str, 
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 125
     lines = [
-        ("title", "CARA PENGISIAN - BPOM STOCK OPNAME STORE"),
-        ("p", f"Store: {store_label}   |   Distributor: {distributor}   |   {n_rows} baris template (SKU + nomor BPOM)"),
-        ("p", "Periode pelaksanaan dan pengisian form: 23 Oktober - 8 November 2026. Batas akhir pengisian: 8 November 2026."),
+        ("title", "CARA PENGISIAN - BPOM STOCK OPNAME TOKO"),
+        ("p", f"Toko: {store_label}   |   Distributor: {distributor}   |   {n_rows} baris template (SKU + nomor BPOM)"),
+        ("p", "Periode pelaksanaan dan pengisian form: 26 Oktober - 8 November 2026. Batas akhir pengisian: 8 November 2026."),
         ("p", ""),
         *_GUIDE,
     ]

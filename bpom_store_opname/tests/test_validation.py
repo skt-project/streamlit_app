@@ -138,7 +138,7 @@ def test_unknown_sku_name_and_isi_mismatch_rejected():
 
 def test_distributor_must_belong_to_company_and_same_sku_allowed_per_distributor():
     res = v.parse_excel(make([good(name="CV LAIN - X")]), [NAME, NAME2])
-    assert not res.ok and "bukan distributor milik store" in messages(res)
+    assert not res.ok and "bukan distributor milik toko" in messages(res)
     assert v.parse_excel(make([good(), good(name=NAME2, qty=2)]), [NAME, NAME2]).ok
     rows = [good(), good(name=NAME2, qty=2), good(name=NAME2.lower(), pid="p-1", bpom="na1", qty=3)]
     assert "Duplikat" in messages(v.parse_excel(make(rows), [NAME, NAME2]))
@@ -215,7 +215,7 @@ def test_template_is_for_one_store_and_original_untouched():
     assert (dv.type, dv.operator, dv.formula1) == ("whole", "greaterThanOrEqual", "0")
     assert str(dv.sqref) == f"F3:F{ws.max_row}"
     guide = " ".join(str(c.value) for c in wb[v.INSTRUCTION_SHEET]["A"] if c.value)
-    assert STORE_LABEL in guide and NAME in guide and "Satu file = satu store" in guide
+    assert STORE_LABEL in guide and NAME in guide and "Satu file = satu toko" in guide
 
 
 def test_filled_template_passes_and_ignores_guide_sheet():
@@ -229,7 +229,7 @@ def test_filled_template_passes_and_ignores_guide_sheet():
     assert res.ok and len(res.rows) == len(skus) and not res.missing and res.warnings == []
     # file milik store dari distributor lain ditolak
     other = v.parse_excel(buf.getvalue(), ["PT LAIN - KOTA"], skus)
-    assert not other.ok and "bukan distributor milik store" in messages(other)
+    assert not other.ok and "bukan distributor milik toko" in messages(other)
 
 
 # ── Google Sheets (mock) ────────────────────────────────────────────────────

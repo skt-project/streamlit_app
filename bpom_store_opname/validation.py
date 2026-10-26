@@ -121,7 +121,7 @@ def validate_form(*, company, store, tanggal, pic, has_file: bool) -> list[str]:
     if not company:
         errors.append("Distributor Company wajib dipilih.")
     if not store:
-        errors.append("Store wajib dipilih.")
+        errors.append("Toko wajib dipilih.")
     if not tanggal:
         errors.append("Tanggal Stock Opname wajib diisi.")
     if not (pic and pic.strip()):
@@ -307,11 +307,11 @@ def parse_excel(data: bytes, expected_names: Sequence[str],
                 result.issues.append(Issue(no, EXPECTED_HEADERS[0], err.capitalize() + "."))
             elif not dist:
                 result.issues.append(Issue(no, EXPECTED_HEADERS[0],
-                                           f"Wajib diisi dengan nama distributor store ini: {_name_list(list(expected_names))}."))
+                                           f"Wajib diisi dengan nama distributor toko ini: {_name_list(list(expected_names))}."))
             elif normalize_name(dist) not in names_by_norm:
                 result.issues.append(Issue(
                     no, EXPECTED_HEADERS[0],
-                    f"'{dist}' bukan distributor milik store yang dipilih. Seharusnya: {_name_list(list(expected_names))}."))
+                    f"'{dist}' bukan distributor milik toko yang dipilih. Seharusnya: {_name_list(list(expected_names))}."))
 
             texts = {}
             for label, cell in (("PRODUCT ID", pid_cell), ("PRODUCT NAME", pname_cell), (COL_ISI, isi_cell),

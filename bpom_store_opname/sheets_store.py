@@ -55,7 +55,7 @@ class DuplicateDataError(SheetsError):
     def __init__(self, conflicts: list[ExcelRow], periode: str):
         self.conflicts = conflicts
         super().__init__(
-            f"Data duplikat: {len(conflicts)} baris di file sudah pernah dikirim untuk store ini "
+            f"Data duplikat: {len(conflicts)} baris di file sudah pernah dikirim untuk toko ini "
             f"(periode {periode}). "
             "Tidak ada data yang disimpan. Revisi tidak tersedia di form ini; jika ada kesalahan data, "
             "hubungi BD."
