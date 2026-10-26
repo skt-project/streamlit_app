@@ -765,7 +765,7 @@ def halaman_pengajuan_noo():
                 alamat_val = "" if alamat_raw.strip() in ("nan","None","","NaN") else alamat_raw.strip()
                 alamat_noo = c_alamat.text_input(lbl,value=alamat_val,label_visibility="collapsed",
                                                   key=f"noo_alamat_{i}",placeholder="Store address...")
-                spv_noo, sales_noo = input_spv_sales(csn, f"noo_{i}", c_spv, c_sales, spv_sales_lookup)
+                spv_noo, sales_noo = input_spv_sales(csn, f"noo_{i}", c_spv,spv_sales_lookup, c_sales)
                 tipe_noo = c_tipe.selectbox(lbl,[""] + JENIS_TOKO_DEFAULT,label_visibility="collapsed",key=f"noo_tipe_{i}")
                 data_noo.loc[i,"Customer Store Code"] = kode_val
                 data_noo.loc[i,"City"]       = city_noo
