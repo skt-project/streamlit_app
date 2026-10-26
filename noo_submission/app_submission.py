@@ -479,8 +479,8 @@ def _aktifkan_fix_cc():
 
 def halaman_pengajuan_noo():
     ss = st.session_state
-    st.markdown(komponen.html_breadcrumb("NOO Submission"), unsafe_allow_html=True)
-    st.markdown(komponen.html_header("NOO Submission","Upload Failure List file to process data.","📦"),
+    st.markdown(komponen.html_breadcrumb("NOO & SKU Submission"), unsafe_allow_html=True)
+    st.markdown(komponen.html_header("NOO & SKU Submission","Upload Failure List file to process data.","📦"),
                 unsafe_allow_html=True)
 
     with st.container(key="kotak_unggah"):
