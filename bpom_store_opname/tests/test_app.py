@@ -339,7 +339,7 @@ def test_products_come_from_bigquery_for_the_skintific_brand_only(monkeypatch):
     products, skipped, error = app.load_products(app.Config(
         worksheet_title="T", sheet_id="X", template_path=TEMPLATE))
     assert error is None and [p.sku for p in products] == ["SKU-A"]
-    assert calls == [("skintific-data-warehouse.gt_schema.master_product", ("SKINTIFIC",), ("Discontinue", "Discontinued"))]
+    assert calls == [("skintific-data-warehouse.gt_schema.master_product", ("SKINTIFIC",), ("Discontinue", "Discontinued", "Not Sold at GT"))]
 
 
 def test_bigquery_failure_is_remembered_so_sessions_do_not_hammer_it(monkeypatch, tmp_path):
