@@ -11,14 +11,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import gspread
 import pandas as pd
 import streamlit as st
-from google.cloud import bigquery
 from google.oauth2 import service_account
 
 import master_product
@@ -33,8 +31,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-BQ_SCOPE = ["https://www.googleapis.com/auth/bigquery"]
-PRODUCTS_RETRY_SECONDS = 60   # setelah BigQuery gagal, jangan coba lagi di setiap rerun
 STORE_SEARCH_THRESHOLD = 1500   # region dengan toko lebih banyak: pakai kotak cari (dropdown ribuan opsi berat dikirim ke HP)
 STORE_SEARCH_MIN_CHARS = 3
 STORE_SEARCH_RESULTS = 50
@@ -42,6 +38,7 @@ MAX_ISSUES_LISTED = 10
 MAX_ISSUES_SHOWN = 300
 
 APP_DIR = Path(__file__).parent
+SKU_LIST_FILE = APP_DIR / "reference" / "Daftar SKU.xlsx"   # dari BD: SKU, Product Name, Pack Size (form tambah SKU langsung)
 STORE_FILE = APP_DIR / "reference" / "Daftar Store.xlsx"   # dari BD: Region, Nama Group Toko (opsional), Nama Toko
 TEMPLATE_FILENAME = "Contoh Excel Response.xlsx"
 TEMPLATE_CANDIDATES = (
@@ -119,7 +116,7 @@ mengacu pada SKU yang telah ditetapkan oleh prinsipal.
 GUIDE_RULES = GUIDE_RULES.replace("**\n", "**  \n")  # judul + paragraf: pindah baris tanpa paragraf baru
 GUIDE_EXTRA_BPOM = """
 **Menambah SKU / nomor BPOM yang belum ada di template:** paling mudah lewat form **Tambah SKU / nomor BPOM langsung**
-di bawah (pilih SKU dari master product, isi nomor BPOM dan QTY). Alternatifnya, tambahkan baris baru di bagian bawah data
+di bawah (pilih SKU dari daftar SKU, isi nomor BPOM dan QTY). Alternatifnya, tambahkan baris baru di bagian bawah data
 Excel dengan **PRODUCT ID** yang sudah ada di template, lalu **PRODUCT NAME** dan **ISI (GR / ML)** (salin dari baris SKU
 yang sama), **BPOM NUMBER** baru, dan **QTY**. Baris tambahan ditandai pada pratinjau setelah upload.
 """
@@ -134,7 +131,6 @@ class Config:
     sheet_id: str | None
     share_with: tuple[str, ...]
     template_path: Path | None
-    master_product_table: str = master_product.DEFAULT_TABLE
 
 
 def service_account_info() -> dict | None:
@@ -176,7 +172,6 @@ def load_config() -> Config:
         sheet_id=_sheet_id(app.get("google_sheet_id")),
         share_with=tuple(app.get("share_with", [])),
         template_path=next((p for p in candidates if p.is_file()), None),
-        master_product_table=app.get("master_product_table", master_product.DEFAULT_TABLE),
     )
 
 
@@ -186,37 +181,19 @@ def get_gspread_client() -> gspread.Client:
     return gspread.authorize(creds)
 
 
+# cache_resource = objek bersama semua sesi TANPA disalin per rerun (cache_data menyalin/pickle tiap rerun).
+# Isi cache ini tidak boleh diubah oleh pemakainya.
 @st.cache_resource(show_spinner=False)
-def get_bq_client() -> bigquery.Client:
-    info = service_account_info()
-    creds = service_account.Credentials.from_service_account_info(info, scopes=BQ_SCOPE)
-    return bigquery.Client(credentials=creds, project=info.get("project_id"))
+def _read_products() -> tuple[list[master_product.Product], int]:
+    return master_product.load_products(SKU_LIST_FILE)
 
 
-# cache_resource = objek bersama semua sesi TANPA disalin per rerun (cache_data menyalin/pickle tiap rerun: 45 ms untuk
-# 20.000 store). Isi cache ini tidak boleh diubah oleh pemakainya.
-@st.cache_resource(ttl=3600, show_spinner=False)
-def _fetch_products(table: str) -> tuple[list[master_product.Product], int]:
-    return master_product.fetch_products(get_bq_client(), table)
-
-
-_products_failure: tuple[float, str] | None = None   # per proses: 60 sesi tidak menyerbu BigQuery saat ia gagal
-
-
-def load_products(table: str) -> tuple[list[master_product.Product], int, str | None]:
-    """Daftar SKU dari master_product (cache 1 jam). Gagal -> ([], 0, pesan); hanya fitur tambah SKU yang nonaktif."""
-    global _products_failure
-    failure = _products_failure
-    if failure and time.time() - failure[0] < PRODUCTS_RETRY_SECONDS:
-        return [], 0, failure[1]
+def load_products() -> tuple[list[master_product.Product], int, str | None]:
+    """Daftar SKU dari file. Gagal -> ([], 0, pesan); hanya fitur tambah SKU yang nonaktif, bagian lain tetap jalan."""
     try:
-        products, skipped = _fetch_products(table)
-    except Exception as exc:
-        log.exception("Gagal membaca master_product")
-        message = f"{type(exc).__name__}: {str(exc)[:300]}"
-        _products_failure = (time.time(), message)
-        return [], 0, message
-    _products_failure = None
+        products, skipped = _read_products()
+    except (master_product.SkuListMissing, master_product.SkuListError) as exc:
+        return [], 0, str(exc)
     return products, skipped, None
 
 
@@ -331,17 +308,17 @@ def template_button(cfg: Config, picked: reference_data.Toko | None, skus: list[
 
 
 def extras_section(cfg: Config, skus: list[val.Sku]) -> list[val.ExtraSku]:
-    """Form tambah SKU + nomor BPOM langsung (SKU dari gt_schema.master_product). Daftar disimpan di session."""
+    """Form tambah SKU + nomor BPOM langsung (SKU dari reference/Daftar SKU.xlsx). Daftar disimpan di session."""
     extras: list[val.ExtraSku] = st.session_state.setdefault("extras", [])
     st.markdown("**Tambah SKU / nomor BPOM langsung (opsional)**")
-    st.caption("Untuk SKU + nomor BPOM yang tidak ada di template. Pilih SKU dari master product (format `SKU - nama produk`), "
+    st.caption("Untuk SKU + nomor BPOM yang tidak ada di template. Pilih SKU dari daftar SKU (format `SKU - nama produk`), "
                "isi nomor BPOM dan QTY, lalu **Tambah ke daftar**. Baris ini ikut tersimpan bersama isi file Excel.")
     flash = st.session_state.pop("extra_flash", None)
     if flash:
         st.success(flash)
-    products, skipped, error = load_products(cfg.master_product_table)
+    products, skipped, error = load_products()
     if error:
-        st.warning("Daftar SKU dari master product tidak dapat dibaca, jadi fitur ini belum bisa dipakai. Anda masih bisa "
+        st.warning("Daftar SKU belum tersedia atau tidak terbaca, jadi fitur ini belum bisa dipakai. Anda masih bisa "
                    f"menambah baris langsung di Excel. Detail: {error}")
     else:
         with st.form("extra_form", clear_on_submit=True):

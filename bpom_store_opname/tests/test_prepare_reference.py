@@ -111,7 +111,7 @@ def test_catalogue_in_bd_format_is_completed_from_current_catalogue_and_master(t
     assert [(s.product_id, s.product_name, s.isi) for s in skus] == [
         (first.product_id, first.product_name, first.isi), ("ZZ-9", "PRODUK ZZ", "5g")]
     rep2, _ = pr.read_catalogue_input(path, CURRENT, None)
-    assert any("--bq" in e for e in rep2.errors)
+    assert any("--skus" in e for e in rep2.errors)
 
 
 def test_catalogue_rejects_duplicates_missing_bpom_and_warns_on_odd_bpom_and_removals(tmp_path):
@@ -131,3 +131,26 @@ def test_real_current_catalogue_roundtrips_without_changes(sandbox):
     path = xlsx(sandbox / "same.xlsx", rows)
     rep, skus = pr.read_catalogue_input(path, CURRENT)
     assert rep.ok and len(skus) == len(CURRENT) and any("+0 baru, -0 hilang, 0 nama/ISI berubah" in i for i in rep.info)
+
+
+def test_sku_list_check_and_install(sandbox, tmp_path):
+    path = xlsx(tmp_path / "skus.xlsx", [["SKU", "Product Name", "Pack Size"], ["ZZ-1", "Produk", "10ml"], ["ZZ-2", "Tanpa pack", None], [None, "x", "1g"]])
+    rep = pr.check_skus(path)
+    assert rep.ok and any("2 SKU unik" in i for i in rep.info)
+    assert any("dilewati" in w for w in rep.warnings) and any("tanpa Pack Size" in w for w in rep.warnings)
+    assert any("SKU di template tidak ada" in w for w in rep.warnings)
+    assert run(sandbox, "--skus", path) == 0 and not (sandbox / "reference" / "Daftar SKU.xlsx").exists()
+    assert run(sandbox, "--skus", path, "--install") == 0
+    import master_product as mp
+    assert [p.sku for p in mp.load_products(sandbox / "reference" / "Daftar SKU.xlsx")[0]] == ["ZZ-1", "ZZ-2"]
+    bad = xlsx(tmp_path / "bad.xlsx", [["Nama"], ["x"]])
+    assert run(sandbox, "--skus", bad, "--install") == 1
+
+
+def test_catalogue_in_bd_format_uses_the_installed_sku_list(sandbox, tmp_path):
+    skus = xlsx(tmp_path / "skus.xlsx", [["SKU", "Product Name", "Pack Size"], ["ZZ-9", "PRODUK ZZ", "5g"]])
+    assert run(sandbox, "--skus", skus, "--install") == 0
+    cat = xlsx(tmp_path / "c.xlsx", [["SKU", "BPOM Number"], ["ZZ-9", "NA11200000009"]])
+    assert run(sandbox, "--catalogue", cat, "--install") == 0                       # nama + ISI dilengkapi dari Daftar SKU yang terpasang
+    new = r.load_catalogue(sandbox / "template" / "Contoh Excel Response.xlsx")
+    assert [(s.product_id, s.product_name, s.isi) for s in new] == [("ZZ-9", "PRODUK ZZ", "5g")]

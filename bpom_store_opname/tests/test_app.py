@@ -51,7 +51,7 @@ def wiring(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "load_config", lambda: app.Config(
         sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
     monkeypatch.setattr(app, "get_gspread_client", lambda: MagicMock())
-    monkeypatch.setattr(app, "load_products", lambda table: (PRODUCTS, 0, None))
+    monkeypatch.setattr(app, "load_products", lambda: (PRODUCTS, 0, None))
     monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
     monkeypatch.setattr(store, "WRITE_INTERVAL", 0.0)       # tanpa jeda penulisan di tes
     for cached in (app.load_tokos_by_region, app.load_skus, app.get_opname_store):
@@ -306,9 +306,34 @@ def test_extra_can_be_removed():
     assert not at.session_state["extras"]
 
 
-def test_master_product_failure_disables_only_the_extra_feature(monkeypatch):
-    monkeypatch.setattr(app, "load_products", lambda table: ([], 0, "Forbidden: 403 no access"))
+def test_missing_sku_list_disables_only_the_extra_feature(monkeypatch, tmp_path):
+    monkeypatch.undo()                                                    # pakai load_products asli, bukan tiruan
+    monkeypatch.setattr(app, "load_config", lambda: app.Config(
+        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
+    monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
+    monkeypatch.setattr(app, "SKU_LIST_FILE", tmp_path / "tidak-ada.xlsx")
+    app.load_tokos_by_region.clear(); app._read_products.clear()
     at = _at()
     assert not at.exception
-    assert any("master product tidak dapat dibaca" in w.value and "403" in w.value for w in at.warning)
+    assert any("Daftar SKU belum tersedia" in w.value for w in at.warning)
     assert len(at.selectbox) == 2 and len(at.download_button) == 0     # form region/toko tetap jalan
+
+
+def test_app_has_no_bigquery_dependency():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert "import bigquery" not in source and "google.cloud" not in source
+    assert "google-cloud-bigquery" not in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+
+def test_sku_list_file_feeds_the_dropdown(monkeypatch, tmp_path):
+    monkeypatch.undo()
+    monkeypatch.setattr(app, "load_config", lambda: app.Config(
+        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
+    monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["Pack Size", "SKU", "Product Name"]); ws.append(["25ml", "ZZ-NEW-01", "PRODUK BARU ZZ"]); ws.append(["5g", "AA-1", "PRODUK A"])
+    wb.save(tmp_path / "Daftar SKU.xlsx")
+    monkeypatch.setattr(app, "SKU_LIST_FILE", tmp_path / "Daftar SKU.xlsx")
+    app.load_tokos_by_region.clear(); app._read_products.clear()
+    at = _at()
+    assert not at.exception and list(at.selectbox[2].options) == ["AA-1 - PRODUK A", "ZZ-NEW-01 - PRODUK BARU ZZ"]

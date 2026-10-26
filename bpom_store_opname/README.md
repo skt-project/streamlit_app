@@ -31,20 +31,22 @@ Spreadsheet utama (satu worksheet). Tidak ada mode revisi. Redaksi di layar meng
 ## Tambah SKU / nomor BPOM langsung
 
 Di Langkah 3 ada form **Tambah SKU / nomor BPOM langsung (opsional)**: pilih SKU (label `SKU - product name`, bisa diketik) dari
-BigQuery `skintific-data-warehouse.gt_schema.master_product`, isi nomor BPOM dan QTY, lalu **Tambah ke daftar**. Baris ini digabung
+`reference/Daftar SKU.xlsx` (diekspor BD dari master product), isi nomor BPOM dan QTY, lalu **Tambah ke daftar**.
+Aplikasi **tidak memakai BigQuery**: semua data referensi berupa file, dan service account hanya butuh Google Sheets.
+Baris yang ditambahkan digabung
 dengan isi file saat validasi dan ikut tersimpan dalam satu `batchUpdate` yang sama (dikosongkan setelah sukses).
 
 - SKU boleh **di luar template**. Nama produk dan ISI diambil dari katalog template bila SKU-nya ada di sana; bila tidak, dari
-  `product_name` dan `pack_size` master_product.
+  `Product Name` dan `Pack Size` dari Daftar SKU.
 - Kombinasi SKU + BPOM yang sama dengan baris file atau baris tambahan lain ditolak (seluruh input batal). Upload file Excel tetap wajib.
-- Daftar SKU di-cache 1 jam. Bila BigQuery tidak terbaca, hanya fitur ini yang nonaktif; tabel dapat diganti lewat `[app] master_product_table`.
-  Service account butuh akses baca tabel + `bigquery.jobs.create`.
+- Bila `Daftar SKU.xlsx` belum ada atau rusak, hanya fitur ini yang nonaktif (pesan jelas); baris tambahan tetap bisa diketik di Excel.
 
 ## Data referensi (dari BD)
 
 | File | Isi |
 |---|---|
 | `reference/Daftar Store.xlsx` | **Wajib ada sebelum dipakai.** Kolom `Region`, `Nama Group Toko` (opsional), `Nama Toko` (urutan/huruf bebas, kolom lain diabaikan, baris judul di atas header boleh). Hanya sheet pertama dibaca |
+| `reference/Daftar SKU.xlsx` | Kolom `SKU`, `Product Name`, `Pack Size` (opsional; urutan/huruf bebas, baris judul boleh). Sumber dropdown form "Tambah SKU langsung". Opsional: tanpa file ini fitur itu nonaktif |
 | `template/Contoh Excel Response.xlsx` | Template resmi **sekaligus katalog SKU** (`Sheet1`). Sheet kerja BD di file ini tidak ikut ke pengguna |
 
 Aturan daftar toko: baris dengan `Nama Group Toko` terisi menjadi **satu pilihan atas nama grup** (semua toko dalam grup digabung);
@@ -56,12 +58,12 @@ Bila `Daftar Store.xlsx` belum ada, aplikasi menampilkan "Daftar toko belum ters
 
 ```
 .\.venv\Scripts\python tools\prepare_reference.py --stores "C:\...\Daftar Store.xlsx"                       # hanya memeriksa
-.\.venv\Scripts\python tools\prepare_reference.py --stores "C:\...\Daftar Store.xlsx" --catalogue "C:\...\SKU.xlsx" --bq --install
+.\.venv\Scripts\python tools\prepare_reference.py --stores "C:\...\Daftar Store.xlsx" --skus "C:\...\Daftar SKU.xlsx" --catalogue "C:\...\Katalog.xlsx" --install
 ```
 
 Tanpa `--install` tidak ada yang ditulis; pemasangan hanya bila SEMUA pemeriksaan lolos, dan semua masalah dilaporkan sekaligus.
-Daftar SKU: format template (`PRODUCT ID`, `PRODUCT NAME`, `ISI (GR / ML)`, `BPOM NUMBER`) atau format BD (`SKU`, `BPOM Number`; nama dan ISI
-dilengkapi dari katalog saat ini lalu `master_product` bila `--bq`); hasilnya menggantikan baris data `Sheet1` pada template.
+Katalog SKU+BPOM (`--catalogue`): format template (`PRODUCT ID`, `PRODUCT NAME`, `ISI (GR / ML)`, `BPOM NUMBER`) atau format BD (`SKU`, `BPOM Number`; nama dan ISI
+dilengkapi dari katalog saat ini lalu dari daftar SKU); hasilnya menggantikan baris data `Sheet1` pada template.
 Setelah dipasang: `python -m pytest tests`, cek lokal, commit, push.
 
 ## Skema worksheet (14 kolom)
@@ -74,7 +76,7 @@ tab dengan skema lama (16 kolom, versi sebelum 2026-10-26) harus dikosongkan ata
 
 ## Setup
 
-1. Salin `.streamlit/secrets.toml.example` ke `.streamlit/secrets.toml`; isi `[connections.bigquery]` (service account) dan
+1. Salin `.streamlit/secrets.toml.example` ke `.streamlit/secrets.toml`; isi `[connections.bigquery]` (hanya nama section untuk service account; tanpa akses BigQuery) dan
    `[app]` dengan `google_sheet_id` (**tepat di bawah header `[app]`**). File ini di-gitignore. Di Streamlit Cloud, isi lewat Settings -> Secrets.
 2. Buat spreadsheet **manual** (service account tidak punya kuota Drive; 403 "storage quota") dengan tab `BPOM Stock Opname Store`,
    lalu share sebagai **Editor** ke `client_email`. Sheets API dan Drive API harus aktif.
@@ -105,5 +107,5 @@ Region -> Toko): 88 dari 100 sesi selesai sampai "Berhasil menyimpan" dengan bar
 
 ## File
 
-`app.py` (UI) · `validation.py` (validasi form + Excel) · `reference_data.py` (baca daftar toko + katalog) · `master_product.py` (daftar SKU dari BigQuery) ·
+`app.py` (UI) · `validation.py` (validasi form + Excel) · `reference_data.py` (baca daftar toko + katalog) · `master_product.py` (daftar SKU dari file) ·
 `tools/prepare_reference.py` (periksa + pasang data BD) · `template_builder.py` (template per toko) · `sheets_store.py` (Google Sheets) · `tests/`

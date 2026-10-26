@@ -432,7 +432,7 @@ def test_narrow_grid_is_widened_before_header_is_written():
     assert ws.update.call_args[0][0] == [store.HEADERS] and ws.update.call_args[0][1] == "A1:N1"
 
 
-# ── SKU / BPOM tambahan + master_product ────────────────────────────────────
+# ── SKU / BPOM tambahan + daftar SKU ────────────────────────────────────
 
 import master_product as mp  # noqa: E402
 
@@ -482,3 +482,20 @@ def test_merge_extras_rejects_duplicates_all_or_nothing():
         assert not merged.ok and needle in messages(merged)
     bad = v.parse_excel(make([good(qty=-1)]), [NAME], SKUS)
     assert v.merge_extras(bad, [dup_file], NAME, SKUS).issues == bad.issues     # file salah: tidak ditumpuk
+
+
+def test_load_products_reads_sku_file_any_column_order_with_title_rows(tmp_path):
+    import pytest
+    path = _xlsx(tmp_path, "Daftar SKU.xlsx", [["EXPORT MASTER PRODUCT"], [None], ["Pack Size", "Product Name", "SKU", "Brand"],
+                                               ["25ml", "Produk B", "B-1", "X"], ["5g", "Produk A", "a-1", "X"], ["1g", "dup", "B-1", "X"],
+                                               [None, "Tanpa SKU", None, "X"], [None, None, None, None]])
+    products, skipped = mp.load_products(path)
+    assert [p.label for p in products] == ["a-1 - Produk A", "B-1 - Produk B"] and skipped == 1 and products[1].pack_size == "25ml"
+    with pytest.raises(mp.SkuListMissing, match="belum tersedia"):
+        mp.load_products(tmp_path / "tidak-ada.xlsx")
+    with pytest.raises(mp.SkuListError, match="Header"):
+        mp.load_products(_xlsx(tmp_path, "a.xlsx", [["Nama", "Harga"], ["x", 1]]))
+    with pytest.raises(mp.SkuListError, match="tidak berisi SKU"):
+        mp.load_products(_xlsx(tmp_path, "b.xlsx", [["SKU", "Product Name"]]))
+    (only,) = mp.load_products(_xlsx(tmp_path, "c.xlsx", [["SKU", "Product Name"], ["Z-1", "Z"]]))[0]     # tanpa Pack Size boleh
+    assert only.pack_size == ""

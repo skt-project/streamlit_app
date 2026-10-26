@@ -1,23 +1,22 @@
-"""Periksa dan pasang data dari BD: daftar store dan/atau daftar SKU + nomor BPOM.
+"""Periksa dan pasang data dari BD: daftar toko, daftar SKU (dropdown), dan/atau katalog SKU + nomor BPOM (template).
 
     python tools/prepare_reference.py --stores "C:\\...\\Daftar Store.xlsx"              # hanya memeriksa
-    python tools/prepare_reference.py --stores X.xlsx --catalogue Y.xlsx --install       # memeriksa lalu memasang
+    python tools/prepare_reference.py --stores X.xlsx --skus Z.xlsx --catalogue Y.xlsx --install   # memeriksa lalu memasang
 
 Tanpa --install tidak ada file yang ditulis. Pemasangan hanya terjadi bila SEMUA pemeriksaan lolos (tanpa ERROR).
 - Daftar toko  -> reference/Daftar Store.xlsx (disalin apa adanya setelah lolos). Kolom: Region, Nama Group Toko (opsional),
   Nama Toko; baris dengan grup menjadi SATU pilihan atas nama grup.
-- Daftar SKU   -> Sheet1 pada template/Contoh Excel Response.xlsx (katalog SKU + BPOM; sheet lain tidak disentuh).
+- Daftar SKU   (--skus) -> reference/Daftar SKU.xlsx: kolom SKU, Product Name, Pack Size; sumber dropdown form "Tambah SKU langsung".
+- Katalog SKU+BPOM (--catalogue) -> Sheet1 pada template/Contoh Excel Response.xlsx (katalog SKU + BPOM; sheet lain tidak disentuh).
   Format yang diterima: (a) kolom PRODUCT ID, PRODUCT NAME, ISI (GR / ML), BPOM NUMBER (urutan bebas), atau
   (b) format BD: SKU, BPOM Number [, BPOM Product Name, Expired Date] - PRODUCT NAME dan ISI diisi dari katalog saat ini,
-  lalu dari master_product (--bq, memakai perintah `bq` milik akun Anda, hanya SELECT).
+  lalu dari daftar SKU (--skus atau reference/Daftar SKU.xlsx yang sudah terpasang).
 """
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import shutil
-import subprocess
 import sys
 from collections import Counter
 from copy import copy
@@ -116,18 +115,6 @@ def _find_columns(header: list[str]) -> dict[str, int] | None:
     return cols if "PRODUCT ID" in cols and "BPOM NUMBER" in cols else None
 
 
-def fetch_master_via_bq(table: str = master_product.DEFAULT_TABLE) -> list[master_product.Product]:
-    """SELECT sku, product_name, pack_size lewat CLI `bq` milik akun Anda (read-only)."""
-    exe = shutil.which("bq")
-    if not exe:
-        raise RuntimeError("perintah `bq` tidak ditemukan di PATH")
-    sql = f"SELECT sku, product_name, pack_size FROM `{table}`"
-    out = subprocess.run([exe, "query", "--use_legacy_sql=false", "--format=json", "--max_rows=100000", sql],
-                         capture_output=True, text=True, check=True, timeout=120).stdout
-    products, _ = master_product.products_from_rows(json.loads(out))
-    return products
-
-
 def read_catalogue_input(path: Path, current: list[val.Sku], master: list | None = None) -> tuple[Report, list[val.Sku]]:
     rep, skus = Report(), []
     try:
@@ -162,7 +149,7 @@ def read_catalogue_input(path: Path, current: list[val.Sku], master: list | None
         if not pid or not bpom:
             rep.errors.append(f"baris {no}: PRODUCT ID/SKU dan BPOM NUMBER wajib diisi.")
             continue
-        if not (name and isi):          # format BD: lengkapi dari katalog saat ini, lalu master_product
+        if not (name and isi):          # format BD: lengkapi dari katalog saat ini, lalu daftar SKU
             src = by_id_current.get(pid.upper())
             if src:
                 name, isi = name or src.product_name, isi or src.isi
@@ -182,7 +169,7 @@ def read_catalogue_input(path: Path, current: list[val.Sku], master: list | None
         skus.append(val.Sku(pid, name, bpom, isi))
     if unresolved:
         rep.errors.append(f"{len(unresolved)} baris tanpa PRODUCT NAME/ISI yang bisa dilengkapi (SKU tidak ada di katalog saat "
-                          f"ini{'' if master else ' dan master_product tidak dipakai; coba --bq'}): "
+                          f"ini{'' if master else ' dan daftar SKU tidak diberikan; coba --skus'}): "
                           + ", ".join(f"baris {n} {p}" for n, p in unresolved[:15]))
     if not skus and not rep.errors:
         rep.errors.append("Tidak ada baris data.")
@@ -225,20 +212,44 @@ def write_catalogue(template_path: Path, skus: list[val.Sku]) -> None:
     wb.save(template_path)
 
 
+# ── daftar SKU untuk dropdown ───────────────────────────────────────────────
+
+def check_skus(path: Path) -> Report:
+    rep = Report()
+    try:
+        products, skipped = master_product.load_products(path)
+    except (master_product.SkuListMissing, master_product.SkuListError) as exc:
+        rep.errors.append(str(exc))
+        return rep
+    rep.info.append(f"{len(products)} SKU unik terbaca.")
+    if skipped:
+        rep.warnings.append(f"{skipped} baris dilewati karena SKU atau Product Name kosong.")
+    no_pack = [p.sku for p in products if not p.pack_size]
+    if no_pack:
+        rep.warnings.append(f"{len(no_pack)} SKU tanpa Pack Size (tidak bisa ditambah lewat form kecuali ada di template): "
+                            + ", ".join(no_pack[:8]) + (" ..." if len(no_pack) > 8 else ""))
+    current = {s.product_id.upper() for s in reference_data.load_catalogue(ROOT / "template" / "Contoh Excel Response.xlsx")}
+    missing = sorted(current - {p.sku.upper() for p in products})
+    if missing:
+        rep.warnings.append(f"{len(missing)} SKU di template tidak ada di daftar ini: {missing[:8]}")
+    return rep
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stores", type=Path, help="file daftar toko dari BD (.xlsx): Region, Nama Group Toko, Nama Toko")
     ap.add_argument("--catalogue", type=Path, help="file daftar SKU + BPOM dari BD (.xlsx)")
-    ap.add_argument("--bq", action="store_true", help="lengkapi PRODUCT NAME/ISI dari gt_schema.master_product (perintah bq, SELECT saja)")
+    ap.add_argument("--skus", type=Path, help="file daftar SKU dari BD (.xlsx): SKU, Product Name, Pack Size")
     ap.add_argument("--install", action="store_true", help="pasang ke reference/ dan template/ bila semua pemeriksaan lolos")
     ap.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
-    if not (args.stores or args.catalogue):
-        ap.error("isi --stores dan/atau --catalogue")
+    if not (args.stores or args.catalogue or args.skus):
+        ap.error("isi --stores, --skus, dan/atau --catalogue")
     root = args.root
     store_target, template_target = root / "reference" / "Daftar Store.xlsx", root / "template" / "Contoh Excel Response.xlsx"
+    sku_target = root / "reference" / "Daftar SKU.xlsx"
     all_ok, actions = True, []
 
     if args.stores:
@@ -249,16 +260,25 @@ def main(argv: list[str] | None = None) -> int:
         if rep.ok:
             actions.append(lambda: (store_target.parent.mkdir(exist_ok=True), shutil.copyfile(args.stores, store_target),
                                     print(f"Dipasang: {store_target}")))
+    if args.skus:
+        print(f"== Daftar SKU (dropdown): {args.skus}")
+        rep = check_skus(args.skus)
+        rep.print()
+        all_ok &= rep.ok
+        if rep.ok:
+            actions.append(lambda: (sku_target.parent.mkdir(exist_ok=True), shutil.copyfile(args.skus, sku_target),
+                                    print(f"Dipasang: {sku_target}")))
     if args.catalogue:
         print(f"== Daftar SKU + BPOM: {args.catalogue}")
         current = reference_data.load_catalogue(template_target)
         master = None
-        if args.bq:
+        sku_source = args.skus or (sku_target if sku_target.is_file() else None)
+        if sku_source:
             try:
-                master = fetch_master_via_bq()
-                print(f"[INFO] master_product dibaca: {len(master)} SKU.")
-            except Exception as exc:
-                print(f"[PERINGATAN] master_product tidak terbaca ({exc}); hanya katalog saat ini yang dipakai.")
+                master, _ = master_product.load_products(sku_source)
+                print(f"[INFO] daftar SKU dibaca dari {sku_source.name}: {len(master)} SKU.")
+            except (master_product.SkuListMissing, master_product.SkuListError) as exc:
+                print(f"[PERINGATAN] daftar SKU tidak terbaca ({exc}); hanya katalog saat ini yang dipakai.")
         rep, skus = read_catalogue_input(args.catalogue, current, master)
         rep.print()
         all_ok &= rep.ok
