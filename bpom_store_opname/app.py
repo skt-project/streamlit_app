@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +35,8 @@ SCOPES = [
 STORE_SEARCH_THRESHOLD = 1500   # region dengan toko lebih banyak: pakai kotak cari (dropdown ribuan opsi berat dikirim ke HP)
 STORE_SEARCH_MIN_CHARS = 3
 STORE_SEARCH_RESULTS = 50
+BQ_SCOPE = ["https://www.googleapis.com/auth/bigquery"]
+PRODUCTS_RETRY_SECONDS = 60     # setelah BigQuery gagal, 60 detik tidak dicoba lagi (60+ sesi tidak menyerbunya)
 STORE_SHEET_TTL = 600           # detik: perubahan di Google Sheet daftar toko muncul di aplikasi paling lambat segini
 MAX_ISSUES_LISTED = 10
 MAX_ISSUES_SHOWN = 300
@@ -138,6 +141,9 @@ class Config:
     store_filter_value: str = "BA"              # hanya baris dengan nilai ini di kolom filter ("" = tanpa filter)
     store_filter_header: str = "BA Non BA"      # nama header kolom filter; bila tidak ada dipakai store_filter_column
     store_filter_column: str = "H"
+    # Daftar SKU untuk form tambah SKU langsung: BigQuery master_product (brand terbatas), cadangan reference/Daftar SKU.xlsx
+    master_product_table: str = master_product.DEFAULT_TABLE
+    master_product_brands: tuple[str, ...] = master_product.DEFAULT_BRANDS
 
 
 def service_account_info() -> dict | None:
@@ -190,6 +196,8 @@ def load_config() -> Config:
         store_filter_value=str(app.get("store_filter_value", "BA")).strip(),
         store_filter_header=str(app.get("store_filter_header", "BA Non BA")).strip(),
         store_filter_column=str(app.get("store_filter_column", "H")).strip(),
+        master_product_table=str(app.get("master_product_table", master_product.DEFAULT_TABLE)).strip(),
+        master_product_brands=tuple(str(b).strip() for b in app.get("master_product_brands", master_product.DEFAULT_BRANDS)),
     )
 
 
@@ -202,17 +210,52 @@ def get_gspread_client() -> gspread.Client:
 # cache_resource = objek bersama semua sesi TANPA disalin per rerun (cache_data menyalin/pickle tiap rerun).
 # Isi cache ini tidak boleh diubah oleh pemakainya.
 @st.cache_resource(show_spinner=False)
-def _read_products() -> tuple[list[master_product.Product], int]:
+def get_bq_client():
+    from google.cloud import bigquery     # impor berat: hanya saat daftar SKU pertama kali dibaca
+    info = service_account_info()
+    creds = service_account.Credentials.from_service_account_info(info, scopes=BQ_SCOPE)
+    return bigquery.Client(credentials=creds, project=info.get("project_id"))
+
+
+@st.cache_resource(ttl=3600, show_spinner=False)
+def _fetch_products_bq(table: str, brands: tuple[str, ...]) -> tuple[list[master_product.Product], int]:
+    return master_product.fetch_products(get_bq_client(), table, brands)
+
+
+@st.cache_resource(show_spinner=False)
+def _read_products_file() -> tuple[list[master_product.Product], int]:
     return master_product.load_products(SKU_LIST_FILE)
 
 
-def load_products() -> tuple[list[master_product.Product], int, str | None]:
-    """Daftar SKU dari file. Gagal -> ([], 0, pesan); hanya fitur tambah SKU yang nonaktif, bagian lain tetap jalan."""
+_bq_failure: tuple[float, str] | None = None     # per proses: sesi lain tidak ikut menyerbu BigQuery saat ia gagal
+
+
+def load_products(cfg: Config) -> tuple[list[master_product.Product], int, str | None]:
+    """Daftar SKU: BigQuery master_product (brand terbatas, cache 1 jam); bila gagal, file reference/Daftar SKU.xlsx.
+
+    Gagal semua -> ([], 0, pesan); hanya fitur tambah SKU yang nonaktif, bagian lain tetap jalan.
+    """
+    global _bq_failure
+    failure = _bq_failure
+    bq_error = None
+    if failure and time.time() - failure[0] < PRODUCTS_RETRY_SECONDS:
+        bq_error = failure[1]
+    else:
+        try:
+            products, skipped = _fetch_products_bq(cfg.master_product_table, cfg.master_product_brands)
+            _bq_failure = None
+            return products, skipped, None
+        except Exception as exc:                  # izin, jaringan, tabel hilang, dsb.
+            log.exception("Gagal membaca master_product dari BigQuery")
+            bq_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+            _bq_failure = (time.time(), bq_error)
     try:
-        products, skipped = _read_products()
-    except (master_product.SkuListMissing, master_product.SkuListError) as exc:
-        return [], 0, str(exc)
-    return products, skipped, None
+        products, skipped = _read_products_file()
+        return products, skipped, None
+    except (master_product.SkuListMissing, master_product.SkuListError):
+        email = (service_account_info() or {}).get("client_email", "service account")
+        return [], 0, (f"BigQuery master_product tidak terbaca ({bq_error}). Beri `{email}` peran BigQuery Data Viewer pada tabel "
+                       "itu dan BigQuery Job User pada project, atau letakkan reference/Daftar SKU.xlsx.")
 
 
 def _group_by_region(tokos) -> dict[str, list[reference_data.Toko]]:
@@ -359,9 +402,9 @@ def extras_section(cfg: Config, skus: list[val.Sku]) -> list[val.ExtraSku]:
     flash = st.session_state.pop("extra_flash", None)
     if flash:
         st.success(flash)
-    products, skipped, error = load_products()
+    products, skipped, error = load_products(cfg)
     if error:
-        st.warning("Daftar SKU belum tersedia atau tidak terbaca, jadi fitur ini belum bisa dipakai. Anda masih bisa "
+        st.warning("Daftar SKU tidak dapat dibaca, jadi fitur ini belum bisa dipakai. Anda masih bisa "
                    f"menambah baris langsung di Excel. Detail: {error}")
     else:
         with st.form("extra_form", clear_on_submit=True):

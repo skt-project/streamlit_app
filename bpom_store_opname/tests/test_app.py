@@ -51,7 +51,7 @@ def wiring(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "load_config", lambda: app.Config(
         sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
     monkeypatch.setattr(app, "get_gspread_client", lambda: MagicMock())
-    monkeypatch.setattr(app, "load_products", lambda: (PRODUCTS, 0, None))
+    monkeypatch.setattr(app, "load_products", lambda cfg: (PRODUCTS, 0, None))
     monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
     monkeypatch.setattr(store, "WRITE_INTERVAL", 0.0)       # tanpa jeda penulisan di tes
     for cached in (app.load_tokos_by_region, app.load_skus, app.get_opname_store):
@@ -312,17 +312,48 @@ def test_missing_sku_list_disables_only_the_extra_feature(monkeypatch, tmp_path)
         sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE))
     monkeypatch.setattr(app, "STORE_FILE", _store_file(tmp_path))
     monkeypatch.setattr(app, "SKU_LIST_FILE", tmp_path / "tidak-ada.xlsx")
-    app.load_tokos_by_region.clear(); app._read_products.clear()
+    _bq_fails(monkeypatch, PermissionError("403 Access Denied: BigQuery"))
     at = _at()
     assert not at.exception
-    assert any("Daftar SKU belum tersedia" in w.value for w in at.warning)
+    assert any("BigQuery master_product tidak terbaca" in w.value and "sa@proj" in w.value and "Job User" in w.value for w in at.warning)
     assert len(at.selectbox) == 2 and len(at.download_button) == 0     # form region/toko tetap jalan
 
 
-def test_app_has_no_bigquery_dependency():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert "import bigquery" not in source and "google.cloud" not in source
-    assert "google-cloud-bigquery" not in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+def _bq_fails(monkeypatch, exc):
+    monkeypatch.setattr(app, "service_account_info", lambda: {"client_email": "sa@proj.iam.gserviceaccount.com"})
+    def boom(table, brands):
+        raise exc
+    monkeypatch.setattr(app, "_fetch_products_bq", boom)
+    monkeypatch.setattr(app, "_bq_failure", None)
+    app.load_tokos_by_region.clear(); app._read_products_file.clear()
+
+
+def test_products_come_from_bigquery_for_the_three_brands_only(monkeypatch):
+    monkeypatch.undo()
+    calls = []
+    def fake_fetch(table, brands):
+        calls.append((table, brands))
+        return [mp.Product("SKU-A", "PRODUK A", "5ml")], 0
+    monkeypatch.setattr(app, "_fetch_products_bq", fake_fetch)
+    monkeypatch.setattr(app, "_bq_failure", None)
+    products, skipped, error = app.load_products(app.Config(
+        sheet_name="T", worksheet_title="T", sheet_id="X", share_with=(), template_path=TEMPLATE))
+    assert error is None and [p.sku for p in products] == ["SKU-A"]
+    assert calls == [("skintific-data-warehouse.gt_schema.master_product", ("SKINTIFIC", "TIMEPHORIA", "FACERINNA"))]
+
+
+def test_bigquery_failure_is_remembered_so_sessions_do_not_hammer_it(monkeypatch, tmp_path):
+    monkeypatch.undo()                                                     # pakai load_products asli, bukan tiruan dari fixture
+    monkeypatch.setattr(app, "SKU_LIST_FILE", tmp_path / "tidak-ada.xlsx")
+    n = []
+    monkeypatch.setattr(app, "service_account_info", lambda: {"client_email": "sa@x"})
+    monkeypatch.setattr(app, "_fetch_products_bq", lambda t, b: (n.append(1), (_ for _ in ()).throw(RuntimeError("down")))[1])
+    monkeypatch.setattr(app, "_bq_failure", None)
+    app._read_products_file.clear()
+    cfg = app.Config(sheet_name="T", worksheet_title="T", sheet_id="X", share_with=(), template_path=TEMPLATE)
+    for _ in range(5):
+        assert app.load_products(cfg)[2] is not None
+    assert len(n) == 1                                                     # 5 sesi -> hanya 1 percobaan BigQuery dalam 60 detik
 
 
 def test_sku_list_file_feeds_the_dropdown(monkeypatch, tmp_path):
@@ -334,9 +365,9 @@ def test_sku_list_file_feeds_the_dropdown(monkeypatch, tmp_path):
     ws.append(["Pack Size", "SKU", "Product Name"]); ws.append(["25ml", "ZZ-NEW-01", "PRODUK BARU ZZ"]); ws.append(["5g", "AA-1", "PRODUK A"])
     wb.save(tmp_path / "Daftar SKU.xlsx")
     monkeypatch.setattr(app, "SKU_LIST_FILE", tmp_path / "Daftar SKU.xlsx")
-    app.load_tokos_by_region.clear(); app._read_products.clear()
+    _bq_fails(monkeypatch, RuntimeError("bigquery down"))                   # BigQuery gagal -> file cadangan dipakai
     at = _at()
-    assert not at.exception and list(at.selectbox[2].options) == ["AA-1 - PRODUK A", "ZZ-NEW-01 - PRODUK BARU ZZ"]
+    assert not at.exception and not at.warning and list(at.selectbox[2].options) == ["AA-1 - PRODUK A", "ZZ-NEW-01 - PRODUK BARU ZZ"]
 
 
 # ── daftar toko dari Google Sheet ───────────────────────────────────────────

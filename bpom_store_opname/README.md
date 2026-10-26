@@ -31,22 +31,25 @@ Spreadsheet utama (satu worksheet). Tidak ada mode revisi. Redaksi di layar meng
 ## Tambah SKU / nomor BPOM langsung
 
 Di Langkah 3 ada form **Tambah SKU / nomor BPOM langsung (opsional)**: pilih SKU (label `SKU - product name`, bisa diketik) dari
-`reference/Daftar SKU.xlsx` (diekspor BD dari master product), isi nomor BPOM dan QTY, lalu **Tambah ke daftar**.
-Aplikasi **tidak memakai BigQuery**: semua data referensi berupa file, dan service account hanya butuh Google Sheets.
-Baris yang ditambahkan digabung
+BigQuery `skintific-data-warehouse.gt_schema.master_product`, **hanya brand SKINTIFIC, TIMEPHORIA, FACERINNA**, isi nomor BPOM dan QTY,
+lalu **Tambah ke daftar**. Daftar dibaca dengan satu query berparameter (`SELECT sku, product_name, pack_size ... WHERE brand IN (...)`),
+di-cache 1 jam; bila BigQuery gagal, dicoba lagi paling cepat tiap 60 detik. Baris yang ditambahkan digabung
 dengan isi file saat validasi dan ikut tersimpan dalam satu `batchUpdate` yang sama (dikosongkan setelah sukses).
 
 - SKU boleh **di luar template**. Nama produk dan ISI diambil dari katalog template bila SKU-nya ada di sana; bila tidak, dari
   `Product Name` dan `Pack Size` dari Daftar SKU.
 - Kombinasi SKU + BPOM yang sama dengan baris file atau baris tambahan lain ditolak (seluruh input batal). Upload file Excel tetap wajib.
-- Bila `Daftar SKU.xlsx` belum ada atau rusak, hanya fitur ini yang nonaktif (pesan jelas); baris tambahan tetap bisa diketik di Excel.
+- **Izin:** service account butuh `BigQuery Data Viewer` pada tabel itu dan `BigQuery Job User` pada project. Tanpa itu, dipakai file
+  cadangan `reference/Daftar SKU.xlsx` bila ada; bila tidak, hanya fitur ini yang nonaktif (pesan menyebut email yang harus diberi izin).
+  Bagian aplikasi lain (daftar toko, template, upload, simpan) tidak bergantung pada BigQuery. Brand/tabel dapat diubah lewat
+  `[app] master_product_brands` / `master_product_table`.
 
 ## Data referensi (dari BD)
 
 | File | Isi |
 |---|---|
 | `reference/Daftar Store.xlsx` | **Wajib ada sebelum dipakai** (kecuali memakai `store_sheet_id`, lihat di bawah). Kolom `Region`, `Nama Group Toko` (opsional), `Nama Toko` (urutan/huruf bebas, kolom lain diabaikan, baris judul di atas header boleh). Hanya sheet pertama dibaca |
-| `reference/Daftar SKU.xlsx` | Kolom `SKU`, `Product Name`, `Pack Size` (opsional; urutan/huruf bebas, baris judul boleh). Sumber dropdown form "Tambah SKU langsung". Opsional: tanpa file ini fitur itu nonaktif |
+| `reference/Daftar SKU.xlsx` | **Opsional (cadangan).** Kolom `SKU`, `Product Name`, `Pack Size`; dipakai hanya bila BigQuery master_product tidak terbaca |
 | `template/Contoh Excel Response.xlsx` | Template resmi **sekaligus katalog SKU** (`Sheet1`). Sheet kerja BD di file ini tidak ikut ke pengguna |
 
 Aturan daftar toko: baris dengan `Nama Group Toko` terisi menjadi **satu pilihan atas nama grup** (semua toko dalam grup digabung);
@@ -86,7 +89,7 @@ tab dengan skema lama (16 kolom, versi sebelum 2026-10-26) harus dikosongkan ata
 
 ## Setup
 
-1. Salin `.streamlit/secrets.toml.example` ke `.streamlit/secrets.toml`; isi `[connections.bigquery]` (hanya nama section untuk service account; tanpa akses BigQuery) dan
+1. Salin `.streamlit/secrets.toml.example` ke `.streamlit/secrets.toml`; isi `[connections.bigquery]` (service account; Sheets wajib, BigQuery hanya untuk daftar SKU tambahan) dan
    `[app]` dengan `google_sheet_id` (**tepat di bawah header `[app]`**). File ini di-gitignore. Di Streamlit Cloud, isi lewat Settings -> Secrets.
 2. Buat spreadsheet **manual** (service account tidak punya kuota Drive; 403 "storage quota") dengan tab `BPOM Stock Opname Store`,
    lalu share sebagai **Editor** ke `client_email`. Sheets API dan Drive API harus aktif.
@@ -117,5 +120,5 @@ Region -> Toko): 88 dari 100 sesi selesai sampai "Berhasil menyimpan" dengan bar
 
 ## File
 
-`app.py` (UI) · `validation.py` (validasi form + Excel) · `reference_data.py` (baca daftar toko + katalog) · `master_product.py` (daftar SKU dari file) ·
+`app.py` (UI) · `validation.py` (validasi form + Excel) · `reference_data.py` (baca daftar toko + katalog) · `master_product.py` (daftar SKU: BigQuery + file cadangan) ·
 `tools/prepare_reference.py` (periksa + pasang data BD) · `template_builder.py` (template per toko) · `sheets_store.py` (Google Sheets) · `tests/`

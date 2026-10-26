@@ -1,7 +1,8 @@
-"""Daftar SKU untuk form "Tambah SKU / nomor BPOM langsung", dibaca dari `reference/Daftar SKU.xlsx`.
+"""Daftar SKU untuk form "Tambah SKU / nomor BPOM langsung".
 
-File ini diekspor oleh BD dari master product (kolom SKU, Product Name, Pack Size). Aplikasi TIDAK terhubung ke BigQuery:
-seluruh data referensi berupa file, sama seperti daftar toko dan katalog template.
+Sumber utama: BigQuery `gt_schema.master_product` (kolom sku, product_name, pack_size), HANYA brand tertentu (default SKINTIFIC,
+TIMEPHORIA, FACERINNA), dibaca dengan SATU query berparameter. Cadangan bila BigQuery gagal: `reference/Daftar SKU.xlsx`
+(kolom SKU, Product Name, Pack Size). Hanya fitur tambah SKU yang bergantung pada daftar ini; bagian aplikasi lain tidak.
 """
 from __future__ import annotations
 
@@ -11,6 +12,9 @@ from pathlib import Path
 
 import openpyxl
 
+DEFAULT_TABLE = "skintific-data-warehouse.gt_schema.master_product"
+DEFAULT_BRANDS = ("SKINTIFIC", "TIMEPHORIA", "FACERINNA")
+_TABLE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 HEADER_SEARCH_ROWS = 10
 SKU_COLS = ("sku", "product id")
 NAME_COLS = ("product name", "product_name", "nama produk")
@@ -100,4 +104,22 @@ def load_products(path: Path) -> tuple[list[Product], int]:
     products, skipped = products_from_rows(data)
     if not products:
         raise SkuListError(f"'{path.name}' tidak berisi SKU.")
+    return products, skipped
+
+
+def fetch_products(client, table: str = DEFAULT_TABLE, brands: tuple[str, ...] = DEFAULT_BRANDS) -> tuple[list[Product], int]:
+    """SELECT sku, product_name, pack_size dari master_product untuk `brands` saja (query berparameter, hanya baca)."""
+    from google.cloud import bigquery     # impor di sini: berat, hanya dibutuhkan saat daftar SKU benar-benar dibaca
+
+    if not _TABLE_RE.match(table):
+        raise ValueError(f"Nama tabel master_product tidak valid: {table!r}")
+    wanted = [b.strip().upper() for b in brands if b and b.strip()]
+    if not wanted:
+        raise ValueError("Daftar brand master_product kosong.")
+    job = client.query(
+        f"SELECT sku, product_name, pack_size FROM `{table}` WHERE UPPER(TRIM(brand)) IN UNNEST(@brands)",
+        job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ArrayQueryParameter("brands", "STRING", wanted)]))
+    products, skipped = products_from_rows(job.result())
+    if not products:
+        raise ValueError(f"Tabel {table} tidak berisi SKU untuk brand {wanted}.")
     return products, skipped

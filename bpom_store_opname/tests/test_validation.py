@@ -534,3 +534,26 @@ def test_row_filter_errors_are_explicit():
         r.load_stores_from_values([BA_HEAD, _ba("Jawa", None, "A", "Non BA")], "sheet", row_filter=flt)
     with pytest.raises(r.ReferenceDataError, match="Header 'sheet' tidak ditemukan.*ditemukan"):
         r.load_stores_from_values([["Wilayah", "Outlet"], ["Jawa", "A"]], "sheet", row_filter=flt)          # pesan memuat header yang ada
+
+
+def test_fetch_products_uses_a_parameterised_query_limited_to_the_given_brands():
+    import pytest
+    seen = {}
+
+    class Job:
+        def result(self):
+            return [{"sku": "S-2", "product_name": "Dua", "pack_size": "5g"}, {"sku": "S-1", "product_name": "Satu", "pack_size": None},
+                    {"sku": "S-2", "product_name": "dup", "pack_size": "9g"}, {"sku": "S-3", "product_name": None, "pack_size": "1g"}]
+
+    class Client:
+        def query(self, sql, job_config=None):
+            seen["sql"], seen["params"] = sql, [(q.name, list(q.values)) for q in job_config.query_parameters]
+            return Job()
+    products, skipped = mp.fetch_products(Client(), "p.d.t", (" skintific ", "TIMEPHORIA", "FACERINNA", ""))
+    assert [p.label for p in products] == ["S-1 - Satu", "S-2 - Dua"] and skipped == 1
+    assert seen["params"] == [("brands", ["SKINTIFIC", "TIMEPHORIA", "FACERINNA"])]            # nilai TIDAK disisipkan ke teks SQL
+    assert "UNNEST(@brands)" in seen["sql"] and "SKINTIFIC" not in seen["sql"] and "`p.d.t`" in seen["sql"]
+    with pytest.raises(ValueError, match="tidak valid"):
+        mp.fetch_products(Client(), "x; DROP TABLE y", ("A",))
+    with pytest.raises(ValueError, match="brand master_product kosong"):
+        mp.fetch_products(Client(), "p.d.t", ("", " "))
