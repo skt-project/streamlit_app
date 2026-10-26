@@ -499,3 +499,38 @@ def test_load_products_reads_sku_file_any_column_order_with_title_rows(tmp_path)
         mp.load_products(_xlsx(tmp_path, "b.xlsx", [["SKU", "Product Name"]]))
     (only,) = mp.load_products(_xlsx(tmp_path, "c.xlsx", [["SKU", "Product Name"], ["Z-1", "Z"]]))[0]     # tanpa Pack Size boleh
     assert only.pack_size == ""
+
+
+# ── daftar toko dengan filter kolom (Google Sheet: BA / Non BA) ─────────────
+
+BA_HEAD = ["Region", "Nama Group Toko", "Nama Toko", "Kode", "Area", "PIC", "Cabang", "BA Non BA"]     # kolom H = indeks 7
+
+
+def _ba(region, group, toko, flag):
+    return [region, group, toko, "K", "A", "P", "C", flag]
+
+
+def test_row_filter_keeps_only_exact_ba_rows_and_skips_validation_of_the_rest():
+    rows = [BA_HEAD, _ba("Jawa", "ALFA", "Alfa 1", "BA"), _ba("Jawa", "ALFA", "Alfa 2", " ba "), _ba("Jawa", None, "Toko X", "Non BA"),
+            _ba("Jawa", None, "Toko Y", ""), _ba("", None, "Rusak tapi Non BA", "Non BA"), _ba("Sumatera", None, "Toko Budi", "BA")]
+    flt = r.RowFilter("BA", header_names=("BA Non BA",), column_letter="H")
+    tokos = r.load_stores_from_values(rows, "sheet", row_filter=flt)
+    assert [(t.region, t.name, t.outlets) for t in tokos] == [("Jawa", "ALFA", 2), ("Sumatera", "Toko Budi", 1)]   # "Non BA" bukan "BA"
+
+
+def test_row_filter_falls_back_to_column_h_when_header_name_differs():
+    head = [*BA_HEAD[:7], "Status BA"]
+    rows = [head, _ba("Jawa", None, "A", "BA"), _ba("Jawa", None, "B", "Non BA")]
+    flt = r.RowFilter("BA", header_names=("BA Non BA",), column_letter="H")
+    assert [t.name for t in r.load_stores_from_values(rows, "sheet", row_filter=flt)] == ["A"]
+
+
+def test_row_filter_errors_are_explicit():
+    import pytest
+    flt = r.RowFilter("BA", header_names=("BA Non BA",), column_letter="H")
+    with pytest.raises(r.ReferenceDataError, match="Kolom filter tidak ditemukan"):
+        r.load_stores_from_values([["Region", "Nama Toko"], ["Jawa", "A"]], "sheet", row_filter=flt)      # tidak ada kolom H
+    with pytest.raises(r.ReferenceDataError, match="tidak berisi toko dengan BA"):
+        r.load_stores_from_values([BA_HEAD, _ba("Jawa", None, "A", "Non BA")], "sheet", row_filter=flt)
+    with pytest.raises(r.ReferenceDataError, match="Header 'sheet' tidak ditemukan.*ditemukan"):
+        r.load_stores_from_values([["Wilayah", "Outlet"], ["Jawa", "A"]], "sheet", row_filter=flt)          # pesan memuat header yang ada

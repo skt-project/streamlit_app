@@ -45,7 +45,7 @@ dengan isi file saat validasi dan ikut tersimpan dalam satu `batchUpdate` yang s
 
 | File | Isi |
 |---|---|
-| `reference/Daftar Store.xlsx` | **Wajib ada sebelum dipakai.** Kolom `Region`, `Nama Group Toko` (opsional), `Nama Toko` (urutan/huruf bebas, kolom lain diabaikan, baris judul di atas header boleh). Hanya sheet pertama dibaca |
+| `reference/Daftar Store.xlsx` | **Wajib ada sebelum dipakai** (kecuali memakai `store_sheet_id`, lihat di bawah). Kolom `Region`, `Nama Group Toko` (opsional), `Nama Toko` (urutan/huruf bebas, kolom lain diabaikan, baris judul di atas header boleh). Hanya sheet pertama dibaca |
 | `reference/Daftar SKU.xlsx` | Kolom `SKU`, `Product Name`, `Pack Size` (opsional; urutan/huruf bebas, baris judul boleh). Sumber dropdown form "Tambah SKU langsung". Opsional: tanpa file ini fitur itu nonaktif |
 | `template/Contoh Excel Response.xlsx` | Template resmi **sekaligus katalog SKU** (`Sheet1`). Sheet kerja BD di file ini tidak ikut ke pengguna |
 
@@ -53,6 +53,16 @@ Aturan daftar toko: baris dengan `Nama Group Toko` terisi menjadi **satu pilihan
 baris tanpa grup menjadi pilihan atas nama toko. Pilihan unik per (Region, nama). Daftar ditolak **seluruhnya** bila: kolom Region/Nama
 Toko tidak ada, ada baris tanpa Region atau nama, atau satu nama muncul sebagai grup sekaligus sebagai toko tunggal di region yang sama.
 Bila `Daftar Store.xlsx` belum ada, aplikasi menampilkan "Daftar toko belum tersedia" dan form tidak tampil.
+
+### Daftar toko langsung dari Google Sheet (sementara / tanpa file di repo)
+
+Alternatif `Daftar Store.xlsx`: isi di `[app]` pada Secrets `store_sheet_id` (ID atau URL; `?gid=` memilih tab, tanpa gid = tab pertama).
+Sheet itu harus di-share ke `client_email` (minimal Viewer). Aplikasi membacanya **satu kali per 10 menit** (bukan per pengguna), jadi
+perubahan di sheet muncul paling lambat 10 menit. Kolom sama seperti file (Region, Nama Group Toko, Nama Toko).
+
+Filter baris (default): hanya baris yang kolom **`BA Non BA`** (bila header tidak ada: **kolom H**) bernilai persis **`BA`**; "Non BA" dan
+kosong dilewati sepenuhnya. Ubah lewat `store_filter_value` / `store_filter_header` / `store_filter_column` (`store_filter_value = ""` = tanpa filter).
+Bila kolom tidak cocok, halaman menampilkan nama header yang ditemukan; bila sheet belum di-share, halaman menyebut email yang harus diberi akses.
 
 ### Memasang data dari BD
 

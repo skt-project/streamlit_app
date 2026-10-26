@@ -34,6 +34,7 @@ SCOPES = [
 STORE_SEARCH_THRESHOLD = 1500   # region dengan toko lebih banyak: pakai kotak cari (dropdown ribuan opsi berat dikirim ke HP)
 STORE_SEARCH_MIN_CHARS = 3
 STORE_SEARCH_RESULTS = 50
+STORE_SHEET_TTL = 600           # detik: perubahan di Google Sheet daftar toko muncul di aplikasi paling lambat segini
 MAX_ISSUES_LISTED = 10
 MAX_ISSUES_SHOWN = 300
 
@@ -131,6 +132,12 @@ class Config:
     sheet_id: str | None
     share_with: tuple[str, ...]
     template_path: Path | None
+    # Daftar toko dari Google Sheet (opsional; bila kosong dipakai reference/Daftar Store.xlsx)
+    store_sheet_id: str | None = None
+    store_sheet_gid: int | None = None
+    store_filter_value: str = "BA"              # hanya baris dengan nilai ini di kolom filter ("" = tanpa filter)
+    store_filter_header: str = "BA Non BA"      # nama header kolom filter; bila tidak ada dipakai store_filter_column
+    store_filter_column: str = "H"
 
 
 def service_account_info() -> dict | None:
@@ -147,6 +154,12 @@ def service_account_info() -> dict | None:
     except Exception:  # secrets.toml tidak ada
         pass
     return None
+
+
+def _sheet_gid(value: str | None) -> int | None:
+    """gid tab dari URL spreadsheet (`...edit?gid=123#gid=123`); None bila tidak ada."""
+    match = re.search(r"[#&?]gid=(\d+)", value or "")
+    return int(match.group(1)) if match else None
 
 
 def _sheet_id(value: str | None) -> str | None:
@@ -172,6 +185,11 @@ def load_config() -> Config:
         sheet_id=_sheet_id(app.get("google_sheet_id")),
         share_with=tuple(app.get("share_with", [])),
         template_path=next((p for p in candidates if p.is_file()), None),
+        store_sheet_id=_sheet_id(app.get("store_sheet_id")),
+        store_sheet_gid=int(app["store_sheet_gid"]) if app.get("store_sheet_gid") not in (None, "") else _sheet_gid(app.get("store_sheet_id")),
+        store_filter_value=str(app.get("store_filter_value", "BA")).strip(),
+        store_filter_header=str(app.get("store_filter_header", "BA Non BA")).strip(),
+        store_filter_column=str(app.get("store_filter_column", "H")).strip(),
     )
 
 
@@ -197,13 +215,38 @@ def load_products() -> tuple[list[master_product.Product], int, str | None]:
     return products, skipped, None
 
 
-@st.cache_resource(show_spinner=False)
-def load_tokos_by_region() -> dict[str, list[reference_data.Toko]]:
-    """{region: [toko, ...]} - dibaca dari file BD sekali, lalu di-cache (dropdown tetap ringan)."""
+def _group_by_region(tokos) -> dict[str, list[reference_data.Toko]]:
     grouped: dict[str, list[reference_data.Toko]] = {}
-    for t in reference_data.load_stores(STORE_FILE):
+    for t in tokos:
         grouped.setdefault(t.region, []).append(t)
     return {r: sorted(v, key=lambda t: t.name.casefold()) for r, v in sorted(grouped.items())}
+
+
+@st.cache_resource(show_spinner=False)
+def load_tokos_by_region() -> dict[str, list[reference_data.Toko]]:
+    """{region: [toko, ...]} dari file BD (reference/Daftar Store.xlsx), sekali lalu di-cache (dropdown tetap ringan)."""
+    return _group_by_region(reference_data.load_stores(STORE_FILE))
+
+
+@st.cache_resource(ttl=STORE_SHEET_TTL, show_spinner=False)
+def _tokos_from_sheet(sheet_id: str, gid: int | None, filter_header: str, filter_column: str,
+                      filter_value: str) -> dict[str, list[reference_data.Toko]]:
+    """Daftar toko dari Google Sheet: SATU pembacaan per proses tiap STORE_SHEET_TTL detik (bukan per sesi/rerun)."""
+    gc = get_gspread_client()
+    read = dict(retry_on=store._READ_RETRY, delays=store._BACKOFF)
+    sh = store._retry(lambda: gc.open_by_key(sheet_id), **read)
+    ws = sh.get_worksheet_by_id(gid) if gid is not None else sh.sheet1
+    values = store._retry(lambda: ws.get_all_values(), **read)
+    row_filter = (reference_data.RowFilter(equals=filter_value, header_names=(filter_header,) if filter_header else (),
+                                           column_letter=filter_column) if filter_value else None)
+    return _group_by_region(reference_data.load_stores_from_values(values, "Google Sheet daftar toko", row_filter=row_filter))
+
+
+def load_tokos(cfg: Config) -> dict[str, list[reference_data.Toko]]:
+    if cfg.store_sheet_id:
+        return _tokos_from_sheet(cfg.store_sheet_id, cfg.store_sheet_gid, cfg.store_filter_header,
+                                 cfg.store_filter_column, cfg.store_filter_value)
+    return load_tokos_by_region()
 
 
 @st.cache_resource(show_spinner=False)
@@ -429,7 +472,7 @@ def main() -> None:
                  "atau atur `template_path` di `[app]`.")
         st.stop()
     try:
-        tokos_by_region = load_tokos_by_region()
+        tokos_by_region = load_tokos(cfg)
         skus = load_skus(str(cfg.template_path))
     except reference_data.StoreListMissing:
         st.warning("**Daftar toko belum tersedia.** Form belum bisa dipakai; hubungi BD untuk menyediakan "
@@ -437,6 +480,12 @@ def main() -> None:
         st.stop()
     except reference_data.ReferenceDataError as exc:
         st.error(f"Data referensi dari BD bermasalah: {exc}")
+        st.stop()
+    except gspread.exceptions.GSpreadException as exc:
+        email = (service_account_info() or {}).get("client_email", "service account")
+        log.exception("Gagal membaca daftar toko dari Google Sheet")
+        st.error(f"Daftar toko dari Google Sheet tidak bisa dibaca ({type(exc).__name__}). Pastikan sheet itu di-share ke "
+                 f"`{email}` (minimal Viewer) dan `store_sheet_id` benar.")
         st.stop()
 
     with st.expander("Ketentuan dan panduan pengisian", expanded=True):

@@ -337,3 +337,67 @@ def test_sku_list_file_feeds_the_dropdown(monkeypatch, tmp_path):
     app.load_tokos_by_region.clear(); app._read_products.clear()
     at = _at()
     assert not at.exception and list(at.selectbox[2].options) == ["AA-1 - PRODUK A", "ZZ-NEW-01 - PRODUK BARU ZZ"]
+
+
+# ── daftar toko dari Google Sheet ───────────────────────────────────────────
+
+STORE_SHEET_ID = "STORE_SHEET_ID_X"
+SHEET_HEAD = ["Region", "Nama Group Toko", "Nama Toko", "Kode", "Area", "PIC", "Cabang", "BA Non BA"]
+
+
+def _store_sheet(monkeypatch, values, **cfg_extra):
+    """Konfigurasi aplikasi memakai Google Sheet daftar toko (tiruan); mengembalikan (gc, ws)."""
+    ws = MagicMock(); ws.get_all_values.return_value = values
+    sh = MagicMock(); sh.get_worksheet_by_id.return_value = ws; sh.sheet1 = ws
+    gc = MagicMock(); gc.open_by_key.return_value = sh
+    monkeypatch.setattr(app, "get_gspread_client", lambda: gc)
+    monkeypatch.setattr(app, "service_account_info", lambda: {"client_email": "sa@proj.iam.gserviceaccount.com"})
+    monkeypatch.setattr(app, "load_config", lambda: app.Config(
+        sheet_name="T", worksheet_title="T", sheet_id="FAKE_ID", share_with=(), template_path=TEMPLATE,
+        store_sheet_id=STORE_SHEET_ID, **cfg_extra))
+    app._tokos_from_sheet.clear()
+    return gc, sh, ws
+
+
+def test_store_list_from_google_sheet_keeps_only_ba_rows(monkeypatch):
+    values = [SHEET_HEAD,
+              ["Jawa", "ALFAMART", "Alfa 1", "", "", "", "", "BA"], ["Jawa", "ALFAMART", "Alfa 2", "", "", "", "", "BA"],
+              ["Jawa", None, "Toko Non BA", "", "", "", "", "Non BA"], ["Sumatera", None, "Toko Budi", "", "", "", "", "BA"]]
+    gc, sh, ws = _store_sheet(monkeypatch, values, store_sheet_gid=0)
+    at = _at()
+    assert not at.exception and not at.error
+    assert list(at.selectbox[0].options) == ["Jawa", "Sumatera"]
+    at.selectbox[0].select("Jawa").run()
+    assert list(at.selectbox[1].options) == ["ALFAMART  ·  grup (2 toko)"]               # Non BA tidak muncul
+    gc.open_by_key.assert_called_once_with(STORE_SHEET_ID)
+    sh.get_worksheet_by_id.assert_called_once_with(0)
+    at.selectbox[0].select("Sumatera").run()                                                # rerun berikutnya tidak membaca sheet lagi
+    assert gc.open_by_key.call_count == 1 and ws.get_all_values.call_count == 1
+
+
+def test_store_list_sheet_without_gid_uses_first_tab(monkeypatch):
+    gc, sh, ws = _store_sheet(monkeypatch, [SHEET_HEAD, ["Jawa", None, "A", "", "", "", "", "BA"]])
+    at = _at()
+    assert not at.exception and list(at.selectbox[0].options) == ["Jawa"]
+    assert not sh.get_worksheet_by_id.called
+
+
+def test_store_sheet_unreadable_shows_which_account_to_share_with(monkeypatch):
+    import gspread
+    gc, sh, ws = _store_sheet(monkeypatch, [])
+    gc.open_by_key.side_effect = gspread.exceptions.SpreadsheetNotFound("x")
+    at = _at()
+    assert not at.exception and len(at.selectbox) == 0
+    assert any("sa@proj.iam.gserviceaccount.com" in e.value and "di-share" in e.value for e in at.error)
+
+
+def test_store_sheet_wrong_columns_shows_found_headers(monkeypatch):
+    _store_sheet(monkeypatch, [["Wilayah", "Outlet", "BA Non BA"], ["Jawa", "A", "BA"]])
+    at = _at()
+    assert any("Header" in e.value and "wilayah" in e.value.lower() for e in at.error)
+
+
+def test_sheet_gid_is_parsed_from_url():
+    assert app._sheet_gid("https://docs.google.com/spreadsheets/d/AbC/edit?gid=123#gid=123") == 123
+    assert app._sheet_gid("https://docs.google.com/spreadsheets/d/AbC/edit") is None and app._sheet_gid(None) is None
+    assert app._sheet_id("https://docs.google.com/spreadsheets/d/AbC-1_x/edit?gid=0#gid=0") == "AbC-1_x"

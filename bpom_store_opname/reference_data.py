@@ -46,13 +46,94 @@ class Toko:
         return f"{self.name}  ·  grup ({self.outlets} toko)" if self.is_group and self.outlets > 1 else self.name
 
 
-def load_stores(path: Path, *, max_listed: int = 8) -> list[Toko]:
-    """Daftar toko dari BD. Kolom wajib: Region dan Nama Toko; Nama Group Toko opsional (urutan kolom bebas, kolom lain diabaikan).
+@dataclass(frozen=True)
+class RowFilter:
+    """Hanya baris yang nilai kolomnya SAMA PERSIS (tanpa peduli huruf besar/kecil dan spasi) dengan `equals` yang dipakai.
 
-    Baris dengan Nama Group Toko terisi menjadi SATU pilihan atas nama grup itu (semua toko dalam grup digabung);
-    baris tanpa grup menjadi pilihan atas nama toko. Pilihan unik per (Region, nama). Satu masalah saja menggagalkan seluruh
-    pemuatan supaya tidak ada toko yang diam-diam hilang. Baris judul di atas header (10 baris pertama) diperbolehkan.
+    Kolom dicari berdasarkan nama header (`header_names`); bila tidak ada header itu, dipakai huruf kolom `column_letter`
+    (mis. "H"). Baris yang tidak lolos filter dilewati sepenuhnya, termasuk validasinya.
     """
+    equals: str
+    header_names: tuple[str, ...] = ()
+    column_letter: str = ""
+
+    def resolve(self, header: list[str]) -> int:
+        for name in self.header_names:
+            if _col_key(name) in header:
+                return header.index(_col_key(name))
+        if self.column_letter:
+            index = _letter_index(self.column_letter)
+            if index < len(header):
+                return index
+        raise ReferenceDataError(
+            f"Kolom filter tidak ditemukan (header {list(self.header_names)} atau kolom {self.column_letter or '-'}); "
+            f"header yang ada: {header}.")
+
+
+def _letter_index(letter: str) -> int:
+    n = 0
+    for ch in letter.strip().upper():
+        n = n * 26 + (ord(ch) - ord("A") + 1)
+    return n - 1
+
+
+def tokos_from_rows(rows, source: str, *, row_filter: RowFilter | None = None, max_listed: int = 8) -> list[Toko]:
+    """Susun pilihan toko dari baris-baris tabel (iterator tuple/list nilai sel). `source` hanya untuk pesan error.
+
+    Kolom wajib: Region dan Nama Toko; Nama Group Toko opsional (urutan bebas, kolom lain diabaikan). Baris dengan grup terisi
+    menjadi SATU pilihan atas nama grup; baris tanpa grup menjadi pilihan atas nama toko; unik per (Region, nama).
+    Satu masalah saja menggagalkan seluruh pemuatan supaya tidak ada toko yang diam-diam hilang.
+    Header boleh di baris mana pun dalam HEADER_SEARCH_ROWS baris pertama.
+    """
+    problems: list[str] = []
+    merged: dict[tuple[str, str], list] = {}      # (region, nama) -> [Region asli, nama asli, is_group, jumlah baris]
+    rows = iter(rows)
+    header, header_no, cols = [], 0, None
+    for no, cells in enumerate(rows, start=1):
+        candidate = [_col_key(c) for c in (cells or ())]
+        if not header:
+            header, header_no = candidate, no
+        found = _find_store_columns(candidate)
+        if found:
+            header, header_no, cols = candidate, no, found
+            break
+        if no >= HEADER_SEARCH_ROWS:
+            break
+    if cols is None:
+        raise ReferenceDataError(
+            f"Header '{source}' tidak ditemukan. Perlu kolom Region dan Nama Toko (opsional Nama Group Toko); "
+            f"ditemukan {header}.")
+    i_region, i_group, i_toko = cols
+    i_filter = row_filter.resolve(header) if row_filter else None
+    wanted = _col_key(row_filter.equals) if row_filter else ""
+    for no, row in enumerate(rows, start=header_no + 1):
+        row = tuple(row) + (None,) * (len(header) - len(row))
+        if all(_clean(c) == "" for c in row):
+            continue
+        if row_filter and _col_key(row[i_filter]) != wanted:
+            continue
+        region, toko = _clean(row[i_region]), _clean(row[i_toko])
+        group = _clean(row[i_group]) if i_group is not None else ""
+        name = group or toko
+        if not (region and name):
+            problems.append(f"baris {no}: Region dan Nama Toko wajib diisi")
+            continue
+        key = (normalize_name(region), normalize_name(name))
+        entry = merged.setdefault(key, [region, name, bool(group), 0])
+        entry[3] += 1
+        if bool(group) != entry[2]:
+            problems.append(f"baris {no}: '{name}' di region '{region}' muncul sebagai grup dan sebagai toko tunggal")
+    if problems:
+        shown = "; ".join(problems[:max_listed]) + (
+            f"; ... (+{len(problems) - max_listed} masalah lain)" if len(problems) > max_listed else "")
+        raise ReferenceDataError(f"'{source}' bermasalah: {shown}.")
+    if not merged:
+        raise ReferenceDataError(f"'{source}' tidak berisi toko" + (f" dengan {_clean(row_filter.equals)} pada kolom filter." if row_filter else "."))
+    return [Toko(region, name, is_group, n, name.lower()) for region, name, is_group, n in merged.values()]
+
+
+def load_stores(path: Path, *, row_filter: RowFilter | None = None, max_listed: int = 8) -> list[Toko]:
+    """Daftar toko dari file xlsx BD (`reference/Daftar Store.xlsx`); aturan kolom dan penggabungan: lihat `tokos_from_rows`."""
     if not path.is_file():
         raise StoreListMissing(
             f"Daftar toko belum tersedia: letakkan file '{path.name}' di folder '{path.parent.name}/' "
@@ -61,52 +142,17 @@ def load_stores(path: Path, *, max_listed: int = 8) -> list[Toko]:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except Exception as exc:
         raise ReferenceDataError(f"File '{path.name}' tidak dapat dibaca: {exc}") from None
-    problems: list[str] = []
-    merged: dict[tuple[str, str], list] = {}      # (region, nama) -> [Region asli, nama asli, is_group, jumlah baris]
     try:
         ws = wb.worksheets[0]
         ws.reset_dimensions()
-        rows = ws.iter_rows(values_only=True)
-        header, header_no, cols = [], 0, None
-        for no, cells in enumerate(rows, start=1):
-            candidate = [_col_key(c) for c in (cells or ())]
-            if not header:
-                header, header_no = candidate, no
-            found = _find_store_columns(candidate)
-            if found:
-                header, header_no, cols = candidate, no, found
-                break
-            if no >= HEADER_SEARCH_ROWS:
-                break
-        if cols is None:
-            raise ReferenceDataError(
-                f"Header '{path.name}' tidak ditemukan. Perlu kolom Region dan Nama Toko (opsional Nama Group Toko); "
-                f"ditemukan {header}.")
-        i_region, i_group, i_toko = cols
-        for no, row in enumerate(rows, start=header_no + 1):
-            row = tuple(row) + (None,) * (len(header) - len(row))
-            if all(_clean(c) == "" for c in row):
-                continue
-            region, toko = _clean(row[i_region]), _clean(row[i_toko])
-            group = _clean(row[i_group]) if i_group is not None else ""
-            name = group or toko
-            if not (region and name):
-                problems.append(f"baris {no}: Region dan Nama Toko wajib diisi")
-                continue
-            key = (normalize_name(region), normalize_name(name))
-            entry = merged.setdefault(key, [region, name, bool(group), 0])
-            entry[3] += 1
-            if bool(group) != entry[2]:
-                problems.append(f"baris {no}: '{name}' di region '{region}' muncul sebagai grup dan sebagai toko tunggal")
+        return tokos_from_rows(ws.iter_rows(values_only=True), path.name, row_filter=row_filter, max_listed=max_listed)
     finally:
         wb.close()
-    if problems:
-        shown = "; ".join(problems[:max_listed]) + (
-            f"; ... (+{len(problems) - max_listed} masalah lain)" if len(problems) > max_listed else "")
-        raise ReferenceDataError(f"'{path.name}' bermasalah: {shown}.")
-    if not merged:
-        raise ReferenceDataError(f"'{path.name}' tidak berisi toko.")
-    return [Toko(region, name, is_group, n, f"{name}".lower()) for region, name, is_group, n in merged.values()]
+
+
+def load_stores_from_values(values: list[list], source: str, *, row_filter: RowFilter | None = None) -> list[Toko]:
+    """Daftar toko dari isi Google Sheet (`worksheet.get_all_values()`)."""
+    return tokos_from_rows(values, source, row_filter=row_filter)
 
 
 def _find_store_columns(header: list[str]):
