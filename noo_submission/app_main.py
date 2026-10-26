@@ -677,7 +677,7 @@ def _simpan_sku(df, kc_pk, tag, rk):
                 ss.sku_pending.pop(k)
                 ok += 1
             else:
-                gagal.append(f"{k} (HTTP {r.status_code})")
+                gagal.append(f"{k} (HTTP {r.status_code}: {r.text[:200]})")
         except Exception as e:
             gagal.append(f"{k} ({e})")
     ambil_sku_mapping.clear()
