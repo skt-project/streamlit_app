@@ -12,7 +12,10 @@ Spreadsheet utama (satu worksheet). Tidak ada mode revisi. Redaksi di layar meng
 2. **Tanggal Stock Opname + Nama PIC.** *Periode* (`YYYY-MM`) diisi otomatis dari tanggal itu.
 3. **Download template** (tombol merah; sheet "Cara Pengisian" memuat toko terpilih) dan isi hanya kolom QTY.
 4. **Upload .xlsx** - diperiksa otomatis; satu baris salah = seluruh upload dibatalkan (tidak ada data masuk).
-5. **Submit.**
+5. **Rincian final lalu Submit.** Sebelum Submit, halaman menampilkan rincian: isian form (region, toko, tanggal, periode, PIC, nama file),
+   total baris (dari file + SKU tambahan), total QTY, jumlah baris QTY 0 dan BPOM tambahan, serta tabel SEMUA baris yang akan disimpan
+   dengan kolom Sumber (`Excel baris n` / `Form tambahan`). Submit baru diproses setelah kotak konfirmasi dicentang; centang diulang
+   untuk setiap pengiriman.
 
 ## Aturan validasi
 
@@ -30,7 +33,7 @@ Spreadsheet utama (satu worksheet). Tidak ada mode revisi. Redaksi di layar meng
 
 ## Tambah SKU / nomor BPOM langsung
 
-Di Langkah 3 ada form **Tambah SKU / nomor BPOM langsung (opsional)**: pilih SKU (label `SKU - product name`, bisa diketik) dari
+Di Langkah 3 ada form **Tambah SKU / nomor BPOM langsung (opsional)**: pilih SKU (label `SKU - product name`, bisa diketik; QTY mulai dari 0 dengan tombol + dan -) dari
 BigQuery `skintific-data-warehouse.gt_schema.master_product`, **hanya brand SKINTIFIC dan tanpa status Discontinue / Not Sold at GT**, isi nomor BPOM dan QTY,
 lalu **Tambah ke daftar**. Daftar dibaca dengan satu query berparameter (`SELECT sku, product_name, pack_size ... WHERE brand IN (...) AND status NOT IN (Discontinue, Discontinued, Not Sold at GT)`),
 di-cache 1 jam; bila BigQuery gagal, dicoba lagi paling cepat tiap 60 detik. Baris yang ditambahkan digabung

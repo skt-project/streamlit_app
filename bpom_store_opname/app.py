@@ -105,7 +105,7 @@ mengacu pada SKU yang telah ditetapkan oleh prinsipal.
 1. Pilih **Region** dan **Toko** (jika toko adalah grup, maka pilih nama grup), lalu isi **tanggal stock opname** dan **nama PIC** Stock Opname
 2. **Download template** (kolom Nama Toko (By Group) akan terisi otomatis), isi kolom **QTY**, jangan mengubah header atau urutan kolom.
 3. **Upload** file, tunggu pemeriksaan otomatis, perbaiki jika ada error.
-4. Klik **Submit**. Data hanya disimpan jika seluruh isi file valid.
+4. Periksa **rincian final** di Langkah 5, centang konfirmasi, lalu klik **Submit**. Data hanya disimpan jika seluruh isi file valid.
 
 - Toko tidak diperkenankan mengubah header, nama kolom, atau urutan kolom. Baris judul di atas header boleh dibiarkan.
 - Satu file = satu toko. Untuk toko lain, pilih toko tersebut lalu download template-nya.
@@ -345,21 +345,45 @@ def show_issues(issues: list[val.Issue]) -> None:
             )
 
 
-def show_preview(rows: list[val.ExcelRow]) -> None:
-    st.dataframe(
-        pd.DataFrame({
-            "Baris Excel": [str(r.excel_row) if r.excel_row else "Tambahan" for r in rows],
-            "Nama Toko (By Group)": [r.toko_name for r in rows],
-            "PRODUCT ID": [r.product_id for r in rows],
-            "PRODUCT NAME": [r.product_name for r in rows],
-            "ISI (GR / ML)": [r.isi for r in rows],
-            "BPOM NUMBER": [r.bpom_number for r in rows],
-            "QTY": [r.qty for r in rows],
-            "BPOM Tambahan": ["Ya" if r.additional else "" for r in rows],
-        }),
-        hide_index=True,
-        width="stretch",
-    )
+def show_final_review(*, region, picked, tanggal, pic, uploaded, parsed) -> None:
+    """Rincian final sebelum Submit: isian form + SEMUA baris yang akan disimpan (file Excel dan SKU tambahan dari form)."""
+    st.markdown("**Rincian final - periksa dulu sebelum Submit**")
+    facts = (("Region", region),
+             ("Toko", picked.name if picked else None),
+             ("Tanggal Stock Opname", tanggal.strftime("%d/%m/%Y") if tanggal else None),
+             ("Periode", val.periode_label(tanggal) if tanggal else None),
+             ("Nama PIC", pic.strip() if pic and pic.strip() else None),
+             ("File Excel", uploaded.name if uploaded is not None else None))
+    st.markdown("\n".join(f"- **{k}:** {v}" if v else f"- **{k}:** :red[belum diisi]" for k, v in facts))
+    if parsed is None or not parsed.ok:
+        st.info("Rincian baris akan muncul di sini setelah file Excel valid (Langkah 4).")
+        return
+    rows = parsed.rows
+    from_form = sum(1 for r in rows if not r.excel_row)
+    total_qty = f"{sum(r.qty for r in rows):,}".replace(",", ".")
+    st.markdown("\n".join([
+        f"- **Total baris yang akan disimpan:** {len(rows)} ({len(rows) - from_form} dari file Excel + {from_form} SKU/BPOM tambahan dari form)",
+        f"- **Total QTY:** {total_qty}",
+        f"- **Baris dengan QTY 0:** {sum(1 for r in rows if r.qty == 0)}",
+        f"- **Baris BPOM tambahan (di luar daftar resmi):** {sum(1 for r in rows if r.additional)}"]))
+    if parsed.missing:
+        st.warning(f"{len(parsed.missing)} kombinasi SKU + BPOM dari daftar prinsipal tidak ada di file/tambahan. "
+                   "Pastikan seluruh SKU dan nomor BPOM di toko ini sudah dilaporkan.")
+    with st.expander(f"Semua baris yang akan disimpan ({len(rows)})", expanded=True):
+        st.dataframe(
+            pd.DataFrame({
+                "No": range(1, len(rows) + 1),
+                "Sumber": [f"Excel baris {r.excel_row}" if r.excel_row else "Form tambahan" for r in rows],
+                "PRODUCT ID": [r.product_id for r in rows],
+                "PRODUCT NAME": [r.product_name for r in rows],
+                "ISI (GR / ML)": [r.isi for r in rows],
+                "BPOM NUMBER": [r.bpom_number for r in rows],
+                "QTY": [r.qty for r in rows],
+                "BPOM Tambahan": ["Ya" if r.additional else "" for r in rows],
+            }),
+            hide_index=True,
+            width="stretch",
+        )
 
 
 def show_flash() -> None:
@@ -406,8 +430,8 @@ def extras_section(cfg: Config, skus: list[val.Sku]) -> list[val.ExtraSku]:
             product = st.selectbox("SKU", products, index=None, format_func=lambda p: p.label,
                                    placeholder=f"Ketik SKU / nama produk ({len(products)} SKU)")
             bpom = st.text_input("Nomor BPOM", max_chars=val.MAX_TEXT_LEN)
-            qty = st.number_input("QTY", min_value=0, step=1, value=None, format="%d",
-                                  placeholder="Bilangan bulat 0 atau lebih")
+            # value=0 (bukan None): Streamlit mematikan tombol + dan - selama isian kosong. 0 adalah QTY yang sah (tidak ada stok).
+            qty = st.number_input("QTY (bilangan bulat 0 atau lebih)", min_value=0, step=1, value=0, format="%d")
             if st.form_submit_button("Tambah ke daftar"):
                 extra, err = val.build_extra(product.sku if product else "", bpom, qty, products, skus)
                 if not err and any(val.row_key(e.product_id, e.bpom_number) == val.row_key(extra.product_id, extra.bpom_number)
@@ -604,8 +628,6 @@ def main() -> None:
                             "PRODUCT NAME": [k.product_name for _, k in parsed.missing],
                             "BPOM NUMBER": [k.bpom_number for _, k in parsed.missing],
                         }), hide_index=True, width="stretch")
-                with st.expander("Pratinjau isi file", expanded=False):
-                    show_preview(parsed.rows)
 
     if extras and uploaded is None:
         st.info(f"{len(extras)} SKU/BPOM tambahan sudah ada di daftar; upload file Excel agar semuanya diperiksa "
@@ -613,11 +635,17 @@ def main() -> None:
 
     # Langkah 5 - submit
     st.subheader("Langkah 5 - Submit")
-    st.caption("Pastikan semua isian benar dan file sudah berstatus **valid**, lalu klik Submit satu kali dan tunggu "
-               "sampai muncul pesan hasil. Data yang sudah terkirim **tidak dapat direvisi** dari form ini.")
+    st.caption("Periksa **rincian final** di bawah (isian form, baris dari file Excel, dan SKU tambahan), centang konfirmasi, "
+               "lalu klik Submit satu kali dan tunggu sampai muncul pesan hasil. Data yang sudah terkirim "
+               "**tidak dapat direvisi** dari form ini.")
+    show_final_review(region=region, picked=picked, tanggal=tanggal, pic=pic, uploaded=uploaded, parsed=parsed)
+    confirmed = st.checkbox("Saya sudah memeriksa rincian di atas dan data sudah benar.",
+                            key=f"confirm_{st.session_state['upload_ver']}")
     if st.button("Submit", type="primary"):
         form_errors = val.validate_form(region=region, toko=picked, tanggal=tanggal, pic=pic,
                                         has_file=uploaded is not None)
+        if not confirmed:
+            form_errors = form_errors + ["Centang kotak konfirmasi setelah memeriksa rincian final, lalu klik Submit lagi."]
         meta = None
         if not form_errors:
             meta = store.OpnameMeta(region=picked.region, toko=picked.name, tanggal=tanggal.isoformat(), pic=pic.strip())

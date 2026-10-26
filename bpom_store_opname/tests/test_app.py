@@ -98,7 +98,10 @@ def _fill_form(at, upload=None):
     return at
 
 
-def _click(at, label):
+def _click(at, label, confirm=True):
+    """Klik tombol. Untuk Submit, kotak konfirmasi rincian final dicentang dulu (kecuali confirm=False)."""
+    if label == "Submit" and confirm and len(at.checkbox) and not at.checkbox[0].value:
+        at.checkbox[0].check().run()
     next(b for b in at.button if b.label == label).click()
     at.run()
 
@@ -448,3 +451,63 @@ def test_results_sheet_403_is_reported_without_crash(monkeypatch):
     import pytest
     with pytest.raises(store.SheetsError, match="belum di-share sebagai Editor"):
         store.open_spreadsheet(gc, "X")
+
+
+def test_qty_stepper_has_a_starting_value_so_plus_and_minus_are_enabled():
+    at = _at()
+    qty = at.number_input[0]
+    assert qty.value == 0 and qty.min == 0 and qty.step == 1                  # value=None mematikan tombol + dan - di Streamlit
+    # (perilaku klik + / - di browser diuji di aplikasi live; di dalam st.form nilai baru berlaku saat form dikirim)
+
+
+def test_extra_with_default_qty_zero_is_accepted_and_shown_in_the_list():
+    at = _at()
+    at.selectbox[2].select_index(1)
+    next(t for t in at.text_input if t.label == "Nomor BPOM").input("NA777")
+    _click(at, "Tambah ke daftar")
+    assert not at.error and any("NA777" in m.value and "QTY **0**" in m.value for m in at.markdown)
+
+
+# ── rincian final di Langkah 5 ──────────────────────────────────────────────
+
+def _texts(at):
+    return " ".join([m.value for m in at.markdown] + [w.value for w in at.warning] + [i.value for i in at.info])
+
+
+def test_final_review_waits_for_a_valid_file_and_marks_missing_inputs():
+    at = _at()
+    text = _texts(at)
+    assert "Rincian final" in text and "Region:** :red[belum diisi]" in text and "Nama PIC:** :red[belum diisi]" in text
+    assert "Rincian baris akan muncul di sini setelah file Excel valid" in text
+    assert len(at.checkbox) == 1 and at.checkbox[0].value is False
+
+
+def test_final_review_lists_form_values_file_rows_and_added_skus(monkeypatch):
+    at = _at()
+    _add_extra(at, 1, "NA999", 4)                                          # SKU baru dari form, QTY 4
+    _add_extra(at, 0, "NA-BARU-77", 0)                                     # SKU template + BPOM baru, QTY 0
+    at = _fill_form(at, _filled(REGION, TOKO))
+    text = _texts(at)
+    n_file = len(SKUS)
+    expected_qty = sum(range(3, 3 + n_file)) + 4                           # file diisi QTY = nomor baris (3..), + 4 + 0
+    assert f"Region:** {REGION}" in text and f"Toko:** {TOKO}" in text and "Tanggal Stock Opname:** 25/10/2026" in text
+    assert "Periode:** Oktober 2026" in text and "Nama PIC:** Budi" in text and "File Excel:** isi.xlsx" in text
+    assert f"Total baris yang akan disimpan:** {n_file + 2} ({n_file} dari file Excel + 2 SKU/BPOM tambahan dari form)" in text
+    assert "Total QTY:** " + f"{expected_qty:,}".replace(",", ".") in text and "Baris dengan QTY 0:** 1" in text
+    assert "Baris BPOM tambahan (di luar daftar resmi):** 2" in text
+    expanders = [e for e in at.expander if e.label.startswith("Semua baris yang akan disimpan")]
+    assert expanders and expanders[0].label.endswith(f"({n_file + 2})")
+    frame = next(d for d in at.dataframe if "Sumber" in d.value.columns)
+    assert len(frame.value) == n_file + 2
+    assert list(frame.value["Sumber"][-2:]) == ["Form tambahan", "Form tambahan"]
+    assert frame.value["Sumber"][0].startswith("Excel baris ") and list(frame.value["PRODUCT ID"][-2:]) == ["ZZ-NEW-01", SKUS[0].product_id]
+
+
+def test_submit_requires_the_confirmation_checkbox_and_writes_nothing_without_it(monkeypatch):
+    sh = _fake_sheet(monkeypatch)
+    at = _fill_form(_at(), _filled(REGION, TOKO))
+    _click(at, "Submit", confirm=False)
+    assert any("Centang kotak konfirmasi" in e.value for e in at.error) and sh.batch_update.call_count == 0
+    _click(at, "Submit")                                                    # sekarang dicentang -> tersimpan
+    assert sh.batch_update.call_count == 1 and any("Berhasil menyimpan" in s.value for s in at.success)
+    assert at.checkbox[0].value is False                                    # konfirmasi harus diulang untuk pengiriman berikutnya
