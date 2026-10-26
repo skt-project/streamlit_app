@@ -110,10 +110,10 @@ def open_spreadsheet(
         if sheet_id:
             return gc.open_by_key(sheet_id), False
         return gc.open(title), False
-    except gspread.SpreadsheetNotFound:
+    except (gspread.SpreadsheetNotFound, PermissionError):     # gspread: HTTP 403 -> PermissionError
         if sheet_id:
-            raise SheetsError(f"Spreadsheet dengan id '{sheet_id}' tidak ditemukan atau belum di-share "
-                              "ke service account.") from None
+            raise SheetsError(f"Spreadsheet dengan id '{sheet_id}' tidak ditemukan atau service account belum di-share "
+                              "sebagai Editor.") from None
     try:
         sh = gc.create(title)
     except gspread.exceptions.APIError as exc:

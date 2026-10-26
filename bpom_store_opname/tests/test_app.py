@@ -401,3 +401,19 @@ def test_sheet_gid_is_parsed_from_url():
     assert app._sheet_gid("https://docs.google.com/spreadsheets/d/AbC/edit?gid=123#gid=123") == 123
     assert app._sheet_gid("https://docs.google.com/spreadsheets/d/AbC/edit") is None and app._sheet_gid(None) is None
     assert app._sheet_id("https://docs.google.com/spreadsheets/d/AbC-1_x/edit?gid=0#gid=0") == "AbC-1_x"
+
+
+def test_store_sheet_403_permission_error_is_a_friendly_message_not_a_crash(monkeypatch):
+    gc, sh, ws = _store_sheet(monkeypatch, [])
+    gc.open_by_key.side_effect = PermissionError()                        # persis yang dilempar gspread untuk HTTP 403
+    at = _at()
+    assert not at.exception and len(at.selectbox) == 0
+    assert any("sa@proj.iam.gserviceaccount.com" in e.value and "PermissionError" in e.value for e in at.error)
+
+
+def test_results_sheet_403_is_reported_without_crash(monkeypatch):
+    monkeypatch.setattr(store, "open_spreadsheet", store.open_spreadsheet)    # pakai fungsi asli
+    gc = MagicMock(); gc.open_by_key.side_effect = PermissionError()
+    import pytest
+    with pytest.raises(store.SheetsError, match="belum di-share sebagai Editor"):
+        store.open_spreadsheet(gc, "T", sheet_id="X")

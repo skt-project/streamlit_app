@@ -481,7 +481,7 @@ def main() -> None:
     except reference_data.ReferenceDataError as exc:
         st.error(f"Data referensi dari BD bermasalah: {exc}")
         st.stop()
-    except gspread.exceptions.GSpreadException as exc:
+    except (gspread.exceptions.GSpreadException, PermissionError) as exc:
         email = (service_account_info() or {}).get("client_email", "service account")
         log.exception("Gagal membaca daftar toko dari Google Sheet")
         st.error(f"Daftar toko dari Google Sheet tidak bisa dibaca ({type(exc).__name__}). Pastikan sheet itu di-share ke "
