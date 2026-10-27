@@ -16,9 +16,9 @@ from shared import (
     KOLOM_VALIDASI, STATUS_VALID, STATUS_REVIEW, WARNA_VALIDASI, warnai_validasi,
     TABLE_SUBMIT_NOO, TABLE_RIWAYAT, ZONA_WAKTU, PENGGUNA, SUPABASE_URL, _SB_HEADERS,
     PANJANG_PREFIX, PANJANG_ANGKA, JENIS_TOKO_DEFAULT,
-    KOLOM_NOO_OUTPUT, OPSI_RATING, label_rating,
+    KOLOM_NOO_OUTPUT,
     # Supabase
-    sb_insert, sb_select, sb_patch_by_kode_nama, sb_cari_duplikat_kode, ambil_raw_noo,
+    sb_insert, sb_select, sb_patch_by_kode_nama, ambil_raw_noo,
     # GSheets
     daftar_distributor, muat_distributor_dari_sheet, muat_prefix_per_distributor,
     max_angka_per_prefix, resolve_distributor, sb_max_angka_store_id,
@@ -309,7 +309,7 @@ def tab_noo():
         ss.f_status = "All statuses"; ss.f_distri = "All distributors"; ss.f_brand = "All brands"
         ss.pop("f_tgl_awal",None); ss.pop("f_tgl_akhir",None)
 
-    opsi_jenis  = sorted(set(JENIS_TOKO_DEFAULT) | set(ss.df_toko["Store Type"].dropna().astype(str)) - {""})
+    opsi_jenis  = sorted((set(JENIS_TOKO_DEFAULT) | set(ss.df_toko["Store Type"].dropna().astype(str))) - {""})
     daftar_distri = ["All distributors"] + sorted(
         muat_distributor_dari_sheet()["distributor_company_name"].str.strip().replace("",np.nan).dropna().unique()
     )
