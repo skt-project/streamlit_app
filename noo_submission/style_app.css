@@ -423,8 +423,9 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   text-align: left !important;
   width: 100% !important;
 }
-/* NOO Upload Option: lebar minimum + scroll horizontal */
-.st-key-tabel_noo_scroll {
+/* NOO Upload Option + Manual: lebar minimum + scroll horizontal */
+.st-key-tabel_noo_scroll,
+.st-key-tabel_manual_scroll {
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 12px;
@@ -433,18 +434,25 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   min-width: 1300px;
   flex-wrap: nowrap;
 }
-.st-key-tabel_noo_scroll [data-testid="stColumn"] {
+.st-key-tabel_manual_scroll [data-testid="stHorizontalBlock"] {
+  min-width: 1500px;
+  flex-wrap: nowrap;
+}
+.st-key-tabel_noo_scroll [data-testid="stColumn"],
+.st-key-tabel_manual_scroll [data-testid="stColumn"] {
   min-width: 0;
 }
 /* teks nama panjang tidak terpotong "..." */
-.st-key-kartu_noo .st-key-tabel_noo_scroll .catatan-kecil {
+.st-key-kartu_noo .st-key-tabel_noo_scroll .catatan-kecil,
+.st-key-kartu_noo .st-key-tabel_manual_scroll .catatan-kecil {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
   line-height: 1.3 !important;
 }
 /* header kolom satu baris */
-.st-key-tabel_noo_scroll [data-testid="stMarkdownContainer"] b { white-space: nowrap; }
+.st-key-tabel_noo_scroll [data-testid="stMarkdownContainer"] b,
+.st-key-tabel_manual_scroll [data-testid="stMarkdownContainer"] b { white-space: nowrap; }
 
 /* SPV Confirmation: lebar minimum + scroll horizontal */
 .st-key-tabel_spv_scroll {
@@ -466,7 +474,8 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 
 /* Scroll hanya ke samping, tidak ada scroll vertikal */
 .st-key-tabel_spv_scroll,
-.st-key-tabel_noo_scroll {
+.st-key-tabel_noo_scroll,
+.st-key-tabel_manual_scroll {
   overflow-x: auto !important;
   overflow-y: hidden !important;
   height: auto !important;
@@ -474,7 +483,8 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   padding-bottom: 12px;
 }
 .st-key-tabel_spv_scroll > div[data-testid="stVerticalBlock"],
-.st-key-tabel_noo_scroll > div[data-testid="stVerticalBlock"] {
+.st-key-tabel_noo_scroll > div[data-testid="stVerticalBlock"],
+.st-key-tabel_manual_scroll > div[data-testid="stVerticalBlock"] {
   overflow: visible !important;
   height: auto !important;
 }
