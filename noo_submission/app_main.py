@@ -21,7 +21,7 @@ from shared import (
     sb_insert, sb_select, sb_patch_by_kode_nama, sb_cari_duplikat_kode, ambil_raw_noo,
     # GSheets
     daftar_distributor, muat_distributor_dari_sheet, muat_prefix_per_distributor,
-    max_angka_per_prefix, resolve_distributor,
+    max_angka_per_prefix, resolve_distributor, sb_max_angka_store_id,
     # Utils
     ke_wib_naive, waktu_sekarang, hitung_validasi, hasil_ke_excel, catat_riwayat,
 )
@@ -43,6 +43,8 @@ NAVIGASI = [
 def generate_store_ids(df: pd.DataFrame, semua: pd.DataFrame = None, kolom_target: str = "Store ID") -> pd.Series:
     prefix_per_distri = muat_prefix_per_distributor()
     counter = dict(max_angka_per_prefix())
+    for p, a in sb_max_angka_store_id().items():
+        counter[p] = max(counter.get(p, 0), a)
     if semua is not None:
         for sid in semua[kolom_target].fillna("").astype(str).str.strip():
             p, a = sid[:PANJANG_PREFIX], sid[PANJANG_PREFIX:]
@@ -1228,4 +1230,4 @@ def main():
     }[ss.halaman_aktif]()
 
 if __name__ == "__main__":
-    main()
+    main()  
