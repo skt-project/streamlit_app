@@ -13,11 +13,13 @@ import komponen
 from shared import (
     # Constants
     CITY, JENIS_TOKO_DEFAULT, KOLOM_NOO_OUTPUT, KOLOM_SKU_OUTPUT, KOLOM_SKU_STAGED,
-    KOLOM_SKU_TAMPIL, KOLOM_SKU_OPSIONAL, SKU_KOLOM_DB, TABLE_SUBMIT_NOO, TABLE_HISTORY_ID,
-    KOLOM_HISTORY_ID_REF, ZONA_WAKTU, PENGGUNA, STATUS_REVIEW, STATUS_VALID,
+    KOLOM_SKU_TAMPIL, KOLOM_SKU_OPSIONAL, SKU_KOLOM_DB, TABLE_SUBMIT_NOO,
+    ZONA_WAKTU, PENGGUNA, STATUS_REVIEW, STATUS_VALID,
     # Supabase
     sb_insert, sb_select, sb_cari_duplikat_kode, sb_cari_duplikat_sku, sb_select_batch, ambil_raw_noo,
     sb_patch_by_kode_nama,
+    # BigQuery
+    bq_cari_duplikat_kode,
     # GSheets
     daftar_distributor, muat_distri_code_map, muat_distri_customer_code_raw,
     muat_distri_customer_name, muat_produk_lookup, muat_spv_sales_lookup,
@@ -306,7 +308,7 @@ def render_manual_sku():
     if not map_produk:
         st.warning(f"{SHEET_PRODUCT} is empty."); return
 
-    with st.expander("📋 Manual Input (Row by Row)",
+    with st.expander("📋 Manual Input, 1 by 1 row",
                      expanded=bool(ss.sku_staged) or ss.sku_last_batch is not None):
         if ss.sku_last_batch is not None:
             st.success(f"✅ {ss.sku_last_n} rows saved to sku_mapping")
@@ -450,7 +452,127 @@ def render_manual_sku():
                 ss.pesan_toast = f"Manual SKU Mapping saved — {len(payload)} rows"
                 st.rerun()
 
-# ═════════════════════════════════════════════════════════════════════════════
+def _bulk_sku_cocokkan(teks: str, map_produk: dict) -> tuple:
+    """Return (produk_di_dropdown | None, status)."""
+    k = _kunci_produk(teks)
+    if k in map_produk:
+        return k, "Exact"
+    hit = process.extractOne(k, list(map_produk), scorer=fuzz.WRatio, score_cutoff=60)
+    if hit:
+        return hit[0], "Suggested"
+    return None, "Not found"
+
+def render_bulk_sku():
+    ss = st.session_state
+    ss.setdefault("sku_bulk_rows", [])
+    ss.setdefault("sku_bulk_ver", 0)
+    ss.setdefault("sku_staged", [])
+    ss.setdefault("sku_editor_key", 0)
+    try:
+        map_raw    = muat_distri_customer_code_raw()
+        map_nama   = muat_distri_customer_name()
+        map_produk = muat_produk_lookup(SHEET_PRODUCT)
+    except Exception as e:
+        st.error(f"Failed to load mapping for Bulk SKU Paste: {e}"); return
+    if not map_raw or not map_produk:
+        return
+    opsi_produk = sorted(map_produk)
+
+    with st.expander("📑Paste All SKU", expanded=bool(ss.sku_bulk_rows)):
+        st.caption("Step 1 — Select distributor, paste Product and Customer Product Code (one per line)")
+        distri = st.selectbox("Distributor", [""] + sorted(map_raw), key="sku_bulk_distri")
+        c_p, c_k = st.columns(2)
+        t_produk = c_p.text_area("Product", height=120, key="sku_bulk_produk",
+                                 placeholder="G2G-XXX\nNXP-YYY\n...")
+        t_kode   = c_k.text_area("Customer Product Code", height=120, key="sku_bulk_kode",
+                                 placeholder="SKU001\nSKU002\n...")
+
+        if st.button("Apply Paste", key="sku_bulk_apply"):
+            l_produk = [x.strip() for x in t_produk.splitlines() if x.strip()]
+            l_kode   = [x.strip() for x in t_kode.splitlines() if x.strip()]
+            if not l_produk:
+                st.warning("Product is required.")
+            elif len(l_produk) != len(l_kode):
+                st.error(f"Mismatch: {len(l_produk)} products vs {len(l_kode)} codes.")
+            else:
+                rows = []
+                for p, kd in zip(l_produk, l_kode):
+                    hasil_p, status = _bulk_sku_cocokkan(p, map_produk)
+                    rows.append({"Pasted": p, "Match": status,
+                                 "Product": hasil_p, "Customer Product Code": kd})
+                ss.sku_bulk_rows = rows
+                ss.sku_bulk_ver += 1
+                st.rerun()
+
+        if not ss.sku_bulk_rows:
+            return
+
+        st.caption("Step 2 — Fix any wrong Product using the dropdown, then add to staged rows")
+        hasil = st.data_editor(
+            pd.DataFrame(ss.sku_bulk_rows), key=f"sku_bulk_editor_{ss.sku_bulk_ver}",
+            column_order=["Pasted", "Match", "Product", "Customer Product Code"],
+            column_config={
+                "Pasted":  st.column_config.TextColumn("Pasted Product", width=200),
+                "Match":   st.column_config.TextColumn("Match", width=100),
+                "Product": st.column_config.SelectboxColumn("Product (fix here)", options=opsi_produk, width=240),
+                "Customer Product Code": st.column_config.TextColumn("Customer Product Code", width=200),
+            },
+            disabled=["Pasted", "Match"], hide_index=True, num_rows="fixed", width="stretch",
+        )
+
+        belum = [n for n, (p, kd) in enumerate(zip(hasil["Product"], hasil["Customer Product Code"]), 1)
+                 if _sku_str(p) not in map_produk or not _sku_str(kd)]
+        if belum:
+            st.warning("Fix Product / Customer Product Code on row: " + ", ".join(map(str, belum)))
+        elif (hasil["Match"] == "Suggested").any():
+            st.info("Rows marked Suggested were auto-matched. Please double-check them.")
+
+        c_add, c_clear, _ = st.columns([1.8, 1.2, 5])
+        tambah = c_add.button("➕ Add to Staged", type="primary", key="sku_bulk_add",
+                              width="stretch", disabled=bool(belum) or not distri)
+        if c_clear.button("Clear", key="sku_bulk_clear", width="stretch"):
+            ss.sku_bulk_rows = []
+            ss.sku_bulk_ver += 1
+            st.rerun()
+        if not distri:
+            st.caption("Select a distributor first.")
+
+        if tambah:
+            nama_cust = map_nama.get(distri, "")
+            if not nama_cust:
+                st.error(f"Customer Name is empty for distributor: {distri}"); return
+            baru, lewat = [], []
+            ada = {_sku_kunci(r["Customer Code"], r["Product"]) for r in ss.sku_staged}
+            kandidat = []
+            for _, r in hasil.iterrows():
+                p  = _sku_str(r["Product"])
+                cc = bangun_customer_code(map_raw.get(distri, ""), p)
+                if not cc:
+                    st.error(f"Customer Code (column G) is empty for distributor: {distri}"); return
+                kandidat.append((cc, p, _sku_str(r["Customer Product Code"])))
+            dup_db, gagal_cek = sb_cari_duplikat_sku("sku_mapping", [(cc, p) for cc, p, _ in kandidat])
+            if gagal_cek:
+                st.error("Could not check duplicates for: " + ", ".join(sorted(gagal_cek))); return
+            for cc, p, kd in kandidat:
+                k = _sku_kunci(cc, p)
+                if k in ada or k in dup_db:
+                    lewat.append(f"{cc}/{p}"); continue
+                ada.add(k)
+                baru.append({
+                    "Pilih": False, "Distributor": distri, "Customer Code": cc,
+                    "Customer Name": nama_cust, "Product": p,
+                    "Customer Product Code": kd,
+                    "Customer Product Name": cari_nama_produk(p, map_produk),
+                    **{k2: "" for k2 in KOLOM_SKU_OPSIONAL},
+                })
+            ss.sku_staged.extend(baru)
+            ss.sku_editor_key += 1
+            ss.sku_bulk_rows = []
+            ss.sku_bulk_ver += 1
+            ss.pesan_toast = (f"{len(baru)} rows added to staged"
+                              + (f", {len(lewat)} duplicates skipped: {', '.join(lewat[:5])}" if lewat else ""))
+            ss.pesan_toast_icon = "⚠️" if lewat else "✅"
+            st.rerun()
 # HALAMAN: NOO SUBMISSION
 # ═════════════════════════════════════════════════════════════════════════════
 def cc_salah(df: pd.DataFrame) -> list:
@@ -535,6 +657,7 @@ def halaman_pengajuan_noo():
         st.markdown(judul_opsi(1,"Manual","select Distributor & fill Product, Customer Product Code"),
                     unsafe_allow_html=True)
         render_manual_sku()
+        render_bulk_sku()
         st.markdown('<hr class="pemisah-opsi">', unsafe_allow_html=True)
         st.markdown(judul_opsi(2,"Upload Option","extracted from Failure List file"),
                     unsafe_allow_html=True)
@@ -552,12 +675,8 @@ def halaman_pengajuan_noo():
             st.markdown('<div class="preview-kosong">📄 No data yet, please upload a file first</div>',
                         unsafe_allow_html=True)
 
-    c_unduh_sku, c_submit_sku = st.columns([1,2])
-    c_unduh_sku.download_button("⬇️ Download Result", hasil_ke_excel(data_sku), "hasil_sku_mapping.xlsx",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                disabled=not file_siap, width="stretch", key="unduh_sku")
-    if c_submit_sku.button("📨 Submit SKU Mapping", disabled=not file_siap or bool(salah_cc),
-                            type="primary", width="stretch", key="submit_sku"):
+    if st.button("📨 Submit SKU Mapping", disabled=not file_siap or bool(salah_cc),
+                 type="primary", width="stretch", key="submit_sku"):
         if cc_salah(data_sku):          
             st.error("Submit cancelled: some Customer Codes still have an invalid prefix.")
             st.stop()
@@ -603,7 +722,7 @@ def halaman_pengajuan_noo():
 
         # Opsi 1: Manual bulk paste
         st.markdown(judul_opsi(1,"Manual","paste Customer Store Code & Store Name"), unsafe_allow_html=True)
-        with st.expander("📋 Manual Input (Paste Bulk)", expanded=bool(ss.get("bulk_data"))):
+        with st.expander("📋 Manual Input and Paste Customer Store Code", expanded=bool(ss.get("bulk_data"))):
             st.caption("Step 1 — Paste Customer Store Code and Store Name (one per line)")
             c_bulk_kode, c_bulk_nama = st.columns(2)
             bulk_kode = c_bulk_kode.text_area("Customer Store Code",height=120,key="bulk_kode_noo",
@@ -691,7 +810,7 @@ def halaman_pengajuan_noo():
                     else:
                         with st.spinner("Checking duplicates..."):
                             dup_in, g_in   = sb_cari_duplikat_kode(TABLE_SUBMIT_NOO, kode_list,"Customer Store Code")
-                            dup_hi, g_hi   = sb_cari_duplikat_kode(TABLE_HISTORY_ID, kode_list, KOLOM_HISTORY_ID_REF)
+                            dup_hi, g_hi   = bq_cari_duplikat_kode(kode_list)
                             duplikat = dup_in | dup_hi
                             gagal    = g_in  | g_hi
                         if gagal:
@@ -742,7 +861,7 @@ def halaman_pengajuan_noo():
             header = st.columns(LEBAR_NOO)
             for kolom, (teks, wajib) in zip(header,[
                 ("Customer Store Code",True),("Store Name",False),("Customer Store Name",False),
-                ("City",True),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True)]):
+                ("City",True),("Store Address",True),("Sales Name",True),("SPV",True),("Store Type",True)]):
                 tanda = ' <b style="color:#ef4f58">*</b>' if wajib else ""
                 kolom.markdown(f"<b>{teks}</b>{tanda}", unsafe_allow_html=True)
             spv_sales_lookup = muat_spv_sales_lookup()
@@ -754,7 +873,7 @@ def halaman_pengajuan_noo():
                 data_noo[_c] = data_noo[_c].astype("object")
             for i, baris in data_noo.iterrows():
                 csn = str(baris.get("Customer Store Name",baris.get("Store Name",""))).strip().upper()
-                c_kode,c_nama,c_csn,c_city,c_alamat,c_spv,c_sales,c_tipe = st.columns(LEBAR_NOO)
+                c_kode,c_nama,c_csn,c_city,c_alamat,c_sales,c_spv,c_tipe = st.columns(LEBAR_NOO)
                 kode_val = str(baris["Customer Store Code"])
                 c_kode.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{kode_val}</div>', unsafe_allow_html=True)
                 c_nama.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{baris["Store Name"]}</div>', unsafe_allow_html=True)
@@ -787,7 +906,7 @@ def halaman_pengajuan_noo():
             else:
                 with st.spinner("Checking duplicates..."):
                     dup_in, g_in = sb_cari_duplikat_kode(TABLE_SUBMIT_NOO, kode_list,"Customer Store Code")
-                    dup_hi, g_hi = sb_cari_duplikat_kode(TABLE_HISTORY_ID, kode_list, KOLOM_HISTORY_ID_REF)
+                    dup_hi, g_hi = bq_cari_duplikat_kode(kode_list)
                     duplikat = dup_in | dup_hi
                     gagal    = g_in  | g_hi
                 if gagal:
@@ -1034,7 +1153,7 @@ def main():
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon","✅"))
 
     with st.sidebar:
-        st.markdown('<div class="brand">📦 NOO & SKU Submission</div>'
+        st.markdown('<div class="brand">📦NOO & SKU Submission</div>'
                     '<div class="brand-sub">Submit and confirm NOO data.</div>',
                     unsafe_allow_html=True)
         for label, ikon, kunci in NAVIGASI:
