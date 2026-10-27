@@ -749,6 +749,8 @@ def halaman_pengajuan_noo():
                 prefix_map      = {"NXP":"17","G2G":"12"}
                 LEBAR_MANUAL    = [1.2,1.2,1.3,0.8,0.9,0.9,1.5,1.1,1.1,1.2]
                 spv_sales_lookup = muat_spv_sales_lookup()
+                tabel_manual = st.container(key="tabel_manual_scroll")
+                tabel_manual.__enter__()
                 h = st.columns(LEBAR_MANUAL)
                 for col, (teks, wajib) in zip(h,[
                     ("Store Code",False),("Store Name",False),("Distributor",False),
@@ -791,6 +793,7 @@ def halaman_pengajuan_noo():
                     })
                     if not (info and prefix_pilih and alamat.strip() and spv.strip() and sales.strip() and tipe):
                         bulk_semua_terisi = False
+                tabel_manual.__exit__(None, None, None)
 
                 if tidak_ketemu:
                     st.warning("Distributor code not found for: " + ", ".join(tidak_ketemu))
