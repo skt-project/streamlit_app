@@ -861,19 +861,21 @@ def halaman_pengajuan_noo():
             header = st.columns(LEBAR_NOO)
             for kolom, (teks, wajib) in zip(header,[
                 ("Customer Store Code",True),("Store Name",False),("Customer Store Name",False),
-                ("City",True),("Store Address",True),("Sales Name",True),("SPV",True),("Store Type",True)]):
+                ("City",True),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True)]):
                 tanda = ' <b style="color:#ef4f58">*</b>' if wajib else ""
                 kolom.markdown(f"<b>{teks}</b>{tanda}", unsafe_allow_html=True)
             spv_sales_lookup = muat_spv_sales_lookup()
             semua_terisi = True
             data_noo = data_noo.reset_index(drop=True)
-            for _c in ["Customer Store Code","City","Store Address","SE/KAE","SPV","Store Type"]:
+            for _c in ["Customer Store Code","City","Store Address","SPV","SE/KAE","Store Type"]:
                 if _c not in data_noo.columns:
                     data_noo[_c] = ""
                 data_noo[_c] = data_noo[_c].astype("object")
             for i, baris in data_noo.iterrows():
                 csn = str(baris.get("Customer Store Name",baris.get("Store Name",""))).strip().upper()
-                c_kode,c_nama,c_csn,c_city,c_alamat,c_sales,c_spv,c_tipe = st.columns(LEBAR_NOO)
+                #EDIT DISINI KOLOM NOO
+                c_kode,c_nama,c_csn,c_city,c_alamat,c_spv, c_sales,c_tipe = st.columns(LEBAR_NOO)
+                #-------------
                 kode_val = str(baris["Customer Store Code"])
                 c_kode.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{kode_val}</div>', unsafe_allow_html=True)
                 c_nama.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{baris["Store Name"]}</div>', unsafe_allow_html=True)
