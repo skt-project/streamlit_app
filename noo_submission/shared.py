@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
 # ─────────────────────────────── ZONA & PENGGUNA ──────────────────────────────
 ZONA_WAKTU = ZoneInfo("Asia/Jakarta")
@@ -27,6 +29,7 @@ SHEET_SALES       = "Sales Mapping"
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
+
 _SB_HEADERS = {
     "apikey":        SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -38,9 +41,9 @@ _SB_HEADERS = {
 TABLE_SUBMIT_NOO   = "INPUT_NOO"
 TABLE_RIWAYAT      = "riwayat_noo"
 TABLE_HISTORY_NOO  = "NOO_GENERATOR_ID"
-TABLE_HISTORY_ID   = "history_id"
 TABLE_SKU_MAPPING  = "sku_mapping"
-KOLOM_HISTORY_ID_REF = "Reference ID"
+BQ_MASTER_STORE    = "gt_schema.master_store_database_basis"
+BQ_KOLOM_KODE_TOKO = "dst_id_g2g"   # = Customer Store Code (kode toko dari distributor)
 
 # ─────────────────────────────── VALIDASI ─────────────────────────────────────
 KOLOM_VALIDASI = ["Generate ID", "Need Review", "Existing"]
@@ -53,29 +56,70 @@ WARNA_VALIDASI = {
     "Existing":    "background-color: #fff3b0; color: #7a5b00",
 }
 
+#--------------------BIGQUERY---------------------
+
+try:
+    gcp_secrets = st.secrets["connections"]["bigquery"]
+    private_key = gcp_secrets["private_key"].replace("\\n", "\n")
+    _bq_credentials = service_account.Credentials.from_service_account_info({
+        "type": gcp_secrets["type"],
+        "project_id": gcp_secrets["project_id"],
+        "private_key_id": gcp_secrets["private_key_id"],
+        "private_key": private_key,
+        "client_email": gcp_secrets["client_email"],
+        "client_id": gcp_secrets["client_id"],
+        "auth_uri": gcp_secrets["auth_uri"],
+        "token_uri": gcp_secrets["token_uri"],
+        "auth_provider_x509_cert_url": gcp_secrets["auth_provider_x509_cert_url"],
+        "client_x509_cert_url": gcp_secrets["client_x509_cert_url"],
+    })
+    GCP_PROJECT_ID = st.secrets["bigquery"]["project"]
+except Exception:
+    GCP_CREDENTIALS_PATH = r"C:\Users\Shaltsa Nadya\Documents\try python\streamlit\skintific-data-warehouse-ea77119e2e7a.json"
+    GCP_PROJECT_ID = "skintific-data-warehouse"
+    _bq_credentials = service_account.Credentials.from_service_account_file(GCP_CREDENTIALS_PATH)
+
+
+@st.cache_resource(show_spinner=False)
+def get_bq_client() -> bigquery.Client:
+    return bigquery.Client(credentials=_bq_credentials, project=GCP_PROJECT_ID)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_id() -> set:
+    client = get_bq_client()
+    query = f"""
+        SELECT DISTINCT UPPER(TRIM(cust_id)) as cust_id
+        FROM `{GCP_PROJECT_ID}.gt_schema.master_store_database_basis`
+        WHERE cust_id IS NOT NULL AND TRIM(cust_id) != ''
+    """
+    return {r.cust_id for r in client.query(query).result()}
+
+def bq_cari_duplikat_kode(kode_list) -> tuple:
+    """Cek Customer Store Code ke kolom cust_id di BigQuery master store.
+    Return (ditemukan, gagal_cek), sama seperti sb_cari_duplikat_kode."""
+    kode_bersih = {str(k).strip() for k in kode_list if str(k).strip()}
+    if not kode_bersih:
+        return set(), set()
+    try:
+        client = get_bq_client()
+        query = f"""
+            SELECT DISTINCT UPPER(TRIM(CAST({BQ_KOLOM_KODE_TOKO} AS STRING))) AS kode
+            FROM `{GCP_PROJECT_ID}.{BQ_MASTER_STORE}`
+            WHERE UPPER(TRIM(CAST({BQ_KOLOM_KODE_TOKO} AS STRING))) IN UNNEST(@kode)
+        """
+        cfg = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ArrayQueryParameter("kode", "STRING", [k.upper() for k in kode_bersih])
+        ])
+        ketemu = {r.kode for r in client.query(query, job_config=cfg).result()}
+        return {k for k in kode_bersih if k.upper() in ketemu}, set()
+    except Exception:
+        return set(), kode_bersih
+#--------------------------------------------
+
 def warnai_validasi(v):
     return WARNA_VALIDASI.get(v, "")
 
-# ─────────────────────────────── RATING ───────────────────────────────────────
-OPSI_RATING = ["5 - Sangat Baik", "4 - Baik", "3 - Cukup", "2 - Kurang", "1 - Sangat Kurang"]
-
-def label_rating(n: int) -> str:
-    return {5: OPSI_RATING[0], 4: OPSI_RATING[1], 3: OPSI_RATING[2],
-            2: OPSI_RATING[3], 1: OPSI_RATING[4]}[n]
-
-def normalisasi_rating(v) -> str:
-    try:
-        n = int(float(v))
-        if 1 <= n <= 5:
-            return label_rating(n)
-    except (TypeError, ValueError):
-        pass
-    s = str(v).strip()
-    if s in OPSI_RATING:
-        return s
-    if s[:1].isdigit() and 1 <= int(s[0]) <= 5:
-        return label_rating(int(s[0]))
-    return "3 - Cukup"
 
 # ─────────────────────────────── STORE TYPES & KOTA ──────────────────────────
 DATA_STORE_TYPE = [
@@ -447,6 +491,32 @@ def sb_cari_duplikat_sku(table: str, pasangan):
 def ambil_raw_noo() -> list:
     return sb_select(TABLE_SUBMIT_NOO, order="created_at.desc", limit=500)
 
+def sb_max_angka_store_id() -> dict:
+    """Max angka per prefix dari SEMUA Store ID di INPUT_NOO (tanpa batas 500 baris)."""
+    hasil, start, step = {}, 0, 1000
+    while True:
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/{TABLE_SUBMIT_NOO}",
+                headers={**_SB_HEADERS, "Prefer": "", "Range-Unit": "items",
+                         "Range": f"{start}-{start+step-1}"},
+                params={"select": '"Store ID"'}, timeout=15)
+            if r.status_code == 416:
+                break
+            r.raise_for_status()
+            batch = r.json()
+        except Exception:
+            break
+        for row in batch:
+            sid = str(row.get("Store ID") or "").strip().upper()
+            p, a = sid[:PANJANG_PREFIX], sid[PANJANG_PREFIX:]
+            if a.isdigit():
+                hasil[p] = max(hasil.get(p, 0), int(a))
+        if len(batch) < step:
+            break
+        start += step
+    return hasil
+
 # ═════════════════════════════════════════════════════════════════════════════
 # GOOGLE SHEETS LOADERS
 # ═════════════════════════════════════════════════════════════════════════════
@@ -521,23 +591,33 @@ def muat_prefix_per_distributor() -> dict:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def max_angka_per_prefix() -> dict:
-    sheet_name = SHEET_HISTORY.split("!")[0]
-    url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_NOO)}/gviz/tq"
-           f"?tqx=out:csv&sheet={quote(sheet_name)}&headers=1")
-    try:
-        df = pd.read_csv(url, dtype=str).fillna("")
-        df.columns = [c.strip() for c in df.columns]
-        ids = df["Store ID [copy paste value]"].str.strip()
-        ids = ids[ids.ne("")]
-        hasil = {}
-        for sid in ids:
-            prefix   = sid[:PANJANG_PREFIX]
-            angka_str = sid[PANJANG_PREFIX:]
-            if angka_str.isdigit():
-                hasil[prefix] = max(hasil.get(prefix, 0), int(angka_str))
-        return hasil
-    except Exception:
-        return {}
+    hasil = {}
+    for sid in get_id():
+        prefix, angka_str = sid[:PANJANG_PREFIX], sid[PANJANG_PREFIX:]
+        if angka_str.isdigit():
+            hasil[prefix] = max(hasil.get(prefix, 0), int(angka_str))
+    return hasil
+
+
+    # sheet_name = SHEET_HISTORY.split("!")[0]
+    # url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_NOO)}/gviz/tq"
+    #        f"?tqx=out:csv&sheet={quote(sheet_name)}&headers=1")
+    # try:
+    #     df = pd.read_csv(url, dtype=str).fillna("")
+    #     df.columns = [c.strip() for c in df.columns]
+    #     ids = df["Store ID [copy paste value]"].str.strip()
+    #     ids = ids[ids.ne("")]
+    #     hasil = {}
+    #     for sid in ids:
+    #         prefix   = sid[:PANJANG_PREFIX]
+    #         angka_str = sid[PANJANG_PREFIX:]
+    #         if angka_str.isdigit():
+    #             hasil[prefix] = max(hasil.get(prefix, 0), int(angka_str))
+    #     return hasil
+    # except Exception:
+    #     return {}
+
+
 
 @st.cache_data(ttl=600, show_spinner=False)
 def muat_distri_code_map() -> dict:
