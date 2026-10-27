@@ -1048,6 +1048,59 @@ PO_TEMPLATE_COLS = [
 PO_IMG_COLS = PO_TEMPLATE_COLS[0:4] + PO_TEMPLATE_COLS[6:14]
 PO_COLS_copy = PO_TEMPLATE_COLS[:14]
 
+# ===== PI Validation helpers =====
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_pi_anomaly(distributor_names: tuple) -> pd.DataFrame:
+    """
+    SKU yg punya >1 distinct reference_cust_order_no
+    per (distributor_name, sku) → anomali double PI.
+    """
+    if not distributor_names:
+        return pd.DataFrame()
+    client = get_bq_client()
+    dist_str = ", ".join([f"'{d}'" for d in distributor_names])
+    query = f"""
+        SELECT
+            distributor_name,
+            sku,
+            COUNT(DISTINCT reference_cust_order_no)                          AS cnt_ref,
+            STRING_AGG(DISTINCT CAST(reference_cust_order_no AS STRING)
+                       ORDER BY CAST(reference_cust_order_no AS STRING))     AS ref_list,
+            MAX(validation_by_rsa)                                           AS validation_by_rsa
+        FROM `{TEST_TABLE}`
+        WHERE UPPER(distributor_name) IN ({dist_str})
+          AND reference_cust_order_no IS NOT NULL
+        GROUP BY 1, 2
+        HAVING COUNT(DISTINCT reference_cust_order_no) > 1
+        ORDER BY distributor_name, sku
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.warning(f"⚠️ Gagal fetch PI Validation: {e}")
+        return pd.DataFrame()
+
+
+def _update_pi_validation(distributor_name: str, sku: str, validation_text: str) -> bool:
+    """UPDATE kolom validation_by_rsa di BQ untuk pasangan distributor+sku yg anomali."""
+    client = get_bq_client()
+    safe_val = validation_text.replace("\\", "\\\\").replace("'", "\\'")
+    safe_dist = distributor_name.replace("'", "\\'")
+    safe_sku  = sku.replace("'", "\\'")
+    query = f"""
+        UPDATE `{TEST_TABLE}`
+        SET validation_by_rsa = '{safe_val}'
+        WHERE UPPER(distributor_name) = '{safe_dist}'
+          AND UPPER(sku)              = '{safe_sku}'
+          AND reference_cust_order_no IS NOT NULL
+    """
+    try:
+        client.query(query).result()
+        return True
+    except Exception as e:
+        st.error(f"Gagal update PI Validation ({distributor_name} / {sku}): {e}")
+        return False
+
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim, brand_map=None):
     brand_map = brand_map or {}
     final_disp = pd.concat(e_dfs.values(), ignore_index=True)
@@ -1420,8 +1473,151 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     st.success(msg)
             except Exception as e:
                 st.error(f"Gagal simpan ke BigQuery: {e}")
+    # ============ 9. PI Validation ============
+    st.markdown(
+        """<div class="pipeline-step active">
+               <span class="step-number">9</span>
+               <strong>PI Validation — Double Reference Order No</strong>
+           </div>""",
+        unsafe_allow_html=True,
+    )
 
-    return final_disp
+    _pi_dist_tuple = tuple(
+        sorted(
+            final_disp["Distributor"]
+            .dropna().astype(str).str.strip().str.upper().unique()
+        )
+    )
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def fetch_pi_all(distributor_names: tuple) -> pd.DataFrame:
+        if not distributor_names:
+            return pd.DataFrame()
+        client = get_bq_client()
+        dist_str = ", ".join([f"'{d}'" for d in distributor_names])
+        query = f"""
+            SELECT
+                distributor_name,
+                sku,
+                COUNT(DISTINCT reference_cust_order_no)                         AS cnt_ref,
+                STRING_AGG(DISTINCT CAST(reference_cust_order_no AS STRING)
+                           ORDER BY CAST(reference_cust_order_no AS STRING))    AS ref_list,
+                MAX(validation_by_rsa)                                          AS validation_by_rsa
+            FROM `{TEST_TABLE}`
+            WHERE UPPER(distributor_name) IN ({dist_str})
+              AND reference_cust_order_no IS NOT NULL
+            GROUP BY 1, 2
+            ORDER BY cnt_ref DESC, distributor_name, sku
+        """
+        try:
+            return client.query(query).to_dataframe()
+        except Exception as e:
+            st.warning(f"⚠️ Gagal fetch PI data: {e}")
+            return pd.DataFrame()
+
+    all_pi_df  = fetch_pi_all(_pi_dist_tuple)
+    anomaly_df = fetch_pi_anomaly(_pi_dist_tuple)
+
+    bq_ref_map = {}  # selalu init di sini dulu
+    if not all_pi_df.empty:
+        for _, r in all_pi_df.iterrows():
+            bq_ref_map[(str(r["distributor_name"]).upper(), str(r["sku"]).upper())] = r
+
+    # preview tabel anomali (kalau ada dari BQ)
+    if not all_pi_df.empty:
+        _prev = all_pi_df[["distributor_name","sku","cnt_ref","ref_list","validation_by_rsa"]].copy()
+        _prev = _prev.rename(columns={
+            "distributor_name":  "Distributor",
+            "sku":               "SKU",
+            "cnt_ref":           "Jumlah Ref",
+            "ref_list":          "Reference Order No",
+            "validation_by_rsa": "Validasi RSA (existing)",
+        })
+        def _color_ref(val):
+            if isinstance(val, (int, float)) and val > 1:
+                return "background-color:#FFF3CD;color:#856404;font-weight:700;"
+            return ""
+        st.dataframe(
+            _prev.style.applymap(_color_ref, subset=["Jumlah Ref"]),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if not anomaly_df.empty:
+        st.warning(
+            f"⚠️ **{len(anomaly_df)} SKU** memiliki lebih dari 1 `reference_cust_order_no` "
+            f"(double PI) dari {anomaly_df['distributor_name'].nunique()} distributor."
+        )
+    else:
+        st.success("Semua SKU hanya memiliki 1 Reference Order No.")
+
+    st.caption("Isi Reference Order No yang valid dan keterangan validasi RSA, lalu Save. Hanya SKU anomali (>1 ref) yang perlu diisi.")
+
+    # ── Build editable table dari anomaly saja ──
+    if anomaly_df.empty:
+        st.info("Tidak ada SKU yang perlu divalidasi.")
+    else:
+        _edit_rows = []
+        for _, anom_row in anomaly_df.iterrows():
+            _dist = str(anom_row["distributor_name"]).strip().upper()
+            _sku  = str(anom_row["sku"]).strip().upper()
+            _raw_refs = str(anom_row.get("ref_list") or "")
+            _refs = [r.strip() for r in _raw_refs.split(",") if r.strip()] or [""]
+
+            #------------------------------- STEP LOGIC - SUPPLY CONTROL----------------------------
+            _edit_rows.append({
+                "Distributor":        _dist,
+                "SKU":                _sku,
+                "Jumlah Ref":         int(anom_row.get("cnt_ref", 0)),
+                "Reference Order No": _refs[0],     #notes reference kolom
+                "Semua Ref":          _raw_refs, 
+                "Validation by RSA":  str(anom_row.get("validation_by_rsa") or ""),
+            })
+#--------------------------------------------------------------------------------------------------------------
+        _edit_df = pd.DataFrame(_edit_rows)
+        _edited = st.data_editor(
+            _edit_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["Distributor", "SKU", "Jumlah Ref", "Semua Ref"],
+            column_config={
+                "Jumlah Ref": st.column_config.NumberColumn(width="small"),
+                "Reference Order No": st.column_config.TextColumn(
+                    "Reference Order No ✏️", help="Edit ke ref yang valid", width="medium"
+                ),
+                "Validation by RSA": st.column_config.TextColumn(
+                    "Validation by RSA ✏️", help="Catatan validasi RSA", width="large"
+                ),
+                "Semua Ref": st.column_config.TextColumn("Semua Ref (BQ)", width="medium"),
+            },
+            key="pi_editor",
+        )
+
+        if st.button(
+            "💾 Save PI Validation",
+            use_container_width=True,
+            key="btn_save_pi_validation",
+            disabled=st.session_state.get("pi_validation_saved", False),
+        ):
+            _saved, _skipped = 0, 0
+            for _, row in _edited.iterrows():
+                _note = str(row.get("Validation by RSA") or "").strip()
+                if _note:
+                    if _update_pi_validation(row["Distributor"], row["SKU"], _note):
+                        _saved += 1
+                else:
+                    _skipped += 1
+
+            if _saved:
+                fetch_pi_anomaly.clear()
+                fetch_pi_all.clear()
+                st.session_state["pi_validation_saved"] = True
+                msg = f"✅ {_saved} baris PI Validation tersimpan."
+                if _skipped:
+                    msg += f" ({_skipped} baris dilewati karena kolom kosong.)"
+                st.success(msg)
+            else:
+                st.info("Tidak ada perubahan — isi kolom Validation by RSA dulu.")
     
 
 
