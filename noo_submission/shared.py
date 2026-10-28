@@ -26,8 +26,11 @@ SHEET_PRODUCT     = "Product Mapping!A2:B"
 SHEET_SALES       = "Sales Mapping"
 
 # ─────────────────────────────── SUPABASE ─────────────────────────────────────
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+# SUPABASE_URL = st.secrets["SUPABASE_URL"]
+# SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+
+SUPABASE_URL = "https://iarwfviiulnmseirfhlq.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhcndmdmlpdWxubXNlaXJmaGxxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0NjEyMTIsImV4cCI6MjEwODAzNzIxMn0.-LSVYGBxtUV2LWKkWddOBlqMBA60H1C15qsko0LFgFE"
 
 
 _SB_HEADERS = {
