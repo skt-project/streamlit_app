@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 
 import clients
 import master_data
+import opening_stock
 from conftest import make_jpeg
 from master_data import MasterData, MasterError
 from test_service import T1, FakeBQ, FakeMirror, FakeStorage
@@ -35,13 +36,14 @@ def backend(monkeypatch, tmp_path):
     st.cache_data.clear()
     monkeypatch.setattr(master_data, "DEFAULT_SNAPSHOT", tmp_path / "snap.json")
     monkeypatch.setattr(master_data, "_MEMORY", {})
-    state = {"fail": False, "distributors": DISTS, "skus": SKUS, "diagnostics": ["diag"]}
+    state = {"fail": False, "distributors": DISTS, "skus": SKUS, "diagnostics": ["diag"], "ho_stocks": {}}
     be = SimpleNamespace(
         config=SimpleNamespace(
             bigquery_project="proj", bigquery_dataset="gt_schema", sku_codes=("K1", "K2"),
-            evidence_bucket="bkt", admin_username="admin", admin_password="pw-for-tests-only",
+            evidence_bucket="bkt", output_sheet_id="sheet", ho_stock_worksheet="Opening Stock",
+            admin_username="admin", admin_password="pw-for-tests-only",
         ),
-        bq_client=None, bq_store=FakeBQ(), evidence=FakeStorage(), mirror=FakeMirror(),
+        bq_client=None, gc=None, bq_store=FakeBQ(), evidence=FakeStorage(), mirror=FakeMirror(),
     )
     monkeypatch.setattr(clients, "build_backends", lambda secrets: be)
 
@@ -51,6 +53,14 @@ def backend(monkeypatch, tmp_path):
         return MasterData(state["distributors"], state["skus"], list(state["diagnostics"]))
 
     monkeypatch.setattr(master_data, "load_master", fake_load)
+
+    def fake_ho(gc, sheet_id, worksheet):
+        return {
+            "url": "https://docs.google.com/spreadsheets/d/sheet/edit?gid=1#gid=1",
+            "stocks": state["ho_stocks"],
+        }
+
+    monkeypatch.setattr(opening_stock, "load_ho_stock", fake_ho)
     be.master_state = state
     return be
 
@@ -98,6 +108,8 @@ def test_page_title_sku_text_placeholder_and_no_initial_errors(backend):
     assert [t.value for t in at.title] == [PAGE]
     assert any(s.value == "DAFTAR SKU" for s in at.subheader)
     assert any(NOTE in m.value for m in at.markdown)
+    assert any("Jika ada selisih antara Stok Distributor dan Stok versi Perusahaan" in m.value for m in at.markdown)
+    assert any("Data Stock yang dimiliki tim Head Office:** —" in m.value for m in at.markdown)
     assert [t.label for t in at.tabs] == ["📝 Input Stock", "🔐 Admin"]
     stocks = [t for t in at.text_input if t.label == "Stock"]
     assert len(stocks) == 2
@@ -107,6 +119,15 @@ def test_page_title_sku_text_placeholder_and_no_initial_errors(backend):
     assert at.selectbox(key="spv_None").disabled and at.selectbox(key="dist_None_None").disabled
     assert backend.bq_store.touched == 0
     assert not at.warning
+
+
+def test_head_office_stock_is_shown_above_each_input(backend):
+    backend.master_state["ho_stocks"] = {"gudang satu": {"K1": 8}}
+    at = choose(fresh())
+    texts = [m.value for m in at.markdown]
+    assert any("**Data Stock yang dimiliki tim Head Office:** 8" in t for t in texts)
+    assert any("**Data Stock yang dimiliki tim Head Office:** tidak ada" in t for t in texts)
+    assert any("spreadsheet ini" in t for t in texts)
 
 
 def test_dependent_dropdowns_and_sku_rows_have_no_delete(backend):

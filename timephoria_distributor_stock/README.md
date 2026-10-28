@@ -31,7 +31,7 @@ Waktu yang terlihat user, di sheet, dan di metadata foto memakai **WIB** (`YYYY-
 
 **Upsert.** Key = `tanggal_stock + distributor_code + sku_code`. `transaction_id` = UUID5 deterministik dari key itu (namespace di kode, jangan diubah). Submit ulang pada key yang sama menimpa: `created_at` dipertahankan, `updated_at` baru, supervisor / stock / foto terbaru menggantikan. Tidak ada mode revisi terpisah dan tidak ada penghapusan baris lain. SKU yang sama diketik dua kali dalam satu submit: baris terakhir yang dipakai.
 
-**Stock.** Satu angka `stock_qty` per SKU: bilangan bulat ≥ 0 (nol boleh). Desimal, negatif, kosong, huruf, dan angka di atas INT64 ditolak. Pesan error menyebut "Stock".
+**Stock.** Satu angka `stock_qty` per SKU: bilangan bulat ≥ 0 (nol boleh). Desimal, negatif, kosong, huruf, dan angka di atas INT64 ditolak. Pesan error menyebut "Stock". Di atas daftar isian ada catatan tebal: bila stok distributor berbeda dari stok versi perusahaan, perusahaan akan follow-up. Di atas tiap isian Stock tampil angka **Opening stock Oct** dari tab `Opening Stock` pada spreadsheet output (dicocokkan lewat nama distributor), plus tautan ke tab itu.
 
 **Foto.**
 

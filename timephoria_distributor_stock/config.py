@@ -8,6 +8,7 @@ from typing import Any, Mapping
 DEFAULT_OUTPUT_WORKSHEET = "Distributor Stock"
 DEFAULT_TABLE = "timephoria_smart_coverage_tester_feedback"
 DEFAULT_EVIDENCE_ROOT = "Timephoria Distributor Stock Evidence"
+DEFAULT_HO_WORKSHEET = "Opening Stock"
 
 _SHEET_URL_RE = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]+)")
 _IDENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -36,6 +37,7 @@ class AppConfig:
     evidence_root_folder: str
     output_worksheet: str
     sku_codes: tuple[str, ...]
+    ho_stock_worksheet: str = DEFAULT_HO_WORKSHEET
     admin_username: str = ""
     admin_password: str = field(default="", repr=False)
 
@@ -78,6 +80,7 @@ def load_config(secrets: Mapping[str, Any], fallback_project: str = "") -> AppCo
         evidence_root_folder=get("evidence_root_folder", DEFAULT_EVIDENCE_ROOT),
         output_worksheet=get("output_worksheet", DEFAULT_OUTPUT_WORKSHEET),
         sku_codes=_sku_codes(app.get("sku_codes")),
+        ho_stock_worksheet=get("ho_stock_worksheet", DEFAULT_HO_WORKSHEET),
         admin_username=str(admin.get("username", "") or "").strip(),
         admin_password=str(admin.get("password", "") or ""),
     )

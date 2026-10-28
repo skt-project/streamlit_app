@@ -18,6 +18,7 @@ from gcs_evidence import EvidenceStorageError
 from image_processor import MAX_BYTES, ImageError, process_photo
 from master_data import MasterError, load_master, load_master_with_fallback
 from mobile import apply_mobile_layout, keep_row
+from opening_stock import HoStockError, load_ho_stock, lookup_ho_qty
 from service import SalesSubmitter, SubmissionFailed, SubmissionRejected, plan_actions
 from timeutil import WIB, fmt_wib
 from validation import LineInput, validate_submission
@@ -30,6 +31,11 @@ SKU_HEADING = "DAFTAR SKU"
 SKU_NOTE = (
     "Isi jumlah stok Tester Smart Coverage yang tersisa di Distributor dan sertakan bukti fotonya (wajib)"
 )
+STOCK_DIFF_NOTE = (
+    "Jika ada selisih antara Stok Distributor dan Stok versi Perusahaan, "
+    "maka Perusahaan akan follow-up ke pihak terkait untuk validasi lebih lanjut"
+)
+HO_STOCK_LABEL = "Data Stock yang dimiliki tim Head Office"
 QTY_PLACEHOLDER = "isi quantity disini"
 _REQUIRED_SUFFIX = "wajib diisi."
 
@@ -62,6 +68,11 @@ def get_existing(distributor_code: str, iso_date: str, nonce: int):
 @st.cache_data(ttl=60, show_spinner=False)
 def get_range_rows(start_iso: str, end_iso: str, nonce: int):
     return get_backends().bq_store.fetch_by_date_range(date.fromisoformat(start_iso), date.fromisoformat(end_iso))
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_ho_stock(sheet_id: str, worksheet: str, nonce: int):
+    return load_ho_stock(get_backends().gc, sheet_id, worksheet)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -209,6 +220,30 @@ def main():
         render_admin(be, master, get_range_rows, get_previous)
 
 
+def _load_ho_reference(be, nonce: int) -> dict:
+    sheet_id = getattr(be.config, "output_sheet_id", "") or ""
+    worksheet = getattr(be.config, "ho_stock_worksheet", "Opening Stock")
+    if not sheet_id:
+        return {"url": "", "stocks": {}}
+    try:
+        return get_ho_stock(sheet_id, worksheet, nonce)
+    except HoStockError as exc:
+        st.warning(str(exc))
+    except Exception as exc:
+        log.exception("Stok Head Office gagal dimuat")
+        st.warning(f"Data stok Head Office tidak dapat dimuat ({exc.__class__.__name__}).")
+    return {"url": "", "stocks": {}}
+
+
+def _ho_caption(ho: dict, distributor, sku_code: str | None) -> str:
+    if distributor is None or not sku_code:
+        shown = "—"
+    else:
+        qty = lookup_ho_qty(ho.get("stocks") or {}, distributor.distributor_name, sku_code)
+        shown = "tidak ada" if qty is None else str(qty)
+    return f"**{HO_STOCK_LABEL}:** {shown}"
+
+
 def render_input(be, master):
     ss = st.session_state
     if ss.last_result is not None:
@@ -260,6 +295,12 @@ def render_input(be, master):
 
     st.subheader(SKU_HEADING)
     st.markdown(SKU_NOTE)
+    st.markdown(f"**{STOCK_DIFF_NOTE}**")
+    ho = _load_ho_reference(be, ss.master_nonce)
+    if ho.get("url"):
+        st.markdown(
+            f"{HO_STOCK_LABEL} untuk setiap SKU ada di [spreadsheet ini]({ho['url']})."
+        )
     sku_by_code = master.skus
     slots: dict[int, st.delta_generator.DeltaGenerator] = {}
     inputs: list[LineInput] = []
@@ -270,6 +311,7 @@ def render_input(be, master):
             name = sku.name if sku else ""
             st.markdown(f"**{i}. {fixed_code}** {name}".rstrip())
             sku_code = fixed_code if sku else None
+            st.markdown(_ho_caption(ho, distributor, sku_code))
             stock_raw = st.text_input("Stock", key=_k("st", uid), placeholder=QTY_PLACEHOLDER)
             with st.expander("📷 Foto SKU (opsional)"):
                 cam = st.camera_input("Ambil foto", key=_k("cam", uid))
