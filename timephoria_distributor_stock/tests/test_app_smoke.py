@@ -127,7 +127,7 @@ def test_head_office_stock_is_shown_above_each_input(backend):
     texts = [m.value for m in at.markdown]
     assert any("**Data Stock yang dimiliki tim Head Office:** 8" in t for t in texts)
     assert any("**Data Stock yang dimiliki tim Head Office:** tidak ada" in t for t in texts)
-    assert any("spreadsheet ini" in t for t in texts)
+    assert not any("spreadsheet ini" in t for t in texts)
 
 
 def test_dependent_dropdowns_and_sku_rows_have_no_delete(backend):

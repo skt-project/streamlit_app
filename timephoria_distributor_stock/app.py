@@ -297,10 +297,6 @@ def render_input(be, master):
     st.markdown(SKU_NOTE)
     st.markdown(f"**{STOCK_DIFF_NOTE}**")
     ho = _load_ho_reference(be, ss.master_nonce)
-    if ho.get("url"):
-        st.markdown(
-            f"{HO_STOCK_LABEL} untuk setiap SKU ada di [spreadsheet ini]({ho['url']})."
-        )
     sku_by_code = master.skus
     slots: dict[int, st.delta_generator.DeltaGenerator] = {}
     inputs: list[LineInput] = []
