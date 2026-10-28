@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from rapidfuzz import fuzz, process
-
 import komponen
+from login_page import require_login
 from shared import (
     # Constants
     CITY, JENIS_TOKO_DEFAULT, KOLOM_NOO_OUTPUT, KOLOM_SKU_OUTPUT, KOLOM_SKU_STAGED,
@@ -493,7 +493,7 @@ def render_bulk_sku():
             if not l_produk:
                 st.warning("Product is required.")
             elif len(l_produk) != len(l_kode):
-                st.error(f"Mismatch: {len(l_produk)} products vs {len(l_kode)} codes.")
+                st.error(f"Product Code Salah: {len(l_produk)} products dari {len(l_kode)} kode.")
             else:
                 rows = []
                 for p, kd in zip(l_produk, l_kode):
@@ -1146,6 +1146,7 @@ def halaman_konfirmasi_spv():
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
     st.set_page_config(page_title="NOO & SKU Submission", page_icon="📦", layout="wide")
+    user = require_login()          
     inisialisasi_state()
     ss = st.session_state
     CSS_PATH = os.path.join(os.path.dirname(__file__), "style_app.css")
@@ -1167,6 +1168,25 @@ def main():
                       args=(kunci,), width="stretch")
         st.markdown(f'<div class="status-update">Last updated: {ss.terakhir_update}</div>',
                     unsafe_allow_html=True)
+        with st.container(key="user_profil"):
+            with st.popover(f"👤  {user['username']}", use_container_width=True):
+                initial = user['username'][0].upper()
+                st.markdown(f"""
+                <div class="profil-header">
+                    <div class="profil-avatar">{initial}</div>
+                    <div>
+                        <div class="profil-nama">{user['username']}</div>
+                        <div class="profil-email">{user.get('email','—')}</div>
+                    </div>
+                </div>
+                <hr class="profil-divider">
+                """, unsafe_allow_html=True)
+                st.link_button("📍Help & Support ", url="https://docs.google.com/forms/d/1E5qhMSQ8kSu6WJQzIGbpeBVr0oMU8mjkWyI00VdRUyI/", width="stretch")
+
+        with st.container(key="logout"):
+            if st.button("🚪  Log Out", width="stretch"):
+                ss.clear()
+                st.rerun()
 
     {"pengajuan": halaman_pengajuan_noo, "spv": halaman_konfirmasi_spv}[ss.halaman_aktif]()
 
