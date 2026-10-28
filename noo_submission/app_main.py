@@ -6,9 +6,10 @@ import re
 import os
 import numpy as np
 import pandas as pd
+import bcrypt
 import requests
+import shared as _shared
 import streamlit as st
-
 import komponen
 from shared import (
     # Constants
@@ -32,13 +33,19 @@ NAVIGASI = [
     ("Dashboard",          "", "dashboard"),
     ("Store Validation",   "",   "validasi"),
     ("Submission History", "", "riwayat"),
-    ("Settings",           "⚙️", "pengaturan"),
+    ("Settings",           "", "pengaturan"),
    # ("Input NOO", "noo"),
 ]
 
-# ═════════════════════════════════════════════════════════════════════════════
+#------------------USERNAME SETTINGS-------------------------------------------
+def nama_pengguna() -> str:
+    user = st.session_state.get("user") or {}
+    uname = str(user.get("username", "")).strip()
+    if user.get("tagging") in ("RSA", "BD_SUPPORT"):
+        return uname
+    # username distributor = company code
+    return f"Admin - {uname.upper()}" if uname else "Admin"
 # GENERATOR ID
-# ═════════════════════════════════════════════════════════════════════════════
 
 def generate_store_ids(df: pd.DataFrame, semua: pd.DataFrame = None, kolom_target: str = "Store ID") -> pd.Series:
     prefix_per_distri = muat_prefix_per_distributor()
@@ -961,7 +968,7 @@ def halaman_dashboard():
 
     st.markdown('<hr style="margin:8px 0 16px 0;border:none;border-top:1px solid #e2e8f0">', unsafe_allow_html=True)
 
-    # ── NOO ──────────────────────────────────────────────────────────────────
+    # NOO 
     st.markdown('<p style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-bottom:12px">NOO Submission</p>',
                 unsafe_allow_html=True)
     if df_noo_f.empty:
@@ -1047,7 +1054,7 @@ new Chart(document.getElementById('bar_distri'),{{
 
     st.markdown('<hr style="margin:20px 0;border:none;border-top:1px solid #e2e8f0">', unsafe_allow_html=True)
 
-    # ── SKU ──────────────────────────────────────────────────────────────────
+    # ── SKU
     st.markdown('<p style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-bottom:12px">SKU Mapping</p>',
                 unsafe_allow_html=True)
     if df_sku_f.empty:
@@ -1168,9 +1175,63 @@ def _callback_ukuran_halaman():
     st.session_state.ukuran_halaman = st.session_state.atur_ukuran_halaman
     st.session_state.halaman_data   = 1
 
+TABLE_USER = "users"
+TAGGING_BD = "BD SUPPORT"
+
+def _sb_users_list() -> list:
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/{TABLE_USER}",
+        headers={**_SB_HEADERS, "Prefer": ""},
+        params={"select": "username,email,tagging", "order": "created_at.desc"},
+        timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def _sb_user_delete(username: str) -> bool:
+    r = requests.delete(
+        f"{SUPABASE_URL}/rest/v1/{TABLE_USER}",
+        headers={**_SB_HEADERS, "Prefer": "return=representation"},
+        params={"username": f"eq.{username}"}, timeout=10)
+    if r.ok and len(r.json()) == 1:
+        return True
+    st.session_state["_err_del"] = f"HTTP {r.status_code}, rows={r.text[:150]}"
+    return False
+
+def _sb_user_reset_pw(username: str, pw_baru: str) -> bool:
+    hashed = bcrypt.hashpw(pw_baru.encode(), bcrypt.gensalt()).decode()
+    r = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/{TABLE_USER}",
+        headers={**_SB_HEADERS, "Prefer": "return=representation"},
+        params={"username": f"eq.{username}"},
+        json={"password": hashed}, timeout=10)
+    return r.ok and len(r.json()) == 1
 def halaman_pengaturan():
     ss = st.session_state
-    st.markdown(komponen.html_header("Settings","Preferences for this session.","⚙️"), unsafe_allow_html=True)
+    st.markdown(komponen.html_header("Settings","Preferences & user access management.","⚙️"),
+                unsafe_allow_html=True)
+    st.markdown("""
+<style>
+[data-testid="stForm"] [data-baseweb="input"],
+[data-testid="stTabs"] [data-baseweb="input"]{
+  background:#ffffff !important;
+  border:1px solid #cbd5e1 !important;
+  border-radius:10px !important;
+}
+[data-testid="stForm"] input,
+[data-testid="stTabs"] input{
+  background:#ffffff !important;
+  color:#0f172a !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    # ── Guard: hanya BD SUPPORT ──
+    me = ss.get("user") or {}
+    if me.get("tagging") != TAGGING_BD:
+        st.error("Access denied. Settings is only for BD Support.")
+        return
+
+    # ── Preferences (tetap) ──
     opsi = [10,15,25,50]
     st.selectbox("Rows per page", opsi, index=opsi.index(ss.ukuran_halaman),
                  key="atur_ukuran_halaman", on_change=_callback_ukuran_halaman)
@@ -1180,14 +1241,100 @@ def halaman_pengaturan():
         ss.terakhir_update = waktu_sekarang()
         st.rerun()
 
+    st.divider()
+    st.subheader("User Access (Input NOO & SKU)")
+
+    try:
+        users = _sb_users_list()
+    except Exception as e:
+        st.error(f"Failed to load users: {e}")
+        return
+
+    #   akses_users = [u for u in users if u.get("tagging") == "user"]
+    hapus_opts = [u["username"] for u in users if u["username"] != me.get("username")]
+    semua_opts = [u["username"] for u in users]
+
+    tab_add, tab_del, tab_pw = st.tabs(["➕ Add user", "🗑️ Delete user", "🔑 Reset password"])
+
+    # ── Tambah user ──
+    with tab_add:
+        from login_page import do_signup, TAGGING_USER         
+        with st.form("form_add_user", clear_on_submit=True):
+            n_user  = st.text_input("Username")
+            n_email = st.text_input("Email")
+            n_pw    = st.text_input("Temporary password (min. 8 characters)", type="password")
+            ok_add  = st.form_submit_button("Add user", type="primary")
+        if ok_add:
+            if not all([n_user, n_email, n_pw]):
+                st.error("All fields are required.")
+            elif not re.fullmatch(r"[A-Za-z0-9_.]{3,20}", n_user):
+                st.error("Username 3-20 characters: letters, numbers, _ or .")
+            elif len(n_pw) < 8:
+                st.error("Password must be at least 8 characters.")
+            else:
+                try:
+                    do_signup(n_user, n_email, n_pw, tagging=TAGGING_USER)
+                except Exception as e:
+                    st.error(f"Failed to add user: {e}")
+                else:
+                    catat_riwayat("Add user", n_user.strip().lower())
+                    st.success(f"User '{n_user.strip().lower()}' added.")
+
+    # ── Hapus user ──
+    with tab_del:
+        if not hapus_opts:
+            st.info("No users available to delete.")
+        else:
+            u_del = st.selectbox("Select username", hapus_opts, key="set_del_user")
+            yakin = st.checkbox(f"I understand '{u_del}' will lose access", key="set_del_yakin")
+            if st.button("Delete user", type="primary", disabled=not yakin, key="set_del_btn"):
+                if not _sb_user_delete(u_del):
+                    st.error(f"Delete failed: {ss.pop('_err_del', '-')}")
+                else:
+                    catat_riwayat("Delete user", u_del)
+                    ss.pesan_toast = f"User '{u_del}' deleted."
+                    st.rerun()
+
+    # ── Reset password ──
+    with tab_pw:
+        u_pw = st.selectbox("Select username", semua_opts, key="set_pw_user")
+        with st.form("form_reset_pw", clear_on_submit=True):
+            pw1 = st.text_input("New password (min. 8 characters)", type="password")
+            pw2 = st.text_input("Confirm new password", type="password")
+            ok_pw = st.form_submit_button("Reset password", type="primary")
+        if ok_pw:
+            if len(pw1) < 8:
+                st.error("Password must be at least 8 characters.")
+            elif pw1 != pw2:
+                st.error("Passwords do not match.")
+            elif not _sb_user_reset_pw(u_pw, pw1):
+                st.error("Reset failed (check Supabase RLS policy for UPDATE).")
+            else:
+                catat_riwayat("Reset password", u_pw)
+                st.success(f"Password for '{u_pw}' has been reset.")
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main():
     st.set_page_config(page_title="Store Validation", page_icon="🏪", layout="wide")
-    inisialisasi_state()
     ss = st.session_state
+
+    # Login gate
+    from login_page import require_login
+    user = require_login()
+
+    IZIN_MASUK = {"RSA", "BD SUPPORT"}
+    if user.get("tagging") not in IZIN_MASUK:
+        st.error("Access denied. This app is only for RSA and BD Support.")
+        if st.button("Back to login"):
+            st.session_state.clear()
+            st.rerun()
+        st.stop()
+
+    _shared.PENGGUNA = nama_pengguna()
+
+    inisialisasi_state()
 
     CSS_PATH = os.path.join(os.path.dirname(__file__), "style_app.css")
     try:
@@ -1199,6 +1346,8 @@ def main():
     if ss.get("pesan_toast"):
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon","✅"))
 
+    user = ss.get("user", {})
+
     with st.sidebar:
         st.markdown(
             '<div class="brand">'
@@ -1208,19 +1357,28 @@ def main():
             '<div class="brand-sub">NOO & SKU Mapping Dashboard</div>',
             unsafe_allow_html=True
         )
+        is_bd = user.get("tagging") == "BD SUPPORT"
         for label, ikon, kunci in NAVIGASI:
+            if kunci == "pengaturan" and not is_bd:
+                continue
             nama_tombol = f"navaktif_{kunci}" if ss.halaman_aktif == kunci else f"nav_{kunci}"
             st.button(f"{ikon}   {label}", key=nama_tombol, on_click=tuju_halaman,
                       args=(kunci,), width="stretch")
 
-        st.link_button("🔍 Input NOO", "https://noo-submission.streamlit.app/",
+        st.link_button("Input NOO & SKU", "https://noo-submission.streamlit.app/",
                 use_container_width=True, key="nav_noo")
 
-        st.markdown(
-            f'<div class="status-sidebar"><span class="titik"></span> Ready</div>'
-            f'<div class="status-update">🕐 {ss.terakhir_update}</div>',
-            unsafe_allow_html=True
-        )
+        # st.markdown(
+        #     f'<div class="status-sidebar"><span class="titik"></span> Ready</div>'
+        #     f'<div class="status-update">🕐 {ss.terakhir_update}</div>',
+        #     unsafe_allow_html=True
+        # )
+
+        # ── Logout (fixed bottom sidebar via CSS) ────────────────────────────
+        with st.container(key="logout"):
+            if st.button("🚪  Log Out", width="stretch"):
+                ss.clear()
+                st.rerun()
 
     {
         "dashboard":  halaman_dashboard,
