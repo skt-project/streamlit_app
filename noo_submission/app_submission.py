@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 from rapidfuzz import fuzz, process
 import komponen
+import shared as _shared
 from login_page import require_login
 from shared import (
     # Constants
@@ -1144,9 +1145,17 @@ def halaman_konfirmasi_spv():
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
+def nama_pengguna(user: dict) -> str:
+    uname = str(user.get("username", "")).strip()
+    if user.get("tagging") in ("RSA", "BD SUPPORT"):
+        return uname
+    if user.get("tagging") == "Admin Distributor":
+        return f"Admin - {uname.upper()}"
+    return uname or "Admin"
 def main():
     st.set_page_config(page_title="NOO & SKU Submission", page_icon="📦", layout="wide")
-    user = require_login()          
+    user = require_login()
+    _shared.PENGGUNA = nama_pengguna(user)
     inisialisasi_state()
     ss = st.session_state
     CSS_PATH = os.path.join(os.path.dirname(__file__), "style_app.css")
