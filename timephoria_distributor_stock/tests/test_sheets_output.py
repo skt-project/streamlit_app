@@ -61,7 +61,7 @@ def rec(sku="K1", qty=3, created=NOW):
     return {
         "transaction_id": "tx-" + sku, "tanggal_stock": date(2026, 10, 23),
         "distributor_code": "D1", "distributor_name": "Gudang", "region": "R",
-        "supervisor_name": "Ani", "sku_code": sku, "sku_name": "N", "stock_qty": qty,
+        "supervisor_name": "Ani", "spu_code": sku, "spu_name": "N", "stock_qty": qty,
         "evidence_file_id": None, "evidence_file_url": None, "evidence_file_name": None,
         "evidence_uploaded_at": None, "created_at": created, "updated_at": NOW,
     }
@@ -88,7 +88,7 @@ def test_upsert_updates_inserts_and_collapses_duplicate_keys_in_one_batch():
     assert mirror.upsert([rec("K1", 3), rec("K2", 1)]) == (2, 0)
     assert mirror.upsert([rec("K1", 9), rec("K3", 4)]) == (1, 1)
     assert mirror.upsert([rec("K9", 1), rec("K9", 8)]) == (1, 0)
-    sku_idx = OUTPUT_HEADERS.index("sku_code")
+    sku_idx = OUTPUT_HEADERS.index("spu_code")
     qty_idx = OUTPUT_HEADERS.index("stock_qty")
     body = {row[sku_idx]: row[qty_idx] for row in ws.rows[1:]}
     assert body == {"K1": 9, "K2": 1, "K3": 4, "K9": 8}

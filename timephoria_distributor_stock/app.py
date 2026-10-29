@@ -21,13 +21,13 @@ from mobile import apply_mobile_layout, keep_row
 from opening_stock import HoStockError, load_ho_stock, lookup_ho_qty
 from service import SalesSubmitter, SubmissionFailed, SubmissionRejected, plan_actions
 from timeutil import WIB, fmt_wib
-from validation import LineInput, validate_submission
+from validation import LineInput, Sku, validate_submission
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("timephoria.app")
 
 PAGE_TITLE = "TIMEPHORIA Smart Coverage Tester Feedback"
-SKU_HEADING = "DAFTAR SKU"
+SKU_HEADING = "DAFTAR SPU"
 SKU_NOTE = (
     "Isi jumlah stok Tester Smart Coverage yang tersisa di Distributor dan sertakan bukti fotonya (wajib)"
 )
@@ -72,7 +72,10 @@ def get_range_rows(start_iso: str, end_iso: str, nonce: int):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_ho_stock(sheet_id: str, worksheet: str, nonce: int):
-    return load_ho_stock(get_backends().gc, sheet_id, worksheet)
+    loaded = load_ho_stock(get_backends().gc, sheet_id, worksheet)
+    loaded.setdefault("spus", [])
+    loaded.setdefault("spu_names", {})
+    return loaded
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -158,7 +161,7 @@ def render_result(res):
     for warning in res.warnings:
         st.warning(warning)
     df = pd.DataFrame([{
-        "SKU": f"{ln.sku_code} - {ln.sku_name}" if ln.sku_name else ln.sku_code,
+        "SPU": f"{ln.spu_code} - {ln.spu_name}" if ln.spu_name else ln.spu_code,
         "Stock": ln.stock_qty,
         "Aksi": ln.action,
         "Transaction ID": ln.transaction_id,
@@ -189,6 +192,13 @@ def main():
         st.error(f"Gagal terhubung ke layanan Google: {exc.__class__.__name__}. Periksa secrets dan akses service account.")
         st.stop()
     master = mres.data
+    ho_catalog = _load_ho_reference(be, ss.master_nonce)
+    spu_codes = list(ho_catalog.get("spus") or [])
+    if not spu_codes:
+        st.error("Daftar SPU dari tab Opening Stock kosong atau tidak dapat dibaca.")
+        st.stop()
+    spu_names = ho_catalog.get("spu_names") or {}
+    master.skus = {code: Sku(code, spu_names.get(code, "")) for code in spu_codes}
 
     if mres.stale:
         st.warning(
@@ -203,12 +213,14 @@ def main():
         st.caption(f"Master dibaca: {fmt_wib(mres.loaded_at)}" + (" (data lama)" if mres.stale else ""))
         if st.button("Muat ulang master"):
             ss.master_nonce += 1
+            ss.rows_ready = False
             get_master.clear()
+            get_ho_stock.clear()
             st.rerun()
-        st.button("Reset daftar SKU (kosongkan isian)", on_click=_reset_rows)
+        st.button("Reset daftar SPU (kosongkan isian)", on_click=_reset_rows)
         missing = [s.code for s in master.skus.values() if not s.name]
         if missing:
-            st.warning("Ada SKU tanpa nama di master produk: " + ", ".join(missing))
+            st.warning("Ada SPU tanpa nama di tab Opening Stock: " + ", ".join(missing))
         with st.expander("Info master"):
             for line in master.diagnostics:
                 st.caption(line)
@@ -224,7 +236,7 @@ def _load_ho_reference(be, nonce: int) -> dict:
     sheet_id = getattr(be.config, "output_sheet_id", "") or ""
     worksheet = getattr(be.config, "ho_stock_worksheet", "Opening Stock")
     if not sheet_id:
-        return {"url": "", "stocks": {}}
+        return {"url": "", "stocks": {}, "spus": [], "spu_names": {}}
     try:
         return get_ho_stock(sheet_id, worksheet, nonce)
     except HoStockError as exc:
@@ -232,14 +244,15 @@ def _load_ho_reference(be, nonce: int) -> dict:
     except Exception as exc:
         log.exception("Stok Head Office gagal dimuat")
         st.warning(f"Data stok Head Office tidak dapat dimuat ({exc.__class__.__name__}).")
-    return {"url": "", "stocks": {}}
+    return {"url": "", "stocks": {}, "spus": [], "spu_names": {}}
 
 
 def _ho_caption(ho: dict, distributor, sku_code: str | None) -> str:
+    spus = ho.get("spus") or []
     if distributor is None or not sku_code:
         shown = "—"
     else:
-        qty = lookup_ho_qty(ho.get("stocks") or {}, distributor.distributor_name, sku_code)
+        qty = lookup_ho_qty(ho.get("stocks") or {}, distributor.distributor_name, sku_code, spus)
         shown = "tidak ada" if qty is None else str(qty)
     return f"**{HO_STOCK_LABEL}:** {shown}"
 
@@ -279,11 +292,11 @@ def render_input(be, master):
             st.error(str(exc))
         if existing:
             st.info(
-                f"Sudah ada {len(existing)} SKU tercatat untuk distributor ini pada {tanggal.isoformat()}."
+                f"Sudah ada {len(existing)} SPU tercatat untuk distributor ini pada {tanggal.isoformat()}."
             )
             with st.expander("Data yang sudah ada", expanded=False):
                 st.dataframe(pd.DataFrame([{
-                    "SKU": f"{r['sku_code']} - {r['sku_name']}",
+                    "SPU": f"{r['spu_code']} - {r['spu_name']}",
                     "Stock": r["stock_qty"],
                     "Supervisor": r["supervisor_name"],
                     "Evidence": r["evidence_file_url"],
@@ -309,7 +322,7 @@ def render_input(be, master):
             sku_code = fixed_code if sku else None
             st.markdown(_ho_caption(ho, distributor, sku_code))
             stock_raw = st.text_input("Stock", key=_k("st", uid), placeholder=QTY_PLACEHOLDER)
-            with st.expander("📷 Foto SKU (opsional)"):
+            with st.expander("📷 Foto SPU (opsional)"):
                 cam = st.camera_input("Ambil foto", key=_k("cam", uid))
                 upl = st.file_uploader("…atau upload dari galeri (JPG/JPEG)", key=_k("upl", uid))
             photo, photo_error = None, None
@@ -359,9 +372,9 @@ def render_input(be, master):
 
     if result.lines:
         actions = plan_actions(result.lines, existing)
-        old = {r["sku_code"]: r for r in existing}
+        old = {r["spu_code"]: r for r in existing}
         st.dataframe(pd.DataFrame([{
-            "SKU": f"{ln.sku_code} - {ln.sku_name}" if ln.sku_name else ln.sku_code,
+            "SPU": f"{ln.sku_code} - {ln.sku_name}" if ln.sku_name else ln.sku_code,
             "Stock": ln.stock_qty,
             "Aksi": actions[ln.sku_code],
             "Stock lama": (old.get(ln.sku_code) or {}).get("stock_qty"),
@@ -370,7 +383,7 @@ def render_input(be, master):
     no_photo = [w for w in result.warnings if w.message.startswith("PERINGATAN")]
     if result.ok and no_photo:
         st.warning(
-            f"⚠️ {len(no_photo)} SKU dengan Stock > 0 belum punya foto sendiri. "
+            f"⚠️ {len(no_photo)} SPU dengan Stock > 0 belum punya foto sendiri. "
             "Submit tetap boleh selama minimal satu foto terlampir."
         )
     for warning in result.warnings:

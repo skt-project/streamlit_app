@@ -16,7 +16,7 @@ from timeutil import fmt_wib
 log = logging.getLogger("timephoria.sheets")
 
 OUTPUT_HEADERS: list[str] = list(COLUMNS)
-_KEY_COLS = [OUTPUT_HEADERS.index(c) for c in ("tanggal_stock", "distributor_code", "sku_code")]
+_KEY_COLS = [OUTPUT_HEADERS.index(c) for c in ("tanggal_stock", "distributor_code", "spu_code")]
 _LAST_COL = chr(ord("A") + len(OUTPUT_HEADERS) - 1)
 
 

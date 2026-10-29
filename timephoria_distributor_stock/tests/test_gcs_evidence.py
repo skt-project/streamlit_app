@@ -57,7 +57,7 @@ def make(error=None):
 def upload(store, **kwargs):
     args = dict(
         data=b"jpg", tanggal_stock=date(2026, 10, 23), distributor_code="D000001",
-        distributor_name="Gudang Contoh", sku_code="TST000001", sku_name="Produk Contoh",
+        distributor_name="Gudang Contoh", spu_code="TST000001", spu_name="Produk Contoh",
         supervisor_name="Ani Contoh", transaction_id="tx1",
     )
     args.update(kwargs)
@@ -74,7 +74,7 @@ def test_object_path_metadata_and_no_overwrite():
     assert evidence.url.startswith("https://storage.cloud.google.com/bkt/Timephoria%20Distributor%20Stock%20Evidence/")
     name, content_type, generation, meta = bucket.calls[0]
     assert content_type == "image/jpeg" and generation == 0
-    assert meta["distributor_code"] == "D000001" and meta["sku_code"] == "TST000001"
+    assert meta["distributor_code"] == "D000001" and meta["spu_code"] == "TST000001"
     assert meta["tanggal_stock"] == "2026-10-23" and meta["uploaded_at"].endswith(" WIB")
     assert meta["transaction_id"] == "tx1"
     for attr in ("trash", "delete", "remove"):

@@ -29,13 +29,13 @@ class FakeBQ:
         if self.fail_upsert:
             raise RuntimeError("merge failed")
         for rec in records:
-            key = (rec.tanggal_stock, rec.distributor_code, rec.sku_code)
+            key = (rec.tanggal_stock, rec.distributor_code, rec.spu_code)
             old = self.rows.get(key)
             row = dict(
                 transaction_id=rec.transaction_id, tanggal_stock=rec.tanggal_stock,
                 distributor_code=rec.distributor_code, distributor_name=rec.distributor_name,
                 region=rec.region, supervisor_name=rec.supervisor_name,
-                sku_code=rec.sku_code, sku_name=rec.sku_name, stock_qty=rec.stock_qty,
+                spu_code=rec.spu_code, spu_name=rec.spu_name, stock_qty=rec.stock_qty,
                 evidence_file_id=rec.evidence_file_id, evidence_file_url=rec.evidence_file_url,
                 evidence_file_name=rec.evidence_file_name, evidence_uploaded_at=rec.evidence_uploaded_at,
                 created_at=rec.created_at, updated_at=rec.updated_at,
@@ -70,7 +70,7 @@ class FakeStorage:
         self.uploaded, self.fail_on, self.n = [], fail_on, 0
 
     def upload(self, **kw):
-        if kw["sku_code"] == self.fail_on:
+        if kw["spu_code"] == self.fail_on:
             raise EvidenceStorageError("akses ditolak")
         self.n += 1
         self.uploaded.append(kw)
@@ -173,7 +173,7 @@ def test_mirror_receives_preserved_created_at(distributors):
 
 
 def test_plan_actions_and_duplicate_warning(distributors):
-    assert plan_actions([stock_line("K1", 1)], [{"sku_code": "K1"}]) == {"K1": "UPDATE"}
+    assert plan_actions([stock_line("K1", 1)], [{"spu_code": "K1"}]) == {"K1": "UPDATE"}
     bq = FakeBQ(dups=["K1"])
     res = submitter(bq)[0].submit(
         distributor=distributors["D1"], tanggal_stock=D, supervisor_name="Ani", lines=[stock_line("K1", 0)])

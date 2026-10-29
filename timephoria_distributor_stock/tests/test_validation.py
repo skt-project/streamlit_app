@@ -88,4 +88,4 @@ def test_distributor_and_supervisor_required(distributors, skus):
 
 def test_unknown_sku_rejected(distributors, skus):
     res = run(distributors, skus, [line(1, "NOPE", "1", PHOTO)])
-    assert not res.ok and any("tidak ada di daftar SKU" in e.message for e in res.errors)
+    assert not res.ok and any("tidak ada di daftar SPU" in e.message for e in res.errors)

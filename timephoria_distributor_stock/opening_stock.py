@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-REQUIRED_COLUMNS = ("DB Name", "SKU List", "Opening stock Oct")
+REQUIRED_COLUMNS = ("DB Name", "SPU", "Ending Stock Oct")
 
 
 class HoStockError(Exception):
@@ -35,19 +35,39 @@ def parse_qty_cell(value: Any) -> int | None:
     return int(number)
 
 
-def parse_opening_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, int]]:
-    """Nama distributor (dinormalisasi) → kode SKU → opening stock. Baris terakhir menang."""
+def parse_opening_rows(rows: Sequence[Mapping[str, Any]]) -> tuple[dict[str, dict[str, int]], list[str], dict[str, str]]:
+    """Kembalikan (stok per nama distributor dan SPU, urutan SPU, nama SPU). Baris terakhir menang."""
     stocks: dict[str, dict[str, int]] = {}
+    spus: list[str] = []
+    names: dict[str, str] = {}
+    seen: set[str] = set()
     for row in rows:
+        spu = str(row.get("SPU") or "").strip()
+        if spu and spu not in seen:
+            seen.add(spu)
+            spus.append(spu)
+        spu_name = str(row.get("SPU NAME") or "").strip()
+        if spu and spu_name:
+            names[spu] = spu_name
         name = norm_name(row.get("DB Name"))
-        sku = str(row.get("SKU List") or "").strip()
-        if not name or not sku:
+        if not name or not spu:
             continue
-        qty = parse_qty_cell(row.get("Opening stock Oct"))
+        qty = parse_qty_cell(row.get("Ending Stock Oct"))
         if qty is None:
             continue
-        stocks.setdefault(name, {})[sku] = qty
-    return stocks
+        stocks.setdefault(name, {})[spu] = qty
+    return stocks, spus, names
+
+
+def spu_for_code(code: str, spu_codes: Sequence[str]) -> str | None:
+    """SPU adalah awalan kode SKU. Bila lebih dari satu cocok, yang terpanjang dipakai."""
+    text = str(code or "").strip()
+    if not text:
+        return None
+    matches = [spu for spu in spu_codes if text == spu or text.startswith(spu)]
+    if not matches:
+        return None
+    return max(matches, key=len)
 
 
 def sheet_url(sheet_id: str, gid: int) -> str:
@@ -68,8 +88,14 @@ def load_ho_stock(gc, sheet_id: str, worksheet_name: str) -> dict[str, Any]:
         raise
     except Exception as exc:
         raise HoStockError(f"Stok Head Office gagal dibaca ({exc.__class__.__name__}).") from exc
-    return {"url": sheet_url(sheet_id, worksheet.id), "stocks": parse_opening_rows(rows)}
+    stocks, spus, names = parse_opening_rows(rows)
+    return {"url": sheet_url(sheet_id, worksheet.id), "stocks": stocks, "spus": spus, "spu_names": names}
 
 
-def lookup_ho_qty(stocks: Mapping[str, Mapping[str, int]], distributor_name: str, sku_code: str) -> int | None:
-    return stocks.get(norm_name(distributor_name), {}).get(sku_code)
+def lookup_ho_qty(
+    stocks: Mapping[str, Mapping[str, int]], distributor_name: str, sku_code: str, spu_codes: Sequence[str],
+) -> int | None:
+    spu = spu_for_code(sku_code, spu_codes)
+    if not spu:
+        return None
+    return stocks.get(norm_name(distributor_name), {}).get(spu)

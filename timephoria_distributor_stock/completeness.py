@@ -53,8 +53,8 @@ class EvidenceItem:
     distributor_code: str
     distributor_name: str
     tanggal_stock: date | None
-    sku_code: str
-    sku_name: str
+    spu_code: str
+    spu_name: str
     stock_qty: int | None
     supervisor: str | None
     updated_at: datetime | None
@@ -81,8 +81,8 @@ def compute_completeness(
 ) -> list[DistributorStatus]:
     by_dist: dict[str, dict[date | None, dict[str, Mapping[str, Any]]]] = defaultdict(lambda: defaultdict(dict))
     for row in rows:
-        if row.get("distributor_code") in distributors and row.get("sku_code") in skus:
-            by_dist[row["distributor_code"]][row.get("tanggal_stock")][row["sku_code"]] = row
+        if row.get("distributor_code") in distributors and row.get("spu_code") in skus:
+            by_dist[row["distributor_code"]][row.get("tanggal_stock")][row["spu_code"]] = row
 
     out: list[DistributorStatus] = []
     for distributor in distributors.values():
@@ -137,20 +137,20 @@ def summarize_by_region(statuses: Sequence[DistributorStatus]) -> list[dict[str,
 def evidence_items(
     distributors: Mapping[str, Distributor], skus: Mapping[str, Sku], rows: Sequence[Mapping[str, Any]],
 ) -> list[EvidenceItem]:
-    """Satu item per baris yang punya foto (pointer terbaru per distributor + SKU + tanggal)."""
+    """Satu item per baris yang punya foto (pointer terbaru per distributor + SPU + tanggal)."""
     items = []
     for row in rows:
         distributor = distributors.get(row.get("distributor_code"))
         if distributor is None or not row.get("evidence_file_id"):
             continue
-        sku = skus.get(row.get("sku_code"))
+        sku = skus.get(row.get("spu_code"))
         items.append(EvidenceItem(
             region=region_of(distributor),
             distributor_code=distributor.distributor_code,
             distributor_name=distributor.distributor_name,
             tanggal_stock=row.get("tanggal_stock"),
-            sku_code=row.get("sku_code") or "",
-            sku_name=sku.name if sku else (row.get("sku_name") or ""),
+            spu_code=row.get("spu_code") or "",
+            spu_name=sku.name if sku else (row.get("spu_name") or ""),
             stock_qty=row.get("stock_qty"),
             supervisor=row.get("supervisor_name"),
             updated_at=row.get("updated_at"),
@@ -159,7 +159,7 @@ def evidence_items(
         ))
     items.sort(key=lambda item: (
         item.region, item.distributor_name.casefold(), item.distributor_code,
-        _d(item.tanggal_stock), item.sku_code,
+        _d(item.tanggal_stock), item.spu_code,
     ))
     return items
 

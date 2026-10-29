@@ -76,7 +76,7 @@ def _photo_card(evidence, item) -> None:
     st.markdown(
         f"**{item.distributor_code}** · {item.distributor_name}  \n"
         f"Tanggal {when}  \n"
-        f"{item.sku_code} · {item.sku_name}  \n"
+        f"{item.spu_code} · {item.spu_name}  \n"
         f"Stock **{item.stock_qty}**  \n"
         f"{item.supervisor or '-'} · {fmt_wib(item.updated_at) if item.updated_at else '-'}"
     )
@@ -92,7 +92,7 @@ def _distributor_table(statuses: list[DistributorStatus]) -> pd.DataFrame:
         "Distributor": s.distributor.distributor_name,
         "Kunjungan": s.visits,
         "Kunjungan terakhir": s.last_visit.isoformat() if s.last_visit else "",
-        "SKU terisi (terbaik)": f"{s.sku_filled}/{s.sku_total}",
+        "SPU terisi (terbaik)": f"{s.sku_filled}/{s.sku_total}",
         "Foto": s.photo_count,
         "Supervisor": s.supervisor or "",
         "Waktu submit terakhir (WIB)": fmt_wib(s.last_submit) if s.last_submit else "",
@@ -180,7 +180,7 @@ def render_admin(be, master, fetch_rows: Callable[[str, str, int], list[dict]],
     row2[1].metric(f"{_STATUS_ICON[STATUS_NONE]} {STATUS_NONE}", sum(s.status == STATUS_NONE for s in scoped))
     st.caption(
         f"Rentang {start.isoformat()} s/d {end.isoformat()}. **Lengkap** = pada minimal satu tanggal kunjungan "
-        f"dalam rentang, semua {len(master.skus)} SKU terisi, dan bila total Stock tanggal itu lebih dari 0 ada "
+        f"dalam rentang, semua {len(master.skus)} SPU terisi, dan bila total Stock tanggal itu lebih dari 0 ada "
         f"minimal 1 foto. Total Stock 0 tidak membutuhkan foto."
     )
 
@@ -216,9 +216,9 @@ def render_admin(be, master, fetch_rows: Callable[[str, str, int], list[dict]],
                 "Tanggal kunjungan", dates, index=default, key=f"adm_visit_{code}_{span}",
                 format_func=lambda d: d.isoformat(),
             )
-            by_sku = {r["sku_code"]: r for r in rows if r["distributor_code"] == code and r["tanggal_stock"] == visit}
+            by_sku = {r["spu_code"]: r for r in rows if r["distributor_code"] == code and r["tanggal_stock"] == visit}
             st.dataframe(pd.DataFrame([{
-                "SKU": f"{sku.code} - {sku.name}" if sku.name else sku.code,
+                "SPU": f"{sku.code} - {sku.name}" if sku.name else sku.code,
                 "Stock": (by_sku.get(sku.code) or {}).get("stock_qty"),
                 "Isian": "Terisi" if sku.code in by_sku else "Belum",
                 "Foto": "Ada" if (by_sku.get(sku.code) or {}).get("evidence_file_id") else "-",
@@ -229,7 +229,7 @@ def render_admin(be, master, fetch_rows: Callable[[str, str, int], list[dict]],
             except BigQueryError as exc:
                 st.error(str(exc))
                 previous_rows = []
-            prev_by_sku = {r["sku_code"]: r for r in previous_rows}
+            prev_by_sku = {r["spu_code"]: r for r in previous_rows}
             prev_date = previous_rows[0]["tanggal_stock"] if previous_rows else None
             st.markdown("##### Perbandingan dengan submit sebelumnya")
             if prev_date:
@@ -242,7 +242,7 @@ def render_admin(be, master, fetch_rows: Callable[[str, str, int], list[dict]],
                 prev = (prev_by_sku.get(sku.code) or {}).get("stock_qty")
                 change = compare_sku(current, prev)
                 compared.append({
-                    "SKU": sku.code,
+                    "SPU": sku.code,
                     "Stock sekarang": change["sekarang"],
                     "Stock sebelumnya": change["sebelumnya"],
                     "Selisih": change["selisih"],

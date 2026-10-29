@@ -19,7 +19,7 @@ log = logging.getLogger("timephoria.bigquery")
 
 COLUMNS = [
     "transaction_id", "tanggal_stock", "distributor_code", "distributor_name", "region",
-    "supervisor_name", "sku_code", "sku_name", "stock_qty", "evidence_file_id", "evidence_file_url",
+    "supervisor_name", "spu_code", "spu_name", "stock_qty", "evidence_file_id", "evidence_file_url",
     "evidence_file_name", "evidence_uploaded_at", "created_at", "updated_at",
 ]
 
@@ -38,8 +38,8 @@ class TransactionRecord:
     distributor_name: str
     region: str
     supervisor_name: str
-    sku_code: str
-    sku_name: str
+    spu_code: str
+    spu_name: str
     stock_qty: int
     evidence_file_id: str | None
     evidence_file_url: str | None
@@ -61,8 +61,8 @@ def create_table_sql(fqn: str) -> str:
   distributor_name STRING,
   region STRING,
   supervisor_name STRING,
-  sku_code STRING NOT NULL,
-  sku_name STRING,
+  spu_code STRING NOT NULL,
+  spu_name STRING,
   stock_qty INT64 NOT NULL,
   evidence_file_id STRING,
   evidence_file_url STRING,
@@ -72,7 +72,7 @@ def create_table_sql(fqn: str) -> str:
   updated_at TIMESTAMP NOT NULL
 )
 PARTITION BY tanggal_stock
-CLUSTER BY distributor_code, sku_code"""
+CLUSTER BY distributor_code, spu_code"""
 
 
 def _struct_param(rec: TransactionRecord) -> bigquery.StructQueryParameter:
@@ -85,8 +85,8 @@ def _struct_param(rec: TransactionRecord) -> bigquery.StructQueryParameter:
         scalar("distributor_name", "STRING", rec.distributor_name),
         scalar("region", "STRING", rec.region),
         scalar("supervisor_name", "STRING", rec.supervisor_name),
-        scalar("sku_code", "STRING", rec.sku_code),
-        scalar("sku_name", "STRING", rec.sku_name),
+        scalar("spu_code", "STRING", rec.spu_code),
+        scalar("spu_name", "STRING", rec.spu_name),
         scalar("stock_qty", "INT64", rec.stock_qty),
         scalar("has_new_evidence", "BOOL", rec.has_new_evidence),
         scalar("evidence_file_id", "STRING", rec.evidence_file_id),
@@ -108,27 +108,27 @@ class BigQueryStore:
     def select_existing_sql(self) -> str:
         return (
             f"SELECT {', '.join(COLUMNS)} FROM `{self.fqn}` "
-            "WHERE tanggal_stock = @tanggal AND distributor_code = @distributor_code ORDER BY sku_code"
+            "WHERE tanggal_stock = @tanggal AND distributor_code = @distributor_code ORDER BY spu_code"
         )
 
     def select_by_ids_sql(self) -> str:
         return (
             f"SELECT {', '.join(COLUMNS)} FROM `{self.fqn}` "
-            "WHERE transaction_id IN UNNEST(@ids) ORDER BY tanggal_stock, distributor_code, sku_code"
+            "WHERE transaction_id IN UNNEST(@ids) ORDER BY tanggal_stock, distributor_code, spu_code"
         )
 
     def select_by_range_sql(self) -> str:
         return (
             f"SELECT {', '.join(COLUMNS)} FROM `{self.fqn}` "
             "WHERE tanggal_stock BETWEEN @mulai AND @selesai "
-            "ORDER BY tanggal_stock, distributor_code, sku_code"
+            "ORDER BY tanggal_stock, distributor_code, spu_code"
         )
 
     def duplicates_sql(self) -> str:
         return (
-            f"SELECT sku_code, COUNT(*) AS n FROM `{self.fqn}` "
+            f"SELECT spu_code, COUNT(*) AS n FROM `{self.fqn}` "
             "WHERE tanggal_stock = @tanggal AND distributor_code = @distributor_code "
-            "GROUP BY sku_code HAVING COUNT(*) > 1"
+            "GROUP BY spu_code HAVING COUNT(*) > 1"
         )
 
     def select_previous_sql(self) -> str:
@@ -138,7 +138,7 @@ class BigQueryStore:
             "WHERE distributor_code = @distributor_code AND tanggal_stock = ("
             f"SELECT MAX(tanggal_stock) FROM `{self.fqn}` "
             "WHERE distributor_code = @distributor_code AND tanggal_stock < @tanggal) "
-            "ORDER BY sku_code"
+            "ORDER BY spu_code"
         )
 
     def merge_sql(self) -> str:
@@ -146,12 +146,12 @@ class BigQueryStore:
         src_cols = ", ".join(f"S.{c}" for c in COLUMNS)
         return f"""MERGE `{self.fqn}` T
 USING (SELECT * FROM UNNEST(@rows)) S
-ON T.tanggal_stock = S.tanggal_stock AND T.distributor_code = S.distributor_code AND T.sku_code = S.sku_code
+ON T.tanggal_stock = S.tanggal_stock AND T.distributor_code = S.distributor_code AND T.spu_code = S.spu_code
 WHEN MATCHED THEN UPDATE SET
   distributor_name = S.distributor_name,
   region = S.region,
   supervisor_name = S.supervisor_name,
-  sku_name = S.sku_name,
+  spu_name = S.spu_name,
   stock_qty = S.stock_qty,
   evidence_file_id = IF(S.has_new_evidence, S.evidence_file_id, T.evidence_file_id),
   evidence_file_url = IF(S.has_new_evidence, S.evidence_file_url, T.evidence_file_url),
@@ -199,14 +199,14 @@ WHEN NOT MATCHED THEN INSERT ({cols})
             bigquery.ScalarQueryParameter("tanggal", "DATE", tanggal_stock),
             bigquery.ScalarQueryParameter("distributor_code", "STRING", distributor_code),
         ])
-        return [r["sku_code"] for r in rows]
+        return [r["spu_code"] for r in rows]
 
     def upsert(self, records: Sequence[TransactionRecord]) -> None:
         if not records:
             return
-        keys = {(r.tanggal_stock, r.distributor_code, r.sku_code) for r in records}
+        keys = {(r.tanggal_stock, r.distributor_code, r.spu_code) for r in records}
         if len(keys) != len(records):
-            raise BigQueryError("Duplikat key (tanggal stock + distributor + SKU) dalam satu submit.")
+            raise BigQueryError("Duplikat key (tanggal stock + distributor + SPU) dalam satu submit.")
         self._run(self.merge_sql(), [
             bigquery.ArrayQueryParameter("rows", "STRUCT", [_struct_param(r) for r in records]),
         ])

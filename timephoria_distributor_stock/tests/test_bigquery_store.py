@@ -35,7 +35,7 @@ class Row(dict):
 def rec(sku="K1", evidence=True):
     return TransactionRecord(
         transaction_id="tx-" + sku, tanggal_stock=date(2026, 10, 23), distributor_code=EVIL,
-        distributor_name=EVIL, region="R", supervisor_name=EVIL, sku_code=sku, sku_name="Name",
+        distributor_name=EVIL, region="R", supervisor_name=EVIL, spu_code=sku, spu_name="Name",
         stock_qty=11, evidence_file_id="fid" if evidence else None,
         evidence_file_url="url" if evidence else None, evidence_file_name="n.jpg" if evidence else None,
         evidence_uploaded_at=NOW if evidence else None, created_at=NOW, updated_at=NOW,
@@ -77,7 +77,7 @@ def test_merge_semantics_and_struct_parameter():
     sql, cfg = client.calls[0]
     assert sql.startswith(f"MERGE `{FQN}` T")
     assert EVIL not in sql and "K1" not in sql
-    assert "ON T.tanggal_stock = S.tanggal_stock AND T.distributor_code = S.distributor_code AND T.sku_code = S.sku_code" in sql
+    assert "ON T.tanggal_stock = S.tanggal_stock AND T.distributor_code = S.distributor_code AND T.spu_code = S.spu_code" in sql
     update = sql.split("WHEN MATCHED THEN UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
     assert "created_at" not in update and "transaction_id" not in update
     assert "updated_at = S.updated_at" in update and "stock_qty = S.stock_qty" in update
@@ -110,4 +110,4 @@ def test_query_failure_wrapped_and_ddl_matches_columns():
         assert f"  {col} " in ddl
     assert "stock_qty INT64 NOT NULL" in ddl and "tanggal_stock DATE NOT NULL" in ddl
     assert "sell_out" not in ddl
-    assert "PARTITION BY tanggal_stock" in ddl and "CLUSTER BY distributor_code, sku_code" in ddl
+    assert "PARTITION BY tanggal_stock" in ddl and "CLUSTER BY distributor_code, spu_code" in ddl

@@ -55,9 +55,13 @@ def backend(monkeypatch, tmp_path):
     monkeypatch.setattr(master_data, "load_master", fake_load)
 
     def fake_ho(gc, sheet_id, worksheet):
+        spus = list(state.get("spu_list") or ["K1", "K2"])
+        names = state.get("spu_names") or {"K1": "Produk Satu", "K2": "Produk Dua"}
         return {
             "url": "https://docs.google.com/spreadsheets/d/sheet/edit?gid=1#gid=1",
             "stocks": state["ho_stocks"],
+            "spus": spus,
+            "spu_names": names,
         }
 
     monkeypatch.setattr(opening_stock, "load_ho_stock", fake_ho)
@@ -106,7 +110,7 @@ def test_page_title_sku_text_placeholder_and_no_initial_errors(backend):
     at = fresh()
     assert not at.exception and not at.error
     assert [t.value for t in at.title] == [PAGE]
-    assert any(s.value == "DAFTAR SKU" for s in at.subheader)
+    assert any(s.value == "DAFTAR SPU" for s in at.subheader)
     assert any(NOTE in m.value for m in at.markdown)
     assert any("Jika ada selisih antara Stok Distributor dan Stok versi Perusahaan" in m.value for m in at.markdown)
     assert any("Data Stock yang dimiliki tim Head Office:** —" in m.value for m in at.markdown)
@@ -147,13 +151,15 @@ def test_dependent_dropdowns_and_sku_rows_have_no_delete(backend):
     assert len([t for t in at.text_input if t.label == "Stock"]) == 2
 
 
-def test_fifteen_sku_rows_follow_the_configured_list(backend):
-    backend.master_state["skus"] = {f"TST{i:06d}": Sku(f"TST{i:06d}", f"Produk {i}") for i in range(1, 16)}
+def test_spu_rows_follow_the_opening_stock_list(backend):
+    codes = [f"GRP{i}" for i in range(1, 7)]
+    backend.master_state["spu_list"] = codes
+    backend.master_state["spu_names"] = {code: f"Grup {i}" for i, code in enumerate(codes, start=1)}
     at = fresh()
-    assert len([t for t in at.text_input if t.label == "Stock"]) == 15
+    assert len([t for t in at.text_input if t.label == "Stock"]) == 6
     assert not [b for b in at.button if b.label in ("Delete", "➕ Tambah SKU")]
     texts = " ".join(m.value for m in at.markdown)
-    assert "**1. TST000001**" in texts and "**15. TST000015**" in texts
+    assert "**1. GRP1**" in texts and "**6. GRP6**" in texts
 
 
 def test_submit_zero_without_photo_and_block_positive_without_photo(backend):
@@ -176,7 +182,7 @@ def test_submit_zero_without_photo_and_block_positive_without_photo(backend):
 def test_submit_with_photo_then_update_and_form_is_not_red(backend):
     at = submit(fill(fresh(), stocks=("5", "0")))
     assert not at.error and len(backend.evidence.uploaded) == 1
-    rows = {r["sku_code"]: r for r in backend.bq_store.rows.values()}
+    rows = {r["spu_code"]: r for r in backend.bq_store.rows.values()}
     assert rows["K1"]["stock_qty"] == 5 and rows["K2"]["stock_qty"] == 0
     at = submit(fill(at, stocks=("8", "1")))
     assert len(backend.bq_store.rows) == 2
@@ -198,12 +204,12 @@ def test_png_rejected_and_required_errors_wait_for_submit(backend):
     assert backend.bq_store.upsert_calls == 0
 
 
-def test_missing_sku_name_warns_and_master_fallback(backend):
-    backend.master_state["skus"] = {"K1": Sku("K1", ""), "K2": Sku("K2", "Produk Dua")}
+def test_missing_spu_name_warns_and_master_fallback(backend):
+    backend.master_state["spu_names"] = {"K1": "", "K2": "Produk Dua"}
     at = fresh()
     assert any("tanpa nama" in w.value for w in at.sidebar.warning)
     assert any("**1. K1**" in m.value for m in at.markdown)
-    backend.master_state["skus"] = SKUS
+    backend.master_state["spu_names"] = {"K1": "Produk Satu", "K2": "Produk Dua"}
     backend.master_state["fail"] = True
     [b for b in at.sidebar.button if b.label == "Muat ulang master"][0].click().run()
     assert any("data terakhir yang valid" in w.value and "penyebab" in w.value for w in at.warning)
@@ -223,7 +229,7 @@ def today():
 def put_row(backend, day, code, sku, stock=2, photo=True, name="Gudang"):
     backend.bq_store.rows[(day, code, sku)] = dict(
         transaction_id=make_transaction_id(day, code, sku), tanggal_stock=day, distributor_code=code,
-        distributor_name=name, region="R1", supervisor_name="Ani", sku_code=sku, sku_name=sku,
+        distributor_name=name, region="R1", supervisor_name="Ani", spu_code=sku, spu_name=sku,
         stock_qty=stock, evidence_file_id=f"{code}-{sku}.jpg" if photo else None,
         evidence_file_url="u" if photo else None, evidence_file_name="n.jpg" if photo else None,
         evidence_uploaded_at=T1 if photo else None, created_at=T1, updated_at=T1,

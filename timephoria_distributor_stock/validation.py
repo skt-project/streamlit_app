@@ -170,7 +170,7 @@ def validate_submission(
                 prev = last_by_sku[ln.sku_code]
                 res.warnings.append(Issue(
                     prev.row_no,
-                    f"SKU {ln.sku_code} dimasukkan lebih dari sekali; baris {ln.row_no} "
+                    f"SPU {ln.sku_code} dimasukkan lebih dari sekali; baris {ln.row_no} "
                     f"(terakhir) yang dipakai, baris ini diabaikan.",
                 ))
             last_by_sku[ln.sku_code] = ln
@@ -178,12 +178,12 @@ def validate_submission(
             no_sku.append(ln)
 
     for ln in no_sku:
-        res.errors.append(Issue(ln.row_no, "SKU wajib dipilih."))
+        res.errors.append(Issue(ln.row_no, "SPU wajib dipilih."))
 
     for ln in sorted(last_by_sku.values(), key=lambda x: x.row_no):
         sku = skus.get(ln.sku_code or "")
         if sku is None:
-            res.errors.append(Issue(ln.row_no, f"SKU '{ln.sku_code}' tidak ada di daftar SKU."))
+            res.errors.append(Issue(ln.row_no, f"SPU '{ln.sku_code}' tidak ada di daftar SPU."))
             continue
         stock, err_st = parse_qty(ln.stock_raw, "Stock")
         if err_st:
@@ -196,7 +196,7 @@ def validate_submission(
         res.lines.append(FinalLine(ln.row_no, sku.code, sku.name, stock, ln.photo))
 
     if not res.lines and not any(i.row_no for i in res.errors):
-        res.errors.append(Issue(None, "Tambahkan minimal satu SKU."))
+        res.errors.append(Issue(None, "Tambahkan minimal satu SPU."))
 
     res.total_stock = sum(ln.stock_qty for ln in res.lines)
     res.photo_count = sum(1 for ln in last_by_sku.values() if ln.photo)
@@ -206,7 +206,7 @@ def validate_submission(
             if ln.stock_qty > 0 and ln.photo is None:
                 res.warnings.append(Issue(
                     ln.row_no,
-                    f"PERINGATAN: SKU {ln.sku_code} Stock {ln.stock_qty} tidak memiliki foto evidence.",
+                    f"PERINGATAN: SPU {ln.sku_code} Stock {ln.stock_qty} tidak memiliki foto evidence.",
                 ))
 
     hard = [e for e in res.errors if e.row_no and not e.message.endswith("wajib diisi.")]

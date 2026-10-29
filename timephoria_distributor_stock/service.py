@@ -32,8 +32,8 @@ class SubmissionFailed(Exception):
 @dataclass
 class SavedLine:
     transaction_id: str
-    sku_code: str
-    sku_name: str
+    spu_code: str
+    spu_name: str
     stock_qty: int
     action: str
     evidence_url: str | None
@@ -58,7 +58,7 @@ class SubmitResult:
 
 
 def plan_actions(lines: Sequence[FinalLine], existing: Sequence[Mapping]) -> dict[str, str]:
-    have = {str(r["sku_code"]) for r in existing}
+    have = {str(r["spu_code"]) for r in existing}
     return {ln.sku_code: ("UPDATE" if ln.sku_code in have else "INSERT") for ln in lines}
 
 
@@ -74,7 +74,7 @@ class SalesSubmitter:
         lines: Sequence[FinalLine],
     ) -> SubmitResult:
         if not lines:
-            raise SubmissionRejected([Issue(None, "Tidak ada SKU untuk disimpan.")])
+            raise SubmissionRejected([Issue(None, "Tidak ada SPU untuk disimpan.")])
         if sum(ln.stock_qty for ln in lines) > 0 and not any(ln.photo for ln in lines):
             raise SubmissionRejected([Issue(None, PHOTO_REQUIRED_MSG)])
 
@@ -84,7 +84,7 @@ class SalesSubmitter:
             existing = self.bq.fetch_existing(tanggal_stock, distributor.distributor_code)
         except Exception as exc:
             raise SubmissionFailed(f"Gagal membaca stok lama dari BigQuery: {exc}") from exc
-        existing_by_sku = {str(r["sku_code"]): r for r in existing}
+        existing_by_code = {str(r["spu_code"]): r for r in existing}
         actions = plan_actions(lines, existing)
 
         uploaded: dict[str, object] = {}
@@ -96,7 +96,7 @@ class SalesSubmitter:
                         data=ln.photo, tanggal_stock=tanggal_stock,
                         distributor_code=distributor.distributor_code,
                         distributor_name=distributor.distributor_name,
-                        sku_code=ln.sku_code, sku_name=ln.sku_name,
+                        spu_code=ln.sku_code, spu_name=ln.sku_name,
                         supervisor_name=supervisor, transaction_id=tx,
                     )
         except Exception as exc:
@@ -106,7 +106,7 @@ class SalesSubmitter:
         records = []
         for ln in lines:
             ev = uploaded.get(ln.sku_code)
-            old = existing_by_sku.get(ln.sku_code)
+            old = existing_by_code.get(ln.sku_code)
             records.append(TransactionRecord(
                 transaction_id=make_transaction_id(tanggal_stock, distributor.distributor_code, ln.sku_code),
                 tanggal_stock=tanggal_stock,
@@ -114,7 +114,7 @@ class SalesSubmitter:
                 distributor_name=distributor.distributor_name,
                 region=distributor.region,
                 supervisor_name=supervisor,
-                sku_code=ln.sku_code, sku_name=ln.sku_name, stock_qty=ln.stock_qty,
+                spu_code=ln.sku_code, spu_name=ln.sku_name, stock_qty=ln.stock_qty,
                 evidence_file_id=getattr(ev, "file_id", None),
                 evidence_file_url=getattr(ev, "url", None),
                 evidence_file_name=getattr(ev, "name", None),
@@ -152,15 +152,15 @@ class SalesSubmitter:
             dups = self.bq.find_duplicate_keys(tanggal_stock, distributor.distributor_code)
             if dups:
                 result.warnings.append(
-                    f"Terdeteksi duplikat key di BigQuery untuk SKU: {', '.join(dups)}. Hubungi admin data.")
+                    f"Terdeteksi duplikat key di BigQuery untuk SPU: {', '.join(dups)}. Hubungi admin data.")
         except Exception:
             log.warning("Pengecekan duplikat gagal", exc_info=True)
 
         result.lines = [
             SavedLine(
-                transaction_id=r.transaction_id, sku_code=r.sku_code, sku_name=r.sku_name,
-                stock_qty=r.stock_qty, action=actions[r.sku_code],
-                evidence_url=r.evidence_file_url or (existing_by_sku.get(r.sku_code) or {}).get("evidence_file_url"),
+                transaction_id=r.transaction_id, spu_code=r.spu_code, spu_name=r.spu_name,
+                stock_qty=r.stock_qty, action=actions[r.spu_code],
+                evidence_url=r.evidence_file_url or (existing_by_code.get(r.spu_code) or {}).get("evidence_file_url"),
             )
             for r in records
         ]

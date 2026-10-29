@@ -60,12 +60,12 @@ class GcsEvidence:
 
     def upload(
         self, *, data: bytes, tanggal_stock: date, distributor_code: str, distributor_name: str,
-        sku_code: str, sku_name: str, supervisor_name: str, transaction_id: str,
+        spu_code: str, spu_name: str, supervisor_name: str, transaction_id: str,
     ) -> EvidenceFile:
         uploaded_at = datetime.now(timezone.utc)
         stamp = to_wib(uploaded_at).strftime("%Y%m%d%H%M%S")
         name = safe_name(
-            f"{tanggal_stock.isoformat()}_{distributor_code}_{sku_code}_{transaction_id}_{stamp}"
+            f"{tanggal_stock.isoformat()}_{distributor_code}_{spu_code}_{transaction_id}_{stamp}"
         ) + ".jpg"
         folder = (
             f"{self.root}/{tanggal_stock.strftime('%Y-%m')}/"
@@ -76,8 +76,8 @@ class GcsEvidence:
         blob.metadata = {
             "distributor_code": distributor_code,
             "distributor_name": distributor_name,
-            "sku_code": sku_code,
-            "sku_name": sku_name,
+            "spu_code": spu_code,
+            "spu_name": spu_name,
             "tanggal_stock": tanggal_stock.isoformat(),
             "supervisor_name": supervisor_name,
             "uploaded_at": to_wib(uploaded_at).strftime("%Y-%m-%d %H:%M:%S") + " WIB",

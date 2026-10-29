@@ -15,7 +15,7 @@ Aplikasi ini saudara dari Facerinna Submission Program. Tabel, spreadsheet, dan 
 
 ## Aturan utama
 
-**Form.** Urutannya: **Region** → **Nama Supervisor** → **Distributor** → Tanggal Stock → daftar SKU. Daftar SKU langsung berisi semua kode di secrets `[app].sku_codes` (urutan secrets). Tidak ada tombol tambah atau hapus baris. Nama produk diambil dari `master_product` apa adanya, tanpa akhiran "(Tester)". Kode yang tidak ketemu tetap tampil dengan nama kosong dan peringatan di sidebar.
+**Form.** Urutannya: **Region** → **Nama Supervisor** → **Distributor** → Tanggal Stock → daftar SPU. Daftar SPU diambil dari tab `Opening Stock` (kode dan nama SPU). Tidak ada tombol tambah atau hapus baris.
 
 **Pembatasan Region → Supervisor → Distributor bersifat lunak** (tanpa PIN). Ini memudahkan pengisian, bukan pengamanan akses.
 
@@ -29,9 +29,9 @@ Aplikasi ini saudara dari Facerinna Submission Program. Tabel, spreadsheet, dan 
 
 Waktu yang terlihat user, di sheet, dan di metadata foto memakai **WIB** (`YYYY-MM-DD HH:MM:SS WIB`, UTC+7, tanpa DST). BigQuery menyimpan TIMESTAMP dalam UTC.
 
-**Upsert.** Key = `tanggal_stock + distributor_code + sku_code`. `transaction_id` = UUID5 deterministik dari key itu (namespace di kode, jangan diubah). Submit ulang pada key yang sama menimpa: `created_at` dipertahankan, `updated_at` baru, supervisor / stock / foto terbaru menggantikan. Tidak ada mode revisi terpisah dan tidak ada penghapusan baris lain. SKU yang sama diketik dua kali dalam satu submit: baris terakhir yang dipakai.
+**Upsert.** Key = `tanggal_stock + distributor_code + spu_code`. `transaction_id` = UUID5 deterministik dari key itu (namespace di kode, jangan diubah). Submit ulang pada key yang sama menimpa: `created_at` dipertahankan, `updated_at` baru, supervisor / stock / foto terbaru menggantikan. Tidak ada mode revisi terpisah dan tidak ada penghapusan baris lain.
 
-**Stock.** Satu angka `stock_qty` per SKU: bilangan bulat ≥ 0 (nol boleh). Desimal, negatif, kosong, huruf, dan angka di atas INT64 ditolak. Pesan error menyebut "Stock". Di atas daftar isian ada catatan tebal: bila stok distributor berbeda dari stok versi perusahaan, perusahaan akan follow-up. Di atas tiap isian Stock tampil angka **Opening stock Oct** dari tab `Opening Stock` pada spreadsheet output (dicocokkan lewat nama distributor). Tautan ke spreadsheet tidak ditampilkan.
+**Stock.** Satu angka `stock_qty` per SPU: bilangan bulat ≥ 0 (nol boleh). Desimal, negatif, kosong, huruf, dan angka di atas INT64 ditolak. Pesan error menyebut "Stock". Di atas daftar isian ada catatan tebal: bila stok distributor berbeda dari stok versi perusahaan, perusahaan akan follow-up. Di atas tiap isian Stock tampil angka **Ending Stock Oct** untuk SPU itu, dari tab `Opening Stock`, dicocokkan lewat nama distributor. Tautan ke spreadsheet tidak ditampilkan. Hasil input di BigQuery dan tab `Distributor Stock` memakai kolom `spu_code` dan `spu_name`.
 
 **Foto.**
 
@@ -53,7 +53,7 @@ Login dari `[admin]` di secrets. Tanpa bagian itu tab menampilkan info bahwa adm
 
 - Rentang tanggal stock, default 7 hari terakhir, maksimal 92 hari.
 - Satu kunjungan = satu tanggal stock yang punya data untuk distributor itu.
-- **Lengkap** = pada minimal satu tanggal dalam rentang, semua SKU terisi, dan bila total stock tanggal itu > 0 ada minimal satu foto. Total 0 tidak membutuhkan foto.
+- **Lengkap** = pada minimal satu tanggal dalam rentang, semua SPU terisi, dan bila total stock tanggal itu > 0 ada minimal satu foto. Total 0 tidak membutuhkan foto.
 - **Belum lengkap** = ada data tetapi tidak ada tanggal yang lengkap. **Belum submit** = tidak ada data di rentang.
 - Perbandingan dengan submit sebelumnya (tanggal terakhir sebelum tanggal yang dipilih, untuk distributor yang sama, boleh di luar rentang). Sebelumnya 0 atau tidak ada ditampilkan sebagai "baru". Penanda bila persentase perubahan melewati ambang (default 50%).
 - Galeri foto terbaru per key, 8 foto per halaman, 2 kolom.
@@ -84,7 +84,7 @@ Setiap pembacaan yang berhasil disimpan sebagai cadangan (memori + `.cache/maste
 
 1. Aktifkan BigQuery API, Cloud Storage API, dan Google Sheets API.
 2. Pakai service account yang sama dengan aplikasi saudara (`YOUR_SERVICE_ACCOUNT_EMAIL`): BigQuery Job User + tulis ke dataset `gt_schema`, Storage Object Creator dan Object Viewer pada bucket evidence (bukan penghapus).
-3. Tabel `timephoria_smart_coverage_tester_feedback` dipartisi `tanggal_stock` dan di-cluster `distributor_code, sku_code`. DDL ada di `bigquery_store.create_table_sql`. Semua query memakai parameter; hanya nama tabel dari secrets yang di-interpolasi, setelah lolos validasi karakter.
+3. Tabel `timephoria_smart_coverage_tester_feedback` dipartisi `tanggal_stock` dan di-cluster `distributor_code, spu_code`. DDL ada di `bigquery_store.create_table_sql`. Semua query memakai parameter; hanya nama tabel dari secrets yang di-interpolasi, setelah lolos validasi karakter.
 4. Buat spreadsheet output baru dan share sebagai **Editor** ke service account. Tab `Distributor Stock` dibuat aplikasi (header 15 kolom, freeze 1 baris). Header yang tidak cocok membuat aplikasi menolak menulis.
 5. Salin `.streamlit/secrets.toml.example` menjadi `.streamlit/secrets.toml`. Di Cloud, `private_key` tetap satu baris dengan `\n`.
 

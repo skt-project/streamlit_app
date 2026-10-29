@@ -18,9 +18,9 @@ SKUS = {"TST000001": Sku("TST000001", "A"), "TST000002": Sku("TST000002", "B")}
 
 def row(day, code, sku, stock, photo=False, updated=T0):
     return {
-        "tanggal_stock": day, "distributor_code": code, "sku_code": sku, "stock_qty": stock,
+        "tanggal_stock": day, "distributor_code": code, "spu_code": sku, "stock_qty": stock,
         "evidence_file_id": f"{code}.jpg" if photo else None, "supervisor_name": "Ani", "updated_at": updated,
-        "sku_name": sku,
+        "spu_name": sku,
     }
 
 
@@ -57,7 +57,7 @@ def test_unknown_rows_ignored_and_evidence_sorted_once():
         row(D1, "D1", "TST000001", 1, photo=True),
     ]
     items = evidence_items(DISTS, SKUS, rows)
-    assert [(i.distributor_code, i.tanggal_stock, i.sku_code) for i in items] == [
+    assert [(i.distributor_code, i.tanggal_stock, i.spu_code) for i in items] == [
         ("D1", D1, "TST000001"), ("D1", D2, "TST000001"), ("D1", D2, "TST000009"),
     ]
 
