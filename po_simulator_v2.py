@@ -104,6 +104,29 @@ def _insert_supply_control(df: pd.DataFrame):
     job.result()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_actual_so(distributor_code: str) -> pd.DataFrame:
+    """Fetch MTD actual SO per SKU untuk distributor tertentu di bulan berjalan."""
+    client = get_bq_client()
+    query = f"""
+        SELECT
+            UPPER(TRIM(distributor_name)) AS distributor_name,
+            UPPER(TRIM(sku))              AS sku,
+            SUM(sell_out_qty)             AS actual_so_mtd
+        FROM `skintific-data-warehouse.rsa.si_st_so_targetsell_out_qty_data_all`
+    WHERE UPPER(TRIM(distributor_code)) = '{distributor_code.upper()}'
+      AND DATE_TRUNC(calendar_date, MONTH) = DATE_TRUNC(CURRENT_DATE(), MONTH)
+    GROUP BY
+        UPPER(TRIM(distributor_code)),
+        UPPER(TRIM(sku))
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.warning(f"⚠️ Gagal fetch actual SO ({distributor_code}): {e}")
+        return pd.DataFrame(columns=["distributor_name", "sku", "actual_so_mtd"])
+
+    
 def _filter_already_saved(df: pd.DataFrame) -> pd.DataFrame:
     """Buang baris yang kombinasi file_name+sku+po_qty-nya sudah pernah ter-insert di BigQuery."""
     if df.empty:
@@ -249,10 +272,11 @@ def get_stock_data(distributor_name: str, sku_list) -> pd.DataFrame:
     table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
     sku_list_str = ", ".join([f"'{sku}'" for sku in sku_list])
     query = f"""
-    SELECT UPPER(region) AS region, UPPER(distributor) AS distributor, sku,
-        assortment, supply_control_status_gt, total_stock,
-        buffer_plan_by_lm_qty_adj, avg_weekly_st_lm_qty,
-        buffer_plan_by_lm_val_adj, remaining_allocation_qty_region, woi_end_of_month_by_lm
+SELECT UPPER(region) AS region, UPPER(distributor) AS distributor,
+    distributor_code, sku,
+    assortment, supply_control_status_gt, total_stock,
+    buffer_plan_by_lm_qty_adj, avg_weekly_st_lm_qty,
+    buffer_plan_by_lm_val_adj, remaining_allocation_qty_region, woi_end_of_month_by_lm
     FROM `{table_id}`
     WHERE UPPER(distributor) = '{distributor_name}'
     AND (UPPER(sku) IN ({sku_list_str}) OR buffer_plan_by_lm_qty_adj > 0)
@@ -262,29 +286,71 @@ def get_stock_data(distributor_name: str, sku_list) -> pd.DataFrame:
     except Exception as e:
         st.error(f"Error fetching stock data: {e}")
         return pd.DataFrame()
+TARGET_SO_SHEET_URL = "https://docs.google.com/spreadsheets/d/1VZLM_H3QJCvLdAYioXh2Ap1wykf85gMVVrzbMJFm4eE/edit?gid=1652651155#gid=1652651155"
+TARGET_SO_DATA_TYPE = "SO"   # CEK nilai data_type di sheet
 
-TARGET_SO_TABLE = "skintific-data-warehouse.gt_schema.target_q3_building_block"
-TARGET_SO_DATA_TYPE = "SO"   # CEK nilai data_type di tabel
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def get_target_so(distributor_name: str, month: int) -> pd.DataFrame:
-    client = get_bq_client()
-    query = f"""
-    SELECT UPPER(TRIM(sku)) AS sku, SUM(qty_target) AS target_so
-    FROM `{TARGET_SO_TABLE}`
-    WHERE UPPER(TRIM(distributor)) = '{distributor_name.upper()}'
-      AND month = {int(month)}
-      AND UPPER(data_type) = '{TARGET_SO_DATA_TYPE}'
-    GROUP BY 1
-    """
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_target_so_raw() -> pd.DataFrame:
+    """Load seluruh sheet Target SO sekali, lalu di-cache. Filtering dilakukan belakangan di pandas."""
+    csv_url, _ = gsheet_to_csv_url(TARGET_SO_SHEET_URL)
+    if csv_url is None:
+        st.error("Link Target SO tidak valid.")
+        return pd.DataFrame()
     try:
-        return client.query(query).to_dataframe()
+        req = urllib.request.Request(csv_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+        df = pd.read_csv(io.BytesIO(raw), dtype=str)
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        return df
     except Exception as e:
-        st.error(f"Error fetching Target SO: {e}")
-        return pd.DataFrame(columns=["sku", "target_so"])
+        st.error(f"Error fetching Target SO sheet: {e}")
+        return pd.DataFrame()
 
 
-def apply_oos_sellout_logic(df: pd.DataFrame, target_df: pd.DataFrame) -> pd.DataFrame:
+def get_target_so(distributor_code: str, month: int) -> pd.DataFrame:
+    df = _load_target_so_raw()
+    if df.empty:
+        return pd.DataFrame(columns=["distributor_code", "sku", "target_so"])
+
+    required_cols = {"distributor_code", "sku", "qty_target", "month", "data_type"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        st.error(f"Kolom berikut tidak ditemukan di sheet Target SO: {missing}. Kolom tersedia: {list(df.columns)}")
+        return pd.DataFrame(columns=["distributor_code", "sku", "target_so"])
+
+    df["distributor_code"] = df["distributor_code"].astype(str).str.strip().str.upper()
+    df["sku"] = df["sku"].astype(str).str.strip().str.upper()
+    df["data_type"] = df["data_type"].astype(str).str.strip().str.upper()
+    df["month"] = pd.to_numeric(df["month"], errors="coerce")
+    df["qty_target"] = pd.to_numeric(df["qty_target"], errors="coerce").fillna(0)
+
+    filtered = df[
+        (df["distributor_code"] == str(distributor_code).strip().upper())
+        & (df["month"] == int(month))
+        & (df["data_type"] == TARGET_SO_DATA_TYPE.upper())
+    ].copy()
+
+    if filtered.empty:
+        return pd.DataFrame(columns=["distributor_code", "sku", "target_so"])
+
+    result = (
+        filtered.groupby(["distributor_code", "sku"], as_index=False)["qty_target"]
+        .sum()
+        .rename(columns={"qty_target": "target_so"})
+    )
+    return result
+
+_STOP_SC = {"STOP PO", "OOS", "DISCONTINUED", "UNAVAILABLE"}
+
+def apply_oos_sellout_logic(
+    df: pd.DataFrame,
+    target_df: pd.DataFrame,
+    actual_so_df: pd.DataFrame | None = None,   # <-- param baru
+) -> pd.DataFrame:
+
+    # --- Target SO ---
     if target_df is not None and not target_df.empty:
         tmap = target_df.set_index("sku")["target_so"].to_dict()
         df["target_so"] = df["Customer SKU Code"].map(tmap)
@@ -292,20 +358,44 @@ def apply_oos_sellout_logic(df: pd.DataFrame, target_df: pd.DataFrame) -> pd.Dat
         df["target_so"] = 0
     df["target_so"] = pd.to_numeric(df["target_so"], errors="coerce").fillna(0)
 
+    # --- Actual SO MTD (baru): kurangi target_so dg actual yg sdh terjadi ---
+    if actual_so_df is not None and not actual_so_df.empty:
+        amap = actual_so_df.set_index("sku")["actual_so_mtd"].to_dict()
+        df["actual_so_mtd"] = df["Customer SKU Code"].map(amap)
+    else:
+        df["actual_so_mtd"] = 0
+    df["actual_so_mtd"] = pd.to_numeric(df["actual_so_mtd"], errors="coerce").fillna(0)
+
+    # net_target = sisa target yg belum terpenuhi
+    df["net_target_so"] = np.maximum(df["target_so"] - df["actual_so_mtd"], 0)
+
+    # --- Base series ---
     sugg_init = pd.to_numeric(df["buffer_plan_by_lm_qty_adj"], errors="coerce").fillna(0)
     stock     = pd.to_numeric(df["total_stock"], errors="coerce").fillna(0)
     po        = pd.to_numeric(df["PO Qty"], errors="coerce").fillna(0)
     alloc     = pd.to_numeric(df["remaining_allocation_qty_region"], errors="coerce").fillna(0)
-    is_normal = df["supply_control_status_gt"].fillna("").astype(str).str.upper().eq("NORMAL")
 
-    gap  = df["target_so"] - stock
+    sc_upper  = df["supply_control_status_gt"].fillna("").astype(str).str.upper()
+    is_normal = sc_upper.eq("NORMAL")
+    is_stop   = sc_upper.isin(_STOP_SC)   # <-- flag baru: STOP PO / OOS / dst
+
+    # --- Gap pakai net_target (bukan target_so mentah) ---
+    gap  = df["net_target_so"] - stock
     calc = np.maximum(sugg_init, gap)
     calc = np.where(alloc > 0, np.minimum(calc, alloc), calc)
     final = np.where(calc > 0, calc, po)
 
     df["target_so_minus_stock"] = gap
-    df["sugg_qty_so"] = np.where(is_normal, final, sugg_init)
-    df["sugg_qty_final"] = np.maximum(df["sugg_qty_so"], sugg_init)
+
+    # Kalau STOP PO/OOS → pakai po_qty awal (jangan suggest qty apapun)
+    # Kalau NORMAL       → pakai final (target-based)
+    # Selain itu (non-normal non-stop) → pakai sugg_init
+    df["sugg_qty_so"] = np.select(
+        [is_stop, is_normal],
+        [po,      final],
+        default=sugg_init,
+    )
+    df["sugg_qty_final"] = np.where(is_stop, po, np.maximum(df["sugg_qty_so"], sugg_init))
     return df
 
 
@@ -556,7 +646,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
                     if val == "SAFE MOQ": cell.font = moq_safe_font
                     elif val == "Under MOQ": cell.font = moq_under_font
 #------- END --------------
-                if col_name in ["Remaining Allocation (By Region)", "Suggested PO buffer", "Suggested PO Value"] and npd_sku_list:
+                if col_name in ["Remaining Allocation (By Region)","Suggested PO Value", "Suggested QTY Final"] and npd_sku_list:
                     sku_ci = col_map.get("SKU")
                     if sku_ci is not None:
                         sku_val = ws.cell(row=r_idx, column=sku_ci + 1).value
@@ -907,8 +997,33 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         res_df.loc[zv, "buffer_plan_by_lm_val_adj"] = res_df.loc[zv, "SIP"] * res_df.loc[zv, "buffer_plan_by_lm_qty_adj"]
 
         # --- OOS Sell Out logic ---
-        _target_df = get_target_so(dist_name, datetime.now().month)
-        res_df = apply_oos_sellout_logic(res_df, _target_df)
+ 
+        _dist_code = ""
+        if "distributor_code" in stock_df.columns:
+            _codes = stock_df["distributor_code"].dropna().unique()
+            if len(_codes) > 0:
+                _dist_code = str(_codes[0]).strip().upper()
+
+        if not _dist_code:
+            st.warning(f"⚠️ distributor_code tidak ditemukan untuk {dist_name}, target SO dilewati.")
+
+        _target_df    = get_target_so(_dist_code, datetime.now().month) if _dist_code else pd.DataFrame()
+        _actual_so_df = get_actual_so(_dist_code) if _dist_code else pd.DataFrame()
+        res_df = apply_oos_sellout_logic(res_df, _target_df, _actual_so_df)
+
+
+        with st.expander(f"🔍 Debug Target SO — {dist_name}", expanded=False):
+            st.write("distributor_code dipakai (dari stock_analysis):", _dist_code)
+            st.write("month dipakai:", datetime.now().month)
+            st.write("Jumlah baris hasil target_so:", len(_target_df))
+            if not _target_df.empty:
+                st.dataframe(_target_df)
+            else:
+                st.warning("Query kosong — cek apakah distributor_code ini memang ada di tabel target_q3_building_block dengan month & data_type yang sesuai.")
+
+        res_df = apply_oos_sellout_logic(res_df, _target_df, _actual_so_df)
+
+  
         # --------------------------
 
         bp = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
@@ -1135,15 +1250,24 @@ def fetch_pi_anomaly(distributor_names: tuple) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _update_pi_validation(distributor_name: str, sku: str, validation_text: str) -> bool:
-    """UPDATE kolom validation_by_rsa di BQ untuk pasangan distributor+sku yg anomali."""
+def _update_pi_validation(distributor_name: str, sku: str, validation_text: str, ref_no: str = "") -> bool:
+    """UPDATE validation_by_rsa, dan jika ref_no diisi, overwrite juga reference_cust_order_no
+    untuk SEMUA baris mentah pasangan distributor+sku ini (menyatukan jadi 1 ref yang valid)."""
     client = get_bq_client()
     safe_val = validation_text.replace("\\", "\\\\").replace("'", "\\'")
     safe_dist = distributor_name.replace("'", "\\'")
     safe_sku  = sku.replace("'", "\\'")
+
+    set_clauses = [f"validation_by_rsa = '{safe_val}'"]
+    ref_no = str(ref_no or "").strip()
+    if ref_no:
+        safe_ref = ref_no.replace("\\", "\\\\").replace("'", "\\'")
+        set_clauses.append(f"reference_cust_order_no = '{safe_ref}'")
+    set_sql = ", ".join(set_clauses)
+
     query = f"""
         UPDATE `{TEST_TABLE}`
-        SET validation_by_rsa = '{safe_val}'
+        SET {set_sql}
         WHERE UPPER(distributor_name) = '{safe_dist}'
           AND UPPER(sku)              = '{safe_sku}'
           AND reference_cust_order_no IS NOT NULL
@@ -1572,31 +1696,6 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     all_pi_df  = fetch_pi_all(_pi_dist_tuple)
     anomaly_df = fetch_pi_anomaly(_pi_dist_tuple)
 
-    bq_ref_map = {}  # selalu init di sini dulu
-    if not all_pi_df.empty:
-        for _, r in all_pi_df.iterrows():
-            bq_ref_map[(str(r["distributor_name"]).upper(), str(r["sku"]).upper())] = r
-
-    # preview tabel anomali (kalau ada dari BQ)
-    if not all_pi_df.empty:
-        _prev = all_pi_df[["distributor_name","sku","cnt_ref","ref_list","validation_by_rsa"]].copy()
-        _prev = _prev.rename(columns={
-            "distributor_name":  "Distributor",
-            "sku":               "SKU",
-            "cnt_ref":           "Jumlah Ref",
-            "ref_list":          "Reference Order No",
-            "validation_by_rsa": "Validasi RSA (existing)",
-        })
-        def _color_ref(val):
-            if isinstance(val, (int, float)) and val > 1:
-                return "background-color:#FFF3CD;color:#856404;font-weight:700;"
-            return ""
-        st.dataframe(
-            _prev.style.applymap(_color_ref, subset=["Jumlah Ref"]),
-            use_container_width=True,
-            hide_index=True,
-        )
-
     if not anomaly_df.empty:
         st.warning(
             f"⚠️ **{len(anomaly_df)} SKU** memiliki lebih dari 1 `reference_cust_order_no` "
@@ -1605,48 +1704,95 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     else:
         st.success("Semua SKU hanya memiliki 1 Reference Order No.")
 
-    st.caption("Isi Reference Order No yang valid dan keterangan validasi RSA, lalu Save. Hanya SKU anomali (>1 ref) yang perlu diisi.")
+    #st.caption("Isi Reference Order No yang valid dan keterangan validasi RSA, lalu Save. Hanya SKU anomali (>1 ref) yang perlu diisi.")
 
     # ── Build editable table dari anomaly saja ──
     if anomaly_df.empty:
         st.info("Tidak ada SKU yang perlu divalidasi.")
     else:
-        _edit_rows = []
-        for _, anom_row in anomaly_df.iterrows():
+        st.caption(f"{len(anomaly_df)} SKU perlu divalidasi — pilih ref yang benar dari dropdown masing-masing baris.")
+
+        st.markdown("""
+        <style>
+        div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; }
+        div[data-testid="stVerticalBlockBorderWrapper"] { padding: 0 !important; }
+        .pi-row-text { font-size: 0.78rem; line-height: 1.1; margin: 0; padding-top: 0.5rem; }
+        .pi-row-header { font-size: 0.78rem; font-weight: 700; margin: 0; }
+        div[data-baseweb="select"] { font-size: 0.78rem; min-height: 2rem; }
+        div[data-baseweb="select"] > div { min-height: 2rem; padding-top: 0.1rem; padding-bottom: 0.1rem; }
+        .stTextInput input { font-size: 0.78rem; padding: 0.25rem 0.5rem; height: 2rem; }
+        </style>
+        """, unsafe_allow_html=True)
+
+        _NOTE_OPTIONS = ["Mapping PI by RSA", "Others"]
+        _col_widths = [2, 1.3, 0.8, 2, 1.6, 2]
+
+        # Header
+        h1, h2, h3, h4, h5, h6 = st.columns(_col_widths, gap="small")
+        h1.markdown("<p class='pi-row-header'>Distributor</p>", unsafe_allow_html=True)
+        h2.markdown("<p class='pi-row-header'>SKU</p>", unsafe_allow_html=True)
+        h3.markdown("<p class='pi-row-header'>Jumlah Ref</p>", unsafe_allow_html=True)
+        h4.markdown("<p class='pi-row-header'>Reference Order No ✏️</p>", unsafe_allow_html=True)
+        h5.markdown("<p class='pi-row-header'>Validation by RSA ✏️</p>", unsafe_allow_html=True)
+        h6.markdown("<p class='pi-row-header'>Catatan (jika Others)</p>", unsafe_allow_html=True)
+
+        _pending_rows = []
+        for i, (_, anom_row) in enumerate(anomaly_df.iterrows()):
             _dist = str(anom_row["distributor_name"]).strip().upper()
             _sku  = str(anom_row["sku"]).strip().upper()
             _raw_refs = str(anom_row.get("ref_list") or "")
             _refs = [r.strip() for r in _raw_refs.split(",") if r.strip()] or [""]
+            _existing_note = str(anom_row.get("validation_by_rsa") or "").strip()
 
-            #------------------------------- STEP LOGIC - SUPPLY CONTROL----------------------------
-            _edit_rows.append({
-                "Distributor":        _dist,
-                "SKU":                _sku,
-                "Jumlah Ref":         int(anom_row.get("cnt_ref", 0)),
-                "Reference Order No": _refs[0],     #notes reference kolom
-                "Semua Ref":          _raw_refs, 
-                "Validation by RSA":  str(anom_row.get("validation_by_rsa") or ""),
+            if _existing_note == "Mapping PI by RSA":
+                _default_choice = "Mapping PI by RSA"
+                _default_manual = ""
+            else:
+                _default_choice = "Others"
+                _default_manual = _existing_note
+
+            c1, c2, c3, c4, c5, c6 = st.columns(_col_widths, gap="small")
+            with c1:
+                st.markdown(f"<p class='pi-row-text'>{_dist}</p>", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"<p class='pi-row-text'>{_sku}</p>", unsafe_allow_html=True)
+            with c3:
+                st.markdown(f"<p class='pi-row-text'>{int(anom_row.get('cnt_ref', 0))}</p>", unsafe_allow_html=True)
+            with c4:
+                ref_pick = st.selectbox(
+                    "ref", options=_refs, index=0,
+                    key=f"pi_ref_{i}_{_dist}_{_sku}",
+                    label_visibility="collapsed",
+                )
+            with c5:
+                choice_pick = st.selectbox(
+                    "note_choice", options=_NOTE_OPTIONS,
+                    index=_NOTE_OPTIONS.index(_default_choice),
+                    key=f"pi_choice_{i}_{_dist}_{_sku}",
+                    label_visibility="collapsed",
+                )
+            with c6:
+                if choice_pick == "Others":
+                    manual_val = st.text_input(
+                        "manual_note", value=_default_manual,
+                        key=f"pi_manual_{i}_{_dist}_{_sku}",
+                        label_visibility="collapsed",
+                        placeholder="Tulis catatan...",
+                    )
+                else:
+                    manual_val = ""
+                    st.markdown("<p class='pi-row-text'>—</p>", unsafe_allow_html=True)
+
+            _final_note = choice_pick if choice_pick != "Others" else manual_val.strip()
+
+            _pending_rows.append({
+                "Distributor": _dist,
+                "SKU": _sku,
+                "Reference Order No": ref_pick,
+                "Validation by RSA": _final_note,
             })
-#--------------------------------------------------------------------------------------------------------------
-        _edit_df = pd.DataFrame(_edit_rows)
-        _edited = st.data_editor(
-            _edit_df,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["Distributor", "SKU", "Jumlah Ref", "Semua Ref"],
-            column_config={
-                "Jumlah Ref": st.column_config.NumberColumn(width="small"),
-                "Reference Order No": st.column_config.TextColumn(
-                    "Reference Order No ✏️", help="Edit ke ref yang valid", width="medium"
-                ),
-                "Validation by RSA": st.column_config.TextColumn(
-                    "Validation by RSA ✏️", help="Catatan validasi RSA", width="large"
-                ),
-                "Semua Ref": st.column_config.TextColumn("Semua Ref (BQ)", width="medium"),
-            },
-            key="pi_editor",
-        )
 
+        st.divider()
         if st.button(
             "💾 Save PI Validation",
             use_container_width=True,
@@ -1654,14 +1800,26 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
             disabled=st.session_state.get("pi_validation_saved", False),
         ):
             _saved, _skipped = 0, 0
-            for _, row in _edited.iterrows():
-                _note = str(row.get("Validation by RSA") or "").strip()
-                if _note:
-                    if _update_pi_validation(row["Distributor"], row["SKU"], _note):
+            for row in _pending_rows:
+                _note = row["Validation by RSA"].strip()
+                _ref  = row["Reference Order No"].strip()
+                if _note or _ref:
+                    if _update_pi_validation(row["Distributor"], row["SKU"], _note, _ref):
                         _saved += 1
                 else:
                     _skipped += 1
 
+            if _saved:
+                fetch_pi_anomaly.clear()
+                fetch_pi_all.clear()
+                st.session_state["pi_validation_saved"] = True
+                msg = f"✅ {_saved} baris PI Validation tersimpan."
+                if _skipped:
+                    msg += f" ({_skipped} baris dilewati karena kolom kosong.)"
+                st.success(msg)
+            else:
+                st.info("Tidak ada perubahan — isi kolom Validation by RSA atau pilih Reference Order No dulu.")
+        #-----------------------------
             if _saved:
                 fetch_pi_anomaly.clear()
                 fetch_pi_all.clear()
