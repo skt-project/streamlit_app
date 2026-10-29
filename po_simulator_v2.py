@@ -113,7 +113,7 @@ def get_actual_so(distributor_code: str) -> pd.DataFrame:
             UPPER(TRIM(distributor_name)) AS distributor_name,
             UPPER(TRIM(sku))              AS sku,
             SUM(sell_out_qty)             AS actual_so_mtd
-        FROM `skintific-data-warehouse.rsa.si_st_so_targetsell_out_qty_data_all`
+        FROM `skintific-data-warehouse.rsa.si_st_so_target_data_all`
     WHERE UPPER(TRIM(distributor_code)) = '{distributor_code.upper()}'
       AND DATE_TRUNC(calendar_date, MONTH) = DATE_TRUNC(CURRENT_DATE(), MONTH)
     GROUP BY
