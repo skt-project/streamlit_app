@@ -263,6 +263,50 @@ def get_stock_data(distributor_name: str, sku_list) -> pd.DataFrame:
         st.error(f"Error fetching stock data: {e}")
         return pd.DataFrame()
 
+TARGET_SO_TABLE = "skintific-data-warehouse.gt_schema.target_q3_building_block"
+TARGET_SO_DATA_TYPE = "SO"   # CEK nilai data_type di tabel
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_target_so(distributor_name: str, month: int) -> pd.DataFrame:
+    client = get_bq_client()
+    query = f"""
+    SELECT UPPER(TRIM(sku)) AS sku, SUM(qty_target) AS target_so
+    FROM `{TARGET_SO_TABLE}`
+    WHERE UPPER(TRIM(distributor)) = '{distributor_name.upper()}'
+      AND month = {int(month)}
+      AND UPPER(data_type) = '{TARGET_SO_DATA_TYPE}'
+    GROUP BY 1
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Error fetching Target SO: {e}")
+        return pd.DataFrame(columns=["sku", "target_so"])
+
+
+def apply_oos_sellout_logic(df: pd.DataFrame, target_df: pd.DataFrame) -> pd.DataFrame:
+    if target_df is not None and not target_df.empty:
+        tmap = target_df.set_index("sku")["target_so"].to_dict()
+        df["target_so"] = df["Customer SKU Code"].map(tmap)
+    else:
+        df["target_so"] = 0
+    df["target_so"] = pd.to_numeric(df["target_so"], errors="coerce").fillna(0)
+
+    sugg_init = pd.to_numeric(df["buffer_plan_by_lm_qty_adj"], errors="coerce").fillna(0)
+    stock     = pd.to_numeric(df["total_stock"], errors="coerce").fillna(0)
+    po        = pd.to_numeric(df["PO Qty"], errors="coerce").fillna(0)
+    alloc     = pd.to_numeric(df["remaining_allocation_qty_region"], errors="coerce").fillna(0)
+    is_normal = df["supply_control_status_gt"].fillna("").astype(str).str.upper().eq("NORMAL")
+
+    gap  = df["target_so"] - stock
+    calc = np.maximum(sugg_init, gap)
+    calc = np.where(alloc > 0, np.minimum(calc, alloc), calc)
+    final = np.where(calc > 0, calc, po)
+
+    df["target_so_minus_stock"] = gap
+    df["sugg_qty_final"] = np.where(is_normal, final, sugg_init)
+    return df
+
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_brand_list() -> list:
@@ -477,7 +521,8 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     reject_font = Font(bold=True, color="D73E3E")
     suggest_font = Font(bold=True, color="F3C94C")
     currency_cols = ["PO Value", "Suggested PO Value"]
-    integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)"]
+    integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)",
+                    "Target SO", "Suggestion QTY Final"]
     decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)"]
@@ -860,6 +905,11 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         zv = (res_df["buffer_plan_by_lm_val_adj"] == 0) & (res_df["buffer_plan_by_lm_qty_adj"] > 0) & (res_df["SIP"] > 0)
         res_df.loc[zv, "buffer_plan_by_lm_val_adj"] = res_df.loc[zv, "SIP"] * res_df.loc[zv, "buffer_plan_by_lm_qty_adj"]
 
+        # --- OOS Sell Out logic ---
+        _target_df = get_target_so(dist_name, datetime.now().month)
+        res_df = apply_oos_sellout_logic(res_df, _target_df)
+        # --------------------------
+
         bp = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
         res_df = res_df[(res_df["PO Qty"] > 0) | (bp > 0)].copy()
         
@@ -952,6 +1002,8 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             "WOI PO Original":"WOI (Stock + PO Ori)","WOI Suggest":"WOI After Buffer (Stock + Suggested Qty)",
             "woi_end_of_month_by_lm":"Stock + Suggested Qty WOI (Projection at EOM)",
             "remaining_allocation_qty_region":"Remaining Allocation (By Region)",
+            "target_so":"Target SO",
+            "sugg_qty_final":"Suggestion QTY Final",
         })
         if rejected_skus_1:
             res_df = apply_sku_rejection_rules(rejected_skus_1, res_df, __REGION_LIST_1, is_in=False)
@@ -1005,6 +1057,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
                     "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark",
                     "Suggested PO Qty","Suggested PO Value",
+                    "Target SO","Suggestion QTY Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
