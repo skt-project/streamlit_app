@@ -2623,9 +2623,14 @@ if st.session_state.get('page') == 'po_changer':
         sku_col_sim = next((c for c in sim_df.columns if c.upper() in ("SKU","PRODUCT CODE", "SKU CODE")), None)
         qty_col_sim = next((c for c in sim_df.columns if c.upper() in ("QTY","QUANTITY")), None)
         dist_col_sim = next((c for c in sim_df.columns if "DISTRIBUTOR" in c.upper()), None)
-
         if sku_col_sim and qty_col_sim and dist_col_sim:
             st.divider()
+            _cached = st.session_state.get("sim_result_rsa")
+            _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final"}
+            if _cached and _cached.get("dfs"):
+                _first_df = next(iter(_cached["dfs"].values()))
+                if not _need_cols.issubset(_first_df.columns):
+                    st.session_state.pop("sim_result_rsa", None)
             if st.session_state.get("sim_result_rsa") is None:
                 excel_dfs, all_npd, brand_map = _run_po_simulation(
                     sim_df.copy(), sku_col_sim, qty_col_sim, dist_col_sim,
