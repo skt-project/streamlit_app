@@ -304,7 +304,8 @@ def apply_oos_sellout_logic(df: pd.DataFrame, target_df: pd.DataFrame) -> pd.Dat
     final = np.where(calc > 0, calc, po)
 
     df["target_so_minus_stock"] = gap
-    df["sugg_qty_final"] = np.where(is_normal, final, sugg_init)
+    df["sugg_qty_so"] = np.where(is_normal, final, sugg_init)
+    df["sugg_qty_final"] = np.maximum(df["sugg_qty_so"], sugg_init)
     return df
 
 
@@ -522,7 +523,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     suggest_font = Font(bold=True, color="F3C94C")
     currency_cols = ["PO Value", "Suggested PO Value"]
     integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)",
-                    "Target SO", "Suggestion QTY Final"]
+                    "Target SO", "Suggested QTY SO", "Suggested QTY Final"]
     decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)"]
@@ -555,7 +556,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
                     if val == "SAFE MOQ": cell.font = moq_safe_font
                     elif val == "Under MOQ": cell.font = moq_under_font
 #------- END --------------
-                if col_name in ["Remaining Allocation (By Region)", "Suggested PO Qty", "Suggested PO Value"] and npd_sku_list:
+                if col_name in ["Remaining Allocation (By Region)", "Suggested PO buffer", "Suggested PO Value"] and npd_sku_list:
                     sku_ci = col_map.get("SKU")
                     if sku_ci is not None:
                         sku_val = ws.cell(row=r_idx, column=sku_ci + 1).value
@@ -998,12 +999,13 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         res_df = res_df.rename(columns={
             "Customer SKU Code":"SKU","assortment":"Assortment","supply_control_status_gt":"Supply Control",
             "total_stock":"Total Stock (Qty)","avg_weekly_st_lm_qty":"Avg Weekly Sales LM (Qty)",
-            "buffer_plan_by_lm_qty_adj":"Suggested PO Qty","buffer_plan_by_lm_val_adj":"Suggested PO Value",
+            "buffer_plan_by_lm_qty_adj":"Suggested PO buffer","buffer_plan_by_lm_val_adj":"Suggested PO Value",
             "WOI PO Original":"WOI (Stock + PO Ori)","WOI Suggest":"WOI After Buffer (Stock + Suggested Qty)",
             "woi_end_of_month_by_lm":"Stock + Suggested Qty WOI (Projection at EOM)",
             "remaining_allocation_qty_region":"Remaining Allocation (By Region)",
             "target_so":"Target SO",
-            "sugg_qty_final":"Suggestion QTY Final",
+            "sugg_qty_so":"Suggested QTY SO",
+            "sugg_qty_final":"Suggested QTY Final",
         })
         if rejected_skus_1:
             res_df = apply_sku_rejection_rules(rejected_skus_1, res_df, __REGION_LIST_1, is_in=False)
@@ -1056,8 +1058,8 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
                     "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark",
-                    "Suggested PO Qty","Suggested PO Value",
-                    "Target SO","Suggestion QTY Final",
+                    "Suggested PO buffer","Suggested PO Value",
+                    "Target SO","Suggested QTY SO","Suggested QTY Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
@@ -1069,8 +1071,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 
         res_df = res_df.reindex(columns=out_cols)
         res_df.sort_values(by=["is_po_sku","SKU"], ascending=[False,True], inplace=True)
-
-        zero_sugg = res_df[(res_df["Suggested PO Qty"] == 0) & (res_df["is_po_sku"] == True)][["SKU","Product Name","PO Qty","Suggested PO Qty","Remark"]]
+        zero_sugg = res_df[(res_df["Suggested PO buffer"] == 0) & (res_df["is_po_sku"] == True)][["SKU","Product Name","PO Qty","Suggested PO buffer","Remark"]]
         if not zero_sugg.empty:
             st.warning(f"⚠️ **{dist_name}** — {len(zero_sugg)} SKU memiliki Suggested PO Qty = 0")
             st.dataframe(zero_sugg, use_container_width=True, hide_index=True)
@@ -1092,7 +1093,7 @@ PO_TEMPLATE_COLS = [
     'Distributor','SKU','Product Name','Assortment','Supply Control',
     'Avg Weekly Sales LM (Qty)','Total Stock (Qty)','Current WOI',
     'PO Qty','PO Value','WOI (Stock + PO Ori)','Remark',
-    'Suggested PO Qty','Suggested PO Value',
+    'Suggested PO buffer','Suggested PO Value',
     'WOI After Buffer (Stock + Suggested Qty)',
     'Stock + Suggested Qty WOI (Projection at EOM)',
     'Remaining Allocation (By Region)','RSA Notes','MOQ', 'Check MOQ',
@@ -1418,7 +1419,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     "Distributor": "distributor_name", "SKU": "sku",
     "Product Name": "product_name", "Supply Control": "status_supply",
     "PO Qty": "po_qty", "_source_file": "file_name",
-    "Suggested PO Qty": "suggested_po_qty",
+    "Suggested PO buffer": "suggested_po_qty",
     "Remaining Allocation (By Region)": "remaining_allocation",
     "WOI (Stock + PO Ori)": "current_woi" }).copy()
 
