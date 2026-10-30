@@ -1311,7 +1311,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         & (_final_num[_stock_col] > 0)
         & ~_final_num["Remark"].str.contains("Steve", case=False, na=False)
         & _final_num["Remark"].str.contains("Reject", case=False, na=False)
-        &  ~_final_num["Remark"].str.contains("Reject (Sulawesi Only)", case=False, na=False)
+       &  ~_final_num["Remark"].str.contains("Reject (Sulawesi Only)", case=False, na=False, regex=False)
         & (_final_num[_woi_ori] > 17 )
     ].copy()
 
