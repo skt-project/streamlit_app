@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,6 +71,15 @@ class RowFilter:
             f"header yang ada: {header}.")
 
 
+def _index_letter(index: int) -> str:
+    """Indeks kolom berbasis 0 -> huruf kolom Excel/Sheets (0 -> A, 7 -> H, 26 -> AA)."""
+    n, letters = index + 1, ""
+    while n:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(ord("A") + rem) + letters
+    return letters
+
+
 def _letter_index(letter: str) -> int:
     n = 0
     for ch in letter.strip().upper():
@@ -106,12 +116,15 @@ def tokos_from_rows(rows, source: str, *, row_filter: RowFilter | None = None, m
     i_region, i_group, i_toko = cols
     i_filter = row_filter.resolve(header) if row_filter else None
     wanted = _col_key(row_filter.equals) if row_filter else ""
+    seen_values: Counter = Counter()           # nilai yang ada di kolom filter (untuk pesan error bila tidak ada yang cocok)
     for no, row in enumerate(rows, start=header_no + 1):
         row = tuple(row) + (None,) * (len(header) - len(row))
         if all(_clean(c) == "" for c in row):
             continue
-        if row_filter and _col_key(row[i_filter]) != wanted:
-            continue
+        if row_filter:
+            seen_values[_clean(row[i_filter])] += 1
+            if _col_key(row[i_filter]) != wanted:
+                continue
         region, toko = _clean(row[i_region]), _clean(row[i_toko])
         group = _clean(row[i_group]) if i_group is not None else ""
         name = group or toko
@@ -128,7 +141,14 @@ def tokos_from_rows(rows, source: str, *, row_filter: RowFilter | None = None, m
             f"; ... (+{len(problems) - max_listed} masalah lain)" if len(problems) > max_listed else "")
         raise ReferenceDataError(f"'{source}' bermasalah: {shown}.")
     if not merged:
-        raise ReferenceDataError(f"'{source}' tidak berisi toko" + (f" dengan {_clean(row_filter.equals)} pada kolom filter." if row_filter else "."))
+        if row_filter:
+            col = f"'{header[i_filter]}' (kolom {_index_letter(i_filter)})"
+            values = ", ".join(f"{v!r} ({n})" for v, n in seen_values.most_common(8)) or "(kolom kosong)"
+            raise ReferenceDataError(
+                f"'{source}' tidak berisi toko dengan {_clean(row_filter.equals)} pada kolom filter {col}. "
+                f"Nilai yang ada di kolom itu: {values}. Bila kolomnya salah, atur store_filter_header / store_filter_column; "
+                "bila nilainya berbeda, atur store_filter_value.")
+        raise ReferenceDataError(f"'{source}' tidak berisi toko.")
     return [Toko(region, name, is_group, n, name.lower()) for region, name, is_group, n in merged.values()]
 
 

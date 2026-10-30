@@ -532,8 +532,29 @@ def test_row_filter_errors_are_explicit():
         r.load_stores_from_values([["Region", "Nama Toko"], ["Jawa", "A"]], "sheet", row_filter=flt)      # tidak ada kolom H
     with pytest.raises(r.ReferenceDataError, match="tidak berisi toko dengan BA"):
         r.load_stores_from_values([BA_HEAD, _ba("Jawa", None, "A", "Non BA")], "sheet", row_filter=flt)
+
     with pytest.raises(r.ReferenceDataError, match="Header 'sheet' tidak ditemukan.*ditemukan"):
         r.load_stores_from_values([["Wilayah", "Outlet"], ["Jawa", "A"]], "sheet", row_filter=flt)          # pesan memuat header yang ada
+
+
+def test_no_match_error_names_the_filter_column_and_the_values_found():
+    import pytest
+    flt = r.RowFilter("BA", header_names=("BA Non BA",), column_letter="H")
+    rows = [BA_HEAD, _ba("Jawa", None, "A", "Non BA"), _ba("Jawa", None, "B", "Non BA"), _ba("Jawa", None, "C", "Beauty Advisor"), _ba("Jawa", None, "D", "")]
+    with pytest.raises(r.ReferenceDataError) as exc:
+        r.load_stores_from_values(rows, "sheet", row_filter=flt)
+    msg = str(exc.value)
+    assert "kolom filter 'ba non ba' (kolom H)" in msg
+    assert "'Non BA' (2)" in msg and "'Beauty Advisor' (1)" in msg and "'' (1)" in msg           # nilai yang ada, termasuk kosong
+    assert "store_filter_value" in msg
+    shifted = [["Region", "Nama Group Toko", "Nama Toko", "Kolom Baru", "x", "y", "z", "BA Non BA", "Status"], ["Jawa", None, "A", "", "", "", "", "Non BA", "BA"]]
+    with pytest.raises(r.ReferenceDataError, match="kolom I|kolom H"):                              # kolom dicari lewat nama header, bukan posisi
+        r.load_stores_from_values(shifted, "sheet", row_filter=flt)
+
+
+def test_index_letter_roundtrip():
+    for letter in ("A", "H", "Z", "AA", "AZ", "BA"):
+        assert r._index_letter(r._letter_index(letter)) == letter
 
 
 def test_fetch_products_uses_a_parameterised_query_limited_to_the_given_brands():
