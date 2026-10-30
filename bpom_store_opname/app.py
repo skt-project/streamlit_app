@@ -135,8 +135,8 @@ class Config:
     store_sheet_id: str | None = None
     store_sheet_gid: int | None = None
     store_filter_value: str = "BA"              # hanya baris dengan nilai ini di kolom filter ("" = tanpa filter)
-    store_filter_header: str = "BA Non BA"      # nama header kolom filter; bila tidak ada dipakai store_filter_column
-    store_filter_column: str = "H"
+    store_filter_header: str = "BA/ Non BA"     # nama header kolom filter (spasi dan "/" diabaikan: "BA Non BA" juga cocok)
+    store_filter_column: str = ""               # huruf kolom CADANGAN bila header tidak ada; kosong = tidak ada cadangan (error yang jelas)
     # Daftar SKU untuk form tambah SKU langsung: BigQuery master_product (brand terbatas), cadangan reference/Daftar SKU.xlsx
     master_product_table: str = master_product.DEFAULT_TABLE
     master_product_brands: tuple[str, ...] = master_product.DEFAULT_BRANDS
@@ -189,8 +189,8 @@ def load_config() -> Config:
         store_sheet_id=_sheet_id(app.get("store_sheet_id")),
         store_sheet_gid=int(app["store_sheet_gid"]) if app.get("store_sheet_gid") not in (None, "") else _sheet_gid(app.get("store_sheet_id")),
         store_filter_value=str(app.get("store_filter_value", "BA")).strip(),
-        store_filter_header=str(app.get("store_filter_header", "BA Non BA")).strip(),
-        store_filter_column=str(app.get("store_filter_column", "H")).strip(),
+        store_filter_header=str(app.get("store_filter_header", "BA/ Non BA")).strip(),
+        store_filter_column=str(app.get("store_filter_column", "")).strip(),
         master_product_table=str(app.get("master_product_table", master_product.DEFAULT_TABLE)).strip(),
         master_product_brands=tuple(str(b).strip() for b in app.get("master_product_brands", master_product.DEFAULT_BRANDS)),
         master_product_exclude_statuses=tuple(str(x).strip() for x in app.get("master_product_exclude_statuses", master_product.DEFAULT_EXCLUDE_STATUSES)),

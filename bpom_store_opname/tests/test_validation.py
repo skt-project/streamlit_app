@@ -592,3 +592,25 @@ def test_fetch_products_uses_a_parameterised_query_limited_to_the_given_brands()
         mp.fetch_products(Client(), "x; DROP TABLE y", ("A",))
     with pytest.raises(ValueError, match="brand master_product kosong"):
         mp.fetch_products(Client(), "p.d.t", ("", " "))
+
+
+REAL_HEAD = ["store/group id", "kode toko", "nama toko", "region", "channel", "group", "budget q4", "skp", "tpm", "ba/ non ba",
+             "program", "so", "store stock", "budget utilized"]                                       # header sheet BD per 2026-10-30
+
+
+def _real(region, toko, group, flag, skp="SKP"):
+    return ["ID1", "K1", toko, region, "MT", group, "0", skp, "", flag, "", "", "", ""]
+
+
+def test_filter_matches_the_real_sheet_by_header_ignoring_spaces_and_slash_and_never_falls_back_to_a_position():
+    import pytest
+    flt = r.RowFilter("BA", header_names=("BA/ Non BA",))
+    rows = [REAL_HEAD, _real("Jawa", "Alfa 1", "ALFAMART", "BA"), _real("Jawa", "Alfa 2", "ALFAMART", "BA"),
+            _real("Jawa", "Toko X", None, "Non BA"), _real("Sumatera", "Toko Budi", None, "ba")]
+    tokos = r.load_stores_from_values(rows, "sheet", row_filter=flt)
+    assert [(t.region, t.name, t.outlets) for t in tokos] == [("Jawa", "ALFAMART", 2), ("Sumatera", "Toko Budi", 1)]
+    for alias in ("BA Non BA", "ba/non ba", "BA / NON BA"):
+        assert len(r.load_stores_from_values(rows, "sheet", row_filter=r.RowFilter("BA", header_names=(alias,)))) == 2
+    no_marker = [[h for h in REAL_HEAD if h != "ba/ non ba"], *[[v for i, v in enumerate(row) if i != 9] for row in rows[1:]]]
+    with pytest.raises(r.ReferenceDataError, match="Kolom filter tidak ditemukan"):                   # tidak ada kolom H/J diam-diam
+        r.load_stores_from_values(no_marker, "sheet", row_filter=flt)

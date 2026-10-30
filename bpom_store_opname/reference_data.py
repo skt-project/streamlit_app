@@ -59,9 +59,12 @@ class RowFilter:
     column_letter: str = ""
 
     def resolve(self, header: list[str]) -> int:
+        # Judul dibandingkan tanpa spasi dan garis miring: "BA Non BA" = "BA/ Non BA" = "ba/non ba".
+        squashed = [re.sub(r"[\s/]+", "", h) for h in header]
         for name in self.header_names:
-            if _col_key(name) in header:
-                return header.index(_col_key(name))
+            key = re.sub(r"[\s/]+", "", _col_key(name))
+            if key and key in squashed:
+                return squashed.index(key)
         if self.column_letter:
             index = _letter_index(self.column_letter)
             if index < len(header):
