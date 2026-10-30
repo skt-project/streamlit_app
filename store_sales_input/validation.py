@@ -1,6 +1,6 @@
 """Aturan validasi murni (tanpa Streamlit / Google API) sehingga mudah diuji.
 
-Mencakup: master Non BA, SKU, qty (Sell Out dan Stock), duplikat SKU, aturan evidence dan
+Mencakup: master Non BA, SKU, qty (Sell Out dan Stock), duplikat SKU, foto opsional dan
 identitas transaksi (upsert key).
 """
 from __future__ import annotations
@@ -171,8 +171,7 @@ def validate_submission(
     `stores` harus sudah hanya berisi Non BA. SKU yang sama berulang → baris TERAKHIR
     dipakai (baris sebelumnya tidak divalidasi karena akan dibuang).
 
-    Aturan foto: setiap submit WAJIB memuat minimal satu foto (dari salah satu SKU), berapa pun
-    qty-nya, termasuk 0. Foto per SKU bersifat opsional.
+    Foto bersifat opsional (per SKU, tanpa aturan wajib). Foto yang rusak tetap jadi error baris.
     """
     res = ValidationResult()
 
@@ -233,15 +232,5 @@ def validate_submission(
     # tidak memunculkan pesan "foto belum ada" yang menyesatkan.
     res.photo_count = sum(1 for ln in last_by_sku.values() if ln.photo)
 
-    # Aturan evidence: foto mandatory di setiap submit.
-    for ln in res.lines:
-        if ln.sell_out_qty > 0 and ln.photo is None:
-            res.warnings.append(Issue(
-                ln.row_no,
-                f"PERINGATAN: SKU {ln.sku_code} Sell Out {ln.sell_out_qty} tidak memiliki foto evidence.",
-            ))
-    if last_by_sku and res.photo_count == 0:
-        res.errors.append(Issue(
-            None, "Foto evidence wajib: lampirkan minimal satu foto (dari salah satu SKU) pada setiap submit.",
-        ))
+    # Foto sepenuhnya opsional: tidak ada aturan wajib, tidak ada peringatan.
     return res

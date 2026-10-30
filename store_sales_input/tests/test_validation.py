@@ -176,34 +176,21 @@ def test_upsert_key_and_deterministic_transaction_id():
     assert a not in others and len(others) == 3
 
 
-# ── Aturan evidence: foto mandatory di setiap submit ────────────────────────
+# ── Foto sepenuhnya opsional ────────────────────────────────────────────────
 
-def test_photo_mandatory_even_when_everything_is_zero(stores, skus):
+def test_photo_optional_even_when_everything_is_zero(stores, skus):
     r = run(stores, skus, [L(1, "SKU000001", "0", "0"), L(2, "SKU000002", "0", "0")])
-    assert not r.ok and any("Foto evidence wajib" in e.message for e in r.errors)
+    assert r.ok and r.photo_count == 0 and not r.warnings
 
 
-def test_photo_mandatory_when_quantities_positive(stores, skus):
-    r = run(stores, skus, [L(1, "SKU000001", "3", "5")])
-    assert not r.ok and any("Foto evidence wajib" in e.message for e in r.errors)
+def test_photo_optional_when_quantities_positive_no_warning(stores, skus):
+    r = run(stores, skus, [L(1, "SKU000001", "3", "5"), L(2, "SKU000002", "2", "0", PHOTO)])
+    assert r.ok and r.photo_count == 1 and not r.warnings
 
 
-def test_one_photo_from_any_sku_is_enough(stores, skus):
-    r = run(stores, skus, [L(1, "SKU000001", "3", "5"), L(2, "SKU000002", "0", "0", PHOTO)])
-    assert r.ok and r.photo_count == 1
-
-
-def test_warning_only_for_sell_out_positive_without_photo(stores, skus):
-    r = run(stores, skus, [L(1, "SKU000001", "3", "5", PHOTO), L(2, "SKU000002", "2", "0"),
-                           L(3, "SKU000003", "0", "9")])
-    assert r.ok
-    warned = [w for w in r.warnings if w.message.startswith("PERINGATAN")]
-    assert [w.row_no for w in warned] == [2]          # sell out 0 (walau stock > 0) tidak diperingatkan
-
-
-def test_qty_error_in_one_row_does_not_claim_photo_missing(stores, skus):
+def test_qty_error_in_one_row_does_not_mention_photo(stores, skus):
     r = run(stores, skus, [L(1, "SKU000001", "x", "1", PHOTO)])
-    assert not r.ok and not any("Foto evidence wajib" in e.message for e in r.errors)
+    assert not r.ok and not any("oto" in e.message for e in r.errors)
 
 
 def test_photo_error_blocks_that_row(stores, skus):
@@ -215,7 +202,6 @@ def test_blank_rows_ignored_and_empty_submission_rejected(stores, skus):
     assert run(stores, skus, [LineInput(1), L(2, "SKU000001", "0", "0", PHOTO)]).ok
     r = run(stores, skus, [LineInput(1)])
     assert not r.ok and any("minimal satu SKU" in e.message for e in r.errors)
-    assert not any("Foto evidence wajib" in e.message for e in r.errors)
 
 
 def test_renamed_store_headers_kode_toko_nama_toko_are_accepted():

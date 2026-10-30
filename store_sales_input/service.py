@@ -79,8 +79,6 @@ class SalesSubmitter:
         """`lines` harus sudah lolos `validate_submission` (dipanggil ulang oleh UI sebelum ini)."""
         if not lines:
             raise SubmissionRejected([Issue(None, "Tidak ada SKU untuk disimpan.")])
-        if not any(ln.photo for ln in lines):
-            raise SubmissionRejected([Issue(None, "Foto evidence wajib: minimal satu foto pada setiap submit.")])
 
         supervisor = supervisor_name.strip()
         now = self.clock()

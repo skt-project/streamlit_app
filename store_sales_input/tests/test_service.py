@@ -176,26 +176,21 @@ def test_storage_failure_aborts_before_bigquery():
 
 
 def test_validation_failure_makes_zero_external_calls(stores, skus):
-    """Validasi form gagal → submit tidak dipanggil; submit() sendiri juga menolak input yang melanggar aturan evidence."""
+    """Validasi form gagal → submit tidak dipanggil; submit() sendiri menolak daftar SKU kosong."""
     res = validate_submission(store_id="S1", sales_date=D, supervisor_name="B", stores={"S1": STORE}, skus=skus,
                               lines=[LineInput(1, "SKU000001", "-1", "1", b"x"), LineInput(2, "SKU000002", "2", "1")])
     assert not res.ok
     s, bq, storage, mirror = submitter()
     with pytest.raises(SubmissionRejected):
-        s.submit(store=STORE, sales_date=D, supervisor_name="B", lines=[line("K1", 3)])     # tanpa foto
-    with pytest.raises(SubmissionRejected):
         s.submit(store=STORE, sales_date=D, supervisor_name="B", lines=[])
     assert (bq.touched, storage.uploaded, mirror.calls) == (0, [], [])
 
 
-def test_photo_is_mandatory_even_when_all_quantities_are_zero():
+def test_photo_is_optional_even_when_all_quantities_are_zero():
     s, bq, storage, mirror = submitter()
-    with pytest.raises(SubmissionRejected, match="Foto evidence wajib"):
-        s.submit(store=STORE, sales_date=D, supervisor_name="B", lines=[line("K1", 0, stock=0), line("K2", 0, stock=0)])
-    assert bq.touched == 0 and mirror.calls == []
-    res = s.submit(store=STORE, sales_date=D, supervisor_name="B",
-                   lines=[line("K1", 0, b"p", stock=0), line("K2", 0, stock=0)])
-    assert res.inserted == 2 and len(storage.uploaded) == 1
+    res = s.submit(store=STORE, sales_date=D, supervisor_name="B", lines=[line("K1", 0, stock=0), line("K2", 0, stock=0)])
+    assert res.inserted == 2 and storage.uploaded == [] and len(mirror.calls) == 1
+    assert all(r["evidence_file_id"] is None for r in bq.rows.values())
 
 
 def test_plan_actions():

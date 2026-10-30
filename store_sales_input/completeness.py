@@ -3,7 +3,7 @@
 Satu "kunjungan" = satu tanggal penjualan yang punya data untuk store itu. Store biasanya dikunjungi seminggu
 sekali, jadi status dihitung dari seluruh kunjungan dalam rentang:
 
-- Lengkap       : minimal SATU kunjungan di mana semua SKU master terisi (Sell Out + Stock) DAN ada >= 1 foto.
+- Lengkap       : minimal SATU kunjungan di mana semua SKU master terisi (Sell Out + Stock). Foto tidak mempengaruhi status.
 - Belum lengkap : ada data, tetapi tidak ada satu pun kunjungan yang lengkap.
 - Belum submit  : tidak ada satu pun baris pada rentang itu.
 
@@ -86,7 +86,7 @@ def compute_completeness(
             filled = [c for c in skus if _filled(by_sku.get(c))]
             photos = sum(1 for r in by_sku.values() if r.get("evidence_file_id"))
             stats[d] = (len(filled), photos, tuple(c for c in skus if c not in filled))
-        complete = [d for d, (_, photos, missing) in stats.items() if not missing and photos >= 1]
+        complete = [d for d, (_, _photos, missing) in stats.items() if not missing]
         if not stats:
             status, best = STATUS_NONE, None
         elif complete:

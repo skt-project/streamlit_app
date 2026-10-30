@@ -25,6 +25,24 @@ SKUS = {"K1": Sku("K1", "Produk Satu"), "K2": Sku("K2", "Produk Dua")}
 JPEG = ("foto.jpg", make_jpeg((300, 200)), "image/jpeg")
 
 
+class FakeSupervisors:
+    """Meniru SupervisorDirectory: SPV master per store + nama manual dari transaksi (semua store satu distributor)."""
+
+    def __init__(self, bq_store):
+        self.bq_store = bq_store
+        self.master = {"S1": ("Riko Saputra",), "S3": ("Riko Saputra", "Mila Yusniar")}      # S2: tidak ada di master
+        self.fail = False
+        self.calls = 0
+
+    def load(self, store_ids):
+        from supervisors import SupervisorData, SupervisorLookupError
+        self.calls += 1
+        if self.fail:
+            raise SupervisorLookupError("Daftar SPV gagal dimuat dari BigQuery (Fake).")
+        used = tuple(sorted({r["supervisor_name"] for r in self.bq_store.rows.values()}))
+        return SupervisorData(master=dict(self.master), custom={s: used for s in store_ids})
+
+
 @pytest.fixture
 def backend(monkeypatch, tmp_path):
     import streamlit as st
@@ -36,6 +54,7 @@ def backend(monkeypatch, tmp_path):
         config=SimpleNamespace(master_sheet_id="m", store_master_worksheet="a", sku_master_worksheet="b",
                                evidence_bucket="bkt", admin_username="admin", admin_password="pw-for-tests-only"),
         gc=None, bq_store=FakeBQ(), evidence=FakeStorage(), mirror=FakeMirror())
+    be.supervisors = FakeSupervisors(be.bq_store)
     monkeypatch.setattr(clients, "build_backends", lambda secrets: be)
     state = {"fail": False}
 
@@ -62,14 +81,26 @@ def select_store(at, region="JATENG", store="S1 - Toko Satu"):
     return at.run()
 
 
-def fill(at, rows=(("3", "12"), ("0", "0")), photo=JPEG, supervisor="Budi"):
-    """Layout: selectbox [0]=Region [1]=Store [2..]=SKU. text_input [0]=supervisor lalu (Sell Out, Stock) per SKU.
+def pick_supervisor(at, name="Riko Saputra", other=None):
+    """selectbox [2] = Nama Supervisor. `other`: ketik nama lewat "Nama SPV Lainnya"."""
+    from supervisors import SPV_OTHER
+    sb = [s for s in at.selectbox if s.label == "Nama Supervisor"][0]
+    sb.set_value(SPV_OTHER if other else name)
+    at = at.run()
+    if other:
+        [t for t in at.text_input if t.label == "Ketik nama supervisor"][0].set_value(other)
+        at = at.run()
+    return at
+
+
+def fill(at, rows=(("3", "12"), ("0", "0")), photo=JPEG, supervisor="Riko Saputra", other=None):
+    """Layout: selectbox [0]=Region [1]=Store [2]=Nama Supervisor. Qty dicari lewat label (Sell Out, Stock) per SKU.
     file_uploader [i]=foto baris ke-(i+1)."""
-    at = select_store(at)
-    at.text_input[0].set_value(supervisor)
+    at = pick_supervisor(select_store(at), supervisor, other)
+    qty = [t for t in at.text_input if t.label in ("Sell Out", "Stock")]
     for i, (so, st_) in enumerate(rows):
-        at.text_input[1 + 2 * i].set_value(so)
-        at.text_input[2 + 2 * i].set_value(st_)
+        qty[2 * i].set_value(so)
+        qty[2 * i + 1].set_value(st_)
     if photo is not None:
         at.file_uploader[0].set_value(photo)
     return at.run()
@@ -89,11 +120,13 @@ def test_page_loads_with_all_skus_prefilled_and_no_pristine_noise(backend):
     assert at.selectbox[0].options == ["JABAR", "JATENG"]
     assert at.selectbox[1].disabled                              # store terkunci sampai region dipilih
     # template awal = SEMUA SKU master, urut master, sebagai teks tetap (bukan dropdown) agar hemat layar HP
-    assert len(at.selectbox) == 2
+    assert [s.label for s in at.selectbox] == ["Region", "Selected Store", "Nama Supervisor"]
+    assert at.selectbox[2].disabled                              # dropdown supervisor terkunci sampai store dipilih
+    assert at.selectbox[2].options == ["Nama SPV Lainnya"]
     texts = [m.value for m in at.markdown]
     assert any("**1. K1**" in t and "Produk Satu" in t for t in texts)
     assert any("**2. K2**" in t and "Produk Dua" in t for t in texts)
-    assert [t.label for t in at.text_input][:5] == ["Nama Supervisor", "Sell Out", "Stock", "Sell Out", "Stock"]
+    assert [t.label for t in at.text_input][:4] == ["Sell Out", "Stock", "Sell Out", "Stock"]   # supervisor bukan ketik bebas
     assert not at.warning
 
 
@@ -129,6 +162,65 @@ def test_store_dropdown_is_filtered_by_region(backend):
     assert at.selectbox[1].options == ["S2 - Toko Dua"]
 
 
+def spv_select(at):
+    return [s for s in at.selectbox if s.label == "Nama Supervisor"][0]
+
+
+def test_supervisor_dropdown_lists_master_spv_of_the_store_with_other_option_last(backend):
+    at = select_store(fresh())
+    assert not spv_select(at).disabled
+    assert spv_select(at).options == ["Riko Saputra", "Nama SPV Lainnya"]
+    at = select_store(at, "JATENG", "S3 - Toko Tiga")
+    assert spv_select(at).options == ["Mila Yusniar", "Riko Saputra", "Nama SPV Lainnya"]
+
+
+def test_supervisor_from_dropdown_is_saved_and_no_free_text_box_by_default(backend):
+    at = fill(fresh())
+    assert not [t for t in at.text_input if t.label == "Ketik nama supervisor"]
+    at = submit(at)
+    assert {r["supervisor_name"] for r in backend.bq_store.rows.values()} == {"Riko Saputra"}
+
+
+def test_other_option_shows_text_field_and_requires_a_name(backend):
+    at = pick_supervisor(select_store(fresh()), other="x")
+    field = [t for t in at.text_input if t.label == "Ketik nama supervisor"][0]
+    field.set_value("   ")
+    at = at.run()
+    at = submit(at)
+    assert any("Nama Supervisor wajib diisi" in e.value for e in at.error)
+    assert backend.bq_store.rows == {}
+
+
+def test_typed_spv_name_is_saved_and_listed_next_time_for_same_distributor(backend):
+    at = fill(fresh(), supervisor="-", other="  Budi   Santoso ")
+    assert not at.error
+    at = submit(at)
+    assert {r["supervisor_name"] for r in backend.bq_store.rows.values()} == {"Budi Santoso"}      # spasi dirapikan
+    at = select_store(at, "JATENG", "S3 - Toko Tiga")                                              # distributor sama
+    assert spv_select(at).options == ["Mila Yusniar", "Riko Saputra", "Budi Santoso", "Nama SPV Lainnya"]
+
+
+def test_typed_name_matching_an_existing_option_reuses_its_spelling(backend):
+    at = fill(fresh(), supervisor="-", other="riko  SAPUTRA")
+    at = submit(at)
+    assert {r["supervisor_name"] for r in backend.bq_store.rows.values()} == {"Riko Saputra"}
+
+
+def test_store_without_master_spv_hints_to_use_other_option(backend):
+    at = select_store(fresh(), "JABAR", "S2 - Toko Dua")
+    assert spv_select(at).options == ["Nama SPV Lainnya"]
+    assert any("belum ada di master distributor" in c.value for c in at.caption)
+
+
+def test_supervisor_lookup_failure_degrades_to_manual_entry(backend):
+    backend.supervisors.fail = True
+    at = select_store(fresh())
+    assert any("Daftar SPV gagal dimuat" in w.value for w in at.warning)
+    assert spv_select(at).options == ["Nama SPV Lainnya"]
+    at = submit(fill(at, supervisor="-", other="Budi Santoso"))
+    assert {r["supervisor_name"] for r in backend.bq_store.rows.values()} == {"Budi Santoso"}
+
+
 def test_submit_with_photo_inserts_all_rows_then_updates_without_duplicates(backend):
     at = fill(fresh(), rows=(("3", "12"), ("0", "7")))
     assert not at.error
@@ -149,18 +241,19 @@ def test_submit_with_photo_inserts_all_rows_then_updates_without_duplicates(back
     assert any("0 baris baru (INSERT), 2 baris diperbarui" in s.value for s in at.success)
 
 
-def test_photo_mandatory_even_when_all_zero_and_nothing_written(backend):
+def test_submit_without_any_photo_is_allowed_all_zero(backend):
     at = fill(fresh(), rows=(("0", "0"), ("0", "0")), photo=None)
-    assert any("Foto evidence wajib" in e.value for e in at.error)
+    assert not at.error and not at.warning
     at = submit(at)
-    assert backend.bq_store.rows == {} and backend.bq_store.upsert_calls == 0
-    assert backend.evidence.uploaded == [] and backend.mirror.calls == []
+    assert not at.exception
+    assert len(backend.bq_store.rows) == 2 and backend.evidence.uploaded == []
 
 
-def test_positive_quantities_without_photo_blocked(backend):
+def test_submit_without_photo_allowed_with_positive_quantities_and_no_warning(backend):
     at = fill(fresh(), rows=(("3", "5"), ("2", "1")), photo=None)
+    assert not at.error and not at.warning
     at = submit(at)
-    assert backend.bq_store.rows == {} and backend.evidence.uploaded == []
+    assert len(backend.bq_store.rows) == 2 and backend.evidence.uploaded == []
 
 
 def test_every_sku_needs_values_required_errors_appear_after_submit_attempt(backend):
@@ -277,8 +370,8 @@ def test_admin_region_filter_and_logout(backend):
     assert not metrics(at) and at.text_input(key="adm_pass")      # kembali ke form login
 
 
-def test_admin_partial_when_photo_missing_for_complete_skus(backend):
-    # tulis langsung ke fake BigQuery: semua SKU terisi tapi tanpa foto → "Belum lengkap"
+def test_admin_complete_even_without_photo(backend):
+    # tulis langsung ke fake BigQuery: semua SKU terisi tanpa foto → tetap "Lengkap" (foto opsional)
     from datetime import datetime
     from test_service import T1
     from validation import make_transaction_id
@@ -290,7 +383,7 @@ def test_admin_partial_when_photo_missing_for_complete_skus(backend):
             sell_out_qty=1, stock_qty=1, supervisor_name="Budi", evidence_file_id=None, evidence_file_url=None,
             evidence_file_name=None, evidence_uploaded_at=None, created_at=T1, updated_at=T1)
     at = admin_login(fresh())
-    assert metrics(at) == {"Total store": "3", "Lengkap": "0", "Belum lengkap": "1", "Belum submit": "2"}
+    assert metrics(at) == {"Total store": "3", "Lengkap": "1", "Belum lengkap": "0", "Belum submit": "2"}
     assert any("Belum ada foto" in i.value for i in at.info)
 
 

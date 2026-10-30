@@ -20,6 +20,7 @@ from master_cache import load_master_with_fallback
 from mobile import apply_mobile_layout, keep_row
 from service import SalesSubmitter, SubmissionFailed, SubmissionRejected, plan_actions
 from sheets_master import MasterError, load_master
+from supervisors import MAX_NAME_LEN, SPV_OTHER, SupervisorData, SupervisorLookupError, resolve_supervisor
 from timeutil import WIB, fmt_wib
 from validation import LineInput, validate_submission
 
@@ -56,6 +57,12 @@ def get_master(master_id: str, store_ws: str, sku_ws: str, nonce: int):
 @st.cache_data(ttl=30, show_spinner=False)
 def get_existing(store_id: str, iso_date: str, nonce: int):
     return get_backends().bq_store.fetch_existing(date.fromisoformat(iso_date), store_id)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_supervisors(store_ids: tuple, nonce: int):
+    """Daftar SPV per store (master distributor + nama manual). `nonce` naik setelah submit → nama baru langsung muncul."""
+    return get_backends().supervisors.load(store_ids)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -202,6 +209,34 @@ def main():
         render_admin(be, master, get_range_rows)
 
 
+def render_supervisor(be, master, store) -> str:
+    """Dropdown Nama Supervisor (SPV distributor store) + pilihan "Nama SPV Lainnya" untuk mengetik nama baru.
+
+    Nama yang diketik tersimpan lewat submit dan otomatis muncul di dropdown store dengan distributor yang sama.
+    Mengembalikan nama yang dipakai, atau string kosong bila belum dipilih / belum diisi.
+    """
+    ss = st.session_state
+    sid = store.store_id if store else None
+    data, lookup_failed = SupervisorData(), False
+    if store:
+        try:
+            data = get_supervisors(tuple(sorted(master.stores)), ss.nonce)
+        except SupervisorLookupError as exc:
+            lookup_failed = True
+            st.warning(f"{exc} Pilih \"{SPV_OTHER}\" dan ketik nama supervisor.")
+    options = data.options_for(sid)
+    choice = st.selectbox("Nama Supervisor", options, index=None, key=f"spv_{sid}", disabled=store is None,
+                          placeholder="Pilih nama supervisor" if store else "Pilih store dulu")
+    if store and not lookup_failed and not data.master.get(sid):
+        st.caption(f"SPV distributor store ini belum ada di master distributor. Pilih \"{SPV_OTHER}\" untuk mengetik nama.")
+    typed = ""
+    if choice == SPV_OTHER:
+        typed = st.text_input("Ketik nama supervisor", max_chars=MAX_NAME_LEN, key=f"spv_other_{sid}",
+                              placeholder="Nama lengkap supervisor",
+                              help="Nama ini akan muncul di dropdown untuk store dengan distributor yang sama.")
+    return resolve_supervisor(choice, typed, options)
+
+
 def render_input(be, master):
     """Form input penjualan (tidak bergantung pada tab Admin)."""
     ss = st.session_state
@@ -223,7 +258,7 @@ def render_input(be, master):
     if store:
         st.caption(f"Region: {store.region or '-'} · Group: {store.group or '-'} · {store.ba_status}")
     sales_date = st.date_input("Tanggal Penjualan", value=datetime.now(WIB).date(), format="YYYY-MM-DD")
-    supervisor = st.text_input("Nama Supervisor", max_chars=100)
+    supervisor = render_supervisor(be, master, store)
 
     # Data lama: hanya dibaca setelah store + tanggal dipilih.
     existing: list[dict] = []
@@ -248,7 +283,7 @@ def render_input(be, master):
     # 4. Daftar SKU (template awal = semua SKU)
     st.subheader("Daftar SKU")
     st.caption(f"{len(master.skus)} SKU tampil otomatis. Isi **Sell Out** (penjualan store ke end consumer) dan "
-               f"**Stock** untuk setiap SKU, boleh 0. **Foto evidence wajib: minimal satu foto di setiap submit** "
+               f"**Stock** untuk setiap SKU, boleh 0. **Foto bersifat opsional** "
                f"(otomatis dikompres, maksimal {MAX_BYTES // 1_000_000} MB).")
     sku_labels = [s.label for s in master.skus.values()]
     sku_by_label = {s.label: s for s in master.skus.values()}
@@ -336,13 +371,8 @@ def render_input(be, master):
             "Stock lama": (old.get(ln.sku_code) or {}).get("stock_qty"),
             "Foto": "Baru" if ln.photo else ("Tetap (foto lama)" if (old.get(ln.sku_code) or {}).get("evidence_file_id") else "-"),
         } for ln in result.lines]), hide_index=True, width="stretch")
-    no_photo = [w for w in result.warnings if w.message.startswith("PERINGATAN")]
-    if no_photo:
-        st.warning(f"⚠️ {len(no_photo)} SKU dengan Sell Out > 0 belum punya foto evidence. "
-                   "Submit tetap boleh selama minimal satu foto terlampir.")
     for w in result.warnings:
-        if not w.message.startswith("PERINGATAN"):
-            st.warning(str(w))
+        st.warning(str(w))
     if has_input or ss.attempted:
         for issue in result.errors:
             if not issue.row_no:

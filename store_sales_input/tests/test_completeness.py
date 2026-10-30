@@ -32,12 +32,12 @@ def test_complete_partial_and_none():
     rows = [
         row("A", "K1", file_id="f1"), row("A", "K2"),        # semua SKU + 1 foto → lengkap
         row("B", "K1", file_id="f2"),                        # SKU K2 belum → belum lengkap
-        row("C", "K1"), row("C", "K2"),                      # semua SKU tapi TANPA foto → belum lengkap
+        row("C", "K1"), row("C", "K2"),                      # semua SKU tanpa foto → tetap lengkap (foto opsional)
     ]
     st = by_id(compute_completeness(STORES, SKUS, rows))
     assert st["A"].status == STATUS_COMPLETE and (st["A"].sku_filled, st["A"].photo_count) == (2, 1)
     assert st["B"].status == STATUS_PARTIAL and st["B"].missing_skus == ("K2",)
-    assert st["C"].status == STATUS_PARTIAL and st["C"].photo_count == 0 and st["C"].missing_skus == ()
+    assert st["C"].status == STATUS_COMPLETE and st["C"].photo_count == 0 and st["C"].missing_skus == ()
     assert st["D"].status == STATUS_NONE and st["D"].sku_filled == 0 and st["D"].missing_skus == ("K1", "K2")
 
 
@@ -113,10 +113,10 @@ def test_store_is_complete_if_any_visit_in_range_is_complete():
 
 def test_no_complete_visit_is_partial_and_best_visit_has_most_skus():
     rows = [vrow("A", "K1", D1, "f1"),                             # 1 SKU + foto
-            vrow("A", "K1", D2), vrow("A", "K2", D2)]              # 2 SKU, tanpa foto
+            vrow("A", "K1", D2), vrow("A", "K2", D2, so=1, st=None)]   # 2 SKU, Stock K2 kosong
     s = by_id(compute_completeness(STORES, SKUS, rows))["A"]
     assert s.status == STATUS_PARTIAL and s.visits == 2
-    assert s.best_date == D2 and s.sku_filled == 2 and s.missing_skus == ()
+    assert s.best_date == D2 and s.sku_filled == 1 and s.missing_skus == ("K2",)   # seri → kunjungan terbaru
     assert s.photo_count == 1                                      # foto dihitung dari seluruh rentang
 
 

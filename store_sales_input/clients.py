@@ -14,6 +14,7 @@ from bigquery_store import BigQueryStore
 from config import AppConfig, load_config
 from gcs_evidence import GcsEvidence
 from sheets_output import SheetsMirror
+from supervisors import SupervisorDirectory
 
 SCOPES = [
     "https://www.googleapis.com/auth/bigquery",
@@ -50,6 +51,7 @@ class Backends:
     bq_store: BigQueryStore
     mirror: SheetsMirror
     evidence: GcsEvidence
+    supervisors: SupervisorDirectory
 
 
 def build_backends(secrets: Mapping[str, Any]) -> Backends:
@@ -64,4 +66,5 @@ def build_backends(secrets: Mapping[str, Any]) -> Backends:
         bq_store=BigQueryStore(bq_client, cfg.table_fqn),
         mirror=SheetsMirror(lambda: gc.open_by_key(cfg.output_sheet_id), cfg.output_worksheet),
         evidence=GcsEvidence(storage_client, cfg.evidence_bucket, cfg.evidence_root_folder),
+        supervisors=SupervisorDirectory(bq_client, cfg.basis_table_fqn, cfg.distributor_table_fqn, cfg.table_fqn),
     )

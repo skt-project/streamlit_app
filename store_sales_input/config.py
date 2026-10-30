@@ -38,10 +38,21 @@ class AppConfig:
     # Login tab Admin (dari secrets [admin]); kosong = tab admin nonaktif. repr=False agar tidak bocor ke log.
     admin_username: str = field(default="", repr=False)
     admin_password: str = field(default="", repr=False)
+    # Sumber daftar Nama Supervisor (satu dataset dengan tabel transaksi).
+    master_store_basis_table: str = "master_store_database_basis"
+    master_distributor_table: str = "master_distributor"
 
     @property
     def table_fqn(self) -> str:
         return f"{self.bigquery_project}.{self.bigquery_dataset}.{self.bigquery_table}"
+
+    @property
+    def basis_table_fqn(self) -> str:
+        return f"{self.bigquery_project}.{self.bigquery_dataset}.{self.master_store_basis_table}"
+
+    @property
+    def distributor_table_fqn(self) -> str:
+        return f"{self.bigquery_project}.{self.bigquery_dataset}.{self.master_distributor_table}"
 
 
 def load_config(secrets: Mapping[str, Any], fallback_project: str = "") -> AppConfig:
@@ -62,6 +73,8 @@ def load_config(secrets: Mapping[str, Any], fallback_project: str = "") -> AppCo
         store_master_worksheet=get("store_master_worksheet", "Store Master"),
         sku_master_worksheet=get("sku_master_worksheet", "SKU Master"),
         output_worksheet=get("output_worksheet", DEFAULT_OUTPUT_WORKSHEET),
+        master_store_basis_table=get("master_store_basis_table", "master_store_database_basis"),
+        master_distributor_table=get("master_distributor_table", "master_distributor"),
         admin_username=str((secrets.get("admin", {}) or {}).get("username", "") or "").strip(),
         admin_password=str((secrets.get("admin", {}) or {}).get("password", "") or ""),
     )
@@ -80,7 +93,9 @@ def load_config(secrets: Mapping[str, Any], fallback_project: str = "") -> AppCo
         raise ConfigError("bigquery_project mengandung karakter tidak valid.")
     if not re.match(r"^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$", cfg.evidence_bucket):
         raise ConfigError("evidence_bucket bukan nama bucket GCS yang valid.")
-    for label, val in (("bigquery_dataset", cfg.bigquery_dataset), ("bigquery_table", cfg.bigquery_table)):
+    for label, val in (("bigquery_dataset", cfg.bigquery_dataset), ("bigquery_table", cfg.bigquery_table),
+                       ("master_store_basis_table", cfg.master_store_basis_table),
+                       ("master_distributor_table", cfg.master_distributor_table)):
         if not _IDENT_RE.match(val):
             raise ConfigError(f"{label} hanya boleh huruf, angka, '_' dan '-'.")
     return cfg

@@ -15,7 +15,7 @@ Proyek ini terpisah dari aplikasi BPOM Audit Stock.
 
 ## Aturan utama
 
-**Form.** Urutannya: **Region** → **Selected Store** (hanya store Non BA di region itu) → Tanggal Penjualan → Nama Supervisor → daftar SKU. Daftar SKU langsung berisi **semua SKU** di master (urut master), jadi supervisor tinggal mengisi Sell Out dan Stock tiap SKU. Baris boleh dihapus (🗑) dan ditambah lagi (➕); tombol "Reset daftar SKU" di sidebar mengembalikan semua SKU dan mengosongkan isian. Tidak ada bulk upload (akan melewati aturan evidence foto).
+**Form.** Urutannya: **Region** → **Selected Store** (hanya store Non BA di region itu) → Tanggal Penjualan → Nama Supervisor → daftar SKU. Daftar SKU langsung berisi **semua SKU** di master (urut master), jadi supervisor tinggal mengisi Sell Out dan Stock tiap SKU. Baris boleh dihapus (🗑) dan ditambah lagi (➕); tombol "Reset daftar SKU" di sidebar mengembalikan semua SKU dan mengosongkan isian. Tidak ada bulk upload.
 
 **Tanggal penjualan ≠ waktu submit.** Dua hal ini dipisah di BigQuery, sheet, dan layar:
 
@@ -33,19 +33,21 @@ Semua submit adalah upsert (tidak ada mode Input/Revisi terpisah):
 - `supervisor_name`, `sell_out_qty`, `stock_qty`, dan foto terbaru menggantikan yang lama;
 - SKU yang **tidak** ada di submit tidak disentuh (tidak ada penghapusan).
 
+**Nama Supervisor (dropdown).** Aktif setelah store dipilih. Isi dropdown per store:
+
+1. SPV dari master: `master_store_database_basis.cust_id` (= Kode Toko di spreadsheet) → `distributor_tph` → `master_distributor.distributor` (status Active) → kolom `spv_tph`. Join memakai nama distributor yang sudah dinormalisasi (spasi dirapikan, huruf besar) karena sebagian nama di `basis` memuat non-breaking space (mis. "PT KARYA ANANDA SUKSES - MAKASSAR").
+2. Nama yang pernah diketik manual dan sudah tersimpan di tabel transaksi, dari store mana pun dengan distributor TPH yang sama (tidak ada tabel tambahan).
+3. **"Nama SPV Lainnya"** selalu paling bawah. Bila dipilih, muncul kolom untuk mengetik nama. Setelah submit, nama itu ikut tersimpan dan muncul di dropdown berikutnya. Nama yang sama dengan pilihan yang sudah ada (abaikan huruf besar/kecil) memakai ejaan pilihan itu, supaya tidak ada varian ganda.
+
+Bila daftar SPV gagal dimuat dari BigQuery, tampil peringatan dan hanya "Nama SPV Lainnya" yang tersedia (form tetap bisa dipakai). Tabel sumber dapat diubah lewat `[app]` `master_store_basis_table` / `master_distributor_table` (default `master_store_database_basis` / `master_distributor`, dataset yang sama dengan tabel transaksi).
+
 **Dua quantity per SKU.** Setiap SKU mencatat **Sell Out** (`sell_out_qty`, penjualan store ke end consumer) dan **Stock** (`stock_qty`, stock SKU di store). Keduanya wajib diisi, bilangan bulat, `>= 0` (nol boleh). Desimal (`1.5`, `3.0`) dan negatif ditolak; error ditampilkan per baris dan menyebut kolom yang salah. Tidak ada retur.
 
 **SKU ganda dalam satu sesi.** Baris terakhir yang dipakai; baris sebelumnya diabaikan (dengan peringatan).
 
 **Evidence foto.**
 
-| Kondisi | Hasil |
-|---|---|
-| Setiap submit, berapa pun qty-nya (termasuk semua 0) | Minimal **satu** foto dari salah satu SKU, kalau tidak submit **diblokir** |
-| SKU dengan Sell Out > 0 tanpa foto | Peringatan kuat, submit tetap boleh bila ada ≥ 1 foto |
-| SKU dengan Stock > 0 tetapi Sell Out 0, tanpa foto | Tidak ada peringatan |
-
-Foto per SKU bersifat opsional. Bila objek foto tidak relevan dengan evidence, itu disosialisasikan ke user secara verbal (bukan divalidasi aplikasi).
+Foto **sepenuhnya opsional**: tidak ada aturan wajib dan tidak ada peringatan, berapa pun qty-nya (termasuk semua 0). Submit tanpa foto sama sekali diperbolehkan. Bila objek foto tidak relevan dengan evidence, itu disosialisasikan ke user secara verbal (bukan divalidasi aplikasi).
 
 - Per SKU: `st.camera_input` (kamera HP) dan/atau `st.file_uploader` (galeri). Bila keduanya terisi, foto kamera yang dipakai.
 - Hanya **JPG/JPEG**. PNG dan format lain ditolak; isi file diperiksa (PNG yang diberi nama `.jpg` tetap ditolak).
@@ -77,7 +79,7 @@ Isi (hanya membaca; tidak ada tombol hapus/ubah):
 - **Ringkasan** total store, Lengkap, Belum lengkap, Belum submit; tabel **per region** (dengan % lengkap) dan **per store**
   (SKU terisi x/11, jumlah foto, supervisor, waktu submit terakhir WIB); unduh CSV.
 - **Satu kunjungan** = satu tanggal penjualan yang punya data untuk store itu. **Status "Lengkap"** = pada minimal satu
-  kunjungan dalam rentang, semua SKU di master terisi (Sell Out + Stock) **dan** ada minimal 1 foto evidence.
+  kunjungan dalam rentang, semua SKU di master terisi (Sell Out + Stock); foto tidak mempengaruhi status.
   "Belum lengkap" = ada data tetapi tidak ada satu pun kunjungan yang lengkap. "Belum submit" = tidak ada data sama sekali di rentang itu.
   Tabel per store menampilkan jumlah kunjungan, tanggal kunjungan terakhir, SKU terisi pada kunjungan terbaik, dan total foto.
 - **Galeri evidence**: pilih store untuk melihat detail per SKU (terisi/belum) pada tanggal kunjungan yang dipilih, dan fotonya
