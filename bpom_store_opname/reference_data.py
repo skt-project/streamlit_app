@@ -144,10 +144,14 @@ def tokos_from_rows(rows, source: str, *, row_filter: RowFilter | None = None, m
         if row_filter:
             col = f"'{header[i_filter]}' (kolom {_index_letter(i_filter)})"
             values = ", ".join(f"{v!r} ({n})" for v, n in seen_values.most_common(8)) or "(kolom kosong)"
+            by_name = any(_col_key(n) in header for n in row_filter.header_names)
+            fallback = "" if by_name else (f"Header {list(row_filter.header_names)} TIDAK ditemukan, jadi dipakai kolom "
+                                           f"{_index_letter(i_filter)} sebagai cadangan (mungkin kolom yang salah). ")
+            headers = ", ".join(f"{_index_letter(k)}={h!r}" for k, h in enumerate(header) if h)
             raise ReferenceDataError(
-                f"'{source}' tidak berisi toko dengan {_clean(row_filter.equals)} pada kolom filter {col}. "
-                f"Nilai yang ada di kolom itu: {values}. Bila kolomnya salah, atur store_filter_header / store_filter_column; "
-                "bila nilainya berbeda, atur store_filter_value.")
+                f"'{source}' tidak berisi toko dengan {_clean(row_filter.equals)} pada kolom filter {col}. {fallback}"
+                f"Nilai yang ada di kolom itu: {values}. Header yang ada: {headers}. "
+                "Bila kolomnya salah, atur store_filter_header / store_filter_column; bila nilainya berbeda, atur store_filter_value.")
         raise ReferenceDataError(f"'{source}' tidak berisi toko.")
     return [Toko(region, name, is_group, n, name.lower()) for region, name, is_group, n in merged.values()]
 

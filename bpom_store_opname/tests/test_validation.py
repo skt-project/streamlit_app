@@ -548,8 +548,17 @@ def test_no_match_error_names_the_filter_column_and_the_values_found():
     assert "'Non BA' (2)" in msg and "'Beauty Advisor' (1)" in msg and "'' (1)" in msg           # nilai yang ada, termasuk kosong
     assert "store_filter_value" in msg
     shifted = [["Region", "Nama Group Toko", "Nama Toko", "Kolom Baru", "x", "y", "z", "BA Non BA", "Status"], ["Jawa", None, "A", "", "", "", "", "Non BA", "BA"]]
-    with pytest.raises(r.ReferenceDataError, match="kolom I|kolom H"):                              # kolom dicari lewat nama header, bukan posisi
+    with pytest.raises(r.ReferenceDataError, match="kolom H"):                                      # kolom dicari lewat nama header, bukan posisi
         r.load_stores_from_values(shifted, "sheet", row_filter=flt)
+    assert "TIDAK ditemukan" not in msg                                                             # header ada -> bukan cadangan kolom H
+
+    renamed = [["Region", "Nama Group Toko", "Nama Toko", "Kode", "Area", "PIC", "Cabang", "SKP", "BA Flag"],
+               ["Jawa", None, "A", "", "", "", "", "SKP", "BA"], ["Jawa", None, "B", "", "", "", "", "", "Non BA"]]
+    with pytest.raises(r.ReferenceDataError) as exc2:                                               # kasus nyata: kolom H berganti makna
+        r.load_stores_from_values(renamed, "sheet", row_filter=flt)
+    m2 = str(exc2.value)
+    assert "TIDAK ditemukan" in m2 and "'skp' (kolom H)" in m2 and "'SKP' (1)" in m2
+    assert "H='skp'" in m2 and "I='ba flag'" in m2                                                  # semua header terlihat -> kolom pengganti langsung ketahuan
 
 
 def test_index_letter_roundtrip():
