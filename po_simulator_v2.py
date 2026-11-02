@@ -1394,6 +1394,21 @@ def _render_pi_validation():
         else:
             st.info("Tidak ada perubahan — pilih Reference Order No dulu.")
 
+def _flag_po_downloaded():
+    st.session_state["show_save_reminder"] = True
+
+
+@st.dialog("⚠️ Reminder")
+def _save_reminder_dialog():
+    st.markdown(
+        """<p style="color:#1F1F1F;font-size:1.15rem;font-weight:700;margin:.5rem 0 1rem;">
+        Don't forget to save your PO file in Supply Control Table
+        </p>""",
+        unsafe_allow_html=True,
+    )
+    if st.button("OK, Got it", use_container_width=True, key="btn_close_reminder"):
+        st.rerun()
+
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim, brand_map=None):
     brand_map = brand_map or {}
     final_disp = pd.concat(e_dfs.values(), ignore_index=True)
@@ -1464,7 +1479,11 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     dl_data = to_excel_single_sheet_with_sku(final_disp, e_npd)
     st.download_button(label=f"Download PO Result.xlsx ({len(final_disp)} baris)", data=dl_data,
                         file_name=f"PO Result {datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True,
+                        key="dl_po_result", on_click=_flag_po_downloaded)
+
+    if st.session_state.pop("show_save_reminder", False):
+        _save_reminder_dialog()
 
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+1}</span><strong>Auto Kategorisasi &amp; Download Gambar</strong></div>""", unsafe_allow_html=True)
 
@@ -1503,7 +1522,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                     img_bytes = df_to_image_bytes(df_cat, title=title)
                     st.download_button(label=f"Download {label} (.png)", data=img_bytes,
                                        file_name=f"{label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                                       mime="image/png", use_container_width=True)
+                                       mime="image/png", use_container_width=True,
+                                       key=f"dl_img_{label}", on_click=_flag_po_downloaded)
                 except Exception as e:
                     st.error(f"Gagal generate gambar: {e}")
 
@@ -2709,38 +2729,42 @@ if st.session_state.get('page') == 'po_changer':
 
 
 ###################PO Simulator (For RSA) 
-    raw_entries, folder_res = _file_upload_section("rsa")
-    st.divider()
-    _render_pi_validation()
+    tab_po, tab_pi = st.tabs(["📤 PO Simulator", "🔁 PI Validation"])
 
-    if folder_res is not None:
-        sim_df = folder_res["df"].copy()
-        sku_col_sim = next((c for c in sim_df.columns if c.upper() in ("SKU","PRODUCT CODE", "SKU CODE")), None)
-        qty_col_sim = next((c for c in sim_df.columns if c.upper() in ("QTY","QUANTITY")), None)
-        dist_col_sim = next((c for c in sim_df.columns if "DISTRIBUTOR" in c.upper()), None)
-        if sku_col_sim and qty_col_sim and dist_col_sim:
-            st.divider()
-            _cached = st.session_state.get("sim_result_rsa")
-            _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final"}
-            if _cached and _cached.get("dfs"):
-                _first_df = next(iter(_cached["dfs"].values()))
-                if not _need_cols.issubset(_first_df.columns):
-                    st.session_state.pop("sim_result_rsa", None)
-            if st.session_state.get("sim_result_rsa") is None:
-                excel_dfs, all_npd, brand_map = _run_po_simulation(
-                    sim_df.copy(), sku_col_sim, qty_col_sim, dist_col_sim,
-                    _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
-                    _REJECTED_SKUS_1, __REGION_LIST_1,
-                    __REJECTED_SKUS_2, _REGION_LIST_2,
-                    _LIMITED_SKUS_QTY, ___MAX_QTY_LIMIT,
-                )
-                st.session_state["sim_result_rsa"] = {"dfs": excel_dfs, "npd": all_npd, "brand_map": brand_map}
-                st.rerun()
+    with tab_po:
+        raw_entries, folder_res = _file_upload_section("rsa")
 
-            sim_out = st.session_state.get("sim_result_rsa")
-            if sim_out and sim_out["dfs"]:
-                st.success(f"Simulasi selesai — {len(sim_out['dfs'])} distributor")
-                _render_sim_results(sim_out["dfs"], sim_out["npd"], folder_res, sku_col_sim, qty_col_sim, dist_col_sim, sim_out.get("brand_map", {}))
+        if folder_res is not None:
+            sim_df = folder_res["df"].copy()
+            sku_col_sim = next((c for c in sim_df.columns if c.upper() in ("SKU","PRODUCT CODE", "SKU CODE")), None)
+            qty_col_sim = next((c for c in sim_df.columns if c.upper() in ("QTY","QUANTITY")), None)
+            dist_col_sim = next((c for c in sim_df.columns if "DISTRIBUTOR" in c.upper()), None)
+            if sku_col_sim and qty_col_sim and dist_col_sim:
+                st.divider()
+                _cached = st.session_state.get("sim_result_rsa")
+                _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final"}
+                if _cached and _cached.get("dfs"):
+                    _first_df = next(iter(_cached["dfs"].values()))
+                    if not _need_cols.issubset(_first_df.columns):
+                        st.session_state.pop("sim_result_rsa", None)
+                if st.session_state.get("sim_result_rsa") is None:
+                    excel_dfs, all_npd, brand_map = _run_po_simulation(
+                        sim_df.copy(), sku_col_sim, qty_col_sim, dist_col_sim,
+                        _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
+                        _REJECTED_SKUS_1, __REGION_LIST_1,
+                        __REJECTED_SKUS_2, _REGION_LIST_2,
+                        _LIMITED_SKUS_QTY, ___MAX_QTY_LIMIT,
+                    )
+                    st.session_state["sim_result_rsa"] = {"dfs": excel_dfs, "npd": all_npd, "brand_map": brand_map}
+                    st.rerun()
+
+                sim_out = st.session_state.get("sim_result_rsa")
+                if sim_out and sim_out["dfs"]:
+                    st.success(f"Simulasi selesai — {len(sim_out['dfs'])} distributor")
+                    _render_sim_results(sim_out["dfs"], sim_out["npd"], folder_res, sku_col_sim, qty_col_sim, dist_col_sim, sim_out.get("brand_map", {}))
+
+    with tab_pi:
+        _render_pi_validation()
 
     st.stop()
 
