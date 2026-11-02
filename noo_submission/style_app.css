@@ -451,8 +451,22 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   line-height: 1.3 !important;
 }
 /* header kolom satu baris */
+/* header kolom: boleh wrap ke 2 baris, dengan jarak ke baris data di bawahnya */
 .st-key-tabel_noo_scroll [data-testid="stMarkdownContainer"] b,
-.st-key-tabel_manual_scroll [data-testid="stMarkdownContainer"] b { white-space: nowrap; }
+.st-key-tabel_manual_scroll [data-testid="stMarkdownContainer"] b {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.0;
+  display: inline-block;
+  margin-bottom: 4px;
+}
+/* Header kolom NOO: tinggi seragam supaya baris data sejajar rapi */
+.st-key-tabel_noo_scroll [data-testid="stHorizontalBlock"]:first-of-type [data-testid="stColumn"],
+.st-key-tabel_manual_scroll [data-testid="stHorizontalBlock"]:first-of-type [data-testid="stColumn"] {
+  min-height: 44px;
+  display: flex;
+  align-items: flex-end;
+}
 
 /* SPV Confirmation: lebar minimum + scroll horizontal */
 .st-key-tabel_spv_scroll {
@@ -598,3 +612,16 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 .profil-nama  { font-weight: 700; font-size: 12px; color: #192b47; }
 .profil-email { font-size: 10px; color: #8995a7; margin-top: 1px; }
 .profil-divider { border: none; border-top: 1px solid #e8edf3; margin: 5px 0; }
+
+.st-key-tabel_noo_scroll [data-baseweb="select"] > div {
+    min-height: 38px;
+    height: auto;
+    align-items: center;
+}
+.st-key-tabel_noo_scroll [data-baseweb="select"] > div > div {
+    line-height: 1.4;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: visible;
+    font-size: 0.85rem;
+}
