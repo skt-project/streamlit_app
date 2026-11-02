@@ -614,9 +614,11 @@ def halaman_pengajuan_noo():
     tanda_file = tuple((b.name, b.size) for b in (daftar_berkas or []))
     if ss.get("tanda_file_upload") != tanda_file:
         for k in ["sku_staged", "sku_last_batch", "sku_last_n", "sku_msg",
-                  "sku_fix_on", "noo_batch_terkirim"]:
+                  "sku_fix_on", "noo_batch_terkirim",
+                  "_sku_upload_tanda", "_sku_upload_baris"]:
             ss.pop(k, None)
-        ss.sku_editor_key = ss.get("sku_editor_key", 0) + 1
+        ss.sku_editor_key        = ss.get("sku_editor_key", 0) + 1
+        ss.sku_upload_editor_key = ss.get("sku_upload_editor_key", 0) + 1
         ss.tanda_file_upload = tanda_file
 
     file_siap  = False
@@ -660,10 +662,66 @@ def halaman_pengajuan_noo():
         render_manual_sku()
         render_bulk_sku()
         st.markdown('<hr class="pemisah-opsi">', unsafe_allow_html=True)
+
         st.markdown(judul_opsi(2,"Upload Option","extracted from Failure List file"),
                     unsafe_allow_html=True)
         if file_siap and len(data_sku):
-            st.dataframe(data_sku.head(5), hide_index=True, width="stretch")
+            try:
+                map_produk_upload = muat_produk_lookup(SHEET_PRODUCT)
+            except Exception:
+                map_produk_upload = {}
+            ss.setdefault("sku_upload_editor_key", 0)
+            tanda_upload = tuple(data_sku["Product"].tolist())
+            if ss.get("_sku_upload_tanda") != tanda_upload:
+                baris_cocok = []
+                for _, r in data_sku.iterrows():
+                    produk_raw      = _sku_str(r["Product"])
+                    hasil_p, status = _bulk_sku_cocokkan(produk_raw, map_produk_upload)
+                    baris_cocok.append({"_match": status, "product_fix": hasil_p or produk_raw})
+                ss._sku_upload_baris = baris_cocok
+                ss._sku_upload_tanda = tanda_upload
+                ss.sku_upload_editor_key += 1
+            df_edit = data_sku.copy()
+            df_edit["Customer SKU Name"] = data_sku["Customer Product Name"]  # ← teks asli dari file, hanya referensi tampilan
+            for i, b in enumerate(ss.get("_sku_upload_baris", [])):
+                if i < len(df_edit):
+                    df_edit.loc[df_edit.index[i], "Product"] = b["product_fix"]
+
+            LEBAR_SKU_UPLOAD = [1.3, 1.5, 1.6, 1.7, 1.8, 1.5]
+            kolom_tampil = ["Customer Code", "Customer Name", "Customer SKU Name",
+                            "Product", "Customer Product Code", "Customer Product Name"]
+
+            tabel_sku_upload = st.container(key="tabel_sku_upload_scroll")
+            tabel_sku_upload.__enter__()
+            kepala = st.columns(LEBAR_SKU_UPLOAD)
+            for kolom, teks in zip(kepala, kolom_tampil):
+                kolom.markdown(f"<b>{teks}</b>", unsafe_allow_html=True)
+
+            produk_terupdate = []
+            for i, r in df_edit.reset_index(drop=True).iterrows():
+                c_cc, c_cn, c_skuname, c_produk, c_kode, c_namaprod = st.columns(LEBAR_SKU_UPLOAD)
+                c_cc.markdown(r["Customer Code"], unsafe_allow_html=True)
+                c_cn.markdown(r["Customer Name"], unsafe_allow_html=True)
+                c_skuname.markdown(
+                    f'<span style="color:#64748b">{r["Customer SKU Name"]}</span>',
+                    unsafe_allow_html=True)
+                opsi = sorted(map_produk_upload)
+                idx  = opsi.index(r["Product"]) if r["Product"] in opsi else 0
+                produk_pilih = c_produk.selectbox(
+                    "", opsi, index=idx, label_visibility="collapsed",
+                    key=f"sku_upload_produk_{ss.sku_upload_editor_key}_{i}",
+                )
+                c_kode.markdown(r["Customer Product Code"], unsafe_allow_html=True)
+                c_namaprod.markdown(cari_nama_produk(produk_pilih, map_produk_upload), unsafe_allow_html=True)
+                produk_terupdate.append(produk_pilih)
+            tabel_sku_upload.__exit__(None, None, None)
+
+            data_sku = df_edit.drop(columns=["Customer SKU Name"]).reset_index(drop=True)
+            data_sku["Product"] = produk_terupdate
+            data_sku["Customer Product Name"] = [
+                cari_nama_produk(p, map_produk_upload) for p in produk_terupdate
+            ]
+            salah_cc = cc_salah(data_sku)
             if salah_cc:
                 contoh = ", ".join(f"{p}: {cc}→{b}…" for _, p, cc, b in salah_cc[:5])
                 st.error(f"❌ {len(salah_cc)} row(s) have an invalid Customer Code prefix "
@@ -858,27 +916,33 @@ def halaman_pengajuan_noo():
             st.markdown('<div class="preview-kosong">📄 No data yet, please upload a file first</div>',
                         unsafe_allow_html=True)
         else:
-            st.markdown(komponen.html_catatan_noo(), unsafe_allow_html=True)
-            LEBAR_NOO = [1.4,1.8,1.8,1.2,1.8,1.5,1.5,1.4]
+            LEBAR_NOO = [1.9,1.8,1.8,1.0,1.8,1.3,1.3,1.4,0.9] 
             tabel_noo = st.container(key="tabel_noo_scroll")
             tabel_noo.__enter__()
             header = st.columns(LEBAR_NOO)
             for kolom, (teks, wajib) in zip(header,[
                 ("Customer Store Code",True),("Store Name",False),("Customer Store Name",False),
-                ("City",True),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True)]):
+                ("City",False),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True),
+                ("Channel",True)]):
                 tanda = ' <b style="color:#ef4f58">*</b>' if wajib else ""
-                kolom.markdown(f"<b>{teks}</b>{tanda}", unsafe_allow_html=True)
+                kolom.markdown(
+                    f'<div style="font-size:13px; line-height:1.3; '
+                    f'margin-bottom:6px; word-break:break-word;">{teks}{tanda}</div>',
+                    unsafe_allow_html=True)
             spv_sales_lookup = muat_spv_sales_lookup()
             semua_terisi = True
             data_noo = data_noo.reset_index(drop=True)
-            for _c in ["Customer Store Code","City","Store Address","SPV","SE/KAE","Store Type"]:
+            OPSI_TIPE = [""] + JENIS_TOKO_DEFAULT
+            IDX_TIPE_DEFAULT = next(
+                (n for n, o in enumerate(OPSI_TIPE) if str(o).strip().lower() == "retail store"), 0)
+            for _c in ["Customer Store Code","City","Store Address","SPV","SE/KAE","Store Type","Channel"]:
                 if _c not in data_noo.columns:
                     data_noo[_c] = ""
                 data_noo[_c] = data_noo[_c].astype("object")
             for i, baris in data_noo.iterrows():
                 csn = str(baris.get("Customer Store Name",baris.get("Store Name",""))).strip().upper()
                 #EDIT DISINI KOLOM NOO
-                c_kode,c_nama,c_csn,c_city,c_alamat,c_spv, c_sales,c_tipe = st.columns(LEBAR_NOO)
+                c_kode,c_nama,c_csn,c_city,c_alamat,c_spv,c_sales,c_tipe,c_channel = st.columns(LEBAR_NOO)
                 #-------------
                 kode_val = str(baris["Customer Store Code"])
                 c_kode.markdown(f'<div class="catatan-kecil" style="margin-top:8px">{kode_val}</div>', unsafe_allow_html=True)
@@ -891,14 +955,17 @@ def halaman_pengajuan_noo():
                 alamat_noo = c_alamat.text_input(lbl,value=alamat_val,label_visibility="collapsed",
                                                   key=f"noo_alamat_{i}",placeholder="Store address...")
                 spv_noo, sales_noo = input_spv_sales(csn, f"noo_{i}", c_spv, c_sales, spv_sales_lookup)
-                tipe_noo = c_tipe.selectbox(lbl,[""] + JENIS_TOKO_DEFAULT,label_visibility="collapsed",key=f"noo_tipe_{i}")
+                tipe_noo = c_tipe.selectbox(lbl,OPSI_TIPE,index=IDX_TIPE_DEFAULT,
+                                            label_visibility="collapsed",key=f"noo_tipe_{i}")
+                channel_noo = c_channel.selectbox(lbl,["GT","MTI"],label_visibility="collapsed",key=f"noo_channel_{i}")
                 data_noo.loc[i,"Customer Store Code"] = kode_val
                 data_noo.loc[i,"City"]       = city_noo
                 data_noo.loc[i,"Store Address"] = alamat_noo
                 data_noo.loc[i,"SE/KAE"]     = sales_noo
                 data_noo.loc[i,"SPV"]        = spv_noo
                 data_noo.loc[i,"Store Type"] = tipe_noo
-                if not (kode_val.strip() and city_noo.strip() and tipe_noo and spv_noo.strip() and sales_noo.strip()):
+                data_noo.loc[i,"Channel"] = channel_noo
+                if not (kode_val.strip() and tipe_noo and spv_noo.strip() and sales_noo.strip()):
                     semua_terisi = False
             tabel_noo.__exit__(None, None, None)
             noo_siap = semua_terisi
