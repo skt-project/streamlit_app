@@ -710,6 +710,24 @@ def muat_distri_customer_name() -> dict:
 
 def _kunci_produk(v) -> str:
     return " ".join(_sku_str(v).upper().split())
+GID_PRODUCT_DESCRIPTION = "2106824930"
+
+@st.cache_data(ttl=600, show_spinner=False)
+def muat_deskripsi_produk() -> dict:
+    """Return dict {Description: Product Code} dari sheet (gid tetap, nama tab boleh berubah)."""
+    url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}"
+           f"/export?format=csv&gid={GID_PRODUCT_DESCRIPTION}")
+    df = pd.read_csv(url, dtype=str, header=None).fillna("")
+    if df.shape[1] < 2:
+        return {}
+    hasil = {}
+    for _, r in df.iterrows():
+        kode = _sku_str(r.iloc[0])
+        desk = _sku_str(r.iloc[1])
+        if not kode or not desk or kode.strip().upper() in ("PRODUCT CODE", "PRODUCT"):
+            continue
+        hasil.setdefault(desk, kode)
+    return hasil
 
 @st.cache_data(ttl=600, show_spinner=False)
 def muat_produk_lookup(nama_sheet: str) -> dict:
@@ -800,15 +818,16 @@ def hitung_validasi(df: pd.DataFrame) -> pd.Series:
     kosong = lon.isna() | lat.isna() | alamat.eq("") | nama.eq("")
     return pd.Series(np.where(kosong, STATUS_REVIEW, STATUS_VALID), index=df.index)
 
-def hasil_ke_excel(df: pd.DataFrame) -> bytes:
+def hasil_ke_excel(df: pd.DataFrame, startrow: int = 1) -> bytes:
     from openpyxl.styles import Font, Border
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, startrow=1, sheet_name="Sheet1")
-        ws = writer.sheets["Sheet1"]
-        for sel in ws[2]:
-            sel.font  = Font(bold=False)
-            sel.border = Border()
+        df.to_excel(writer, index=False, startrow=startrow, sheet_name="Sheet1")
+        if startrow > 0:
+            ws = writer.sheets["Sheet1"]
+            for sel in ws[startrow + 1]:   # header row = startrow+1 in 1-indexed Excel rows
+                sel.font   = Font(bold=False)
+                sel.border = Border()
     return buffer.getvalue()
 
 def catat_riwayat(aksi: str, detail: str = ""):
