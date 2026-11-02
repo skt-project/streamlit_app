@@ -654,4 +654,11 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   flex-shrink: 0 !important;
   flex-grow: 0 !important;
 }
-
+.city-select {
+  white-space: normal;   /* was: nowrap */
+  text-overflow: clip;   /* was: ellipsis */
+  overflow: visible;     /* was: hidden */
+  height: auto;
+  min-height: 36px;      /* keeps a sane minimum */
+  line-height: 1.3;
+}
