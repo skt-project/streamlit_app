@@ -162,6 +162,8 @@ def _filter_already_saved(df: pd.DataFrame) -> pd.DataFrame:
     return df[mask]
 
 
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_zero_price_skus() -> set:
     try:
@@ -1224,16 +1226,17 @@ def fetch_pi_anomaly() -> pd.DataFrame:
     query = f"""
         SELECT
             UPPER(distributor_name)                                          AS distributor_name,
-            sku,
+            file_name,
             COUNT(DISTINCT reference_cust_order_no)                          AS cnt_ref,
-            STRING_AGG(DISTINCT CAST(reference_cust_order_no AS STRING)
+            STRING_AGG(DISTINCT CAST(reference_cust_order_no AS STRING), '|'
                        ORDER BY CAST(reference_cust_order_no AS STRING))     AS ref_list,
             MAX(validation_by_rsa)                                           AS validation_by_rsa
         FROM `{TEST_TABLE}`
         WHERE reference_cust_order_no IS NOT NULL
+          AND file_name IS NOT NULL AND file_name != ''
         GROUP BY 1, 2
         HAVING COUNT(DISTINCT reference_cust_order_no) > 1
-        ORDER BY distributor_name, sku
+        ORDER BY distributor_name, file_name
     """
     try:
         return client.query(query).to_dataframe()
@@ -1242,13 +1245,13 @@ def fetch_pi_anomaly() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _update_pi_validation(distributor_name: str, sku: str, validation_text: str, ref_no: str = "") -> bool:
-    """UPDATE validation_by_rsa, dan jika ref_no diisi, overwrite juga reference_cust_order_no
-    untuk SEMUA baris mentah pasangan distributor+sku ini (menyatukan jadi 1 ref yang valid)."""
+def _update_pi_validation(distributor_name: str, file_name: str, validation_text: str, ref_no: str = "") -> bool:
+    """Overwrite reference_cust_order_no + validation_by_rsa untuk SEMUA row
+    pasangan distributor + file_name ini."""
     client = get_bq_client()
-    safe_val = validation_text.replace("\\", "\\\\").replace("'", "\\'")
+    safe_val  = validation_text.replace("\\", "\\\\").replace("'", "\\'")
     safe_dist = distributor_name.replace("'", "\\'")
-    safe_sku  = sku.replace("'", "\\'")
+    safe_file = file_name.replace("\\", "\\\\").replace("'", "\\'")
 
     set_clauses = [f"validation_by_rsa = '{safe_val}'"]
     ref_no = str(ref_no or "").strip()
@@ -1261,15 +1264,17 @@ def _update_pi_validation(distributor_name: str, sku: str, validation_text: str,
         UPDATE `{TEST_TABLE}`
         SET {set_sql}
         WHERE UPPER(distributor_name) = '{safe_dist}'
-          AND UPPER(sku)              = '{safe_sku}'
+          AND file_name               = '{safe_file}'
           AND reference_cust_order_no IS NOT NULL
     """
     try:
         client.query(query).result()
         return True
     except Exception as e:
-        st.error(f"Gagal update PI Validation ({distributor_name} / {sku}): {e}")
+        st.error(f"Gagal update PI Validation ({distributor_name} / {file_name}): {e}")
         return False
+
+    
 def _render_pi_validation():
     st.markdown(
         """<div class="pipeline-step active">
@@ -1278,46 +1283,61 @@ def _render_pi_validation():
         unsafe_allow_html=True,
     )
 
+    # pesan hasil save (tetap tampil setelah st.rerun)
+    _flash = st.session_state.pop("pi_flash", None)
+    if _flash:
+        st.success(_flash)
+
     anomaly_df = fetch_pi_anomaly()
 
     if anomaly_df.empty:
-        st.success("Semua SKU hanya memiliki 1 Reference Order No.")
+        st.success("Semua file hanya memiliki 1 Reference Order No.")
         return
 
     st.warning(
-        f"⚠️ **{len(anomaly_df)} SKU** memiliki lebih dari 1 `reference_cust_order_no` "
-        f"(double PI) dari {anomaly_df['distributor_name'].nunique()} distributor."
+        f"⚠️ **{len(anomaly_df)} file** memiliki lebih dari 1 `reference_cust_order_no` "
+        f"dari {anomaly_df['distributor_name'].nunique()} distributor."
     )
-    st.caption(f"{len(anomaly_df)} SKU perlu divalidasi — pilih ref yang benar dari dropdown masing-masing baris.")
+    st.caption("Pilih ref yang benar per file. Semua row di file tersebut akan otomatis ikut berubah.")
 
     st.markdown("""
     <style>
     div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; }
-    div[data-testid="stVerticalBlockBorderWrapper"] { padding: 0 !important; }
-    .pi-row-text { font-size: 0.78rem; line-height: 1.1; margin: 0; padding-top: 0.5rem; }
+    .pi-row-text { font-size: 0.78rem; line-height: 1.1; margin: 0; padding-top: 0.5rem; word-break: break-all; }
     .pi-row-header { font-size: 0.78rem; font-weight: 700; margin: 0; }
     div[data-baseweb="select"] { font-size: 0.78rem; min-height: 2rem; }
-    div[data-baseweb="select"] > div { min-height: 2rem; padding-top: 0.1rem; padding-bottom: 0.1rem; }
     .stTextInput input { font-size: 0.78rem; padding: 0.25rem 0.5rem; height: 2rem; }
+
+    /* panel opsi dropdown: selebar teks terpanjang, tidak dipotong "..." */
+    div[data-baseweb="popover"] { min-width: 480px !important; max-width: 90vw !important; }
+    div[data-baseweb="popover"] ul[role="listbox"] { min-width: 480px !important; }
+    div[data-baseweb="popover"] li[role="option"] { white-space: nowrap !important; }
+    div[data-baseweb="popover"] li[role="option"] * {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+    /* nilai terpilih di kotak dropdown juga tidak dipotong */
+    div[data-baseweb="select"] div[value] { text-overflow: clip !important; }
     </style>
     """, unsafe_allow_html=True)
 
     _NOTE_OPTIONS = ["Mapping PI by RSA", "Others"]
-    _col_widths = [2, 1.3, 0.8, 2, 1.6, 2]
+    _col_widths = [2, 3, 0.8, 4.5, 1.6, 2]
 
     h = st.columns(_col_widths, gap="small")
-    for col, txt in zip(h, ["Distributor", "SKU", "Jumlah Ref", "Reference Order No ✏️",
+    for col, txt in zip(h, ["Distributor", "File", "Jumlah Ref", "Reference Order No ✏️",
                             "Validation by RSA ✏️", "Catatan (jika Others)"]):
         col.markdown(f"<p class='pi-row-header'>{txt}</p>", unsafe_allow_html=True)
 
     _pending_rows = []
     for i, (_, anom_row) in enumerate(anomaly_df.iterrows()):
         _dist = str(anom_row["distributor_name"]).strip().upper()
-        _sku  = str(anom_row["sku"]).strip().upper()
-        _refs = [r.strip() for r in str(anom_row.get("ref_list") or "").split(",") if r.strip()] or [""]
+        _file = str(anom_row["file_name"]).strip()
+        _refs = [r.strip() for r in str(anom_row.get("ref_list") or "").split("|") if r.strip()]
         _existing_note = str(anom_row.get("validation_by_rsa") or "").strip()
 
-        if _existing_note == "Mapping PI by RSA":
+        if _existing_note == "Mapping PI by RSA" or not _existing_note:
             _default_choice, _default_manual = "Mapping PI by RSA", ""
         else:
             _default_choice, _default_manual = "Others", _existing_note
@@ -1326,20 +1346,20 @@ def _render_pi_validation():
         with c1:
             st.markdown(f"<p class='pi-row-text'>{_dist}</p>", unsafe_allow_html=True)
         with c2:
-            st.markdown(f"<p class='pi-row-text'>{_sku}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p class='pi-row-text'>{_file}</p>", unsafe_allow_html=True)
         with c3:
             st.markdown(f"<p class='pi-row-text'>{int(anom_row.get('cnt_ref', 0))}</p>", unsafe_allow_html=True)
         with c4:
-            ref_pick = st.selectbox("ref", options=_refs, index=0,
-                                    key=f"pi_ref_{i}_{_dist}_{_sku}", label_visibility="collapsed")
+            ref_pick = st.selectbox("ref", options=_refs, index=None, placeholder="Pilih ref...",
+                                    key=f"pi_ref_{i}_{_dist}_{_file}", label_visibility="collapsed")
         with c5:
             choice_pick = st.selectbox("note_choice", options=_NOTE_OPTIONS,
                                        index=_NOTE_OPTIONS.index(_default_choice),
-                                       key=f"pi_choice_{i}_{_dist}_{_sku}", label_visibility="collapsed")
+                                       key=f"pi_choice_{i}_{_dist}_{_file}", label_visibility="collapsed")
         with c6:
             if choice_pick == "Others":
                 manual_val = st.text_input("manual_note", value=_default_manual,
-                                           key=f"pi_manual_{i}_{_dist}_{_sku}",
+                                           key=f"pi_manual_{i}_{_dist}_{_file}",
                                            label_visibility="collapsed", placeholder="Tulis catatan...")
             else:
                 manual_val = ""
@@ -1347,8 +1367,8 @@ def _render_pi_validation():
 
         _pending_rows.append({
             "Distributor": _dist,
-            "SKU": _sku,
-            "Reference Order No": ref_pick,
+            "File": _file,
+            "Reference Order No": ref_pick or "",
             "Validation by RSA": choice_pick if choice_pick != "Others" else manual_val.strip(),
         })
 
@@ -1356,22 +1376,24 @@ def _render_pi_validation():
     if st.button("💾 Save PI Validation", use_container_width=True, key="btn_save_pi_validation"):
         _saved, _skipped = 0, 0
         for row in _pending_rows:
-            _note = row["Validation by RSA"].strip()
             _ref  = row["Reference Order No"].strip()
-            if _note or _ref:
-                if _update_pi_validation(row["Distributor"], row["SKU"], _note, _ref):
-                    _saved += 1
-            else:
+            _note = row["Validation by RSA"].strip()
+            if not _ref:                      # belum dipilih -> jangan ditimpa
                 _skipped += 1
+                continue
+            if _update_pi_validation(row["Distributor"], row["File"], _note, _ref):
+                _saved += 1
 
         if _saved:
             fetch_pi_anomaly.clear()
-            msg = f"✅ {_saved} baris PI Validation tersimpan."
+            msg = f"✅ {_saved} file berhasil di-remap."
             if _skipped:
-                msg += f" ({_skipped} baris dilewati karena kolom kosong.)"
-            st.success(msg)
+                msg += f" ({_skipped} file dilewati karena ref belum dipilih.)"
+            st.session_state["pi_flash"] = msg
+            st.rerun()
         else:
-            st.info("Tidak ada perubahan — isi kolom Validation by RSA atau pilih Reference Order No dulu.")
+            st.info("Tidak ada perubahan — pilih Reference Order No dulu.")
+
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim, brand_map=None):
     brand_map = brand_map or {}
     final_disp = pd.concat(e_dfs.values(), ignore_index=True)
