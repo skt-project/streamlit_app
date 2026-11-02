@@ -1,4 +1,3 @@
-
 import datetime
 import json
 import math
@@ -46,6 +45,34 @@ def nama_pengguna() -> str:
     # username distributor = company code
     return f"Admin - {uname.upper()}" if uname else "Admin"
 # GENERATOR ID
+def resequence_prefix(df: pd.DataFrame, prefix: str) -> list:
+    """Susun ulang nomor Store ID utk 1 prefix biar rapat tanpa gap.
+    Urutan berdasar Generated At (yang paling lama dapat nomor terkecil).
+    Return list index yang ID-nya berubah (perlu ditandai dirty)."""
+    if not prefix:
+        return []
+    floor = max(
+        max_angka_per_prefix().get(prefix, 0),
+        sb_max_angka_store_id().get(prefix, 0),
+    )
+    mask = (
+        df["Validasi"].eq(STATUS_VALID) &
+        df["Store ID"].fillna("").astype(str).str.strip().str.startswith(prefix) &
+        ~df["Store ID"].fillna("").astype(str).str.strip().isin(["", "-"])
+    )
+    aktif = df[mask].copy()
+    if aktif.empty:
+        return []
+    aktif["_urut"] = pd.to_datetime(aktif["Generated At"], errors="coerce")
+    aktif = aktif.sort_values("_urut", kind="stable")
+
+    berubah = []
+    for n, idx in enumerate(aktif.index, start=1):
+        id_baru = f"{prefix}{floor+n:0{PANJANG_ANGKA}d}"
+        if str(df.loc[idx, "Store ID"]).strip() != id_baru:
+            df.loc[idx, "Store ID"] = id_baru
+            berubah.append(idx)
+    return berubah
 
 def generate_store_ids(df: pd.DataFrame, semua: pd.DataFrame = None, kolom_target: str = "Store ID") -> pd.Series:
     prefix_per_distri = muat_prefix_per_distributor()
@@ -310,6 +337,10 @@ def tab_noo():
     ss = st.session_state
     tempat_kpi   = st.empty()
 
+    # DEBUG SEMENTARA — hapus setelah ketemu sumbernya
+#    st.write("DEBUG max BigQuery (IESM):", max_angka_per_prefix().get("IESK"))
+#    st.write("DEBUG max Supabase (IESM):", sb_max_angka_store_id().get("IESK"))
+
     if ss.get("err_tagging"):
         st.error(ss.pop("err_tagging"))
     if ss.pop("reset_filter", False):
@@ -490,9 +521,18 @@ def tab_noo():
         validasi_skrg = df.loc[id_berubah,"Validasi"]
         pilih = validasi_skrg.eq(STATUS_VALID)
         batal = [i for i in id_berubah if not pilih.loc[i]]
+        prefix_terdampak = set()
         for i in batal:
+            sid_lama = str(df.loc[i,"Store ID"]).strip()
+            if sid_lama and sid_lama != "-":
+                prefix_terdampak.add(sid_lama[:PANJANG_PREFIX])
             df.loc[i,"Store ID"] = "-"; df.loc[i,"Generated At"] = pd.NaT
             ss.baris_perlu_push.discard(i)
+        for prefix in prefix_terdampak:
+            id_geser = resequence_prefix(df, prefix)
+            if id_geser:
+                ss.baris_kotor.update(id_geser)
+                ss.baris_perlu_push.update(id_geser)
         store_kosong = df.loc[id_berubah,"Store ID"].fillna("").astype(str).str.strip().isin(["","-"])
         baru = list(pilih.index[pilih & store_kosong])
         if baru:
@@ -796,9 +836,9 @@ def _tab_sku():
     with st.container(key="sku_toolbar"):
         b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
         refresh = b1.button("🔄 Refresh", key="sku_refresh", width="stretch")
-        b2.download_button("⬇️ Download", hasil_ke_excel(data_dl), "hasil_sku_mapping.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           disabled=df_f.empty, key="unduh_sku", width="stretch")
+        b2.download_button("⬇️ Download", hasil_ke_excel(data_dl, startrow=0), "hasil_sku_mapping.xlsx",
+                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                   disabled=df_f.empty, key="unduh_sku", width="stretch")
         simpan = b3.button("💾 Save changes", type="primary", key="sku_simpan",
                            disabled=not ss.sku_pending, width="stretch")
         belum = (f' <span class="teks-belumsimpan">● {len(ss.sku_pending)} unsaved</span>'
