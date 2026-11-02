@@ -24,6 +24,7 @@ from shared import (
     # GSheets
     daftar_distributor, muat_distri_code_map, muat_distri_customer_code_raw,
     muat_distri_customer_name, muat_produk_lookup, muat_spv_sales_lookup,
+    muat_deskripsi_produk,
     region_distributor, muat_distributor_dari_sheet,
     # Pivot / helpers
     pivot_sku_mapping, pivot_noo, noo_row_ke_supabase,
@@ -452,6 +453,16 @@ def render_manual_sku():
                 catat_riwayat("Submit Manual SKU Mapping", f"{len(payload)} rows")
                 ss.pesan_toast = f"Manual SKU Mapping saved — {len(payload)} rows"
                 st.rerun()
+def _set_produk_dari_deskripsi(produk_key: str, desc_key: str, desc_map: dict):
+    deskripsi = st.session_state.get(desc_key, "")
+    if deskripsi and deskripsi in desc_map:
+        st.session_state[produk_key] = desc_map[deskripsi]
+
+def _ambil_kode_depan(teks: str) -> str:
+    """Ambil kata pertama sebelum spasi, misal 'G2G-32601' dari
+    'G2G-32601 GLAD2GLOW PERFECT BLURRING POWDER ...'."""
+    t = _sku_str(teks)
+    return t.split()[0] if t else ""
 
 def _bulk_sku_cocokkan(teks: str, map_produk: dict) -> tuple:
     """Return (produk_di_dropdown | None, status)."""
@@ -670,13 +681,32 @@ def halaman_pengajuan_noo():
                 map_produk_upload = muat_produk_lookup(SHEET_PRODUCT)
             except Exception:
                 map_produk_upload = {}
+            try:
+                map_deskripsi_upload = muat_deskripsi_produk()
+            except Exception as e:
+                st.warning(f"Failed to load Product Description list: {e}")
+                map_deskripsi_upload = {}
+            st.caption(f"DEBUG: {len(map_deskripsi_upload)} descriptions loaded")
             ss.setdefault("sku_upload_editor_key", 0)
-            tanda_upload = tuple(data_sku["Product"].tolist())
+            tanda_upload = tuple(zip(
+                data_sku["Product"].tolist(), data_sku["Customer Product Name"].tolist()
+            ))
             if ss.get("_sku_upload_tanda") != tanda_upload:
                 baris_cocok = []
                 for _, r in data_sku.iterrows():
-                    produk_raw      = _sku_str(r["Product"])
-                    hasil_p, status = _bulk_sku_cocokkan(produk_raw, map_produk_upload)
+                    produk_raw = _sku_str(r["Product"])
+                    kunci_raw  = _kunci_produk(produk_raw)
+                    if kunci_raw in map_produk_upload:
+                        hasil_p, status = kunci_raw, "Exact"
+                    else:
+                        # ambil kata pertama (sebelum spasi) dari Customer SKU Name,
+                        # cek exact match saja — tidak ada fuzzy sama sekali
+                        kode_depan  = _ambil_kode_depan(r["Customer Product Name"])
+                        kunci_depan = _kunci_produk(kode_depan) if kode_depan else ""
+                        if kunci_depan in map_produk_upload:
+                            hasil_p, status = kunci_depan, "Exact"
+                        else:
+                            hasil_p, status = None, "Not found"
                     baris_cocok.append({"_match": status, "product_fix": hasil_p or produk_raw})
                 ss._sku_upload_baris = baris_cocok
                 ss._sku_upload_tanda = tanda_upload
@@ -687,32 +717,60 @@ def halaman_pengajuan_noo():
                 if i < len(df_edit):
                     df_edit.loc[df_edit.index[i], "Product"] = b["product_fix"]
 
-            LEBAR_SKU_UPLOAD = [1.3, 1.5, 1.6, 1.7, 1.8, 1.5]
+            LEBAR_SKU_UPLOAD = [1.0, 1.2, 1.8, 2.0, 1.2, 1.3, 3.0]
             kolom_tampil = ["Customer Code", "Customer Name", "Customer SKU Name",
-                            "Product", "Customer Product Code", "Customer Product Name"]
+                            "Product Description", "Product", "Customer Product Code",
+                            "Customer Product Name"]
 
             tabel_sku_upload = st.container(key="tabel_sku_upload_scroll")
             tabel_sku_upload.__enter__()
             kepala = st.columns(LEBAR_SKU_UPLOAD)
             for kolom, teks in zip(kepala, kolom_tampil):
-                kolom.markdown(f"<b>{teks}</b>", unsafe_allow_html=True)
+                kolom.markdown(
+                    f'<b style="font-size:0.78rem; white-space:nowrap">{teks}</b>',
+                    unsafe_allow_html=True)
+
+            CELL_STYLE = ("font-size:0.78rem; white-space:nowrap; overflow:hidden; "
+                          "text-overflow:ellipsis; display:block;")
+            opsi_deskripsi = [""] + sorted(map_deskripsi_upload.keys())
 
             produk_terupdate = []
             for i, r in df_edit.reset_index(drop=True).iterrows():
-                c_cc, c_cn, c_skuname, c_produk, c_kode, c_namaprod = st.columns(LEBAR_SKU_UPLOAD)
-                c_cc.markdown(r["Customer Code"], unsafe_allow_html=True)
-                c_cn.markdown(r["Customer Name"], unsafe_allow_html=True)
-                c_skuname.markdown(
-                    f'<span style="color:#64748b">{r["Customer SKU Name"]}</span>',
+                c_cc, c_cn, c_skuname, c_desk, c_produk, c_kode, c_namaprod = st.columns(LEBAR_SKU_UPLOAD)
+                c_cc.markdown(
+                    f'<span style="{CELL_STYLE}">{r["Customer Code"]}</span>',
                     unsafe_allow_html=True)
+                c_cn.markdown(
+                    f'<span style="{CELL_STYLE}">{r["Customer Name"]}</span>',
+                    unsafe_allow_html=True)
+                c_skuname.markdown(
+                    f'<span style="font-size:0.68rem; white-space:normal; '
+                    f'word-break:break-word; line-height:1.25; color:#64748b">'
+                    f'{r["Customer SKU Name"]}</span>',
+                    unsafe_allow_html=True)
+
+                desc_key   = f"sku_upload_desc_{ss.sku_upload_editor_key}_{i}"
+                produk_key = f"sku_upload_produk_{ss.sku_upload_editor_key}_{i}"
+                c_desk.selectbox(
+                    "", opsi_deskripsi, label_visibility="collapsed",
+                    key=desc_key,
+                    on_change=_set_produk_dari_deskripsi,
+                    args=(produk_key, desc_key, map_deskripsi_upload),
+                )
+
                 opsi = sorted(map_produk_upload)
                 idx  = opsi.index(r["Product"]) if r["Product"] in opsi else 0
                 produk_pilih = c_produk.selectbox(
                     "", opsi, index=idx, label_visibility="collapsed",
-                    key=f"sku_upload_produk_{ss.sku_upload_editor_key}_{i}",
+                    key=produk_key,
                 )
-                c_kode.markdown(r["Customer Product Code"], unsafe_allow_html=True)
-                c_namaprod.markdown(cari_nama_produk(produk_pilih, map_produk_upload), unsafe_allow_html=True)
+                c_kode.markdown(
+                    f'<span style="{CELL_STYLE}">{r["Customer Product Code"]}</span>',
+                    unsafe_allow_html=True)
+                nama_produk = cari_nama_produk(produk_pilih, map_produk_upload)
+                c_namaprod.markdown(
+                    f'<span style="font-size:0.78rem; white-space:nowrap;">{nama_produk}</span>',
+                    unsafe_allow_html=True)
                 produk_terupdate.append(produk_pilih)
             tabel_sku_upload.__exit__(None, None, None)
 
