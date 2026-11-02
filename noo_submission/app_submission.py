@@ -732,6 +732,8 @@ def halaman_pengajuan_noo():
 
             CELL_STYLE = ("font-size:0.78rem; white-space:nowrap; overflow:hidden; "
                           "text-overflow:ellipsis; display:block;")
+            CELL_STYLE_WRAP = ("font-size:0.78rem; white-space:normal; word-break:break-word; "
+                               "line-height:1.3; display:block;")
             opsi_deskripsi = [""] + sorted(map_deskripsi_upload.keys())
 
             produk_terupdate = []
@@ -741,7 +743,7 @@ def halaman_pengajuan_noo():
                     f'<span style="{CELL_STYLE}">{r["Customer Code"]}</span>',
                     unsafe_allow_html=True)
                 c_cn.markdown(
-                    f'<span style="{CELL_STYLE}">{r["Customer Name"]}</span>',
+                    f'<span style="{CELL_STYLE_WRAP}">{r["Customer Name"]}</span>',
                     unsafe_allow_html=True)
                 c_skuname.markdown(
                     f'<span style="font-size:0.68rem; white-space:normal; '
