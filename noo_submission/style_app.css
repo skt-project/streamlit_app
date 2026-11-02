@@ -157,7 +157,21 @@ div[data-testid="stCheckbox"] label > span:first-child { transform: scale(1.35);
 }
 /* ---------- DROPDOWN: tampilkan teks opsi penuh ---------- */
 ul[role="listbox"] li { height: auto !important; min-height: 38px; }
-ul[role="listbox"] li div { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+ul[role="listbox"] li div {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-size: 0.85rem !important;
+}
+
+/* ---------- DROPDOWN: fix invisible typed search text ---------- */
+div[data-baseweb="select"] input {
+  color: #33435c !important;
+  -webkit-text-fill-color: #33435c !important;
+  opacity: 1 !important;
+  caret-color: #33435c !important;
+  font-size: 0.85rem !important;
+}
 .stButton > button[kind="primary"] div[data-testid="stMarkdownContainer"],
 .stButton > button[kind="primary"] p {
   margin: 0 !important; padding: 0 !important;
@@ -624,26 +638,12 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
     padding-bottom: 0;
     overflow: visible;
     font-size: 0.85rem;
-
-    /* SKU Upload Option: scroll horizontal, baris tetap satu baris (tidak wrap ke bawah) */
-.st-key-tabel_sku_upload_scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 12px;
-}
-.st-key-tabel_sku_upload_scroll [data-testid="stHorizontalBlock"] {
-  min-width: 1300px;
-  flex-wrap: nowrap;
-}
-.st-key-tabel_sku_upload_scroll [data-testid="stColumn"] {
-  min-width: 0;
-}
 }
 
 /* SKU Upload Option: scroll horizontal, kolom tidak boleh mengecil */
 .st-key-tabel_sku_upload_scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   padding-bottom: 12px;
 }
 .st-key-tabel_sku_upload_scroll [data-testid="stHorizontalBlock"] {
