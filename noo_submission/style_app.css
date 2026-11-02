@@ -156,14 +156,30 @@ div[data-testid="stCheckbox"] label > span:first-child { transform: scale(1.35);
   line-height: normal !important;
 }
 /* ---------- DROPDOWN: tampilkan teks opsi penuh ---------- */
-ul[role="listbox"] li { height: auto !important; min-height: 38px; }
+/* Let the menu grow wider than the selectbox */
+div[data-baseweb="popover"] {
+  width: auto !important;
+  max-width: 90vw !important;
+}
+div[data-baseweb="popover"] > div,
+div[data-baseweb="popover"] ul[role="listbox"],
+div[data-baseweb="popover"] ul[role="listbox"] > div,
+div[data-baseweb="popover"] ul[role="listbox"] > div > div {
+  width: max-content !important;
+  min-width: 100% !important;
+  max-width: 480px !important;
+}
+/* One line per option, no clipping */
+ul[role="listbox"] li {
+  min-height: 38px;
+}
+ul[role="listbox"] li,
 ul[role="listbox"] li div {
-  white-space: normal !important;
+  white-space: nowrap !important;
   overflow: visible !important;
   text-overflow: clip !important;
   font-size: 0.85rem !important;
 }
-
 /* ---------- DROPDOWN: fix invisible typed search text ---------- */
 div[data-baseweb="select"] input {
   color: #33435c !important;
