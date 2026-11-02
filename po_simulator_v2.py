@@ -1308,24 +1308,23 @@ def _render_pi_validation():
     div[data-baseweb="select"] { font-size: 0.78rem; min-height: 2rem; }
     .stTextInput input { font-size: 0.78rem; padding: 0.25rem 0.5rem; height: 2rem; }
 
-    /* panel opsi dropdown: selebar teks terpanjang, tidak dipotong "..." */
-    div[data-baseweb="popover"] { min-width: 480px !important; max-width: 90vw !important; }
-    div[data-baseweb="popover"] ul[role="listbox"] { min-width: 480px !important; }
-    div[data-baseweb="popover"] li[role="option"] { white-space: nowrap !important; }
-    div[data-baseweb="popover"] li[role="option"] * {
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
+    /* scroll horizontal untuk seluruh tabel PI */
+    .pi-scroll-anchor + div[data-testid="stVerticalBlock"] { overflow-x: auto; }
+    .pi-scroll-anchor + div[data-testid="stVerticalBlock"] div[data-testid="stHorizontalBlock"] {
+        min-width: 1300px;
+        flex-wrap: nowrap !important;
     }
-    /* nilai terpilih di kotak dropdown juga tidak dipotong */
-    div[data-baseweb="select"] div[value] { text-overflow: clip !important; }
+    /* panel opsi dropdown ref saja: tampil penuh tanpa "..." */
+    div[data-baseweb="popover"] li[role="option"] { white-space: nowrap !important; }
     </style>
     """, unsafe_allow_html=True)
 
     _NOTE_OPTIONS = ["Mapping PI by RSA", "Others"]
     _col_widths = [2, 3, 0.8, 4.5, 1.6, 2]
 
-    h = st.columns(_col_widths, gap="small")
+    st.markdown("<div class='pi-scroll-anchor'></div>", unsafe_allow_html=True)
+    with st.container():
+        h = st.columns(_col_widths, gap="small")
     for col, txt in zip(h, ["Distributor", "File", "Jumlah Ref", "Reference Order No ✏️",
                             "Validation by RSA ✏️", "Catatan (jika Others)"]):
         col.markdown(f"<p class='pi-row-header'>{txt}</p>", unsafe_allow_html=True)
