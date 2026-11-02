@@ -494,6 +494,7 @@ def sb_cari_duplikat_sku(table: str, pasangan):
 def ambil_raw_noo() -> list:
     return sb_select(TABLE_SUBMIT_NOO, order="created_at.desc", limit=500)
 
+# KEMBALIKAN KE INI
 def sb_max_angka_store_id() -> dict:
     """Max angka per prefix dari SEMUA Store ID di INPUT_NOO (tanpa batas 500 baris)."""
     hasil, start, step = {}, 0, 1000
@@ -510,6 +511,7 @@ def sb_max_angka_store_id() -> dict:
             batch = r.json()
         except Exception:
             break
+
         for row in batch:
             sid = str(row.get("Store ID") or "").strip().upper()
             p, a = sid[:PANJANG_PREFIX], sid[PANJANG_PREFIX:]
@@ -519,7 +521,6 @@ def sb_max_angka_store_id() -> dict:
             break
         start += step
     return hasil
-
 # ═════════════════════════════════════════════════════════════════════════════
 # GOOGLE SHEETS LOADERS
 # ═════════════════════════════════════════════════════════════════════════════
@@ -591,6 +592,7 @@ def muat_prefix_per_distributor() -> dict:
     gabung = df_distri.merge(df_cov[["_key","Combine"]], on="_key", how="left")
     gabung = gabung[gabung["Combine"].notna() & gabung["Combine"].str.strip().ne("")]
     return dict(zip(gabung["Distributor Name"].str.strip(), gabung["Combine"].str.strip()))
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def max_angka_per_prefix() -> dict:
