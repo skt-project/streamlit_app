@@ -312,8 +312,8 @@ def terapkan_filter(df, status, distributor="All distributors", rentang=None, br
             m &= tgl <= pd.Timestamp(rentang[1])
     if status != "All statuses":
         m &= df["Validasi"] == status
-    if distributor != "All distributors" and "Customer Store Name" in df.columns:
-        m &= df["Customer Store Name"] == distributor
+    if distributor != "All distributors" and "Distributor" in df.columns:
+        m &= df["Distributor"].astype(str).str.strip().str.startswith(distributor.strip())
     return df[m]
 
 def terapkan_edit(master: pd.DataFrame, hasil_edit: pd.DataFrame):
