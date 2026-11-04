@@ -836,9 +836,15 @@ def _tab_sku():
     with st.container(key="sku_toolbar"):
         b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
         refresh = b1.button("🔄 Refresh", key="sku_refresh", width="stretch")
-        b2.download_button("⬇️ Download", hasil_ke_excel(data_dl, startrow=0), "hasil_sku_mapping.xlsx",
-                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                   disabled=df_f.empty, key="unduh_sku", width="stretch")
+        b2.download_button(
+            "⬇️ Download",
+            hasil_ke_excel(data_dl) if not df_f.empty else b"",
+            "hasil_sku_mapping.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disabled=df_f.empty,
+            key="unduh_sku",
+            width="stretch",
+)
         simpan = b3.button("💾 Save changes", type="primary", key="sku_simpan",
                            disabled=not ss.sku_pending, width="stretch")
         belum = (f' <span class="teks-belumsimpan">● {len(ss.sku_pending)} unsaved</span>'
