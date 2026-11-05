@@ -29,6 +29,12 @@ HEADERS: list[str] = [
     "ISI (GR / ML)",
 ]
 _LEGACY_HEADERS = HEADERS[:-1]   # 13 kolom, sebelum kolom ISI ditambahkan di ujung
+
+# Aplikasi TERKUNCI ke kolom A..N: header, pembacaan (cek duplikat), dan penulisan hanya menyentuh rentang ini.
+# Kolom di kanan N (mis. rumus buatan BD) tidak dibaca, tidak ditulis, dan tidak memengaruhi aplikasi.
+_LAST_COL = chr(ord("A") + len(HEADERS) - 1)          # "N"
+_HEADER_RANGE = f"A1:{_LAST_COL}1"
+_DATA_RANGE = f"A:{_LAST_COL}"
 _IDX = {name: i for i, name in enumerate(HEADERS)}
 _WIB = timezone(timedelta(hours=7))  # Indonesia tidak memakai DST
 
@@ -108,16 +114,20 @@ def open_spreadsheet(
     return sh, True
 
 
+def _trim(row: list[str]) -> list[str]:
+    row = list(row)
+    while row and not str(row[-1]).strip():
+        row.pop()
+    return row
+
+
 def _check_header(ws: gspread.Worksheet, current: list[str]) -> None:
-    """14 kolom pertama harus persis skema. Kolom tambahan di kanan (mis. rumus buatan BD) dibiarkan dan
-    tidak pernah ditulis/ditimpa oleh aplikasi."""
-    current = list(current)
-    while current and not str(current[-1]).strip():
-        current.pop()
-    if current[: len(HEADERS)] != HEADERS:
+    """Kolom A..N harus persis skema; selain itu header tidak ditimpa (error)."""
+    current = _trim(current)
+    if current != HEADERS:
         raise SheetsError(
-            f"Header worksheet '{ws.title}' tidak sesuai skema, sehingga tidak ditimpa. "
-            f"{len(HEADERS)} kolom pertama harus: {HEADERS}. Ditemukan: {current}."
+            f"Header worksheet '{ws.title}' kolom A-{_LAST_COL} tidak sesuai skema, sehingga tidak ditimpa. "
+            f"Diharapkan: {HEADERS}. Ditemukan: {current}."
         )
 
 
@@ -134,14 +144,14 @@ def ensure_worksheet(sh: gspread.Spreadsheet, title: str, *, fresh: bool = False
             ws.update_title(title)
         else:
             ws = sh.add_worksheet(title, rows=1000, cols=len(HEADERS))
-    first_row = ws.row_values(1)
+    first_row = _trim((ws.get(_HEADER_RANGE) or [[]])[0])      # hanya A1:N1
     if first_row == _LEGACY_HEADERS:      # tab lama 13 kolom: tambahkan kolom ISI di ujung (data tidak disentuh)
         if ws.col_count < len(HEADERS):   # grid tab lama hanya 13 kolom; perlu diperlebar dulu
             ws.add_cols(len(HEADERS) - ws.col_count)
         ws.update_cell(1, len(HEADERS), HEADERS[-1])
         first_row = HEADERS
     if not any(str(c).strip() for c in first_row):
-        ws.update([HEADERS], f"A1:{chr(ord('A') + len(HEADERS) - 1)}1", value_input_option="RAW")
+        ws.update([HEADERS], _HEADER_RANGE, value_input_option="RAW")
         ws.freeze(rows=1)
     else:
         _check_header(ws, first_row)
@@ -179,9 +189,9 @@ def insert_rows(sh: gspread.Spreadsheet, ws: gspread.Worksheet, meta: OpnameMeta
     dengan `DuplicateDataError`. `check_duplicates=False` untuk spreadsheet yang baru dibuat.
     """
     if check_duplicates:
-        values = ws.get_all_values()
-        if values and values[0][: len(HEADERS)] != HEADERS:
-            raise SheetsError(f"Header worksheet '{ws.title}' tidak sesuai skema.")
+        values = ws.get(_DATA_RANGE)                             # hanya kolom A..N
+        if values and _trim(values[0]) != HEADERS:
+            raise SheetsError(f"Header worksheet '{ws.title}' kolom A-{_LAST_COL} tidak sesuai skema.")
         existing = {
             (normalize_name(r[_IDX["Distributor Name"]]),
              *row_key(r[_IDX["PRODUCT ID"]], r[_IDX["BPOM NUMBER"]]))

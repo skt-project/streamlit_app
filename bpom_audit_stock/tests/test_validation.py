@@ -192,7 +192,7 @@ def test_filled_multi_distributor_template_passes_and_ignores_guide_sheet():
 
 def _ws(values):
     ws = MagicMock(); ws.id = 1; ws.title = "W"
-    ws.get_all_values.return_value = values
+    ws.get.return_value = values          # aplikasi hanya membaca rentang A:N lewat ws.get
     return ws
 
 
@@ -221,32 +221,39 @@ def test_duplicates_block_input_same_period_only():
     assert store.insert_rows(sh, _ws(existing), store.OpnameMeta("C", "2026-11-02", "x"), [row]).inserted == 1
 
 
-def test_extra_columns_to_the_right_are_allowed_and_never_written():
-    extras = store.HEADERS + ["Status BPOM Number (Expired/Not Expired)", "Region"]   # kolom rumus buatan BD
-    ws = MagicMock(); ws.row_values.return_value = extras; ws.title = "W"
+def test_app_is_locked_to_columns_a_to_n():
+    """Kolom di kanan N (rumus BD, kolom baru, dsb.) tidak dibaca, tidak ditulis, tidak memengaruhi aplikasi."""
+    assert store._LAST_COL == "N" and store._HEADER_RANGE == "A1:N1" and store._DATA_RANGE == "A:N"
+    ws = MagicMock(); ws.title = "W"
+    ws.get.return_value = [list(store.HEADERS)]                    # hanya A1:N1 yang terlihat oleh aplikasi
     sh = MagicMock(); sh.worksheet.return_value = ws
     assert store.ensure_worksheet(sh, "W") is ws
-    ws.update.assert_not_called(); ws.update_cell.assert_not_called()
+    ws.get.assert_called_once_with("A1:N1")
+    ws.update.assert_not_called(); ws.update_cell.assert_not_called(); ws.row_values.assert_not_called()
+
     row = v.ExcelRow(3, NAME, "P-1", "Produk", "10g", "NA1", 5)
-    sh2 = MagicMock()
-    store.insert_rows(sh2, _ws([extras, ["x"] * 16]), store.OpnameMeta("C", "2026-10-25", "Budi"), [row])
+    sh2, ws2 = MagicMock(), _ws([list(store.HEADERS)])
+    store.insert_rows(sh2, ws2, store.OpnameMeta("C", "2026-10-25", "Budi"), [row])
+    ws2.get.assert_called_once_with("A:N")                         # cek duplikat membaca A:N saja
+    ws2.get_all_values.assert_not_called()
     cells = sh2.batch_update.call_args[0][0]["requests"][0]["appendCells"]["rows"][0]["values"]
-    assert len(cells) == len(store.HEADERS) == 14                 # hanya A..N; O dan P dibiarkan untuk rumus BD
-    bad = list(extras); bad[2] = "Periode Lain"                   # kolom inti berbeda tetap ditolak
-    ws2 = MagicMock(); ws2.row_values.return_value = bad; ws2.title = "W"; sh.worksheet.return_value = ws2
+    assert len(cells) == 14                                        # hanya A..N yang ditulis
+
+    bad = list(store.HEADERS); bad[2] = "Periode Lain"             # kolom inti berubah -> ditolak
+    ws3 = MagicMock(); ws3.get.return_value = [bad]; ws3.title = "W"; sh.worksheet.return_value = ws3
     import pytest
     with pytest.raises(store.SheetsError):
         store.ensure_worksheet(sh, "W")
 
 
 def test_legacy_13_column_header_is_upgraded_not_overwritten():
-    ws = MagicMock(); ws.row_values.return_value = list(store._LEGACY_HEADERS); ws.col_count = 13
+    ws = MagicMock(); ws.get.return_value = [list(store._LEGACY_HEADERS)]; ws.col_count = 13
     sh = MagicMock(); sh.worksheet.return_value = ws
     store.ensure_worksheet(sh, "W")
     ws.add_cols.assert_called_once_with(1)                      # grid 13 kolom diperlebar dulu
     ws.update_cell.assert_called_once_with(1, 14, "ISI (GR / ML)")
     ws.update.assert_not_called()
-    ws2 = MagicMock(); ws2.row_values.return_value = ["header", "lain"]; ws2.title = "W"
+    ws2 = MagicMock(); ws2.get.return_value = [["header", "lain"]]; ws2.title = "W"
     sh.worksheet.return_value = ws2
     try:
         store.ensure_worksheet(sh, "W")
