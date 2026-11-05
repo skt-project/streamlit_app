@@ -221,6 +221,24 @@ def test_duplicates_block_input_same_period_only():
     assert store.insert_rows(sh, _ws(existing), store.OpnameMeta("C", "2026-11-02", "x"), [row]).inserted == 1
 
 
+def test_extra_columns_to_the_right_are_allowed_and_never_written():
+    extras = store.HEADERS + ["Status BPOM Number (Expired/Not Expired)", "Region"]   # kolom rumus buatan BD
+    ws = MagicMock(); ws.row_values.return_value = extras; ws.title = "W"
+    sh = MagicMock(); sh.worksheet.return_value = ws
+    assert store.ensure_worksheet(sh, "W") is ws
+    ws.update.assert_not_called(); ws.update_cell.assert_not_called()
+    row = v.ExcelRow(3, NAME, "P-1", "Produk", "10g", "NA1", 5)
+    sh2 = MagicMock()
+    store.insert_rows(sh2, _ws([extras, ["x"] * 16]), store.OpnameMeta("C", "2026-10-25", "Budi"), [row])
+    cells = sh2.batch_update.call_args[0][0]["requests"][0]["appendCells"]["rows"][0]["values"]
+    assert len(cells) == len(store.HEADERS) == 14                 # hanya A..N; O dan P dibiarkan untuk rumus BD
+    bad = list(extras); bad[2] = "Periode Lain"                   # kolom inti berbeda tetap ditolak
+    ws2 = MagicMock(); ws2.row_values.return_value = bad; ws2.title = "W"; sh.worksheet.return_value = ws2
+    import pytest
+    with pytest.raises(store.SheetsError):
+        store.ensure_worksheet(sh, "W")
+
+
 def test_legacy_13_column_header_is_upgraded_not_overwritten():
     ws = MagicMock(); ws.row_values.return_value = list(store._LEGACY_HEADERS); ws.col_count = 13
     sh = MagicMock(); sh.worksheet.return_value = ws

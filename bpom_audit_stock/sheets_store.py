@@ -109,13 +109,15 @@ def open_spreadsheet(
 
 
 def _check_header(ws: gspread.Worksheet, current: list[str]) -> None:
+    """14 kolom pertama harus persis skema. Kolom tambahan di kanan (mis. rumus buatan BD) dibiarkan dan
+    tidak pernah ditulis/ditimpa oleh aplikasi."""
     current = list(current)
     while current and not str(current[-1]).strip():
         current.pop()
-    if current != HEADERS:
+    if current[: len(HEADERS)] != HEADERS:
         raise SheetsError(
             f"Header worksheet '{ws.title}' tidak sesuai skema, sehingga tidak ditimpa. "
-            f"Diharapkan: {HEADERS}. Ditemukan: {current}."
+            f"{len(HEADERS)} kolom pertama harus: {HEADERS}. Ditemukan: {current}."
         )
 
 
