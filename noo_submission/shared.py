@@ -248,7 +248,7 @@ MAPPING_KOLOM_NOO = {
     "Customer Code":       "Customer Code",
     "Customer Branch Code":"Customer Branch Code",
     "Customer Store Code": "Customer Store ID",
-    "Customer Store Name": "Customer Branch Name",
+    "Customer Store Name": "Customer Store Name",   # nama toko (sama dengan Store Name), distributor ada di Group Name
     "City":                None,
     "Store Address":       None,
     "Longitude":           None,
@@ -416,6 +416,23 @@ def sb_patch_by_kode_nama(table: str, kode: str, nama: str, patch: dict) -> bool
     except Exception as e:
         st.session_state.err_tagging = f"EXCEPTION {table} ({kode}/{nama}): {e}"
         return False
+
+def sb_delete(table: str, filters: dict):
+    """DELETE baris yang cocok PERSIS dengan semua filters (kolom -> nilai).
+    Return (jumlah_terhapus, pesan_error). Tanpa filter -> ditolak, supaya tidak pernah menghapus seluruh tabel."""
+    if not filters or any(str(v).strip() == "" for v in filters.values()):
+        return 0, "filter kosong, penghapusan dibatalkan"
+    try:
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/{table}",
+            headers={**_SB_HEADERS, "Prefer": "return=representation"},
+            params={k: f"eq.{v}" for k, v in filters.items()}, timeout=15,
+        )
+        if not r.ok:
+            return 0, f"HTTP {r.status_code}: {r.text[:200]}"
+        return len(r.json()), ""
+    except Exception as e:
+        return 0, str(e)
 
 def sb_update(table: str, row_id, patch: dict):
     try:
@@ -913,7 +930,12 @@ def pivot_noo(df_mentah: pd.DataFrame) -> pd.DataFrame:
     baris_noo  = ambil_baris_unik(baris_noo, KOLOM_KUNCI_UNIK_NOO)
     hasil = pd.DataFrame()
     for kolom_output, kolom_sumber in MAPPING_KOLOM_NOO.items():
-        if kolom_sumber is None:
+        if kolom_output == "Store Address":
+            # ambil kolom alamat dari file (mis. "Customer Address") kalau ada (nama kolom dicari longgar); kalau tidak ada -> kosong
+            norm = lambda x: re.sub(r"[^a-z0-9]", "", str(x).lower())
+            asli = next((c for c in baris_noo.columns if norm(c) in ("customeraddress", "storeaddress", "customerstoreaddress", "address", "alamat", "alamattoko")), None)
+            hasil[kolom_output] = baris_noo[asli] if asli else ""
+        elif kolom_sumber is None:
             hasil[kolom_output] = ""
         elif isinstance(kolom_sumber, channel):
             hasil[kolom_output] = kolom_sumber.nilai
