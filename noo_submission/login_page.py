@@ -429,7 +429,8 @@ def require_login():
         with slot_cookie:
             _js_cookie("", 0)
 
-    st.markdown(CSS, unsafe_allow_html=True)
+    css_ph = st.empty()       # CSS login (termasuk latar halaman) di placeholder: dihapus seketika saat login berhasil
+    css_ph.markdown(CSS, unsafe_allow_html=True)
     if ss.get("pesan_toast"):                      # mis. "Ticket submitted" dari popup Help & Support
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon", ":material/check_circle:"))
 
@@ -460,6 +461,7 @@ def require_login():
                             ss["_ingat"] = bool(ingat_saya)
                             ss["_cookie_ts"] = 0          # tulis cookie segera dengan masa berlaku yang sesuai
                             login_ph.empty()      # hapus halaman login dari layar sebelum app dimuat
+                            css_ph.empty()        # latar/gaya login ikut dihapus, kalau tidak tertinggal saat app memuat
                             st.rerun()
                         except Exception as e:
                             st.error(f"Login gagal: {e}")
