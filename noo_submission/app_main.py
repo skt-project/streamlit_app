@@ -18,7 +18,7 @@ from shared import (
     PANJANG_PREFIX, PANJANG_ANGKA, JENIS_TOKO_DEFAULT,
     KOLOM_NOO_OUTPUT,
     # Supabase
-    sb_insert, sb_select, sb_patch_by_kode_nama, ambil_raw_noo,
+    sb_insert, sb_select, sb_patch_by_kode_nama, ambil_raw_noo, sb_delete,
     # GSheets
     daftar_distributor, muat_distributor_dari_sheet, muat_prefix_per_distributor,
     max_angka_per_prefix, resolve_distributor, sb_max_angka_store_id,
@@ -122,9 +122,21 @@ def muat_data_noo_dari_supabase() -> pd.DataFrame:
     tagging_raw = (df_raw[kolom_tagging_asli].astype(str).str.strip()
                    if kolom_tagging_asli else pd.Series("",index=df_raw.index)).reset_index(drop=True)
     valid_tagging = tagging_raw.isin(KOLOM_VALIDASI)
-    df["Validasi"] = np.where(valid_tagging, tagging_raw, hitung_validasi(df))
-    df["Distributor"] = df.apply(
-        lambda r: resolve_distributor(r["Customer Store Name"], r.get("City","")), axis=1)
+    # tagging kosong/tidak dikenal -> Need Review (Generate ID hanya lewat aksi user, tidak otomatis)
+    df["Validasi"] = np.where(valid_tagging, tagging_raw, STATUS_REVIEW)
+    # distributor = Group Name (Customer Branch Name); baris lama tanpa Group Name memakai Customer Store Name
+    kolom_grup = peta.get(norm("Group Name"))
+    grup = (df_raw[kolom_grup].fillna("").astype(str).str.strip().tolist()
+            if kolom_grup else [""] * len(df))
+    def _cari_distri(g, csn, kota):
+        # coba Group Name dulu, lalu Customer Store Name (data lama); pakai yang pertama cocok dengan sheet Distributor
+        for kandidat in (g, csn):
+            hasil = resolve_distributor(kandidat, kota) if str(kandidat).strip() else ""
+            if hasil:
+                return hasil
+        return ""
+    df["Distributor"] = [_cari_distri(g, csn, kota)
+                         for g, csn, kota in zip(grup, df["Customer Store Name"], df["City"])]
     df = df[KOLOM_TAMPIL]
     df.index = pd.Index(df["#"].to_numpy(), name="_id")
     return df
@@ -229,7 +241,13 @@ def simpan_perubahan():
         kunci   = (kode, nama)
         tagging = str(df.loc[idx,"Validasi"]).strip()
         patch   = {"tagging": tagging}
-        if tagging != STATUS_VALID:
+        if tagging == "Existing" and pd.isna(df.loc[idx,"Generated At"]):
+            # Existing dari SPV Confirmation: Store ID diisi SPV -> simpan apa adanya, jangan dikosongkan
+            sid_ada = str(df.loc[idx,"Store ID"]).strip()
+            if sid_ada and sid_ada != "-":
+                patch["Store ID"] = sid_ada
+            patch["generated_at"] = None
+        elif tagging != STATUS_VALID:
             patch["generated_at"] = None; patch["Store ID"] = ""
             df.loc[idx,"Store ID"] = "-"; df.loc[idx,"Generated At"] = pd.NaT
         else:
@@ -286,7 +304,7 @@ def normalisasi_impor(mentah: pd.DataFrame) -> pd.DataFrame:
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
     df["Latitude"]  = pd.to_numeric(df["Latitude"],  errors="coerce")
     df.insert(0,"#", np.arange(1,len(df)+1))
-    df["Validasi"] = hitung_validasi(df)
+    df["Validasi"] = STATUS_REVIEW        # Generate ID hanya lewat aksi user
     df["_sb_id"]   = ""
     df = df[KOLOM_TAMPIL]
     df.index = pd.Index(df["#"].to_numpy(), name="_id")
@@ -411,13 +429,15 @@ def tab_noo():
         ss.tanda_tangan    = tanda
         ss.kunci_editor   += 1
 
-    c_select_all, c_generate, _ = st.columns([1,1.6,5], vertical_alignment="center")
+    c_select_all, c_generate, c_hapus, _ = st.columns([1,1.6,1.4,4], vertical_alignment="center")
     with c_select_all:
         select_all = st.checkbox("Select All", key=f"select_all_{ss.kunci_editor}")
         ss.snapshot["Pilih"] = select_all
         ss.tampilan_kunci    = None
     with c_generate:
         tombol_generate = st.button("Generate ID", type="primary", key="tombol_generate_bulk")
+    with c_hapus:
+        tombol_hapus = st.button("🗑️ Delete", type="primary", key="tombol_hapus_noo")
 
     konfigurasi_kolom = {
         "#":                     st.column_config.NumberColumn("#",format="%d",width=50),
@@ -450,6 +470,53 @@ def tab_noo():
         hide_index=True, num_rows="fixed", width="stretch",
         height=len(ss.snapshot)*35+38,
     )
+
+    # Hapus baris NOO terpilih (dengan konfirmasi)
+    if pesan_err := ss.pop("noo_hapus_error", None):
+        st.error(pesan_err)
+    if tombol_hapus:
+        dipilih_hapus = hasil_edit[hasil_edit["Pilih"] == True].index.tolist()
+        if not dipilih_hapus:
+            st.warning("No rows selected.")
+        else:
+            ss.noo_hapus_antri = dipilih_hapus
+    if ss.get("noo_hapus_antri"):
+        antri = [i for i in ss.noo_hapus_antri if i in ss.df_toko.index]
+        st.warning(f"Permanently delete {len(antri)} NOO row(s) from Supabase? This cannot be undone.")
+        k_ya, k_batal, _ = st.columns([1.6, 1, 6])
+        if k_batal.button("Cancel", key="noo_hapus_batal"):
+            ss.noo_hapus_antri = None
+            st.rerun()
+        if k_ya.button("Yes, delete", type="primary", key="noo_hapus_ya"):
+            df = ss.df_toko
+            terhapus, gagal, ditolak_policy = [], [], False
+            for i in antri:
+                kode = str(df.loc[i, "Customer Store Code"]).strip()
+                nama = str(df.loc[i, "Customer Store Name"]).strip()
+                n, err = sb_delete(TABLE_SUBMIT_NOO, {"Customer Store Code": kode, "Customer Store Name": nama})
+                if n > 0:
+                    terhapus.append(i)
+                else:
+                    gagal.append(err or "denied")
+                    if not err:
+                        ditolak_policy = True
+            if terhapus:
+                ss.df_toko = df.drop(index=terhapus)
+                ss.baris_kotor -= set(terhapus)
+                ss.baris_perlu_push -= set(terhapus)
+                ambil_raw_noo.clear()
+                catat_riwayat("Delete NOO", f"{len(terhapus)} rows")
+            ss.noo_hapus_antri = None
+            ss.tanda_tangan = None; ss.snapshot = None
+            ss.terakhir_update = waktu_sekarang()
+            ss.pesan_toast = (f"🗑️ {len(terhapus)} row(s) deleted"
+                              + (f" | ❌ {len(gagal)} failed" if gagal else ""))
+            if ditolak_policy:
+                ss.noo_hapus_error = ("Supabase accepted the request but deleted 0 rows: the table has no DELETE policy "
+                                      "for this API key (RLS). Add a DELETE policy on INPUT_NOO in Supabase.")
+            elif gagal:
+                ss.noo_hapus_error = "Delete failed: " + "; ".join(gagal[:3])
+            st.rerun()
 
     # Bulk Generate ID
     if tombol_generate:
@@ -520,7 +587,9 @@ def tab_noo():
         df = ss.df_toko
         validasi_skrg = df.loc[id_berubah,"Validasi"]
         pilih = validasi_skrg.eq(STATUS_VALID)
-        batal = [i for i in id_berubah if not pilih.loc[i]]
+        # Existing yang Store ID-nya dari SPV (tanpa Generated At) tidak boleh dikosongkan saat baris diedit
+        existing_spv = validasi_skrg.eq("Existing") & df.loc[id_berubah,"Generated At"].isna()
+        batal = [i for i in id_berubah if not pilih.loc[i] and not existing_spv.loc[i]]
         prefix_terdampak = set()
         for i in batal:
             sid_lama = str(df.loc[i,"Store ID"]).strip()
@@ -759,11 +828,12 @@ def _tab_sku():
         if msg := ss.pop("sku_pesan", None):
             (st.success if msg[0] == "ok" else st.error)(msg[1])
         with st.container(key="sku_toolbar"):
-            b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
-            if b1.button("🔄 Refresh", key="sku_refresh_empty", width="stretch"):
+            b1, b2, b3, b4, info = st.columns([1, 1.2, 1.5, 1.1, 5], vertical_alignment="center")
+            if b1.button("🔄 Refresh", type="primary", key="sku_refresh_empty", width="stretch"):
                 _refresh_sku()
-            b2.button("⬇️ Download", disabled=True, key="sku_dl_x", width="stretch")
+            b2.button("⬇️ Download", type="primary", disabled=True, key="sku_dl_x", width="stretch")
             b3.button("💾 Save changes", type="primary", disabled=True, key="sku_save_x", width="stretch")
+            b4.button("🗑️ Delete", type="primary", disabled=True, key="sku_hapus_x", width="stretch")
             info.markdown('<div class="teks-showing">Showing 0 of 0 records</div>', unsafe_allow_html=True)
         st.info("No SKU Mapping data returned from Supabase.")
         return
@@ -835,13 +905,14 @@ def _tab_sku():
     data_dl = _bangun_download_sku(df_f)
     with st.container(key="sku_toolbar"):
         b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
-        refresh = b1.button("🔄 Refresh", key="sku_refresh", width="stretch")
+        refresh = b1.button("🔄 Refresh", type="primary", key="sku_refresh", width="stretch")
         b2.download_button(
             "⬇️ Download",
             hasil_ke_excel(data_dl) if not df_f.empty else b"",
             "hasil_sku_mapping.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             disabled=df_f.empty,
+            type="primary",
             key="unduh_sku",
             width="stretch",
 )
@@ -890,10 +961,42 @@ def _tab_sku():
     if "Pilih" in tampil:
         tampil.remove("Pilih")
     tampil.insert(0, "Pilih")
-    s1, s2, _ = st.columns([1, 1.8, 6], vertical_alignment="center")
+    s1, s2, s3, _ = st.columns([1, 1.8, 1.4, 4.8], vertical_alignment="center")
     s1.checkbox("Select All", key="sku_select_all", on_change=_sku_pilih_semua)
     s2.button("✅ Mark as Done", type="primary", key="sku_mark_done", on_click=_sku_mark_done,
               disabled=not (ss.sku_pilih & set(keys)))
+    if s3.button("🗑️ Delete", type="primary", key="sku_hapus", disabled=not (ss.sku_pilih & set(keys))):
+        ss.sku_hapus_antri = sorted(ss.sku_pilih & set(keys))
+    if ss.get("sku_hapus_antri"):
+        st.warning(f"Permanently delete {len(ss.sku_hapus_antri)} SKU Mapping record(s) from Supabase? This cannot be undone.")
+        h_ya, h_batal, _ = st.columns([1.6, 1, 6])
+        if h_batal.button("Cancel", key="sku_hapus_batal"):
+            ss.sku_hapus_antri = None
+            st.rerun()
+        if h_ya.button("Yes, delete", type="primary", key="sku_hapus_ya"):
+            terhapus, gagal = set(), []
+            for k in ss.sku_hapus_antri:
+                if (rk == k).sum() != 1:                      # key tidak unik -> jangan hapus
+                    gagal.append(f"{k} (key not unique)"); continue
+                row = df.loc[rk == k].iloc[0]
+                n, err = sb_delete(SKU_TABLE, {c: row[c] for c in kc_pk})
+                if n == 1:
+                    terhapus.add(k)
+                else:
+                    gagal.append(err or "Supabase deleted 0 rows: no DELETE policy for this API key (RLS) on sku_mapping")
+            if terhapus:
+                ss.sku_df = df[~rk.isin(terhapus)].reset_index(drop=True)
+                ss.sku_pilih -= terhapus
+                for k in terhapus:
+                    ss.sku_pending.pop(k, None)
+                ambil_sku_mapping.clear()
+                ss.sku_select_all = False
+                ss.sku_ver += 1
+                catat_riwayat("Delete SKU Mapping", f"{len(terhapus)} rows")
+            ss.sku_hapus_antri = None
+            ss.sku_pesan = (("ok", f"{len(terhapus)} record(s) deleted") if not gagal else
+                            ("error", f"{len(terhapus)} deleted, {len(gagal)} failed: " + "; ".join(gagal[:3])))
+            st.rerun()
     st.data_editor(
         styler, key=f"editor_sku_{ss.sku_ver}", on_change=_sku_on_change,
         column_order=tampil,
@@ -967,7 +1070,7 @@ def halaman_dashboard():
     peta_sku = {norm(c):c for c in df_sku.columns} if not df_sku.empty else {}
 
     col_tagging     = peta_noo.get("tagging")
-    col_distri      = peta_noo.get("customerstorename") or peta_noo.get("distributor")
+    col_distri      = peta_noo.get("groupname") or peta_noo.get("customerstorename") or peta_noo.get("distributor")
     col_city        = peta_noo.get("city")
     col_created_noo = peta_noo.get("createdat") or peta_noo.get("created_at")
     col_cc_sku      = peta_sku.get("customercode") or peta_sku.get("customer_code")
@@ -1367,7 +1470,7 @@ def main():
     ss = st.session_state
 
     # Login gate
-    from login_page import require_login
+    from login_page import require_login, keluar
     user = require_login()
 
     IZIN_MASUK = {"RSA", "BD SUPPORT"}
@@ -1423,7 +1526,7 @@ def main():
         # ── Logout (fixed bottom sidebar via CSS) ────────────────────────────
         with st.container(key="logout"):
             if st.button("🚪  Log Out", width="stretch"):
-                ss.clear()
+                keluar()
                 st.rerun()
 
     {
