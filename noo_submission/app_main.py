@@ -20,7 +20,7 @@ from shared import (
     # Supabase
     sb_insert, sb_select, sb_patch_by_kode_nama, ambil_raw_noo, sb_delete,
     # GSheets
-    daftar_distributor, muat_distributor_dari_sheet, muat_prefix_per_distributor,
+    daftar_distributor, muat_distributor_dari_sheet, muat_prefix_per_distributor, muat_distri_code_map,
     max_angka_per_prefix, resolve_distributor, sb_max_angka_store_id,
     # Utils
     ke_wib_naive, waktu_sekarang, hitung_validasi, hasil_ke_excel, catat_riwayat,
@@ -29,10 +29,10 @@ from shared import (
 KOLOM_ORDER_EDITOR = ["#","Pilih","Validasi","Penanda","Store ID"] + list(KOLOM[2:])
 
 NAVIGASI = [
-    ("Dashboard",          "", "dashboard"),
-    ("Store Validation",   "",   "validasi"),
-    ("Submission History", "", "riwayat"),
-    ("Settings",           "", "pengaturan"),
+    ("Dashboard",          ":material/trending_up:", "dashboard"),
+    ("Store Validation",   ":material/description:", "validasi"),
+    ("Submission History", ":material/history:",     "riwayat"),
+    ("Settings",           ":material/settings:",    "pengaturan"),
    # ("Input NOO", "noo"),
 ]
 
@@ -128,15 +128,19 @@ def muat_data_noo_dari_supabase() -> pd.DataFrame:
     kolom_grup = peta.get(norm("Group Name"))
     grup = (df_raw[kolom_grup].fillna("").astype(str).str.strip().tolist()
             if kolom_grup else [""] * len(df))
-    def _cari_distri(g, csn, kota):
-        # coba Group Name dulu, lalu Customer Store Name (data lama); pakai yang pertama cocok dengan sheet Distributor
+    kode_distri = muat_distri_code_map()      # 6 karakter awal Customer Store Code -> distributor (Distributor Mapping kol. H)
+    def _cari_distri(g, csn, kota, kode):
+        # 1) Group Name, 2) Customer Store Name (data lama), 3) prefix 6 karakter Customer Store Code
+        #    (nama distributor di file bisa berubah, kode toko tetap)
         for kandidat in (g, csn):
             hasil = resolve_distributor(kandidat, kota) if str(kandidat).strip() else ""
             if hasil:
                 return hasil
-        return ""
-    df["Distributor"] = [_cari_distri(g, csn, kota)
-                         for g, csn, kota in zip(grup, df["Customer Store Name"], df["City"])]
+        info = kode_distri.get(str(kode).strip()[:6].upper())
+        return info["distributor"].strip() if info else ""
+    df["Distributor"] = [_cari_distri(g, csn, kota, kode)
+                         for g, csn, kota, kode in zip(grup, df["Customer Store Name"], df["City"],
+                                                       df["Customer Store Code"])]
     df = df[KOLOM_TAMPIL]
     df.index = pd.Index(df["#"].to_numpy(), name="_id")
     return df
@@ -366,9 +370,7 @@ def tab_noo():
         ss.pop("f_tgl_awal",None); ss.pop("f_tgl_akhir",None)
 
     opsi_jenis  = sorted((set(JENIS_TOKO_DEFAULT) | set(ss.df_toko["Store Type"].dropna().astype(str))) - {""})
-    daftar_distri = ["All distributors"] + sorted(
-        muat_distributor_dari_sheet()["distributor_company_name"].str.strip().replace("",np.nan).dropna().unique()
-    )
+    daftar_distri = ["All distributors"] + daftar_distributor()      # hanya distributor Active
     hari_ini = datetime.datetime.now(ZONA_WAKTU).date()
     tgl_min  = pd.to_datetime(ss.df_toko.get("Created At"), errors="coerce").min() \
         if "Created At" in ss.df_toko.columns else pd.NaT
@@ -393,8 +395,8 @@ def tab_noo():
         status = st.selectbox("Status",["All statuses"] + KOLOM_VALIDASI, key="f_status",
                                on_change=reset_halaman_data)
     with st.container(key="noo_toolbar"):
-        b1, b2, b3, info = st.columns([1, 1.4, 1.5, 6], vertical_alignment="center")
-        b1.button("🔄 Refresh", width="stretch", key="tombol_refresh", on_click=refresh_data_toko,
+        b1, b2, b3, info = st.columns([1, 1.4, 1.3, 6.3], gap="small", vertical_alignment="center")
+        b1.button(":material/refresh: Refresh", width="stretch", key="tombol_refresh", on_click=refresh_data_toko,
                   help="Reload data from Supabase. Unsaved changes will be lost.")
         tempat_unduh = b2.empty()      # diisi setelah hasil filter dihitung
         b3.button("Save changes", type="primary", width="stretch", key="tombol_simpan",
@@ -405,12 +407,6 @@ def tab_noo():
     hasil_filter = terapkan_filter(ss.df_toko, status, distributor, tuple(rentang), brand)
     total_filter = len(hasil_filter)
 
-    data_unduh = bangun_download_noo(hasil_filter)
-    with tempat_unduh.container():
-        st.download_button("⬇️ Download NOO", hasil_ke_excel(data_unduh), "hasil_noo.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           disabled=data_unduh.empty, width="stretch", key="unduh_noo_validasi")
-
     ukuran       = ss.ukuran_halaman
     total_halaman = max(1, math.ceil(total_filter / ukuran))
     ss.halaman_data = max(1, min(ss.halaman_data, total_halaman))
@@ -418,6 +414,10 @@ def tab_noo():
     akhir = min(mulai + ukuran, total_filter)
 
     if total_filter == 0:
+        with tempat_unduh.container():
+            st.download_button(":material/download: Download NOO", b"", "hasil_noo.xlsx",
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               disabled=True, width="stretch", key="unduh_noo_validasi")
         tempat_kpi.markdown(komponen.html_kpi_validasi(ss.df_toko), unsafe_allow_html=True)
         st.info("No stores match the filter.")
         return
@@ -429,22 +429,23 @@ def tab_noo():
         ss.tanda_tangan    = tanda
         ss.kunci_editor   += 1
 
-    c_select_all, c_generate, c_hapus, _ = st.columns([1,1.6,1.4,4], vertical_alignment="center")
+    c_select_all, c_generate, c_hapus, _ = st.columns([1.3,1.2,1.1,6], gap="small", vertical_alignment="center")
     with c_select_all:
         select_all = st.checkbox("Select All", key=f"select_all_{ss.kunci_editor}")
         ss.snapshot["Pilih"] = select_all
         ss.tampilan_kunci    = None
     with c_generate:
-        tombol_generate = st.button("Generate ID", type="primary", key="tombol_generate_bulk")
+        tombol_generate = st.button("Generate ID", type="primary", key="tombol_generate_bulk", width="stretch")
     with c_hapus:
-        tombol_hapus = st.button("🗑️ Delete", type="primary", key="tombol_hapus_noo")
+        tombol_hapus = st.button(":material/delete: Delete", type="primary", key="tombol_hapus_noo", width="stretch")
 
     konfigurasi_kolom = {
         "#":                     st.column_config.NumberColumn("#",format="%d",width=50),
-        "Pilih":                 st.column_config.CheckboxColumn("✅",width=50,default=False),
+        "Pilih":                 st.column_config.CheckboxColumn("Select",width=50,default=False),
         "Validasi":              st.column_config.SelectboxColumn("Validation ▾",options=KOLOM_VALIDASI,width=140,required=True),
         "Penanda":               st.column_config.TextColumn("Marker",width=110),
-        "Store ID":              st.column_config.TextColumn("Store ID",width=150,disabled=True),
+        "Store ID":              st.column_config.TextColumn("Store ID",width=150,
+                                     help="Editable only when Validation = Existing. Otherwise it is generated automatically."),
         "Generated At":          st.column_config.TextColumn("Generated At",width=150,disabled=True),
         "Distributor":           st.column_config.SelectboxColumn("Distributor",options=[""] + daftar_distributor(),width=220),
         "Store Name":            st.column_config.TextColumn("Store Name",width=170,required=True),
@@ -463,6 +464,7 @@ def tab_noo():
         ss.tampilan      = tampil.style.map(warnai_validasi, subset=["Penanda"])
         ss.tampilan_kunci = ss.kunci_editor
 
+    tempat_hapus = st.empty()      # pernyataan konfirmasi hapus ditaruh DI ATAS tabel (sama seperti SKU Mapping)
     hasil_edit = st.data_editor(
         ss.tampilan, key=f"editor_{ss.kunci_editor}",
         column_config=konfigurasi_kolom, column_order=KOLOM_ORDER_EDITOR,
@@ -471,52 +473,65 @@ def tab_noo():
         height=len(ss.snapshot)*35+38,
     )
 
+    # Download: baris yang dicentang (kolom Select) saja; kalau tidak ada yang dicentang -> semua hasil filter
+    dipilih_unduh = hasil_edit.index[hasil_edit["Pilih"] == True]
+    sumber_unduh  = (hasil_filter.loc[hasil_filter.index.intersection(dipilih_unduh)]
+                     if len(dipilih_unduh) else hasil_filter)
+    data_unduh = bangun_download_noo(sumber_unduh)
+    n_pilih_unduh = len(dipilih_unduh)
+    with tempat_unduh.container():
+        st.download_button(f":material/download: Download NOO{f' ({n_pilih_unduh})' if n_pilih_unduh else ''}",
+                           _excel_cache(data_unduh), "hasil_noo.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           disabled=data_unduh.empty, width="stretch", key="unduh_noo_validasi")
+
     # Hapus baris NOO terpilih (dengan konfirmasi)
-    if pesan_err := ss.pop("noo_hapus_error", None):
-        st.error(pesan_err)
     if tombol_hapus:
         dipilih_hapus = hasil_edit[hasil_edit["Pilih"] == True].index.tolist()
         if not dipilih_hapus:
             st.warning("No rows selected.")
         else:
             ss.noo_hapus_antri = dipilih_hapus
-    if ss.get("noo_hapus_antri"):
-        antri = [i for i in ss.noo_hapus_antri if i in ss.df_toko.index]
-        st.warning(f"Permanently delete {len(antri)} NOO row(s) from Supabase? This cannot be undone.")
-        k_ya, k_batal, _ = st.columns([1.6, 1, 6])
-        if k_batal.button("Cancel", key="noo_hapus_batal"):
-            ss.noo_hapus_antri = None
-            st.rerun()
-        if k_ya.button("Yes, delete", type="primary", key="noo_hapus_ya"):
-            df = ss.df_toko
-            terhapus, gagal, ditolak_policy = [], [], False
-            for i in antri:
-                kode = str(df.loc[i, "Customer Store Code"]).strip()
-                nama = str(df.loc[i, "Customer Store Name"]).strip()
-                n, err = sb_delete(TABLE_SUBMIT_NOO, {"Customer Store Code": kode, "Customer Store Name": nama})
-                if n > 0:
-                    terhapus.append(i)
-                else:
-                    gagal.append(err or "denied")
-                    if not err:
-                        ditolak_policy = True
-            if terhapus:
-                ss.df_toko = df.drop(index=terhapus)
-                ss.baris_kotor -= set(terhapus)
-                ss.baris_perlu_push -= set(terhapus)
-                ambil_raw_noo.clear()
-                catat_riwayat("Delete NOO", f"{len(terhapus)} rows")
-            ss.noo_hapus_antri = None
-            ss.tanda_tangan = None; ss.snapshot = None
-            ss.terakhir_update = waktu_sekarang()
-            ss.pesan_toast = (f"🗑️ {len(terhapus)} row(s) deleted"
-                              + (f" | ❌ {len(gagal)} failed" if gagal else ""))
-            if ditolak_policy:
-                ss.noo_hapus_error = ("Supabase accepted the request but deleted 0 rows: the table has no DELETE policy "
-                                      "for this API key (RLS). Add a DELETE policy on INPUT_NOO in Supabase.")
-            elif gagal:
-                ss.noo_hapus_error = "Delete failed: " + "; ".join(gagal[:3])
-            st.rerun()
+    with tempat_hapus.container():
+        if pesan_err := ss.pop("noo_hapus_error", None):
+            st.error(pesan_err)
+        if ss.get("noo_hapus_antri"):
+            antri = [i for i in ss.noo_hapus_antri if i in ss.df_toko.index]
+            st.warning(f"Permanently delete {len(antri)} NOO row(s) from Supabase? This cannot be undone.")
+            k_ya, k_batal, _ = st.columns([1.3, 1, 7], gap="xxsmall")
+            if k_batal.button("Cancel", key="noo_hapus_batal", width="stretch"):
+                ss.noo_hapus_antri = None
+                st.rerun()
+            if k_ya.button("Yes, delete", type="primary", key="noo_hapus_ya", width="stretch"):
+                df = ss.df_toko
+                terhapus, gagal, ditolak_policy = [], [], False
+                for i in antri:
+                    kode = str(df.loc[i, "Customer Store Code"]).strip()
+                    nama = str(df.loc[i, "Customer Store Name"]).strip()
+                    n, err = sb_delete(TABLE_SUBMIT_NOO, {"Customer Store Code": kode, "Customer Store Name": nama})
+                    if n > 0:
+                        terhapus.append(i)
+                    else:
+                        gagal.append(err or "denied")
+                        if not err:
+                            ditolak_policy = True
+                if terhapus:
+                    ss.df_toko = df.drop(index=terhapus)
+                    ss.baris_kotor -= set(terhapus)
+                    ss.baris_perlu_push -= set(terhapus)
+                    ambil_raw_noo.clear()
+                    catat_riwayat("Delete NOO", f"{len(terhapus)} rows")
+                ss.noo_hapus_antri = None
+                ss.tanda_tangan = None; ss.snapshot = None
+                ss.terakhir_update = waktu_sekarang()
+                ss.pesan_toast = (f"{len(terhapus)} row(s) deleted"
+                                  + (f" | {len(gagal)} failed" if gagal else ""))
+                if ditolak_policy:
+                    ss.noo_hapus_error = ("Supabase accepted the request but deleted 0 rows: the table has no DELETE policy "
+                                          "for this API key (RLS). Add a DELETE policy on INPUT_NOO in Supabase.")
+                elif gagal:
+                    ss.noo_hapus_error = "Delete failed: " + "; ".join(gagal[:3])
+                st.rerun()
 
     # Bulk Generate ID
     if tombol_generate:
@@ -526,6 +541,8 @@ def tab_noo():
         else:
             df = ss.df_toko
             for idx in baris_dipilih:
+                if df.loc[idx,"Validasi"] == "Existing":          # Existing -> Generate ID: buang Store ID lama
+                    df.loc[idx,"Store ID"] = "-"; df.loc[idx,"Generated At"] = pd.NaT
                 df.loc[idx,"Validasi"]      = STATUS_VALID
                 hasil_edit.loc[idx,"Validasi"] = STATUS_VALID
             store_kosong = df.loc[baris_dipilih,"Store ID"].fillna("").astype(str).str.strip().isin(["","-"])
@@ -567,12 +584,12 @@ def tab_noo():
                 if not sb_patch_by_kode_nama(TABLE_SUBMIT_NOO, kode, nama, patch):
                     gagal_push.append(kode)
             berhasil = len(baris_dipilih) - len(gagal_prefix) - len(gagal_push)
-            pesan = f"✅ {berhasil} rows successfully generated"
+            pesan = f"{berhasil} rows successfully generated"
             if gagal_prefix:
                 distri_gagal = sorted({str(df.loc[i,"Distributor"]) or "(empty)" for i in gagal_prefix})
-                pesan += f" | ⚠️ {len(gagal_prefix)} failed (prefix not found: {', '.join(distri_gagal)})"
+                pesan += f" | {len(gagal_prefix)} failed (prefix not found: {', '.join(distri_gagal)})"
             if gagal_push:
-                pesan += f" | ❌ {len(gagal_push)} failed to push"
+                pesan += f" | {len(gagal_push)} failed to push"
             catat_riwayat("Bulk Generate ID", f"{berhasil} rows")
             ss.baris_kotor -= set(baris_dipilih)
             ss.baris_perlu_push -= set(baris_dipilih)
@@ -581,10 +598,35 @@ def tab_noo():
             ss.pesan_toast = pesan
             st.rerun()
 
+    # Store ID hanya boleh diketik manual kalau Validation = Existing; selain itu edit dibatalkan
+    manual_sid, ditolak_sid = set(), False
+    if "Store ID" in hasil_edit.columns:
+        _norm = lambda s: s.fillna("").astype(str).str.strip().replace("-", "")
+        lama_sid = _norm(ss.df_toko.loc[hasil_edit.index, "Store ID"])
+        baru_sid = _norm(hasil_edit["Store ID"])
+        for i in hasil_edit.index[baru_sid != lama_sid]:
+            if str(hasil_edit.loc[i, "Validasi"]).strip() == "Existing":
+                manual_sid.add(i)
+            else:
+                hasil_edit.loc[i, "Store ID"] = ss.df_toko.loc[i, "Store ID"]
+                ditolak_sid = True
+    if ditolak_sid:
+        st.toast("Store ID can only be edited when Validation = Existing.", icon=":material/warning:")
+
+    validasi_lama = ss.df_toko["Validasi"].copy()      # sebelum edit diterapkan, untuk deteksi Existing -> Generate ID
     id_berubah = terapkan_edit(ss.df_toko, hasil_edit)
     if id_berubah:
         ss.baris_kotor.update(id_berubah)
         df = ss.df_toko
+        # Existing -> Generate ID: buang Store ID lama (milik Existing) supaya ID baru benar-benar di-generate
+        dari_existing = [i for i in id_berubah
+                         if validasi_lama.get(i) == "Existing" and df.loc[i, "Validasi"] == STATUS_VALID]
+        for i in dari_existing:
+            df.loc[i, "Store ID"] = "-"; df.loc[i, "Generated At"] = pd.NaT
+            ss.baris_perlu_push.discard(i)
+        for i in manual_sid & set(id_berubah):
+            df.loc[i, "Generated At"] = pd.NaT       # Store ID manual: diperlakukan seperti Existing dari SPV
+            ss.baris_perlu_push.discard(i)
         validasi_skrg = df.loc[id_berubah,"Validasi"]
         pilih = validasi_skrg.eq(STATUS_VALID)
         # Existing yang Store ID-nya dari SPV (tanpa Generated At) tidak boleh dikosongkan saat baris diedit
@@ -829,11 +871,11 @@ def _tab_sku():
             (st.success if msg[0] == "ok" else st.error)(msg[1])
         with st.container(key="sku_toolbar"):
             b1, b2, b3, b4, info = st.columns([1, 1.2, 1.5, 1.1, 5], vertical_alignment="center")
-            if b1.button("🔄 Refresh", type="primary", key="sku_refresh_empty", width="stretch"):
+            if b1.button(":material/refresh: Refresh", type="primary", key="sku_refresh_empty", width="stretch"):
                 _refresh_sku()
-            b2.button("⬇️ Download", type="primary", disabled=True, key="sku_dl_x", width="stretch")
-            b3.button("💾 Save changes", type="primary", disabled=True, key="sku_save_x", width="stretch")
-            b4.button("🗑️ Delete", type="primary", disabled=True, key="sku_hapus_x", width="stretch")
+            b2.button(":material/download: Download", type="primary", disabled=True, key="sku_dl_x", width="stretch")
+            b3.button(":material/save: Save changes", type="primary", disabled=True, key="sku_save_x", width="stretch")
+            b4.button(":material/delete: Delete", type="primary", disabled=True, key="sku_hapus_x", width="stretch")
             info.markdown('<div class="teks-showing">Showing 0 of 0 records</div>', unsafe_allow_html=True)
         st.info("No SKU Mapping data returned from Supabase.")
         return
@@ -859,6 +901,7 @@ def _tab_sku():
 
     try:
         _sh = muat_distributor_dari_sheet()
+        _sh = _sh[_sh["Status"].str.strip().str.lower() == "active"]       # hanya distributor Active
         daftar_sheet = (_sh.iloc[:, 0].astype(str).str.strip()
                         .replace("", np.nan).dropna().unique().tolist())
     except Exception:
@@ -902,13 +945,18 @@ def _tab_sku():
     # ── Toolbar ──
     if msg := ss.pop("sku_pesan", None):
         (st.success if msg[0] == "ok" else st.error)(msg[1])
-    data_dl = _bangun_download_sku(df_f)
+    # Download: baris yang dicentang (Select) saja; kalau tidak ada yang dicentang -> semua hasil filter
+    _keys_f   = rk[m].tolist()
+    _terpilih = [k in ss.sku_pilih for k in _keys_f]
+    df_unduh  = df_f[_terpilih] if any(_terpilih) else df_f
+    n_pilih_sku = sum(_terpilih)
+    data_dl = _bangun_download_sku(df_unduh)
     with st.container(key="sku_toolbar"):
         b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
-        refresh = b1.button("🔄 Refresh", type="primary", key="sku_refresh", width="stretch")
+        refresh = b1.button(":material/refresh: Refresh", type="primary", key="sku_refresh", width="stretch")
         b2.download_button(
-            "⬇️ Download",
-            hasil_ke_excel(data_dl) if not df_f.empty else b"",
+            f":material/download: Download{f' ({n_pilih_sku})' if n_pilih_sku else ''}",
+            _excel_cache(data_dl, startrow=0) if not df_f.empty else b"",   # header di baris 1
             "hasil_sku_mapping.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             disabled=df_f.empty,
@@ -916,7 +964,7 @@ def _tab_sku():
             key="unduh_sku",
             width="stretch",
 )
-        simpan = b3.button("💾 Save changes", type="primary", key="sku_simpan",
+        simpan = b3.button(":material/save: Save changes", type="primary", key="sku_simpan",
                            disabled=not ss.sku_pending, width="stretch")
         belum = (f' <span class="teks-belumsimpan">● {len(ss.sku_pending)} unsaved</span>'
                  if ss.sku_pending else "")
@@ -961,19 +1009,22 @@ def _tab_sku():
     if "Pilih" in tampil:
         tampil.remove("Pilih")
     tampil.insert(0, "Pilih")
-    s1, s2, s3, _ = st.columns([1, 1.8, 1.4, 4.8], vertical_alignment="center")
+    s1, s2, s3, _ = st.columns([1.3, 1.4, 1.0, 6.3], gap="small", vertical_alignment="center")
+    if ss.pop("_reset_sku_select_all", False):          # reset harus SEBELUM widget dibuat (tidak boleh sesudahnya)
+        ss.sku_select_all = False
     s1.checkbox("Select All", key="sku_select_all", on_change=_sku_pilih_semua)
-    s2.button("✅ Mark as Done", type="primary", key="sku_mark_done", on_click=_sku_mark_done,
-              disabled=not (ss.sku_pilih & set(keys)))
-    if s3.button("🗑️ Delete", type="primary", key="sku_hapus", disabled=not (ss.sku_pilih & set(keys))):
+    s2.button(":material/check_circle: Mark as Done", type="primary", key="sku_mark_done", on_click=_sku_mark_done,
+              disabled=not (ss.sku_pilih & set(keys)), width="stretch")
+    if s3.button(":material/delete: Delete", type="primary", key="sku_hapus", disabled=not (ss.sku_pilih & set(keys)),
+                 width="stretch"):
         ss.sku_hapus_antri = sorted(ss.sku_pilih & set(keys))
     if ss.get("sku_hapus_antri"):
         st.warning(f"Permanently delete {len(ss.sku_hapus_antri)} SKU Mapping record(s) from Supabase? This cannot be undone.")
-        h_ya, h_batal, _ = st.columns([1.6, 1, 6])
-        if h_batal.button("Cancel", key="sku_hapus_batal"):
+        h_ya, h_batal, _ = st.columns([1.3, 1, 7], gap="xxsmall")
+        if h_batal.button("Cancel", key="sku_hapus_batal", width="stretch"):
             ss.sku_hapus_antri = None
             st.rerun()
-        if h_ya.button("Yes, delete", type="primary", key="sku_hapus_ya"):
+        if h_ya.button("Yes, delete", type="primary", key="sku_hapus_ya", width="stretch"):
             terhapus, gagal = set(), []
             for k in ss.sku_hapus_antri:
                 if (rk == k).sum() != 1:                      # key tidak unik -> jangan hapus
@@ -990,7 +1041,7 @@ def _tab_sku():
                 for k in terhapus:
                     ss.sku_pending.pop(k, None)
                 ambil_sku_mapping.clear()
-                ss.sku_select_all = False
+                ss["_reset_sku_select_all"] = True             # dieksekusi di run berikutnya, sebelum checkbox dibuat
                 ss.sku_ver += 1
                 catat_riwayat("Delete SKU Mapping", f"{len(terhapus)} rows")
             ss.sku_hapus_antri = None
@@ -1003,7 +1054,7 @@ def _tab_sku():
         column_config={
             **{c: st.column_config.TextColumn(label_kolom(c))
                for c in view.columns if c not in (tag, "Pilih")},
-            "Pilih": st.column_config.CheckboxColumn("✅", width=50, default=False),
+            "Pilih": st.column_config.CheckboxColumn("Select", width=50, default=False),
             tag: st.column_config.SelectboxColumn(label_kolom(tag), options=SKU_TAGGING,
                                                   required=True, width=130),
         },
@@ -1056,9 +1107,167 @@ def _brand_dari_cc(cc: str) -> str:
     return "Other"
 
 
+# ═══════════════════════════════════════
+# FEEDBACK (tiket Help & Support dari app submission)
+# ═══════════════════════════════════════
+TABLE_HELP = "help_support"
+FB_PER_HALAMAN = 5
+FB_FILTER = ["All", "In Progress", "Solved"]
+
+@st.cache_data(ttl=30, show_spinner=False)
+def ambil_semua_tiket_help() -> pd.DataFrame:
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/{TABLE_HELP}",
+                     headers={**_SB_HEADERS, "Prefer": ""},
+                     params={"select": "*", "order": "generated_at.desc", "limit": 1000}, timeout=20)
+    r.raise_for_status()
+    return pd.DataFrame(r.json())
+
+def _status_fb(v) -> str:
+    """Status di DB -> 'Solved' atau 'In Progress' (Open dst dianggap In Progress)."""
+    return "Solved" if str(v).strip().lower() in ("solved", "closed", "done", "resolved") else "In Progress"
+
+def _tandai_solved(id_tiket) -> str:
+    """Set status tiket jadi 'Solved'. Return pesan error ('' kalau sukses)."""
+    try:
+        r = requests.patch(f"{SUPABASE_URL}/rest/v1/{TABLE_HELP}",
+                           params={"id": f"eq.{id_tiket}"}, json={"status": "Solved"},
+                           headers={**_SB_HEADERS, "Prefer": "return=representation"}, timeout=15)
+        if not r.ok:
+            return f"HTTP {r.status_code}: {r.text[:200]}"
+        if r.json() == []:
+            return "No ticket was updated."
+        ambil_semua_tiket_help.clear()
+        return ""
+    except Exception as e:
+        return str(e)
+
+def _fb_reset_halaman():
+    st.session_state.fb_halaman = 1
+
+def _fb_ke_halaman(n):
+    st.session_state.fb_halaman = n
+
+def tab_feedback():
+    import html as _html
+    ss = st.session_state
+    ss.setdefault("fb_halaman", 1)
+    ss.setdefault("fb_filter", "All")
+
+    st.markdown('<div class="fb-judul">Feedback</div>'
+                '<div class="fb-sub">Tickets submitted from Help &amp; Support </div>',
+                unsafe_allow_html=True)
+    try:
+        df = ambil_semua_tiket_help()
+    except Exception as e:
+        st.error(f"Failed to load feedback: {e}")
+        return
+
+    # susun data
+    if df.empty:
+        items = []
+    else:
+        waktu = pd.to_datetime(df.get("generated_at"), errors="coerce", utc=True, format="ISO8601").dt.tz_convert(ZONA_WAKTU)
+        items = []
+        for i, (_, r) in enumerate(df.iterrows()):
+            no = r.get("id")
+            items.append({
+                "id":     (no.item() if hasattr(no, "item") else no) if pd.notna(no) else None,
+                "no":     str(no) if pd.notna(no) else str(len(df) - i),
+                "title":  str(r.get("title", "") or "").strip(),
+                "issue":  str(r.get("issue", "")).strip(),
+                "user":   str(r.get("username", "")),
+                "prio":   str(r.get("priority", "")),
+                "status": _status_fb(r.get("status")),
+                "waktu":  waktu.iloc[i],
+            })
+
+    with st.container(key="fb_kartu"):
+        c_filter, c_cari = st.columns([2, 1], vertical_alignment="center")
+        c_filter.segmented_control("Status", FB_FILTER, key="fb_filter", label_visibility="collapsed",
+                                   on_change=_fb_reset_halaman)
+        kata = c_cari.text_input("Search", key="fb_cari", placeholder="Search feedback...",
+                                 label_visibility="collapsed", on_change=_fb_reset_halaman)
+
+        pilih = ss.get("fb_filter") or "All"
+        tampil = [x for x in items
+                  if (pilih == "All" or x["status"] == pilih)
+                  and (not kata or kata.lower() in f'{x["title"]} {x["issue"]} {x["user"]} #{x["no"]}'.lower())]
+
+        total = len(tampil)
+        n_hal = max(1, math.ceil(total / FB_PER_HALAMAN))
+        ss.fb_halaman = min(max(1, ss.fb_halaman), n_hal)
+        awal = (ss.fb_halaman - 1) * FB_PER_HALAMAN
+        potong = tampil[awal:awal + FB_PER_HALAMAN]
+
+        if not potong:
+            st.markdown('<div class="fb-kosong">No feedback found.</div>', unsafe_allow_html=True)
+        else:
+            baris = []
+            for x in potong:
+                isi1  = x["issue"].splitlines()[0] if x["issue"] else "(no description)"
+                judul = x["title"] or isi1
+                if len(judul) > 90:
+                    judul = judul[:87] + "…"
+                tgl = "" if pd.isna(x["waktu"]) else f'{x["waktu"].strftime("%b")} {x["waktu"].day}, {x["waktu"].year} • {x["waktu"].strftime("%H:%M")}'
+                kelas = "solved" if x["status"] == "Solved" else "progress"
+                baris.append(
+                    f'<div class="fb-baris"><div class="fb-ikon"><span class="mi">chat_bubble_outline</span></div>'
+                    f'<div class="fb-isi"><div class="fb-teks">{_html.escape(judul)}</div>'
+                    f'<div class="fb-meta"><span class="fb-no">#{_html.escape(x["no"])}</span>'
+                    f'<span>{_html.escape(x["user"])}</span><span>{_html.escape(x["prio"])}</span>'
+                    + (f'<span>· {_html.escape(isi1[:70])}</span>' if x["title"] else '') +
+                    '</div></div>'
+                    f'<div class="fb-kanan"><span class="fb-badge {kelas}">● {x["status"]}</span>'
+                    f'<div class="fb-tgl">{tgl}</div></div></div>')
+            st.markdown("".join(baris), unsafe_allow_html=True)
+
+            # ubah In Progress -> Solved (tiket di halaman ini yang punya id)
+            is_bd = (ss.get("user") or {}).get("tagging") in ("BD SUPPORT", "BD_SUPPORT")
+            bisa = [x for x in potong if is_bd and x["status"] == "In Progress" and x["id"] is not None]
+            if bisa:
+                st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
+                c_pilih, c_btn = st.columns([3, 1], vertical_alignment="bottom")
+                pilih_t = c_pilih.selectbox(
+                    "Mark ticket as solved", bisa, key="fb_pilih_tiket",
+                    format_func=lambda x: f'#{x["no"]} — {x["title"] or (x["issue"].splitlines()[0][:60] if x["issue"] else "")}')
+                if c_btn.button(":material/check: Mark as Solved", key="fb_btn_solved", width="stretch"):
+                    err = _tandai_solved(pilih_t["id"])
+                    if err:
+                        st.error(f"Failed to update: {err}")
+                    else:
+                        ss.pesan_toast = f'Ticket #{pilih_t["no"]} marked as Solved.'
+                        st.rerun()
+
+        akhir = min(awal + FB_PER_HALAMAN, total)
+        with st.container(key="fb_footer"):          # satu baris: info di kiri, pagination kecil di kanan (tidak boleh turun baris)
+            c_info, b1, b2, b3 = st.columns([10, 1, 1, 1], gap="xxsmall", vertical_alignment="center")
+            c_info.markdown(f'<div class="fb-info">Showing {awal + 1 if total else 0}-{akhir} of {total} feedback</div>',
+                            unsafe_allow_html=True)
+            b1.button("‹", key="fb_prev", on_click=_fb_ke_halaman, args=(ss.fb_halaman - 1,),
+                      disabled=ss.fb_halaman <= 1, width="stretch")
+            b2.button(str(ss.fb_halaman), key="fb_cur", disabled=True, width="stretch")   # nomor halaman: tombol seukuran ‹ ›
+            b3.button("›", key="fb_next", on_click=_fb_ke_halaman, args=(ss.fb_halaman + 1,),
+                      disabled=ss.fb_halaman >= n_hal, width="stretch")
+
+
+
+# ── Grafik native (Vega/Altair, tanpa unduh library dari CDN & tanpa iframe) ──
+@st.cache_data(max_entries=6, show_spinner=False)
+def _excel_cache(df, startrow=1):
+    return hasil_ke_excel(df, startrow=startrow)
+
+def halaman_dashboard_tabs():
+    with st.container(key="dash"):
+        tab_dash, tab_fb = st.tabs([":material/trending_up: Dashboard SKU & NOO", ":material/chat: Feedback"])
+        with tab_dash:
+            halaman_dashboard()
+        with tab_fb:
+            tab_feedback()
+
+
 def halaman_dashboard():
     ss = st.session_state
-    st.markdown(komponen.html_header("Dashboard","Monitor NOO submission & SKU Mapping coverage.","📊"),
+    st.markdown(komponen.html_header("Dashboard","Monitor NOO submission & SKU Mapping coverage.",":material/trending_up:"),
                 unsafe_allow_html=True)
     with st.spinner("Loading dashboard data..."):
         data = ambil_data_dashboard()
@@ -1085,13 +1294,11 @@ def halaman_dashboard():
 
     st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
     f1,f2,f3,f4,f5 = st.columns([1.4,1.4,1.4,1.4,0.8])
-    distri_opts = ["All Distributor"]
-    if not df_noo.empty and col_distri:
-        distri_opts += sorted(df_noo[col_distri].dropna().unique().tolist())
+    distri_opts = ["All Distributor"] + daftar_distributor()          # dari Distributor Mapping, Status = Active
     f_distri   = f1.selectbox("Distributor", distri_opts, key="dash_distri")
-    brand_opts = ["All Brand"]
-    if not df_sku.empty:
-        brand_opts += sorted(df_sku["_brand"].unique().tolist())
+    brand_opts = ["All Brand", "G2G", "NXP"]
+    if not df_sku.empty and "Other" in df_sku["_brand"].values:
+        brand_opts.append("Other")
     f_brand    = f2.selectbox("Brand (SKU)", brand_opts, key="dash_brand")
     hari_ini   = datetime.datetime.now(ZONA_WAKTU).date()
     f_tgl_dari  = f3.date_input("Period from", value=hari_ini-datetime.timedelta(days=30),
@@ -1099,7 +1306,7 @@ def halaman_dashboard():
     f_tgl_sampai = f4.date_input("Period to", value=hari_ini, key="dash_sampai", format="YYYY-MM-DD")
     with f5:
         st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
-        if st.button("🔄 Refresh", key="dash_refresh", width="stretch"):
+        if st.button(":material/refresh: Refresh", key="dash_refresh", width="stretch"):
             ambil_data_dashboard.clear(); st.rerun()
 
     df_noo_f = df_noo.copy() if not df_noo.empty else df_noo
@@ -1108,7 +1315,8 @@ def halaman_dashboard():
         tgl_noo  = ke_wib_naive(df_noo_f[col_created_noo]).dt.date
         df_noo_f = df_noo_f[(tgl_noo >= f_tgl_dari) & (tgl_noo <= f_tgl_sampai)]
     if not df_noo_f.empty and col_distri and f_distri != "All Distributor":
-        df_noo_f = df_noo_f[df_noo_f[col_distri].astype(str).str.strip() == f_distri]
+        df_noo_f = df_noo_f[df_noo_f[col_distri].astype(str).str.strip().str.lower()
+                            .str.startswith(f_distri.strip().lower())]
     if not df_sku_f.empty and col_created_sku:
         tgl_sku  = ke_wib_naive(df_sku_f[col_created_sku]).dt.date
         df_sku_f = df_sku_f[(tgl_sku >= f_tgl_dari) & (tgl_sku <= f_tgl_sampai)]
@@ -1133,65 +1341,71 @@ def halaman_dashboard():
         pct_ext    = round(n_existing/total_noo*100) if total_noo else 0
 
         st.markdown(f"""
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
-  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px 16px">
-    <div style="font-size:0.75rem;color:#64748b;font-weight:500;margin-bottom:6px">Total Stores</div>
-    <div style="font-size:2rem;font-weight:800;color:#0f172a;line-height:1">{total_noo:,}</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px;width:66.6%">
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+    <div style="font-size:0.75rem;color:#64748b;font-weight:500;margin-bottom:3px">Total Stores</div>
+    <div style="font-size:1.35rem;font-weight:800;color:#0f172a;line-height:1">{total_noo:,}</div>
   </div>
-  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:18px 16px">
-    <div style="font-size:0.75rem;color:#15803d;font-weight:500;margin-bottom:6px">Generate ID</div>
-    <div style="font-size:2rem;font-weight:800;color:#166534;line-height:1">{n_generate:,}</div>
-    <div style="font-size:0.72rem;color:#16a34a;margin-top:4px">▲ {pct_gen}% dari total</div>
+  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+    <div style="font-size:0.75rem;color:#15803d;font-weight:500;margin-bottom:3px">Generate ID</div>
+    <div style="font-size:1.35rem;font-weight:800;color:#166534;line-height:1">{n_generate:,}</div>
+    <div style="font-size:0.66rem;color:#16a34a;margin-top:2px">▲ {pct_gen}% dari total</div>
   </div>
-  <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:12px;padding:18px 16px">
-    <div style="font-size:0.75rem;color:#be123c;font-weight:500;margin-bottom:6px">Need Review</div>
-    <div style="font-size:2rem;font-weight:800;color:#9f1239;line-height:1">{n_review:,}</div>
-    <div style="font-size:0.72rem;color:#e11d48;margin-top:4px">{pct_rev}% dari total</div>
+  <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+    <div style="font-size:0.75rem;color:#be123c;font-weight:500;margin-bottom:3px">Need Review</div>
+    <div style="font-size:1.35rem;font-weight:800;color:#9f1239;line-height:1">{n_review:,}</div>
+    <div style="font-size:0.66rem;color:#e11d48;margin-top:2px">{pct_rev}% dari total</div>
   </div>
-  <div style="background:#fefce8;border:1px solid #fde68a;border-radius:12px;padding:18px 16px">
-    <div style="font-size:0.75rem;color:#a16207;font-weight:500;margin-bottom:6px">Existing</div>
-    <div style="font-size:2rem;font-weight:800;color:#854d0e;line-height:1">{n_existing:,}</div>
-    <div style="font-size:0.72rem;color:#ca8a04;margin-top:4px">{pct_ext}% dari total</div>
+  <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+    <div style="font-size:0.75rem;color:#a16207;font-weight:500;margin-bottom:3px">Existing</div>
+    <div style="font-size:1.35rem;font-weight:800;color:#854d0e;line-height:1">{n_existing:,}</div>
+    <div style="font-size:0.66rem;color:#ca8a04;margin-top:2px">{pct_ext}% dari total</div>
   </div>
 </div>
         """, unsafe_allow_html=True)
         cn1,cn2 = st.columns(2)
         with cn1:
-            st.markdown('<p style="font-size:0.82rem;color:#64748b;margin-bottom:4px">NOO by Tagging Status</p>',
-                        unsafe_allow_html=True)
-            if col_tagging:
-                chart_tag = tagging.value_counts()
-                labels    = chart_tag.index.tolist()
-                values    = chart_tag.values.tolist()
-                WARNA_TAG = {"Generate ID":"#22c55e","Need Review":"#f43f5e","Existing":"#eab308"}
-                colors    = [WARNA_TAG.get(l,"#94a3b8") for l in labels]
-                st.components.v1.html(f"""
+            with st.container(key="g_tag"):
+                st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">NOO by Tagging Status</p>',
+                            unsafe_allow_html=True)
+                if col_tagging:
+                    chart_tag = tagging.value_counts()
+                    labels    = chart_tag.index.tolist()
+                    values    = chart_tag.values.tolist()
+                    WARNA_TAG = {"Generate ID":"#475569","Need Review":"#94a3b8","Existing":"#cbd5e1"}   # abu tua -> abu muda
+                    colors    = [WARNA_TAG.get(l,"#94a3b8") for l in labels]
+                    st.components.v1.html(f"""
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<canvas id="donut_noo" style="max-height:200px"></canvas>
+<canvas id="donut_noo" style="max-height:140px"></canvas>
 <script>
-new Chart(document.getElementById('donut_noo'),{{
+Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
+document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('donut_noo'),{{
   type:'doughnut',
   data:{{labels:{json.dumps(labels)},datasets:[{{data:{json.dumps(values)},backgroundColor:{json.dumps(colors)},borderWidth:1}}]}},
-  options:{{responsive:true,plugins:{{legend:{{position:'right',labels:{{font:{{size:11}},boxWidth:12,padding:10}}}}}}}}
-}});
-</script>""", height=220)
+  options:{{responsive:true,plugins:{{legend:{{position:'right',labels:{{font:{{size:10}},boxWidth:10,padding:6}}}}}}}}
+}}));
+</script>""", height=150)
         with cn2:
-            st.markdown('<p style="font-size:0.82rem;color:#64748b;margin-bottom:4px">NOO by Distributor (Top 10)</p>',
-                        unsafe_allow_html=True)
-            if col_distri:
-                per_distri  = (df_noo_f[col_distri].replace("","(undetected)").fillna("(undetected)").value_counts().head(10))
-                labels_d    = per_distri.index.tolist()
-                values_d    = per_distri.values.tolist()
-                st.components.v1.html(f"""
+            with st.container(key="g_distri"):
+                st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">NOO by Distributor (Top 10)</p>',
+                            unsafe_allow_html=True)
+                if col_distri:
+                    per_distri  = (df_noo_f[col_distri].replace("","(undetected)").fillna("(undetected)").value_counts().head(10))
+                    labels_d    = per_distri.index.tolist()
+                    values_d    = per_distri.values.tolist()
+                    st.components.v1.html(f"""
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<canvas id="bar_distri" style="max-height:200px"></canvas>
+<canvas id="bar_distri" style="max-height:140px"></canvas>
 <script>
-new Chart(document.getElementById('bar_distri'),{{
+Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
+document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('bar_distri'),{{
   type:'bar',
-  data:{{labels:{json.dumps(labels_d)},datasets:[{{data:{json.dumps(values_d)},backgroundColor:'#22c55e',borderRadius:4}}]}},
-  options:{{indexAxis:'y',responsive:true,plugins:{{legend:{{display:false}}}},scales:{{x:{{ticks:{{font:{{size:10}}}}}},y:{{ticks:{{font:{{size:10}}}}}}}}}}
-}});
-</script>""", height=220)
+  data:{{labels:{json.dumps(labels_d)},datasets:[{{data:{json.dumps(values_d)},backgroundColor:'#94a3b8',borderRadius:4}}]}},
+  options:{{indexAxis:'y',responsive:true,plugins:{{legend:{{display:false}}}},scales:{{x:{{grid:{{display:false}},ticks:{{font:{{size:10}}}}}},y:{{grid:{{display:false}},ticks:{{font:{{size:10}}}}}}}}}}
+}}));
+</script>""", height=150)
         with st.expander("Recent NOO Submissions (last 20)"):
             kolom_show = [c for c in [peta_noo.get("customerstorecode"),peta_noo.get("storename"),
                                        col_distri,col_city,col_tagging,col_created_noo] if c]
@@ -1218,21 +1432,23 @@ new Chart(document.getElementById('bar_distri'),{{
             sku_baru = int((tgl_s >= cutoff7).sum())
         brand_counts = df_sku_f["_brand"].value_counts() if "_brand" in df_sku_f.columns else pd.Series(dtype=int)
         brand_list   = brand_counts.index.tolist()
-        kpi_cols     = st.columns(3+len(brand_list))
+        # satu baris; lebar tiap kartu = 1/6 baris (sama dengan kartu NOO)
+        n_kartu  = 3 + len(brand_list)
+        kpi_cols = st.columns([1]*n_kartu + ([6 - n_kartu] if n_kartu < 6 else []), gap="small")
         kpi_cols[0].markdown(f"""
-<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px 16px">
-  <div style="font-size:0.75rem;color:#64748b;font-weight:500;margin-bottom:6px">Total SKU Mapped</div>
-  <div style="font-size:2rem;font-weight:800;color:#0f172a;line-height:1">{total_sku:,}</div>
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+  <div style="font-size:0.75rem;color:#64748b;font-weight:500;margin-bottom:3px">Total SKU Mapped</div>
+  <div style="font-size:1.35rem;font-weight:800;color:#0f172a;line-height:1">{total_sku:,}</div>
 </div>""", unsafe_allow_html=True)
         kpi_cols[1].markdown(f"""
-<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:18px 16px">
-  <div style="font-size:0.75rem;color:#0369a1;font-weight:500;margin-bottom:6px">SKU Baru (7 hari)</div>
-  <div style="font-size:2rem;font-weight:800;color:#0c4a6e;line-height:1">{sku_baru:,}</div>
+<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+  <div style="font-size:0.75rem;color:#0369a1;font-weight:500;margin-bottom:3px">SKU Baru (7 hari)</div>
+  <div style="font-size:1.35rem;font-weight:800;color:#0c4a6e;line-height:1">{sku_baru:,}</div>
 </div>""", unsafe_allow_html=True)
         kpi_cols[2].markdown(f"""
-<div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;padding:18px 16px">
-  <div style="font-size:0.75rem;color:#7c3aed;font-weight:500;margin-bottom:6px">Distributor</div>
-  <div style="font-size:2rem;font-weight:800;color:#4c1d95;line-height:1">{n_distri_sku:,}</div>
+<div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+  <div style="font-size:0.75rem;color:#7c3aed;font-weight:500;margin-bottom:3px">Distributor</div>
+  <div style="font-size:1.35rem;font-weight:800;color:#4c1d95;line-height:1">{n_distri_sku:,}</div>
 </div>""", unsafe_allow_html=True)
         BRAND_COLORS = {"G2G":"#6366f1","NXP":"#f59e0b","Other":"#94a3b8"}
         for idx, brand in enumerate(brand_list):
@@ -1240,49 +1456,56 @@ new Chart(document.getElementById('bar_distri'),{{
             pct = round(cnt/total_sku*100) if total_sku else 0
             clr = BRAND_COLORS.get(brand,"#94a3b8")
             kpi_cols[3+idx].markdown(f"""
-<div style="background:#fff;border:1px solid {clr}40;border-radius:12px;padding:18px 16px">
-  <div style="font-size:0.75rem;color:{clr};font-weight:600;margin-bottom:6px">{brand}</div>
-  <div style="font-size:2rem;font-weight:800;color:#0f172a;line-height:1">{cnt:,}</div>
-  <div style="font-size:0.72rem;color:#64748b;margin-top:4px">{pct}% dari total</div>
+<div style="background:#fff;border:1px solid {clr}40;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+  <div style="font-size:0.75rem;color:{clr};font-weight:600;margin-bottom:3px">{brand}</div>
+  <div style="font-size:1.35rem;font-weight:800;color:#0f172a;line-height:1">{cnt:,}</div>
+  <div style="font-size:0.66rem;color:#64748b;margin-top:2px">{pct}% dari total</div>
 </div>""", unsafe_allow_html=True)
 
         st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
         cs1,cs2 = st.columns(2)
         with cs1:
-            st.markdown('<p style="font-size:0.82rem;color:#64748b;margin-bottom:4px">SKU per Brand</p>',
-                        unsafe_allow_html=True)
-            if "_brand" in df_sku_f.columns:
-                labels_b = brand_counts.index.tolist()
-                values_b = brand_counts.values.tolist()
-                colors_b = [BRAND_COLORS.get(b,"#94a3b8") for b in labels_b]
-                st.components.v1.html(f"""
+            with st.container(key="g_brand"):
+                st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">SKU per Brand</p>',
+                            unsafe_allow_html=True)
+                if "_brand" in df_sku_f.columns:
+                    labels_b = brand_counts.index.tolist()
+                    values_b = brand_counts.values.tolist()
+                    colors_b = (["#475569", "#94a3b8", "#cbd5e1", "#64748b", "#e2e8f0"][i % 5] for i in range(len(labels_b)))
+                    colors_b = list(colors_b)
+                    st.components.v1.html(f"""
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<canvas id="donut_brand" style="max-height:180px"></canvas>
+<canvas id="donut_brand" style="max-height:140px"></canvas>
 <script>
-new Chart(document.getElementById('donut_brand'),{{
+Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
+document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('donut_brand'),{{
   type:'doughnut',
   data:{{labels:{json.dumps(labels_b)},datasets:[{{data:{json.dumps(values_b)},backgroundColor:{json.dumps(colors_b)},borderWidth:1}}]}},
-  options:{{responsive:true,plugins:{{legend:{{position:'right',labels:{{font:{{size:11}},boxWidth:12,padding:10}}}}}}}}
-}});
-</script>""", height=200)
+  options:{{responsive:true,plugins:{{legend:{{position:'right',labels:{{font:{{size:10}},boxWidth:10,padding:6}}}}}}}}
+}}));
+</script>""", height=150)
         with cs2:
-            st.markdown('<p style="font-size:0.82rem;color:#64748b;margin-bottom:4px">SKU Submitted Over Time</p>',
-                        unsafe_allow_html=True)
-            if col_created_sku:
-                per_tgl = ke_wib_naive(df_sku_f[col_created_sku]).dt.date.value_counts().sort_index()
-                if not per_tgl.empty:
-                    labels_t = [str(d) for d in per_tgl.index.tolist()]
-                    values_t = per_tgl.values.tolist()
-                    st.components.v1.html(f"""
+            with st.container(key="g_waktu"):
+                st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">SKU Submitted Over Time</p>',
+                            unsafe_allow_html=True)
+                if col_created_sku:
+                    per_tgl = ke_wib_naive(df_sku_f[col_created_sku]).dt.date.value_counts().sort_index()
+                    if not per_tgl.empty:
+                        labels_t = [str(d) for d in per_tgl.index.tolist()]
+                        values_t = per_tgl.values.tolist()
+                        st.components.v1.html(f"""
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<canvas id="line_sku" style="max-height:180px"></canvas>
+<canvas id="line_sku" style="max-height:140px"></canvas>
 <script>
-new Chart(document.getElementById('line_sku'),{{
+Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
+document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('line_sku'),{{
   type:'line',
-  data:{{labels:{json.dumps(labels_t)},datasets:[{{data:{json.dumps(values_t)},borderColor:'#6366f1',backgroundColor:'#6366f120',borderWidth:2,pointRadius:3,fill:true,tension:0.3}}]}},
-  options:{{responsive:true,plugins:{{legend:{{display:false}}}},scales:{{x:{{ticks:{{font:{{size:10}},maxRotation:0}}}},y:{{ticks:{{font:{{size:10}},stepSize:1}}}}}}}}
-}});
-</script>""", height=200)
+  data:{{labels:{json.dumps(labels_t)},datasets:[{{data:{json.dumps(values_t)},borderColor:'#64748b',backgroundColor:'#cbd5e155',borderWidth:2,pointRadius:3,fill:true,tension:0.3}}]}},
+  options:{{responsive:true,plugins:{{legend:{{display:false}}}},scales:{{x:{{grid:{{display:false}},ticks:{{font:{{size:10}},maxRotation:0}}}},y:{{grid:{{display:false}},ticks:{{font:{{size:10}},stepSize:1}}}}}}}}
+}}));
+</script>""", height=150)
 
         with st.expander("All SKU Mapping (last 20)"):
             kolom_show_sku = [c for c in [col_cc_sku,peta_sku.get("customername") or peta_sku.get("customer_name"),
@@ -1299,12 +1522,16 @@ new Chart(document.getElementById('line_sku'),{{
 # HALAMAN: HISTORY
 # ═════════════════════════════════════════════════════════════════════════════
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _riwayat_cache():
+    return sb_select(TABLE_RIWAYAT, order="waktu.desc", limit=200)
+
 def halaman_riwayat():
-    st.markdown(komponen.html_header("Submission History","Log of all submission and validation activities.","🕒"),
+    st.markdown(komponen.html_header("Submission History","Log of all submission and validation activities.",":material/history:"),
                 unsafe_allow_html=True)
-    if st.button("🔄 Refresh", key="refresh_riwayat"):
-        pass
-    rows = sb_select(TABLE_RIWAYAT, order="waktu.desc", limit=200)
+    if st.button(":material/refresh: Refresh", key="refresh_riwayat"):
+        _riwayat_cache.clear()
+    rows = _riwayat_cache()
     if rows:
         df_riwayat = pd.DataFrame(rows)
         kolom_tampil = {"waktu":"Waktu","pengguna":"Pengguna","aksi":"Aksi","detail":"Detail","total":"Total"}
@@ -1327,6 +1554,7 @@ def _callback_ukuran_halaman():
 TABLE_USER = "users"
 TAGGING_BD = "BD SUPPORT"
 
+@st.cache_data(ttl=30, show_spinner=False)
 def _sb_users_list() -> list:
     r = requests.get(
         f"{SUPABASE_URL}/rest/v1/{TABLE_USER}",
@@ -1354,9 +1582,218 @@ def _sb_user_reset_pw(username: str, pw_baru: str) -> bool:
         params={"username": f"eq.{username}"},
         json={"password": hashed}, timeout=10)
     return r.ok and len(r.json()) == 1
+@st.cache_data(ttl=20, show_spinner=False)
+def _sb_riwayat_hitung() -> int:
+    """Jumlah baris di tabel riwayat_noo (-1 kalau gagal dihitung)."""
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/{TABLE_RIWAYAT}",
+                         headers={**_SB_HEADERS, "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
+                         params={"select": "waktu"}, timeout=15)
+        if r.status_code not in (200, 206):
+            return -1
+        return int(r.headers.get("Content-Range", "*/-1").split("/")[-1])
+    except Exception:
+        return -1
+
+def _sb_riwayat_hapus(lebih_lama_dari_hari=None):
+    """Hapus baris riwayat_noo. lebih_lama_dari_hari=None -> SEMUA baris. Return (jumlah_terhapus, pesan_error)."""
+    if lebih_lama_dari_hari is None:
+        params = {"waktu": "not.is.null"}
+    else:
+        batas = datetime.datetime.now(ZONA_WAKTU) - datetime.timedelta(days=int(lebih_lama_dari_hari))
+        params = {"waktu": f"lt.{batas.isoformat(timespec='seconds')}"}
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/{TABLE_RIWAYAT}",
+                            headers={**_SB_HEADERS, "Prefer": "return=representation"},
+                            params=params, timeout=30)
+        if not r.ok:
+            return 0, f"HTTP {r.status_code}: {r.text[:200]}"
+        return len(r.json()), ""
+    except Exception as e:
+        return 0, str(e)
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _sb_tabel_hitung(tabel: str, kolom: str) -> int:
+    """Jumlah baris sebuah tabel Supabase (-1 kalau gagal dihitung)."""
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/{tabel}",
+                         headers={**_SB_HEADERS, "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
+                         params={"select": kolom}, timeout=15)
+        if r.status_code not in (200, 206):
+            return -1
+        return int(r.headers.get("Content-Range", "*/-1").split("/")[-1])
+    except Exception:
+        return -1
+
+def _sb_tabel_hapus(tabel: str, params: dict):
+    """DELETE baris yang cocok dengan params (filter PostgREST). Return (jumlah_terhapus, pesan_error)."""
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/{tabel}",
+                            headers={**_SB_HEADERS, "Prefer": "return=representation"}, params=params, timeout=30)
+        if not r.ok:
+            return 0, f"HTTP {r.status_code}: {r.text[:200]}"
+        return len(r.json()), ""
+    except Exception as e:
+        return 0, str(e)
+
+def _sb_riwayat_reset_id() -> str:
+    """Panggil fungsi SQL reset_riwayat_noo_id() di Supabase. Return pesan error ('' kalau sukses)."""
+    try:
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/rpc/reset_riwayat_noo_id", headers=_SB_HEADERS, json={}, timeout=15)
+        if r.status_code == 404:
+            return ("Function reset_riwayat_noo_id() not found in the Supabase API "
+                    f"(project: {SUPABASE_URL}). Supabase says: {r.text[:300]}")
+        if not r.ok:
+            return f"HTTP {r.status_code}: {r.text[:200]}"
+        return ""
+    except Exception as e:
+        return str(e)
+
+@st.fragment
+def _tab_clear_history():
+    """Isi tab Clear history. Fragment: klik centang/tombol di sini hanya me-render ulang tab ini,
+    bukan seluruh halaman Settings (daftar user dll.), jadi tidak terasa lambat."""
+    ss = st.session_state
+    # Streamlit membuang nilai widget yang tidak ditampilkan (mis. saat pindah halaman).
+    # Simpan salinan nilainya dan pulihkan saat tab ini tampil lagi.
+    _keep = ss.setdefault("_keep_clear", {})
+    for _k in ("riw_hari", "riw_yakin_lama", "riw_yakin_semua", "riw_sekalian_reset",
+               "hs_yakin_solved", "hs_hari", "hs_yakin_lama", "hs_yakin_semua"):
+        if _k in ss:
+            _keep[_k] = ss[_k]
+        elif _k in _keep:
+            ss[_k] = _keep[_k]
+    if hasil := ss.pop("riw_hasil", None):
+        (st.error if hasil[0] == "error" else st.success)(hasil[1])
+    jumlah = _sb_riwayat_hitung()
+    st.caption(f"Table `{TABLE_RIWAYAT}` currently has **{jumlah if jumlah >= 0 else '?'}** record(s).")
+
+    st.markdown("**Delete old records**")
+    c_hari, c_btn, _sp1 = st.columns([1.1, 1.9, 3], vertical_alignment="bottom")
+    hari = c_hari.number_input("Older than (days)", min_value=1, max_value=3650, value=30, step=1, key="riw_hari")
+    yakin_lama = st.checkbox(f"I understand records older than {int(hari)} days will be permanently deleted",
+                             key="riw_yakin_lama")
+    if c_btn.button(":material/delete_sweep: Delete old records", key="riw_btn_lama", disabled=not yakin_lama,
+                    width="stretch"):
+        n, err = _sb_riwayat_hapus(int(hari))
+        if err:
+            ss.riw_hasil = ("error", f"Delete failed: {err}")
+        elif n == 0:
+            ss.riw_hasil = ("success", "No records older than that. If you expected some, check the Supabase "
+                                       "DELETE policy on riwayat_noo (RLS).")
+        else:
+            # (aksi Clear history sengaja TIDAK dicatat ke riwayat_noo, supaya tabel tetap kosong & id tetap ter-reset)
+            ss.riw_hasil = ("success", f"{n} record(s) deleted.")
+        st.rerun()
+
+    st.divider()
+    st.markdown("**Delete ALL history**")
+    yakin_semua = st.checkbox("I understand ALL history records will be permanently deleted (cannot be undone)",
+                              key="riw_yakin_semua")
+    sekalian_reset = st.checkbox("Also reset the id counter to 1 after deleting", value=True, key="riw_sekalian_reset")
+    if st.button(":material/delete_forever: Delete all history", type="primary", key="riw_btn_semua",
+                 disabled=not yakin_semua):
+        n, err = _sb_riwayat_hapus(None)
+        if err:
+            ss.riw_hasil = ("error", f"Delete failed: {err}")
+        elif n == 0 and jumlah > 0:
+            ss.riw_hasil = ("error", "Supabase accepted the request but deleted 0 rows: the table has no DELETE "
+                                     "policy for this API key (RLS). Add a DELETE policy on riwayat_noo.")
+        else:
+            pesan = f"{n} record(s) deleted."
+            if sekalian_reset:
+                err_r = _sb_riwayat_reset_id()
+                pesan += " Id counter reset." if not err_r else f" Id reset failed: {err_r}"
+            # (aksi Clear history sengaja TIDAK dicatat ke riwayat_noo, supaya tabel tetap kosong & id tetap ter-reset)
+            ss.riw_hasil = ("success" if not (sekalian_reset and err_r) else "error", pesan)
+        st.rerun()
+
+    st.divider()
+    st.markdown("**Reset id counter**")
+    st.caption("Next new history record gets the next free number: 1 if the table is empty, otherwise "
+               "(highest existing id + 1). Existing records are not touched.")
+    if st.button(":material/restart_alt: Reset id counter", key="riw_btn_reset_id"):
+        err_r = _sb_riwayat_reset_id()
+        ss.riw_hasil = ("error", f"Reset failed: {err_r}") if err_r else ("success", "Id counter reset.")
+        st.rerun()
+    with st.expander(":material/code: One-time setup (run once in Supabase SQL Editor)"):
+        st.code("""create or replace function public.reset_riwayat_noo_id()
+returns void language plpgsql security definer as $$
+begin
+  perform setval(
+    pg_get_serial_sequence('public.riwayat_noo', 'id'),
+    coalesce((select max(id) from public.riwayat_noo), 0) + 1,
+    false
+  );
+end $$;
+
+grant execute on function public.reset_riwayat_noo_id() to anon, authenticated;
+
+-- wajib: minta Supabase API memuat ulang daftar fungsi, kalau tidak fungsi baru tidak terbaca (error 404)
+notify pgrst, 'reload schema';""", language="sql")
+        st.caption("Assumes the table has an auto-increment column named `id`. If your column has another name, "
+                   "replace `'id'` and `max(id)` above.")
+
+    with st.expander(":material/schedule: Fully automatic cleanup (runs even when nobody opens the app)"):
+        st.markdown("Streamlit cannot run background jobs, so the buttons above are manual. To clean up on a "
+                    "schedule, enable the `pg_cron` extension in Supabase and run this once in the SQL Editor "
+                    "(deletes records older than 30 days, every day at 02:00):")
+        st.code("""select cron.schedule(
+  'clean-riwayat-noo', '0 2 * * *',
+  $$ delete from public.riwayat_noo where waktu < now() - interval '30 days' $$
+);""", language="sql")
+        st.caption("Cancel it with: select cron.unschedule('clean-riwayat-noo');")
+
+    # ── Tiket Help & Support (tabel help_support) ──
+    st.divider()
+    st.markdown("#### Help & Support tickets")
+    jml_hs = _sb_tabel_hitung(TABLE_HELP, "generated_at")
+    st.caption(f"Table `{TABLE_HELP}` currently has **{jml_hs if jml_hs >= 0 else '?'}** ticket(s).")
+
+    def _hs_selesai(n, err, kosong_ok=True):
+        if err:
+            ss.riw_hasil = ("error", f"Delete failed: {err}")
+        elif n == 0 and not kosong_ok:
+            ss.riw_hasil = ("error", "Supabase accepted the request but deleted 0 rows: the table has no DELETE "
+                                     "policy for this API key (RLS). Add a DELETE policy on help_support.")
+        elif n == 0:
+            ss.riw_hasil = ("success", "No matching tickets to delete.")
+        else:
+            ambil_semua_tiket_help.clear()
+            ss.riw_hasil = ("success", f"{n} ticket(s) deleted.")
+        st.rerun()
+
+    st.markdown("**Delete solved tickets**")
+    ok_solved = st.checkbox("I understand all tickets with status Solved will be permanently deleted",
+                            key="hs_yakin_solved")
+    if st.button(":material/task_alt: Delete solved tickets", key="hs_btn_solved", disabled=not ok_solved):
+        n, err = _sb_tabel_hapus(TABLE_HELP, {"status": "ilike.solved"})
+        _hs_selesai(n, err)
+
+    st.markdown("**Delete old tickets**")
+    c_hs_hari, c_hs_btn, _sp2 = st.columns([1.1, 1.9, 3], vertical_alignment="bottom")
+    hs_hari = c_hs_hari.number_input("Older than (days)", min_value=1, max_value=3650, value=90, step=1,
+                                     key="hs_hari")
+    ok_lama = st.checkbox(f"I understand tickets older than {int(hs_hari)} days will be permanently deleted",
+                          key="hs_yakin_lama")
+    if c_hs_btn.button(":material/delete_sweep: Delete old tickets", key="hs_btn_lama", disabled=not ok_lama,
+                       width="stretch"):
+        batas = datetime.datetime.now(ZONA_WAKTU) - datetime.timedelta(days=int(hs_hari))
+        n, err = _sb_tabel_hapus(TABLE_HELP, {"generated_at": f"lt.{batas.isoformat(timespec='seconds')}"})
+        _hs_selesai(n, err)
+
+    st.markdown("**Delete ALL tickets**")
+    ok_semua_hs = st.checkbox("I understand ALL tickets (including In Progress) will be permanently deleted "
+                              "(cannot be undone)", key="hs_yakin_semua")
+    if st.button(":material/delete_forever: Delete all tickets", type="primary", key="hs_btn_semua",
+                 disabled=not ok_semua_hs):
+        n, err = _sb_tabel_hapus(TABLE_HELP, {"generated_at": "not.is.null"})
+        _hs_selesai(n, err, kosong_ok=not (jml_hs > 0))
+
+
 def halaman_pengaturan():
     ss = st.session_state
-    st.markdown(komponen.html_header("Settings","Preferences & user access management.","⚙️"),
+    st.markdown(komponen.html_header("Settings","Preferences & user access management.",":material/settings:"),
                 unsafe_allow_html=True)
     st.markdown("""
 <style>
@@ -1403,7 +1840,8 @@ def halaman_pengaturan():
     hapus_opts = [u["username"] for u in users if u["username"] != me.get("username")]
     semua_opts = [u["username"] for u in users]
 
-    tab_add, tab_del, tab_pw = st.tabs(["➕ Add user", "🗑️ Delete user", "🔑 Reset password"])
+    tab_add, tab_del, tab_pw, tab_riw = st.tabs([":material/person_add: Add user", ":material/delete: Delete user",
+                                                 ":material/key: Reset password", ":material/history: Clear history"])
 
     # ── Tambah user ──
     with tab_add:
@@ -1426,6 +1864,7 @@ def halaman_pengaturan():
                 except Exception as e:
                     st.error(f"Failed to add user: {e}")
                 else:
+                    _sb_users_list.clear()
                     catat_riwayat("Add user", n_user.strip().lower())
                     st.success(f"User '{n_user.strip().lower()}' added.")
 
@@ -1440,6 +1879,7 @@ def halaman_pengaturan():
                 if not _sb_user_delete(u_del):
                     st.error(f"Delete failed: {ss.pop('_err_del', '-')}")
                 else:
+                    _sb_users_list.clear()
                     catat_riwayat("Delete user", u_del)
                     ss.pesan_toast = f"User '{u_del}' deleted."
                     st.rerun()
@@ -1461,12 +1901,17 @@ def halaman_pengaturan():
             else:
                 catat_riwayat("Reset password", u_pw)
                 st.success(f"Password for '{u_pw}' has been reset.")
+
+    # ── Bersihkan riwayat (tabel riwayat_noo) ──
+    with tab_riw:
+        _tab_clear_history()
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main():
-    st.set_page_config(page_title="Store Validation", page_icon="🏪", layout="wide")
+    st.set_page_config(page_title="Store Validation", page_icon=":material/storefront:", layout="wide")
     ss = st.session_state
 
     # Login gate
@@ -1493,14 +1938,14 @@ def main():
         st.error(f"CSS tidak ketemu di: {CSS_PATH}")
 
     if ss.get("pesan_toast"):
-        st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon","✅"))
+        st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon",":material/check_circle:"))
 
     user = ss.get("user", {})
 
     with st.sidebar:
         st.markdown(
             '<div class="brand">'
-            '  <div class="brand-icon">🏪</div>'
+            '  <div class="brand-icon"><span class="mi">storefront</span></div>'
             '  Store Validation'
             '</div>'
             '<div class="brand-sub">NOO & SKU Mapping Dashboard</div>',
@@ -1511,11 +1956,11 @@ def main():
             if kunci == "pengaturan" and not is_bd:
                 continue
             nama_tombol = f"navaktif_{kunci}" if ss.halaman_aktif == kunci else f"nav_{kunci}"
-            st.button(f"{ikon}   {label}", key=nama_tombol, on_click=tuju_halaman,
+            st.button(label, icon=ikon, key=nama_tombol, on_click=tuju_halaman,
                       args=(kunci,), width="stretch")
 
         st.link_button("Input NOO & SKU", "https://noo-submission.streamlit.app/",
-                use_container_width=True, key="nav_noo")
+                icon=":material/link:", use_container_width=True, key="nav_noo")
 
         # st.markdown(
         #     f'<div class="status-sidebar"><span class="titik"></span> Ready</div>'
@@ -1525,12 +1970,12 @@ def main():
 
         # ── Logout (fixed bottom sidebar via CSS) ────────────────────────────
         with st.container(key="logout"):
-            if st.button("🚪  Log Out", width="stretch"):
+            if st.button(":material/logout: Log Out", width="stretch"):
                 keluar()
                 st.rerun()
 
     {
-        "dashboard":  halaman_dashboard,
+        "dashboard":  halaman_dashboard_tabs,
         "validasi":   halaman_validasi_toko,
         "riwayat":    halaman_riwayat,
         "pengaturan": halaman_pengaturan,
