@@ -1,5 +1,9 @@
 import base64
+import hashlib
+import hmac
+import json
 import re
+import time
 from pathlib import Path
 
 import datetime
@@ -9,7 +13,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-from shared import SUPABASE_URL, _SB_HEADERS, sb_insert, muat_distri_code_map
+from shared import SUPABASE_URL, SUPABASE_KEY, _SB_HEADERS, sb_insert, muat_distri_code_map
 
 TABLE_USER = "users"        
 TAGGING_RSA = "RSA"
@@ -313,10 +317,100 @@ def signup_dialog():
 
 
 # ---------------------------------------------------------------------- UI
+# ------------------------------------------------- login bertahan saat refresh (cookie bertanda tangan)
+COOKIE_LOGIN = "skp_auth"
+MASA_LOGIN_DETIK = 30 * 60        # tetap login 30 menit sejak aktivitas terakhir
+_JEDA_PERBARUI_COOKIE = 300       # perpanjang cookie paling cepat tiap 5 menit (hemat render)
+
+
+def _kunci_cookie() -> bytes:
+    try:
+        return str(st.secrets["auth_secret"]).encode()    # disarankan: tambahkan auth_secret di secrets
+    except Exception:
+        return ("skp-auth|" + str(SUPABASE_KEY)).encode()
+
+
+def _buat_token(user: dict) -> str:
+    isi = {"u": user.get("username", ""), "e": user.get("email", ""), "t": user.get("tagging", ""),
+           "x": int(time.time()) + MASA_LOGIN_DETIK}
+    b = base64.urlsafe_b64encode(json.dumps(isi).encode()).decode()
+    return f"{b}.{hmac.new(_kunci_cookie(), b.encode(), hashlib.sha256).hexdigest()}"
+
+
+def _baca_token(token: str):
+    try:
+        b, sig = token.rsplit(".", 1)
+        if not hmac.compare_digest(sig, hmac.new(_kunci_cookie(), b.encode(), hashlib.sha256).hexdigest()):
+            return None
+        isi = json.loads(base64.urlsafe_b64decode(b.encode()))
+        if int(isi["x"]) < time.time():
+            return None
+        return {"username": isi["u"], "email": isi["e"], "tagging": isi["t"]}
+    except Exception:
+        return None
+
+
+def _js_cookie(token: str, detik: int):
+    """Tulis/hapus cookie lewat JS (iframe komponen same-origin dengan halaman Streamlit)."""
+    components.html(
+        f"""<script>
+        const sec = (location.protocol === 'https:') ? '; SameSite=None; Secure' : '; SameSite=Lax';
+        window.parent.document.cookie = "{COOKIE_LOGIN}={token}; max-age={detik}; path=/" + sec;
+        </script>""", height=0)
+
+
+def keluar():
+    """Logout: kosongkan sesi + hapus cookie login. Panggil lalu st.rerun()."""
+    ss = st.session_state
+    ss.clear()
+    ss["_auth_dicoba"] = True      # cookie lama masih terbaca di sesi ini -> jangan dipulihkan lagi
+    ss["_hapus_cookie"] = True
+
+
+_NAMA_ROLE = {TAGGING_RSA: "RSA", TAGGING_BD: "BD Support", "BD SUPPORT": "BD Support",
+              TAGGING_ADMIN_DISTRI: "Admin Distributor", TAGGING_USER: "User"}
+URL_BANTUAN = "https://docs.google.com/forms/d/1E5qhMSQ8kSu6WJQzIGbpeBVr0oMU8mjkWyI00VdRUyI/"
+
+
+def tampilkan_menu_pengguna(user: dict):
+    """Menu pengguna kanan atas: nama + peran, popover berisi profil, Help & Support, Log Out."""
+    nama  = str(user.get("username", ""))
+    email = user.get("email") or "—"
+    role  = _NAMA_ROLE.get(user.get("tagging"), str(user.get("tagging") or ""))
+    with st.container(key="user_profil"):
+        with st.popover(f"{nama}  \n:gray[{role}]", use_container_width=True):
+            st.markdown(
+                f'<div class="menu-profil"><div class="menu-avatar">{(nama[:1] or "?").upper()}</div>'
+                f'<div><div class="menu-nama">{nama}</div><div class="menu-email">{email}</div></div></div>'
+                '<hr class="menu-garis">', unsafe_allow_html=True)
+            with st.container(key="menu_item"):
+                st.link_button("Help & Support", URL_BANTUAN, icon=":material/help:", width="stretch")
+            st.markdown('<hr class="menu-garis">', unsafe_allow_html=True)
+            with st.container(key="menu_keluar"):
+                if st.button("Log Out", icon=":material/logout:", key="menu_logout", width="stretch"):
+                    keluar()
+                    st.rerun()
+
+
 def require_login():
     """Panggil setelah st.set_page_config(). Halaman di bawahnya hanya jalan jika sudah login."""
-    if st.session_state.get("user") is not None:
-        return st.session_state.user
+    ss = st.session_state
+    if ss.get("user") is None and not ss.get("_auth_dicoba"):
+        ss["_auth_dicoba"] = True                       # pulihkan dari cookie hanya sekali per sesi browser
+        try:
+            token = st.context.cookies.get(COOKIE_LOGIN)
+        except Exception:
+            token = None
+        pulih = _baca_token(token) if token else None
+        if pulih:
+            ss.user = pulih
+    if ss.get("user") is not None:
+        if time.time() - ss.get("_cookie_ts", 0) > _JEDA_PERBARUI_COOKIE:
+            _js_cookie(_buat_token(ss.user), MASA_LOGIN_DETIK)
+            ss["_cookie_ts"] = time.time()
+        return ss.user
+    if ss.pop("_hapus_cookie", False):
+        _js_cookie("", 0)
 
     st.markdown(CSS, unsafe_allow_html=True)
 
