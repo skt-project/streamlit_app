@@ -5,16 +5,23 @@ def _satu_baris(teks: str) -> str:
     """Collapse multi-line HTML string menjadi satu baris (buang newline & spasi berlebih)."""
     import re
     return re.sub(r"\s+", " ", teks).strip()
-STATUS_VALID = "✅ Valid"
-STATUS_REVIEW = "⚠️ Need Review"
+STATUS_VALID = "Valid"
+STATUS_REVIEW = "Need Review"
 
 
 # =========================== PAGE HEADER ===========================
-def html_header(judul: str, subjudul: str, ikon: str = "🏪") -> str:
+def _ikon_html(ikon: str) -> str:
+    """":material/nama:" -> ikon garis Material (font bawaan Streamlit); selain itu dipakai apa adanya."""
+    if ikon.startswith(":material/") and ikon.endswith(":"):
+        return f'<span class="mi">{ikon[10:-1]}</span>'
+    return ikon
+
+
+def html_header(judul: str, subjudul: str, ikon: str = ":material/description:") -> str:
     return (
-        f'<div class="header-halaman"><div class="header-kiri"><div class="header-ikon">{ikon}</div><div>'
+        f'<div class="header-halaman"><div class="header-kiri"><div class="header-ikon">{_ikon_html(ikon)}</div><div>'
         f'<div class="header-judul">{judul}</div><div class="header-sub">{subjudul}</div></div></div>'
-        f'<div class="pengguna-box"><span class="avatar-bulat">👤</span></div></div>'
+        f'<div class="pengguna-box"><span class="avatar-bulat"><span class="mi">person</span></span></div></div>'
     )
 
 # =========================== NOO NOTES BANNER ===========================
@@ -45,15 +52,15 @@ def html_kpi_validasi(df) -> str:
 
     def kartu(kelas: str, ikon: str, label: str, nilai: int, badge: bool = True) -> str:
         small = f"<small>({persen(nilai)}%)</small>" if badge else ""
-        return (f'<div class="kartu-kpi {kelas}"><div class="kpi-ikon">{ikon}</div>'
+        return (f'<div class="kartu-kpi {kelas}"><div class="kpi-ikon">{_ikon_html(ikon)}</div>'
                 f'<div><div class="kpi-label">{label}</div>'
                 f'<div class="kpi-nilai">{nilai:,} {small}</div></div></div>')
 
     return ('<div class="grid-kpi">'
-            + kartu("", "🏪", "Total Stores", total, badge=False)
-            + kartu("hijau", "✓", "Generate ID (Success)", n_generate)
-            + kartu("merah", "⚠️", "Need Review", n_review)
-            + kartu("kuning", "📌", "Existing", n_existing)
+            + kartu("", ":material/storefront:", "Total Stores", total, badge=False)
+            + kartu("hijau", ":material/check:", "Generate ID (Success)", n_generate)
+            + kartu("merah", ":material/warning:", "Need Review", n_review)
+            + kartu("kuning", ":material/push_pin:", "Existing", n_existing)
             + "</div>")
  
 
@@ -61,21 +68,21 @@ def html_kpi_validasi(df) -> str:
 # =========================== UPLOADED FILE INFO ===========================
 def html_info_file(nama_file: str, ukuran: str) -> str:
     return (
-        '<div class="info-file"><div class="info-file-ikon">📄</div>'
+        '<div class="info-file"><div class="info-file-ikon"><span class="mi">description</span></div>'
         f'<div><b>{nama_file}</b><span>{ukuran} · Ready to process ✓</span></div></div>'
     )
 
 
 # =========================== UPLOAD ERROR MESSAGE ===========================
 def html_error_unggah(pesan: str) -> str:
-    return f'<div class="pesan-error-unggah">⚠️ {pesan}</div>'
+    return f'<div class="pesan-error-unggah">{pesan}</div>'
 
 
 # =========================== SUBMISSION CARD HEADER ===========================
 def html_header_pengajuan(ikon: str, judul: str, deskripsi: str) -> str:
     return (
         '<div class="pengajuan-header">'
-        f'<div class="pengajuan-ikon">{ikon}</div>'
+        f'<div class="pengajuan-ikon">{_ikon_html(ikon)}</div>'
         f'<div><h3>{judul}</h3><p>{deskripsi}</p></div></div>'
     )
 
@@ -89,7 +96,7 @@ def html_judul_preview(jumlah_data: int | None) -> str:
 # =========================== PREVIEW TABLE (SKU / NOO) ===========================
 def html_tabel_preview(header_kolom: list[str], baris_data: list[list[str]]) -> str:
     if not baris_data:
-        return '<div class="preview-kosong">📄 No data yet, please upload a file first</div>'
+        return '<div class="preview-kosong">No data yet, please upload a file first</div>'
     head = "".join(f"<th>{h}</th>" for h in header_kolom)
     body = "".join(
         "<tr>" + "".join(f"<td>{nilai}</td>" for nilai in baris) + "</tr>" for baris in baris_data
@@ -126,7 +133,7 @@ def html_sel_teks(teks, gaya: str = "") -> str:
 
 
 def html_pesan_error(teks: str) -> str:
-    return f'<div class="pesan-error-kecil">⚠ {escape(teks)}</div>'
+    return f'<div class="pesan-error-kecil">{escape(teks)}</div>'
 
 
 def html_catatan_spv() -> str:
