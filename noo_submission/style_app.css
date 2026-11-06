@@ -461,7 +461,7 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   padding-bottom: 12px;
 }
 .st-key-tabel_noo_scroll [data-testid="stHorizontalBlock"] {
-  min-width: 1300px;
+  min-width: 1450px;
   flex-wrap: nowrap;
 }
 .st-key-tabel_manual_scroll [data-testid="stHorizontalBlock"] {
@@ -506,7 +506,7 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 }
 .st-key-tabel_spv_scroll > div[data-testid="stVerticalBlock"],
 .st-key-tabel_spv_scroll [data-testid="stHorizontalBlock"] {
-  min-width: 1500px;
+  min-width: 2450px;
   flex-wrap: nowrap;
 }
 .st-key-tabel_spv_scroll [data-testid="stColumn"] { min-width: 0; }
@@ -678,3 +678,84 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
   min-height: 36px;      /* keeps a sane minimum */
   line-height: 1.3;
 }
+
+/* NOO Manual + Upload: dropdown/input tidak boleh terpotong (menimpa tinggi 30px dari .st-key-kartu_noo) */
+.st-key-kartu_noo .st-key-tabel_manual_scroll [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+.st-key-kartu_noo .st-key-tabel_noo_scroll [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+.st-key-kartu_noo .st-key-tabel_manual_scroll [data-testid="stTextInput"] input,
+.st-key-kartu_noo .st-key-tabel_noo_scroll [data-testid="stTextInput"] input {
+    min-height: 38px !important;
+    height: 38px !important;
+    padding-top: 0 !important; padding-bottom: 0 !important;
+    align-items: center !important;
+}
+.st-key-kartu_noo .st-key-tabel_manual_scroll [data-testid="stSelectbox"] [data-baseweb="select"] > div > div,
+.st-key-kartu_noo .st-key-tabel_noo_scroll [data-testid="stSelectbox"] [data-baseweb="select"] > div > div {
+    line-height: 1.4 !important;
+    padding-top: 0 !important; padding-bottom: 0 !important;
+    overflow: visible !important;
+}
+
+/* Dropdown (City dll.): menu 240px dan SEMUA lapisan di dalamnya ikut selebar menu (list virtual Streamlit
+   memberi lebar inline sempit pada wadah dalam -> teks terpotong & ada area putih kosong di kanan) */
+body div[data-baseweb="popover"] { min-width: 240px !important; width: 240px !important; max-width: 90vw !important; }
+body div[data-baseweb="popover"] div,
+body div[data-baseweb="popover"] ul,
+body div[data-baseweb="popover"] li {
+    min-width: 0 !important;
+    max-width: none !important;
+    box-sizing: border-box;
+}
+body div[data-baseweb="popover"] > div,
+body div[data-baseweb="popover"] > div > div,
+body div[data-baseweb="popover"] ul[role="listbox"],
+body div[data-baseweb="popover"] [data-testid="stSelectboxVirtualDropdown"],
+body div[data-baseweb="popover"] [data-testid="stSelectboxVirtualDropdown"] > div,
+body div[data-baseweb="popover"] [role="option"] {
+    width: 100% !important;
+}
+body div[data-baseweb="popover"] [role="option"],
+body div[data-baseweb="popover"] [role="option"] *,
+body div[data-baseweb="popover"] li,
+body div[data-baseweb="popover"] li * {
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}
+
+/* ---------- MENU PENGGUNA (kanan atas): nama + peran, popover dengan menu ---------- */
+[class*="st-key-user_profil"] { right: 150px !important; overflow: visible !important; }
+[class*="st-key-user_profil"] > div { overflow: visible !important; max-width: 230px !important; }
+[class*="st-key-user_profil"] > div > button {
+  background: #ffffff !important; border: 1px solid #ece3e6 !important; border-radius: 28px !important;
+  padding: 5px 14px 5px 8px !important; min-height: 46px !important; color: #3b2f37 !important;
+  box-shadow: 0 6px 18px rgba(120,74,78,.10) !important; text-align: left !important;
+}
+[class*="st-key-user_profil"] > div > button:hover { background: #fff8f8 !important; border-color: #e8c9cf !important; }
+[class*="st-key-user_profil"] > div > button p { line-height: 1.2 !important; margin: 0 !important; font-size: 12px !important; }
+[class*="st-key-user_profil"] > div > button p strong { font-size: 14px !important; }
+div[data-testid="stPopoverBody"] { min-width: 270px !important; max-width: 300px !important; border-radius: 14px !important; }
+.menu-profil { display: flex; align-items: center; gap: 12px; padding: 4px 2px 8px; }
+.menu-avatar {
+  width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center;
+  justify-content: center; font-weight: 700; font-size: 18px; color: #fff;
+  background: linear-gradient(135deg, #d9959a, #a95e69);
+}
+.menu-nama { font-weight: 700; font-size: 14px; color: #2b2026; }
+.menu-email { font-size: 11px; color: #8c7a80; margin-top: 2px; word-break: break-all; }
+.menu-garis { border: none; border-top: 1px solid #efe6e8; margin: 6px 0; }
+.st-key-menu_item button, .st-key-menu_item a,
+.st-key-menu_keluar button {
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+  justify-content: flex-start !important; text-align: left !important; font-size: 14px !important;
+  color: #4a3b42 !important; padding: 9px 10px !important; border-radius: 10px !important;
+}
+.st-key-menu_item button:hover, .st-key-menu_item a:hover { background: #fbf1f2 !important; color: #a95e69 !important; }
+.st-key-menu_keluar button, .st-key-menu_keluar button p { color: #e0475b !important; font-weight: 600 !important; }
+.st-key-menu_keluar button:hover { background: #fdecef !important; }
+
+/* menu pengguna: isi item rata kiri, tidak terpotong */
+.st-key-menu_item button > div, .st-key-menu_item a > div, .st-key-menu_keluar button > div {
+  justify-content: flex-start !important; width: 100% !important;
+}
+.st-key-menu_item a, .st-key-menu_item button, .st-key-menu_keluar button { width: 100% !important; }
