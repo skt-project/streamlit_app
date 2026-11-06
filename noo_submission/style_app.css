@@ -1,6 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-html, body, [class*="css"], .stApp { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+/* Satu font untuk semua teks: sama dengan font tombol sidebar (Source Sans bawaan Streamlit) */
+html, body, [class*="css"], .stApp { font-family: "Source Sans", "Source Sans Pro", ui-sans-serif, system-ui, sans-serif; }
+.stApp [data-testid="stMarkdownContainer"], .stApp [data-testid="stMarkdownContainer"] *:not([data-testid="stIconMaterial"]),
+.stApp [data-testid="stCaptionContainer"], .stApp [data-testid="stWidgetLabel"] *, .stApp label, .stApp input,
+.stApp textarea, .stApp [data-baseweb="select"] *:not([data-testid="stIconMaterial"]),
+.stApp [data-testid="stExpander"] summary *:not([data-testid="stIconMaterial"]),
+.stApp [data-testid="stAlert"] *:not([data-testid="stIconMaterial"]),
+[data-baseweb="popover"] *:not([data-testid="stIconMaterial"]), [data-baseweb="menu"] *:not([data-testid="stIconMaterial"]),
+[data-testid="stDialog"] *:not([data-testid="stIconMaterial"]) {
+  font-family: "Source Sans", "Source Sans Pro", ui-sans-serif, system-ui, sans-serif; }
+.stApp [data-testid="stIconMaterial"] { font-family: "Material Symbols Rounded" !important; }
 .stApp { background: #f5f8fc; color: #172033; }
 header[data-testid="stHeader"] { background: transparent; height: 0; }
 .block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 100%; }
@@ -8,7 +17,9 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
    NOT hidden here so users can still access the theme switcher. */
 
 /* ---------- SIDEBAR / NAVIGATION ---------- */
-section[data-testid="stSidebar"] { background: #edf3fa; border-right: 1px solid #dce5f0; min-width: 255px !important; max-width: 255px !important; }
+section[data-testid="stSidebar"] { background: #edf3fa; border-right: 1px solid #dce5f0; }
+section[data-testid="stSidebar"][aria-expanded="true"] { min-width: 255px !important; max-width: 255px !important; }
+section[data-testid="stSidebar"][aria-expanded="false"] { min-width: 0 !important; max-width: 0 !important; width: 0 !important; }
 section[data-testid="stSidebar"] > div { padding-top: 1.2rem; }
 .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; color:#10213f; }
 .brand-sub { color:#758299; font-size:10.5px; line-height:1.4; margin:6px 0 18px; }
@@ -42,7 +53,9 @@ section[data-testid="stSidebar"] [class*="st-key-navaktif"] button {
 .breadcrumb-nav { color:#99a5b5; font-size:10.5px; margin-bottom:6px; }
 .breadcrumb-nav b { color:#33445d; font-weight:600; }
 /* ---------- SIDEBAR / NAVIGATION ---------- */
-section[data-testid="stSidebar"] { background: #edf3fa; border-right: 1px solid #dce5f0; min-width: 255px !important; max-width: 255px !important; }
+section[data-testid="stSidebar"] { background: #edf3fa; border-right: 1px solid #dce5f0; }
+section[data-testid="stSidebar"][aria-expanded="true"] { min-width: 255px !important; max-width: 255px !important; }
+section[data-testid="stSidebar"][aria-expanded="false"] { min-width: 0 !important; max-width: 0 !important; width: 0 !important; }
 section[data-testid="stSidebar"] > div { padding-top: 1.2rem; }
 .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; color:#10213f; }
 .brand-sub { color:#758299; font-size:10.5px; line-height:1.4; margin:6px 0 18px; }
@@ -754,8 +767,291 @@ div[data-testid="stPopoverBody"] { min-width: 270px !important; max-width: 300px
 .st-key-menu_keluar button, .st-key-menu_keluar button p { color: #e0475b !important; font-weight: 600 !important; }
 .st-key-menu_keluar button:hover { background: #fdecef !important; }
 
+/* Help & Support: teks biasa di kanan atas */
+.st-key-help_kanan {
+  position: fixed !important; top: 14px !important; right: 150px !important;
+  width: fit-content !important; z-index: 1000000 !important;
+}
+.st-key-help_kanan button {
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+  padding: 4px 8px !important; min-height: 0 !important; color: #4a3b42 !important;
+}
+.st-key-help_kanan button:hover { background: transparent !important; color: #a95e69 !important; text-decoration: underline; }
+
 /* menu pengguna: isi item rata kiri, tidak terpotong */
 .st-key-menu_item button > div, .st-key-menu_item a > div, .st-key-menu_keluar button > div {
   justify-content: flex-start !important; width: 100% !important;
 }
 .st-key-menu_item a, .st-key-menu_item button, .st-key-menu_keluar button { width: 100% !important; }
+
+/* ---------- FEEDBACK (tab di Dashboard) ---------- */
+.fb-judul { font-size: 28px; font-weight: 800; color: #1c1633; margin-top: 6px; }
+.fb-sub { font-size: 13px; color: #7d7690; margin-bottom: 14px; }
+.st-key-fb_kartu { background: #fff; border: 1px solid #f3dfe8; border-radius: 18px; padding: 16px 18px;
+  box-shadow: 0 6px 22px rgba(214,90,140,.08); }
+.fb-baris { display: flex; align-items: center; gap: 14px; padding: 12px 6px; border-bottom: 1px solid #f4eaf0; }
+.fb-ikon { width: 46px; height: 46px; border-radius: 50%; background: #fde3ee; display: flex;
+  align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.fb-isi { flex: 1; min-width: 0; }
+.fb-teks { font-size: 14px; font-weight: 500; color: #1c1633; }
+.fb-meta { display: flex; gap: 8px; margin-top: 4px; font-size: 11px; color: #8b849b; }
+.fb-no { background: #f1eef5; border-radius: 5px; padding: 0 6px; }
+.fb-kanan { text-align: right; flex-shrink: 0; }
+.fb-badge { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 12px; padding: 3px 10px; }
+.fb-badge.progress { background: #e8edff; color: #3550d8; }
+.fb-badge.solved { background: #def5e8; color: #1a8d4d; }
+.fb-tgl { font-size: 11.5px; color: #7d7690; margin-top: 5px; }
+.fb-info { font-size: 12px; color: #7d7690; }
+.fb-hal { text-align: center; font-weight: 700; color: #d6457f; background: #fde3ee; border-radius: 8px; padding: 6px 0; }
+.fb-kosong { text-align: center; color: #9a93aa; padding: 28px 0; }
+.st-key-fb_kartu [data-testid="stSegmentedControl"] button[aria-checked="true"],
+.st-key-fb_kartu [data-testid="stSegmentedControl"] button[aria-pressed="true"] { background: #ff4f8b !important; color: #fff !important; }
+
+/* Feedback: pagination < 1 > dibuat kecil */
+.st-key-fb_prev button, .st-key-fb_next button {
+  height: 24px !important; min-height: 24px !important; width: 26px !important; min-width: 26px !important;
+  padding: 0 !important; font-size: 12px !important; line-height: 1 !important; border-radius: 6px !important;
+  margin-left: auto; margin-right: auto; display: flex; justify-content: center;
+}
+.st-key-fb_prev button p, .st-key-fb_next button p { font-size: 12px !important; line-height: 1 !important; margin: 0 !important; }
+.fb-hal { font-size: 11px !important; padding: 3px 0 !important; width: 26px; margin: 0 auto; }
+
+/* ---------- UKURAN FONT: semua teks bawaan Streamlit (rem) diperkecil ~12% ---------- */
+html { font-size: 14px !important; }
+
+/* ---------- TOMBOL: lebih tipis & font lebih kecil ---------- */
+.stButton:not([class*="st-key-fb_prev"]):not([class*="st-key-fb_next"]) > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button,
+.stLinkButton a {
+  min-height: 28px !important; height: 28px !important; padding: 0 12px !important;
+  font-size: 11.5px !important; line-height: 1 !important; border-radius: 7px !important;
+}
+.stButton:not([class*="st-key-fb_prev"]):not([class*="st-key-fb_next"]) > button p,
+.stDownloadButton > button p,
+.stFormSubmitButton > button p,
+.stLinkButton a p { font-size: 11.5px !important; line-height: 1 !important; margin: 0 !important; }
+/* menu sidebar */
+section[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] .stLinkButton a {
+  height: 32px !important; min-height: 32px !important; padding: 0 12px !important;
+  font-size: 11.5px !important;
+}
+section[data-testid="stSidebar"] .stButton > button p,
+section[data-testid="stSidebar"] .stLinkButton a p { font-size: 11.5px !important; }
+
+/* ---------- DASHBOARD COMPACT (hanya halaman Dashboard di app_main) ---------- */
+.st-key-dash [data-testid="stVerticalBlock"] { gap: 0.55rem; }
+.st-key-dash [data-testid="stHorizontalBlock"] { gap: 0.6rem; }
+.st-key-dash .header-halaman { margin-bottom: 6px; }
+.st-key-dash .header-ikon { width: 32px; height: 32px; font-size: 16px; border-radius: 9px; }
+.st-key-dash .header-judul { font-size: 17px; }
+.st-key-dash .header-sub { font-size: 10.5px; margin-top: 1px; }
+.st-key-dash .grid-kpi { gap: 8px; margin-bottom: 8px; }
+.st-key-dash .kartu-kpi { min-height: 60px; padding: 9px 12px; border-radius: 10px; }
+.st-key-dash .kpi-ikon { width: 30px; height: 30px; font-size: 15px; margin-right: 9px; border-radius: 8px; }
+.st-key-dash .kpi-label { font-size: 10px; margin-bottom: 2px; }
+.st-key-dash .kpi-nilai { font-size: 16px; }
+.st-key-dash .kpi-nilai small { padding: 1px 5px; font-size: 8.5px; }
+.st-key-dash .donut { width: 36px; height: 36px; margin-right: 9px; }
+.st-key-dash .donut::after { inset: 5px; }
+.st-key-dash .tab-container { margin-bottom: 8px; }
+.st-key-dash .tab-pill { padding: 5px 12px; font-size: 11.5px; }
+.st-key-dash .judul-bagian { margin: 4px 0 4px; }
+.st-key-dash [data-testid="stDataFrame"] { font-size: 11px; }
+.st-key-dash hr { margin: 0.5rem 0 !important; }
+.st-key-dash div[data-testid="stTextInput"] input, .st-key-dash div[data-baseweb="select"] > div { min-height: 30px; font-size: 11.5px; }
+.st-key-dash [data-testid="stTabs"] button[role="tab"] { padding: 4px 10px; height: 30px; }
+.st-key-dash [data-testid="stTabs"] button[role="tab"] p { font-size: 12px; }
+
+/* ---------- hilangkan bingkai abu-abu (focus ring Chrome pada area scroll utama) ---------- */
+[data-testid="stMain"], [data-testid="stMain"]:focus, [data-testid="stMain"]:focus-visible,
+[data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"]:focus-visible,
+[data-testid="stMainBlockContainer"], section.main, .stApp, .stApp:focus-visible {
+  outline: none !important; border: none !important; box-shadow: none !important;
+}
+
+/* ---------- SIDEBAR: teks tombol tebal + ikon garis ---------- */
+section[data-testid="stSidebar"] .stButton > button p,
+section[data-testid="stSidebar"] .stLinkButton a p { font-weight: 700 !important; }
+section[data-testid="stSidebar"] .stButton > button [data-testid="stIconMaterial"],
+section[data-testid="stSidebar"] .stLinkButton a [data-testid="stIconMaterial"] { font-size: 18px !important; margin-right: 8px; }
+
+/* ---------- ICON HEADER HALAMAN: ikon garis (Material), tanpa kotak biru ---------- */
+.mi { font-family: 'Material Symbols Rounded'; font-weight: normal; font-style: normal; font-size: 28px;
+  line-height: 1; letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap;
+  font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased; }
+.header-ikon { background: none !important; box-shadow: none !important; color: #2b3f66 !important;
+  width: auto !important; height: auto !important; border-radius: 0 !important; }
+.st-key-dash .header-ikon .mi { font-size: 24px; }
+.pengajuan-ikon .mi { font-size: 20px; }
+
+/* ---------- ICON NETRAL (tanpa warna) ---------- */
+.kpi-ikon, .hijau .kpi-ikon, .kuning .kpi-ikon, .merah .kpi-ikon,
+.pengajuan-ikon, .info-file-ikon { background: #eef1f6 !important; color: #4a5568 !important; }
+.kpi-ikon .mi { font-size: 20px; }
+.fb-ikon { background: #eef1f6 !important; color: #4a5568; }
+.fb-ikon .mi { font-size: 22px; }
+.brand .mi, .brand-icon .mi { font-size: 20px; color: #2b3f66; }
+.avatar-bulat .mi { font-size: 20px; color: #4a5568; }
+
+/* ---------- Help & Support (kanan atas): di-highlight ---------- */
+.st-key-help_kanan button {
+  background: #e8f0fe !important; border: 1px solid #c5d5f5 !important; border-radius: 16px !important;
+  padding: 0 14px !important; height: 30px !important; min-height: 30px !important;
+  box-shadow: 0 2px 6px rgba(37,99,235,.15) !important;
+}
+.st-key-help_kanan button p { color: #1f5fd2 !important; font-weight: 700 !important; font-size: 12px !important; }
+.st-key-help_kanan button:hover { background: #d6e4fc !important; border-color: #a8c2f0 !important; text-decoration: none !important; }
+
+/* ---------- TOMBOL SERAGAM: rounded square (bukan pill) di area utama ---------- */
+html body [data-testid="stMain"] .stButton:not([class*="st-key-pill_"]) button,
+html body [data-testid="stMain"] .stDownloadButton button,
+html body [data-testid="stMain"] .stFormSubmitButton button,
+html body [data-testid="stMain"] .stLinkButton a {
+  border-radius: 8px !important;
+}
+
+/* spesifisitas lebih tinggi supaya menang atas aturan toolbar lama yang membuat tombol pill */
+[data-testid="stMain"][data-testid="stMain"][data-testid="stMain"] .stButton:not([class*="st-key-pill_"]) button,
+[data-testid="stMain"][data-testid="stMain"][data-testid="stMain"] .stDownloadButton button,
+[data-testid="stMain"][data-testid="stMain"][data-testid="stMain"] .stFormSubmitButton button,
+[data-testid="stMain"][data-testid="stMain"][data-testid="stMain"] .stLinkButton a {
+  border-radius: 8px !important;
+}
+
+/* ---------- DATE INPUT & KALENDER ---------- */
+/* kotak date input: putih + border (sebelumnya sewarna background halaman sehingga tidak terlihat) */
+div[data-testid="stDateInput"] [data-baseweb="input"] {
+  background: #ffffff !important; border: 1px solid #d7e0ea !important; border-radius: 8px !important;
+}
+div[data-testid="stDateInput"] [data-baseweb="base-input"] {
+  background: transparent !important; border: none !important; box-shadow: none !important; border-radius: 8px !important;
+}
+div[data-testid="stDateInput"] input { background: transparent !important; color: #33435c !important; }
+/* popup kalender: lebar menyesuaikan isi (aturan dropdown 240px tidak boleh berlaku), latar putih, bayangan jelas */
+body div[data-baseweb="popover"]:has([data-baseweb="calendar"]) {
+  width: max-content !important; min-width: 0 !important; max-width: 95vw !important;
+  background: #ffffff !important; border: 1px solid #d7e0ea !important; border-radius: 12px !important;
+  box-shadow: 0 10px 30px rgba(17,35,65,.22) !important; overflow: hidden !important;
+}
+body div[data-baseweb="popover"]:has([data-baseweb="calendar"]) > div,
+body div[data-baseweb="popover"]:has([data-baseweb="calendar"]) > div > div,
+[data-baseweb="calendar"] { background: #ffffff !important; width: max-content !important; }
+[data-baseweb="calendar"] [role="gridcell"], [data-baseweb="calendar"] [role="row"] { background: transparent; }
+
+/* ---------- HALAMAN NOO & SKU SUBMISSION: upload area rapi + jarak dikurangi + font seragam ---------- */
+.header-halaman { margin-bottom: 6px; }
+.breadcrumb-nav { margin-bottom: 2px; }
+.pemisah-tipis { border: none; border-top: 1px solid #d9e1ec; margin: 10px 0 !important; }
+.pemisah-opsi { margin: 12px 0 4px !important; }
+.st-key-kotak_unggah { margin-bottom: 0; }
+.st-key-kotak_unggah [data-testid="stVerticalBlock"] { gap: 0.3rem; }
+/* font uploader disamakan dengan font tombol sidebar (sebelumnya jatuh ke font sistem) */
+[data-testid="stFileUploader"], [data-testid="stFileUploader"] *:not([data-testid="stIconMaterial"]) {
+  font-family: "Source Sans", "Source Sans Pro", ui-sans-serif, sans-serif !important;
+}
+/* ikon Material harus tetap memakai font ikonnya, kalau tidak nama ikon ("upload") tampil sebagai teks */
+[data-testid="stFileUploader"] [data-testid="stIconMaterial"] {
+  font-family: "Material Symbols Rounded" !important;
+}
+.st-key-kotak_unggah [data-testid="stWidgetLabel"] p { font-size: 12px; font-weight: 600; color: #33435c; }
+.st-key-kotak_unggah [data-testid="stFileUploaderDropzone"] {
+  background: #f5f9ff; border: 1.5px dashed #8eb5ed; border-radius: 10px; padding: 8px 12px; min-height: 0;
+}
+.st-key-kotak_unggah [data-testid="stFileUploaderDropzone"]:hover { border-color: #2563eb; background: #eaf3ff; }
+.st-key-kotak_unggah [data-testid="stFileUploaderDropzoneInstructions"] span,
+.st-key-kotak_unggah [data-testid="stFileUploaderDropzoneInstructions"] small { font-size: 11px !important; }
+.st-key-kotak_unggah [data-testid="stFileUploaderDropzone"] button { height: 28px; min-height: 28px; padding: 0 12px; font-size: 11.5px !important; }
+
+/* kotak "No data yet" di Upload Option: beri jarak ke tombol Submit di bawahnya & lebar penuh sejajar */
+.preview-kosong { margin: 0 0 10px 0 !important; width: 100%; box-sizing: border-box; }
+.st-key-kartu_noo .preview-kosong, .st-key-kartu_sku .preview-kosong { margin-bottom: 12px !important; }
+
+/* Feedback: footer (info + < 1 >) selalu satu baris, tidak menumpuk walau layar sempit */
+.st-key-fb_footer [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 6px !important; align-items: center !important; }
+.st-key-fb_footer [data-testid="stColumn"] { min-width: 0 !important; }
+.st-key-fb_footer [data-testid="stColumn"]:first-child { flex: 1 1 auto !important; width: auto !important; }
+.st-key-fb_footer [data-testid="stColumn"]:not(:first-child) { flex: 0 0 30px !important; width: 30px !important; min-width: 30px !important; }
+
+/* Feedback footer: tombol pager kecil & sejajar tengah dengan teks "Showing", tidak menimpa garis di atasnya */
+.st-key-fb_footer { margin-top: 10px; }
+.st-key-fb_footer [data-testid="stHorizontalBlock"] { align-items: center !important; }
+.st-key-fb_footer [data-testid="stColumn"] { display: flex !important; align-items: center !important; justify-content: center !important; }
+.st-key-fb_footer [data-testid="stColumn"]:first-child { justify-content: flex-start !important; }
+.st-key-fb_footer [data-testid="stElementContainer"] { margin: 0 !important; width: 100% !important; }
+html body .st-key-fb_footer button {
+  height: 26px !important; min-height: 26px !important; width: 100% !important; min-width: 0 !important;
+  padding: 0 !important; font-size: 12px !important; line-height: 1 !important; border-radius: 6px !important;
+}
+html body .st-key-fb_footer button p { font-size: 12px !important; line-height: 1 !important; margin: 0 !important; }
+.st-key-fb_footer .fb-hal { width: 26px; padding: 5px 0 !important; margin: 0 auto; }
+
+/* Feedback footer: spesifisitas dinaikkan agar menang atas aturan tombol global (28px / padding 12px) */
+html body .st-key-fb_footer.st-key-fb_footer.st-key-fb_footer button {
+  height: 26px !important; min-height: 26px !important; width: 26px !important; min-width: 26px !important;
+  padding: 0 !important; font-size: 12px !important; line-height: 1 !important; border-radius: 6px !important;
+  margin: 0 auto !important;
+}
+html body .st-key-fb_footer.st-key-fb_footer.st-key-fb_footer button p { font-size: 12px !important; line-height: 1 !important; margin: 0 !important; }
+/* nomor halaman aktif (tombol nonaktif): pink */
+html body .st-key-fb_footer.st-key-fb_footer.st-key-fb_footer .st-key-fb_cur button,
+html body .st-key-fb_footer.st-key-fb_footer.st-key-fb_footer [class*="st-key-fb_cur"] button {
+  background: #fde3ee !important; border: 1px solid #fde3ee !important; opacity: 1 !important;
+}
+html body .st-key-fb_footer.st-key-fb_footer.st-key-fb_footer [class*="st-key-fb_cur"] button p { color: #d6457f !important; font-weight: 700 !important; }
+
+/* kartu info file yang diunggah: ringkas */
+.info-file { gap: 10px; padding: 6px 10px; margin-top: 6px; border-radius: 8px; }
+.info-file-ikon { width: 28px; height: 28px; border-radius: 7px; font-size: 14px; }
+.info-file-ikon .mi { font-size: 16px; }
+.info-file b { font-size: 11px; }
+.info-file span { font-size: 9.5px; margin-top: 0; }
+
+/* Tabel SKU upload: area scroll horizontalnya memotong popup dropdown. Popup yang tidak muat di bawah kotak
+   dipindah ke SAMPING kotak dan menutupinya (filter ketikan tidak terlihat). Beri ruang di bawah tabel
+   supaya popup selalu muat di bawah kotaknya. */
+.st-key-tabel_sku_upload_scroll { padding-bottom: 240px !important; margin-bottom: -228px; }
+
+/* Dropdown (Distributor dll.): popup selebar cukup untuk nama panjang, supaya hasil filter terbaca utuh
+   (sebelumnya terkunci 240px sehingga ujung nama terpotong: "...SEJAHTE", "...KISARA") */
+body div[data-baseweb="popover"]:has([role="listbox"]) {
+  width: 440px !important; min-width: 380px !important; max-width: 92vw !important;
+}
+body div[data-baseweb="popover"]:has([role="listbox"]) [role="option"],
+body div[data-baseweb="popover"]:has([role="listbox"]) [role="option"] * {
+  white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important;
+}
+
+/* ---------- Filter aktif di kartu Feedback: pink (selector Streamlit baru) ---------- */
+.st-key-fb_kartu [data-testid="stBaseButton-segmented_controlActive"] {
+  background: #ff4f8b !important; color: #fff !important; border-color: #ff4f8b !important; }
+.st-key-fb_kartu [data-testid="stBaseButton-segmented_controlActive"] p { color: #fff !important; }
+
+/* ---------- Pilihan Dashboard / Feedback: tampil seperti tab bergaris bawah ---------- */
+.st-key-dash_view [data-testid="stButtonGroup"] { gap: 0 !important; border-bottom: 1px solid #e2e8f0; width: 100%; }
+.st-key-dash_view button[data-testid^="stBaseButton-segmented_control"] {
+  background: transparent !important; border: none !important; border-radius: 0 !important;
+  border-bottom: 2px solid transparent !important; box-shadow: none !important;
+  height: 30px !important; padding: 4px 12px !important; color: #64748b !important; }
+.st-key-dash_view button[data-testid^="stBaseButton-segmented_control"] p { font-size: 12px !important; }
+.st-key-dash_view button[data-testid="stBaseButton-segmented_controlActive"] {
+  color: #ff4b4b !important; border-bottom: 2px solid #ff4b4b !important; background: transparent !important; }
+.st-key-dash_view button[data-testid="stBaseButton-segmented_controlActive"] p { color: #ff4b4b !important; }
+
+/* ---------- Toast: hanya teks pesan yang diseragamkan; ikon dibiarkan bawaan Streamlit ---------- */
+[data-testid="stToast"] p { font-family: "Source Sans", "Source Sans Pro", ui-sans-serif, sans-serif;
+  font-size: 13px !important; line-height: 1.35 !important; font-weight: 500; }
+
+/* ---------- Kartu pembungkus tiap grafik Dashboard: putih, rounded square ---------- */
+.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu {
+  background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px 8px;
+  box-shadow: 0 1px 3px rgba(15,23,42,.05); }
+.st-key-g_tag [data-testid="stVerticalBlock"], .st-key-g_distri [data-testid="stVerticalBlock"],
+.st-key-g_brand [data-testid="stVerticalBlock"], .st-key-g_waktu [data-testid="stVerticalBlock"] { gap: 0.2rem; }
+
+/* ikon .mi (HTML) harus tetap memakai font ikon, jangan tertimpa aturan font teks */
+.mi, .stApp .mi, .stApp [data-testid="stMarkdownContainer"] .mi { font-family: 'Material Symbols Rounded' !important; }
+
+/* jarak antara kartu KPI dan kartu grafik */
+.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu { margin-top: 14px; }
