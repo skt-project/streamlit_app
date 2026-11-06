@@ -24,7 +24,6 @@ TAGGING_USER = "user"
 VIDEO_URL = (
     "https://id.glad2glow.com/cdn/shop/videos/c/vp/d5b2903bb1aa433c8941c13212b84286/d5b2903bb1aa433c8941c13212b84286.HD-1080p-2.5Mbps-90325375.mp4?v=0"
 )
-FORGOT_FORM_URL = "https://docs.google.com/forms/d/1E5qhMSQ8kSu6WJQzIGbpeBVr0oMU8mjkWyI00VdRUyI/viewform"
 
 def validasi_username(username: str) -> str:
     u = username.strip().upper()
@@ -79,22 +78,35 @@ html, body, [data-testid="stApp"], [data-testid="stAppViewContainer"]{
 footer, [data-testid="stSidebar"]{ display:none !important; }
 header[data-testid="stHeader"]{ background:transparent !important; }
 [data-testid="stMainBlockContainer"], .block-container{
-  max-width:1080px !important; padding:32px 18px !important;
+  max-width:880px !important; padding:20px 16px !important;
+  /* kartu login tepat di tengah layar (vertikal & horizontal) */
+  min-height:100vh; box-sizing:border-box; display:flex !important; flex-direction:column; justify-content:center;
 }
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]{ width:100%; flex:0 0 auto; }
 
 /* ---- shell (card) ---- */
 .st-key-shell{
-  border:1px solid #f1e4e4; border-radius:30px; overflow:hidden;
-  box-shadow:0 28px 90px rgba(120,74,78,.14); background:#fff;
+  border:1px solid #f1e4e4; border-radius:22px; overflow:hidden;
+  box-shadow:0 18px 56px rgba(120,74,78,.13); background:#fff;
   animation:fadeUp .8s ease both;
 }
-.st-key-shell [data-testid="stHorizontalBlock"]{ gap:0 !important; align-items:stretch; }
+.st-key-shell [data-testid="stHorizontalBlock"]{ gap:0 !important; align-items:stretch !important; }
+.st-key-shell [data-testid="stColumn"]{ align-self:stretch !important; }   /* kolom video ikut setinggi kolom form */
 .st-key-shell [data-testid="stColumn"]{ padding:0 !important; }
 .st-key-shell [data-testid="stVerticalBlock"]{ gap:0 !important; }
 
+/* video memenuhi SELURUH kolom kiri (kolom sudah setinggi kartu): iframe diposisikan relatif ke kolom, bukan ke panel */
+.st-key-shell [data-testid="stColumn"]:has(.st-key-brand){
+  position:relative; overflow:hidden; margin:0 !important; padding:0 !important;
+  border-radius:22px 0 0 22px;      /* sudut kiri video mengikuti sudut kartu */
+}
+.st-key-shell [data-testid="stColumn"]:has(.st-key-brand) [data-testid="stElementContainer"],
+.st-key-shell [data-testid="stColumn"]:has(.st-key-brand) iframe{ border-radius:22px 0 0 22px; }
+.st-key-brand{ position:static !important; overflow:visible !important; }
+
 /* ---- brand panel (kiri) ---- */
-.st-key-brand{ position:relative; min-height:820px; overflow:hidden; background:#f7e9e8; }
-.st-key-brand iframe{ position:absolute; inset:0; width:100%; height:100% !important; border:0; }
+.st-key-brand{ position:relative; min-height:560px; overflow:hidden; background:#f7e9e8; }
+.st-key-brand iframe{ position:absolute; inset:0; width:100% !important; height:100% !important; border:0; }
 .st-key-brand .bg-video{
   position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;
 }
@@ -103,7 +115,7 @@ header[data-testid="stHeader"]{ background:transparent !important; }
   background:linear-gradient(150deg, rgba(255,248,245,var(--veil)), rgba(237,205,207,calc(var(--veil) * .6)));
 }
 .brand-inner{
-  position:relative; z-index:2; min-height:650px; padding:clamp(32px,5vw,64px);
+  position:relative; z-index:2; min-height:560px; padding:clamp(32px,5vw,64px);
   display:flex; flex-direction:column; justify-content:space-between;
 }
 .brand-inner img.logo{ height:44px; width:auto; display:block; }
@@ -123,43 +135,65 @@ header[data-testid="stHeader"]{ background:transparent !important; }
 .brand-footer::after{ content:""; width:50px; height:1px; background:var(--gold); }
 
 /* ---- form panel (kanan) ---- */
-.st-key-formp{ padding:clamp(28px,5vw,64px) clamp(28px,5vw,64px); background:#fff; min-height:650px; justify-content:center; }
-.form-logo{ height:70px; width:auto; display:block; margin:0 auto 28px; }
-.welcome{ font-size:12px; letter-spacing:1.8px; text-transform:uppercase; color:var(--rose-deep); font-weight:700; }
-.form-title{ font-size:35px; letter-spacing:-1.2px; margin:12px 0 8px; font-weight:560; color:var(--ink); line-height:1.15; }
-.subtitle{ margin:0 0 30px; color:var(--muted); font-size:14px; line-height:1.6; }
-.fine-print{ text-align:center; font-size:11px; color:#a39498; margin-top:27px; line-height:1.6; }
+.st-key-formp{ padding:clamp(22px,3vw,38px) clamp(34px,6vw,76px); background:#fff; min-height:560px; justify-content:center; }
+.form-logo{ height:64px; width:auto; display:block; margin:0 auto 22px; }
+.welcome{ font-size:9.5px; letter-spacing:1.6px; text-transform:uppercase; color:var(--rose-deep); font-weight:700; }
+.form-title{ font-size:22px; letter-spacing:-.8px; margin:8px 0 4px; font-weight:560; color:var(--ink); line-height:1.15; }
+.subtitle{ margin:0 0 14px; color:var(--muted); font-size:11px; line-height:1.6; }
+.fine-print{ text-align:center; font-size:9px; color:#a39498; margin-top:14px; line-height:1.6; }
 .fine-print a{ color:var(--rose-deep); text-decoration:none; }
+
+/* teks judul/subjudul/fine print: spesifisitas tinggi supaya menang atas ukuran paragraf bawaan Streamlit */
+.st-key-formp [data-testid="stMarkdownContainer"] .form-title{ font-size:19px !important; margin:6px 0 3px; }
+.st-key-formp [data-testid="stMarkdownContainer"] p.subtitle{ font-size:10.5px !important; margin:0 0 12px; line-height:1.5; }
+.st-key-formp [data-testid="stMarkdownContainer"] p.fine-print{ font-size:8.5px !important; line-height:1.5; margin-top:12px; }
+.st-key-formp [data-testid="stMarkdownContainer"] .welcome{ font-size:9px !important; }
+
+/* jarak antar blok (margin paragraf di dalam markdown tidak terbawa keluar, jadi diatur di wadahnya) */
+.st-key-formp [data-testid="stElementContainer"]:has(.subtitle){ margin-bottom:22px; }
+.st-key-formp [data-testid="stElementContainer"]:has(.fine-print){ margin-top:18px; }
+.st-key-formp [data-testid="stForm"] [data-testid="stCheckbox"]{ margin:2px 0 8px; }
 
 /* inputs */
 .st-key-formp [data-testid="stTextInput"] input,
 div[data-testid="stDialog"] [data-testid="stTextInput"] input{
-  height:58px; padding:0 16px; border-radius:13px; font-size:14px; color:var(--ink);
+  height:36px; padding:0 12px; border-radius:8px; font-size:12px; color:var(--ink);
   background:rgba(255,255,255,.9); border:1px solid var(--line);
 }
 .st-key-formp [data-testid="stTextInput"] div[data-baseweb="input"],
 div[data-testid="stDialog"] [data-testid="stTextInput"] div[data-baseweb="input"]{
-  height:58px !important; border:1px solid var(--line) !important;
-  border-radius:13px !important; background:rgba(255,255,255,.9) !important;
+  height:36px !important; border:1px solid var(--line) !important;
+  border-radius:8px !important; background:rgba(255,255,255,.9) !important;
 }
 .st-key-formp [data-testid="stTextInput"] input,
 div[data-testid="stDialog"] [data-testid="stTextInput"] input{
   height:100% !important; border:0 !important;
 }
-.st-key-formp [data-testid="stVerticalBlock"]{ gap:.75rem !important; }
+.st-key-formp [data-testid="stVerticalBlock"]{ gap:.7rem !important; }
 .st-key-formp [data-testid="stTextInput"] input:focus,
 div[data-testid="stDialog"] [data-testid="stTextInput"] input:focus{
   border-color:#c98283; box-shadow:0 0 0 4px rgba(201,130,131,.12);
 }
-[data-testid="stTextInput"]{ margin-bottom:6px; }
+[data-testid="stTextInput"]{ margin-bottom:2px; }
+
+/* teks bawaan Streamlit di panel form (rem) ikut diperkecil */
+.st-key-formp .stButton button p{ font-size:12px; }
+
+/* checkbox "Remember me": kotak, teks, dan ikon ? sejajar di satu garis tengah (tanpa pembesaran bawaan) */
+.st-key-formp [data-testid="stCheckbox"] label{ display:flex !important; align-items:center !important; gap:8px; }
+.st-key-formp [data-testid="stCheckbox"] label > span:first-child{ transform:none !important; margin:0 !important; flex-shrink:0; }
+.st-key-formp [data-testid="stCheckbox"] label p{ margin:0 !important; line-height:1.2 !important; }
+.st-key-formp [data-testid="stCheckbox"] [data-testid="stTooltipIcon"],
+.st-key-formp [data-testid="stCheckbox"] [data-testid="stTooltipHoverTarget"]{ display:flex; align-items:center; margin:0 0 0 2px; }
+.st-key-formp [data-testid="stCheckbox"] [data-testid="stWidgetLabel"]{ display:flex; align-items:center; }
 
 /* checkbox */
-.st-key-formp [data-testid="stCheckbox"] label p{ font-size:12px; color:var(--muted); }
+.st-key-formp [data-testid="stCheckbox"] label p{ font-size:10px; color:var(--muted); }
 
 /* forgot link (button tampil seperti link) */
 .st-key-forgot button{
   border:0 !important; background:transparent !important; box-shadow:none !important;
-  color:var(--rose-deep) !important; font-size:12px; padding:0; min-height:0;
+  color:var(--rose-deep) !important; font-size:10.5px; padding:0; min-height:0;
 }
 .st-key-forgot [data-testid="stHorizontalBlock"]{
   flex-wrap:nowrap !important; align-items:center;
@@ -172,10 +206,10 @@ div[data-testid="stDialog"] [data-testid="stTextInput"] input:focus{
   display:flex; justify-content:flex-end;
 }
 .st-key-forgot button:hover{ text-decoration:underline; transform:none; }
-.st-key-forgot{ margin-top:18px; }
+.st-key-forgot{ margin-top:14px; }
 .st-key-forgot a{
   border:0 !important; background:transparent !important; box-shadow:none !important;
-  color:var(--rose-deep) !important; font-size:12px; padding:0 !important; min-height:0 !important;
+  color:var(--rose-deep) !important; font-size:10.5px; padding:0 !important; min-height:0 !important;
 }
 .st-key-forgot a:hover{ text-decoration:underline; }
 
@@ -194,7 +228,7 @@ div[data-testid="stDialog"] [data-testid="stTextInput"] input:focus{
   align-items:center;
 }
 .st-key-formp [data-testid="stAlert"] p{
-  font-size:13px;
+  font-size:12px;
   line-height:1.4;
 }
 
@@ -203,7 +237,7 @@ div[data-testid="stDialog"] [data-testid="stTextInput"] input:focus{
 .st-key-formp button[kind="primaryFormSubmit"],
 div[data-testid="stDialog"] button[data-testid="stBaseButton-primary"],
 div[data-testid="stDialog"] button[kind="primary"]{
-  width:100%; min-height:52px; border:0; border-radius:13px; color:#fff; font-weight:650; font-size:14px;
+  width:100%; min-height:36px; height:36px; border:0; border-radius:8px; color:#fff; font-weight:650; font-size:12px;
   background:linear-gradient(110deg,#bd7b82,#d5a18f); box-shadow:0 10px 22px rgba(183,112,119,.22);
   transition:transform .2s ease, box-shadow .2s ease;
 }
@@ -214,7 +248,7 @@ div[data-testid="stDialog"] button[data-testid="stBaseButton-primary"]:hover{
 
 /* tombol Sign Up (secondary) */
 .st-key-signup_btn button{
-  width:100%; min-height:52px; border-radius:13px; font-weight:650; font-size:14px;
+  width:100%; min-height:36px; height:36px; border-radius:8px; font-weight:650; font-size:12px;
   color:#9e6670; background:#fff; border:1px solid rgba(189,123,130,.42);
   transition:transform .2s ease, box-shadow .2s ease;
 }
@@ -222,7 +256,7 @@ div[data-testid="stDialog"] button[data-testid="stBaseButton-primary"]:hover{
   transform:translateY(-2px); box-shadow:0 8px 18px rgba(183,112,119,.1);
   border-color:rgba(189,123,130,.7); color:#9e6670;
 }
-.st-key-signup_btn{ margin-top:22px; }
+.st-key-signup_btn{ margin-top:14px; }
 
 /* dialog */
 div[data-testid="stDialog"] div[role="dialog"]{ border-radius:24px; background:#fffaf8; }
@@ -319,7 +353,8 @@ def signup_dialog():
 # ---------------------------------------------------------------------- UI
 # ------------------------------------------------- login bertahan saat refresh (cookie bertanda tangan)
 COOKIE_LOGIN = "skp_auth"
-MASA_LOGIN_DETIK = 30 * 60        # tetap login 30 menit sejak aktivitas terakhir
+MASA_LOGIN_DETIK = 30 * 60        # tanpa "Remember me": tetap login 30 menit sejak aktivitas terakhir
+MASA_INGAT_DETIK = 24 * 60 * 60   # dengan "Remember me": tetap login 1 hari sejak aktivitas terakhir
 _JEDA_PERBARUI_COOKIE = 300       # perpanjang cookie paling cepat tiap 5 menit (hemat render)
 
 
@@ -330,9 +365,10 @@ def _kunci_cookie() -> bytes:
         return ("skp-auth|" + str(SUPABASE_KEY)).encode()
 
 
-def _buat_token(user: dict) -> str:
+def _buat_token(user: dict, ingat: bool = False) -> str:
+    masa = MASA_INGAT_DETIK if ingat else MASA_LOGIN_DETIK
     isi = {"u": user.get("username", ""), "e": user.get("email", ""), "t": user.get("tagging", ""),
-           "x": int(time.time()) + MASA_LOGIN_DETIK}
+           "r": bool(ingat), "x": int(time.time()) + masa}
     b = base64.urlsafe_b64encode(json.dumps(isi).encode()).decode()
     return f"{b}.{hmac.new(_kunci_cookie(), b.encode(), hashlib.sha256).hexdigest()}"
 
@@ -345,7 +381,7 @@ def _baca_token(token: str):
         isi = json.loads(base64.urlsafe_b64decode(b.encode()))
         if int(isi["x"]) < time.time():
             return None
-        return {"username": isi["u"], "email": isi["e"], "tagging": isi["t"]}
+        return {"username": isi["u"], "email": isi["e"], "tagging": isi["t"], "_r": bool(isi.get("r", False))}
     except Exception:
         return None
 
@@ -367,31 +403,6 @@ def keluar():
     ss["_hapus_cookie"] = True
 
 
-_NAMA_ROLE = {TAGGING_RSA: "RSA", TAGGING_BD: "BD Support", "BD SUPPORT": "BD Support",
-              TAGGING_ADMIN_DISTRI: "Admin Distributor", TAGGING_USER: "User"}
-URL_BANTUAN = "https://docs.google.com/forms/d/1E5qhMSQ8kSu6WJQzIGbpeBVr0oMU8mjkWyI00VdRUyI/"
-
-
-def tampilkan_menu_pengguna(user: dict):
-    """Menu pengguna kanan atas: nama + peran, popover berisi profil, Help & Support, Log Out."""
-    nama  = str(user.get("username", ""))
-    email = user.get("email") or "—"
-    role  = _NAMA_ROLE.get(user.get("tagging"), str(user.get("tagging") or ""))
-    with st.container(key="user_profil"):
-        with st.popover(f"{nama}  \n:gray[{role}]", use_container_width=True):
-            st.markdown(
-                f'<div class="menu-profil"><div class="menu-avatar">{(nama[:1] or "?").upper()}</div>'
-                f'<div><div class="menu-nama">{nama}</div><div class="menu-email">{email}</div></div></div>'
-                '<hr class="menu-garis">', unsafe_allow_html=True)
-            with st.container(key="menu_item"):
-                st.link_button("Help & Support", URL_BANTUAN, icon=":material/help:", width="stretch")
-            st.markdown('<hr class="menu-garis">', unsafe_allow_html=True)
-            with st.container(key="menu_keluar"):
-                if st.button("Log Out", icon=":material/logout:", key="menu_logout", width="stretch"):
-                    keluar()
-                    st.rerun()
-
-
 def require_login():
     """Panggil setelah st.set_page_config(). Halaman di bawahnya hanya jalan jika sudah login."""
     ss = st.session_state
@@ -403,23 +414,32 @@ def require_login():
             token = None
         pulih = _baca_token(token) if token else None
         if pulih:
+            ss["_ingat"] = pulih.pop("_r", False)           # pilihan "Remember me" ikut dipulihkan dari cookie
             ss.user = pulih
     if ss.get("user") is not None:
         if time.time() - ss.get("_cookie_ts", 0) > _JEDA_PERBARUI_COOKIE:
-            _js_cookie(_buat_token(ss.user), MASA_LOGIN_DETIK)
+            ingat = bool(ss.get("_ingat"))
+            _js_cookie(_buat_token(ss.user, ingat), MASA_INGAT_DETIK if ingat else MASA_LOGIN_DETIK)
             ss["_cookie_ts"] = time.time()
         return ss.user
+    # slot tetap (selalu ada, kadang kosong): jumlah elemen di halaman login SAMA di setiap run, jadi tidak ada
+    # elemen sisa (kartu login ganda) saat Streamlit mencocokkan elemen run lama dengan run baru
+    slot_cookie = st.empty()
     if ss.pop("_hapus_cookie", False):
-        _js_cookie("", 0)
+        with slot_cookie:
+            _js_cookie("", 0)
 
     st.markdown(CSS, unsafe_allow_html=True)
+    if ss.get("pesan_toast"):                      # mis. "Ticket submitted" dari popup Help & Support
+        st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon", ":material/check_circle:"))
 
-    with st.container(key="shell"):
+    login_ph = st.empty()     # dibungkus placeholder supaya bisa dikosongkan seketika saat login (anti ghost)
+    with login_ph.container(), st.container(key="shell"):
         col_l, col_r = st.columns(2, gap="small")
 
         with col_l:
             with st.container(key="brand"):
-                components.html(VIDEO_HTML, height=820)
+                components.html(VIDEO_HTML, height=560)
 
         with col_r:
             with st.container(key="formp"):
@@ -428,7 +448,7 @@ def require_login():
                 with st.form("login_form", border=False):
                     username = st.text_input("Username", placeholder="Username", label_visibility="collapsed")
                     password = st.text_input("Password", placeholder="Password", type="password", label_visibility="collapsed")
-                    st.checkbox("Remember me")
+                    ingat_saya = st.checkbox("Remember me", help="Stay signed in for 1 day on this browser.")
                     submitted = st.form_submit_button("Login →", type="primary", width="stretch")
 
                 if submitted:
@@ -437,15 +457,20 @@ def require_login():
                     else:
                         try:
                             do_login(username, password)
+                            ss["_ingat"] = bool(ingat_saya)
+                            ss["_cookie_ts"] = 0          # tulis cookie segera dengan masa berlaku yang sesuai
+                            login_ph.empty()      # hapus halaman login dari layar sebelum app dimuat
                             st.rerun()
                         except Exception as e:
                             st.error(f"Login gagal: {e}")
 
                 with st.container(key="forgot"):
                     c_chat, c_forgot = st.columns([1.3, 1], vertical_alignment="center")
-                    c_chat.link_button("📞Chat admin", FORGOT_FORM_URL)
+                    if c_chat.button(":material/help: Help & Support", key="login_help"):
+                        from help_support import dialog_help_support      # popup tiket (tanpa Google Form)
+                        dialog_help_support()
                     if c_forgot.button("Forgot password?"):
-                        st.toast("Hubungi admin untuk reset password.", icon="ℹ️")
+                        st.toast("Hubungi admin untuk reset password.", icon=":material/info:")
 
                 with st.container(key="signup_btn"):
                     if st.button("Sign Up", width="stretch"):
