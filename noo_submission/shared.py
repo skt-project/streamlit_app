@@ -594,7 +594,7 @@ def muat_coverage_mapping() -> pd.DataFrame:
     df = df[df["Area Coverage"].str.strip().ne("") & df["Combine"].str.strip().ne("")]
     return df.reset_index(drop=True)
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_prefix_per_distributor() -> dict:
     df_distri = muat_distributor_dari_sheet()
     df_cov    = muat_coverage_mapping()
@@ -641,7 +641,7 @@ def max_angka_per_prefix() -> dict:
 
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_distri_code_map() -> dict:
     nama_sheet = SHEET_DISTRI.split("!")[0]
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}/gviz/tq"
@@ -665,7 +665,7 @@ def muat_distri_code_map() -> dict:
         hasil[h] = {"distributor": nama, "company_code": g}
     return hasil
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_mapping_distributor_name() -> dict:
     df = muat_distributor_dari_sheet()
     df = df[df["Status"].str.strip().str.lower() == "active"]
@@ -689,7 +689,7 @@ def region_distributor(nama_distributor: str) -> tuple:
     d = df[df["Distributor Name"].str.strip() == nama_distributor.strip()]
     return tuple(sorted({r.strip() for r in d["Region"] if r.strip()}))
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_distri_customer_code_raw() -> dict:
     nama_sheet = SHEET_DISTRI.split("!")[0]
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}/gviz/tq"
@@ -697,17 +697,20 @@ def muat_distri_customer_code_raw() -> dict:
     df = pd.read_csv(url, dtype=str).fillna("")
     if df.shape[1] < 7:
         return {}
+    kol_status = next((c for c in df.columns if str(c).strip().lower() == "status"), None)
     hasil = {}
     for _, r in df.iterrows():
         nama = r.iloc[1].strip()
         if not nama or nama == "Distributor Name" or nama == df.columns[1]:
+            continue
+        if kol_status is not None and str(r[kol_status]).strip().lower() != "active":
             continue
         g = r.iloc[6].strip()
         if nama not in hasil or (not hasil[nama] and g):
             hasil[nama] = g
     return hasil
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_distri_customer_name() -> dict:
     nama_sheet = SHEET_DISTRI.split("!")[0]
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}/gviz/tq"
@@ -715,10 +718,13 @@ def muat_distri_customer_name() -> dict:
     df = pd.read_csv(url, dtype=str).fillna("")
     if df.shape[1] < 2:
         return {}
+    kol_status = next((c for c in df.columns if str(c).strip().lower() == "status"), None)
     hasil = {}
     for _, r in df.iterrows():
         nama = r.iloc[1].strip()
         if not nama or nama == "Distributor Name" or nama == df.columns[1]:
+            continue
+        if kol_status is not None and str(r[kol_status]).strip().lower() != "active":
             continue
         a = r.iloc[0].strip()
         if nama not in hasil or (not hasil[nama] and a):
@@ -729,7 +735,7 @@ def _kunci_produk(v) -> str:
     return " ".join(_sku_str(v).upper().split())
 GID_PRODUCT_DESCRIPTION = "2106824930"
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_deskripsi_produk() -> dict:
     """Return dict {Description: Product Code} dari sheet (gid tetap, nama tab boleh berubah)."""
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}"
@@ -746,7 +752,7 @@ def muat_deskripsi_produk() -> dict:
         hasil.setdefault(desk, kode)
     return hasil
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_produk_lookup(nama_sheet: str) -> dict:
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}/gviz/tq"
            f"?tqx=out:csv&sheet={quote(nama_sheet.split('!')[0])}&headers=1")
@@ -765,7 +771,7 @@ def muat_produk_lookup(nama_sheet: str) -> dict:
 def cari_nama_produk(product: str, lookup: dict) -> str:
     return lookup.get(_kunci_produk(product), "")
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_spv_sales_lookup() -> dict:
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}/gviz/tq"
            f"?tqx=out:csv&sheet={quote(SHEET_SALES)}&headers=1")
@@ -787,9 +793,43 @@ def muat_spv_sales_lookup() -> dict:
             lst.append(sales)
     return hasil
 
+def _norm_distri(t: str) -> str:
+    t = re.sub(r"[^A-Z0-9 ]", " ", str(t).upper())
+    t = re.sub(r"\b(PT|CV|UD|TOKO)\b", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+def _cocokkan_distributor_spv(distri: str, lookup: dict) -> dict:
+    """Cari distributor di lookup yang namanya mirip (beda spasi/tanda baca/PT-CV/cabang), supaya daftar SPV
+    tetap dibatasi ke distributor itu, bukan semua SPV."""
+    kunci = _norm_distri(distri)
+    if not kunci:
+        return {}
+    norm = {d: _norm_distri(d) for d in lookup}
+    # 1) sama setelah dinormalisasi
+    for d, n in norm.items():
+        if n == kunci:
+            return lookup[d]
+    # 2) salah satu nama memuat yang lain (mis. "JAYATAMA" vs "CV JAYATAMA - BALI")
+    kand = [d for d, n in norm.items() if n and (n in kunci or kunci in n)]
+    if len(kand) == 1:
+        return lookup[kand[0]]
+    # 3) kemiripan tinggi
+    try:
+        from rapidfuzz import fuzz, process
+        hit = process.extractOne(kunci, list(norm.values()), scorer=fuzz.token_set_ratio, score_cutoff=90)
+        if hit:
+            for d, n in norm.items():
+                if n == hit[0]:
+                    return lookup[d]
+    except Exception:
+        pass
+    return {}
+
 def input_spv_sales(distri: str, kunci: str, c_spv, c_sales, lookup: dict) -> tuple:
     lbl  = "\u200b"
     peta = lookup.get(str(distri).strip().upper(), {})
+    if not peta:
+        peta = _cocokkan_distributor_spv(distri, lookup)
     if not peta:
         peta = {}
         for d in lookup.values():
@@ -840,24 +880,34 @@ def hasil_ke_excel(df: pd.DataFrame, startrow: int = 1) -> bytes:
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, startrow=startrow, sheet_name="Sheet1")
-        if startrow > 0:
-            ws = writer.sheets["Sheet1"]
-            for sel in ws[startrow + 1]:   # header row = startrow+1 in 1-indexed Excel rows
-                sel.font   = Font(bold=False)
-                sel.border = Border()
+        ws = writer.sheets["Sheet1"]
+        for sel in ws[startrow + 1]:       # baris header = startrow+1 (1-indexed): tanpa tebal & tanpa garis
+            sel.font   = Font(bold=False)
+            sel.border = Border()
     return buffer.getvalue()
 
-def catat_riwayat(aksi: str, detail: str = ""):
+def nama_pengguna_sesi() -> str:
+    """Nama pengguna dari SESI ini (bukan variabel global modul, yang dipakai bersama semua pengguna server)."""
+    user  = st.session_state.get("user") or {}
+    uname = str(user.get("username", "")).strip()
+    if not uname:
+        return PENGGUNA
+    if user.get("tagging") == "Admin Distributor":
+        return f"Admin - {uname.upper()}"
+    return uname
+
+def catat_riwayat(aksi: str, detail: str = "", pengguna: str = None):
     ss    = st.session_state
     df    = ss.get("df_toko", pd.DataFrame())
     total = len(df)
+    pengguna = pengguna or nama_pengguna_sesi()
     ss.setdefault("riwayat", []).insert(0, {
-        "Waktu": waktu_sekarang(), "Pengguna": PENGGUNA,
+        "Waktu": waktu_sekarang(), "Pengguna": pengguna,
         "Aksi": aksi, "Detail": detail, "Total": total,
     })
     sb_insert(TABLE_RIWAYAT, {
         "waktu":    datetime.datetime.now(ZONA_WAKTU).isoformat(timespec="seconds"),
-        "pengguna": PENGGUNA,
+        "pengguna": pengguna,
         "aksi":     aksi,
         "detail":   detail,
         "total":    total,
@@ -867,7 +917,8 @@ def set_keterangan_noo(jenis: str, teks: str):
     ss = st.session_state
     ss.noo_keterangan     = f"{jenis}:{teks}"
     ss.pesan_toast        = teks
-    ss.pesan_toast_icon   = {"success":"✅","warning":"⚠️","error":"❌"}.get(jenis, "ℹ️")
+    ss.pesan_toast_icon   = {"success":":material/check_circle:","warning":":material/warning:",
+                              "error":":material/error:"}.get(jenis, ":material/info:")
 
 def tampilkan_keterangan_noo():
     ss = st.session_state
