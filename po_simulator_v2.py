@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 import zipfile
-import math
 import re
 import base64
 import urllib.request
@@ -10,7 +9,6 @@ from pathlib import Path
 import openpyxl
 import numpy as np
 from datetime import datetime
-from typing import List
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Side, Border
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -45,7 +43,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DASHBOARD_URL_DEFAULT = "https://po-simulator.streamlit.app/"
 TEMPLATE_DRIVE_URL = "https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/edit?gid=0#gid=0"
 TEMPLATE_PO_URL = "https://docs.google.com/spreadsheets/d/1_4SFn2_SvGm1on0EJkntYjC2cLvNZyDjX54zcQAWRtQ/edit?gid=0#gid=0"
 BQ_DATASET = "rsa"
@@ -116,9 +113,7 @@ def get_actual_so(distributor_code: str) -> pd.DataFrame:
         FROM `skintific-data-warehouse.rsa.si_st_so_target_data_all`
     WHERE UPPER(TRIM(distributor_code)) = '{distributor_code.upper()}'
       AND DATE_TRUNC(calendar_date, MONTH) = DATE_TRUNC(CURRENT_DATE(), MONTH)
-    GROUP BY
-        UPPER(TRIM(distributor_code)),
-        UPPER(TRIM(sku))
+    GROUP BY 1, 2
     """
     try:
         return client.query(query).to_dataframe()
@@ -554,17 +549,6 @@ def _convert_to_xlsx(fname: str, fbytes: bytes):
 
 
 
-def _detect_brand_tag(df: pd.DataFrame, name_col) -> str:
-    if not name_col or name_col not in df.columns:
-        return ""
-    text_all = " ".join(df[name_col].dropna().astype(str).tolist()).upper()
-    tags = []
-    if re.search(r'\bGLAD2GLOW\b|\bG2G\b', text_all):
-        tags.append("G2G")
-    if re.search(r'\bNEXTPRIME\b|\bNXP\b', text_all):
-        tags.append("NXP")
-    return "-".join(tags)
-
 def numeric_coerce(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         try:
@@ -587,13 +571,6 @@ def gsheet_to_csv_url(url: str):
     return csv_url, sheet_id
 
 
-def create_zip_of_files(file_dict: dict) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for fname, data in file_dict.items():
-            zf.writestr(fname, data)
-    return buf.getvalue()
-
 
 
 def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
@@ -613,7 +590,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     proceed_font = Font(bold=True, color="54CE54")
     reject_font = Font(bold=True, color="D73E3E")
     suggest_font = Font(bold=True, color="F3C94C")
-    currency_cols = ["PO Value", "Suggested PO Value"]
+    currency_cols = ["PO Value", "Suggested PO Value", "Suggested Value Final"]
     integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)",
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final"]
     decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI",
@@ -648,7 +625,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
                     if val == "SAFE MOQ": cell.font = moq_safe_font
                     elif val == "Under MOQ": cell.font = moq_under_font
 #------- END --------------
-                if col_name in ["Remaining Allocation (By Region)","Suggested PO Value", "Suggested QTY Final"] and npd_sku_list:
+                if col_name in ["Remaining Allocation (By Region)","Suggested Value Final", "Suggested QTY Final"] and npd_sku_list:
                     sku_ci = col_map.get("SKU")
                     if sku_ci is not None:
                         sku_val = ws.cell(row=r_idx, column=sku_ci + 1).value
@@ -678,10 +655,6 @@ def to_excel_single_sheet(df: pd.DataFrame, npd_sku_list=None) -> bytes:
     _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list)
     wb.save(output); output.seek(0)
     return output.getvalue()
-
-
-def to_excel_single_sheet_with_sku(df: pd.DataFrame, npd_sku_list=None, sku_master_df=None) -> bytes:
-    return to_excel_single_sheet(df, npd_sku_list)
 
 
 
@@ -734,48 +707,44 @@ def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
     return buf.getvalue()
 
 
+def pivot_to_png_bytes(df: pd.DataFrame, kinds: list, title: str = "") -> bytes:
+    """Render tabel pivot (df sudah berisi string terformat) jadi PNG. kinds: item/sub/dist/grand per baris."""
+    if not MATPLOTLIB_OK:
+        raise RuntimeError("matplotlib tidak tersedia.")
+    n_rows, n_cols = df.shape
+    fig, ax = plt.subplots(figsize=(max(8, n_cols * 1.5), max(1.0, n_rows * 0.24 + 0.6)))
+    ax.axis('off')
+    if title:
+        ax.set_title(title, fontsize=9, fontweight='bold', color='#5A1E38', pad=8, loc='left')
+    tbl = ax.table(cellText=df.values.tolist(), colLabels=df.columns.tolist(), loc='center', cellLoc='left')
+    tbl.auto_set_font_size(False); tbl.set_fontsize(7)
+    tbl.auto_set_column_width(col=list(range(n_cols)))
+    tbl.scale(1, 1.3)
+    for j in range(n_cols):
+        tbl[0, j].set_facecolor('#D9D9D9')
+        tbl[0, j].set_text_props(color='#1F1F1F', fontweight='bold')
+    for i, k in enumerate(kinds, start=1):
+        for j in range(n_cols):
+            c = tbl[i, j]
+            c.set_facecolor('#FFFFFF')
+            c.set_text_props(color='#1F1F1F', fontweight='normal' if k == "item" else 'bold')
+    fig.patch.set_facecolor('white')
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150, facecolor='white')
+    buf.seek(0); plt.close(fig)
+    return buf.getvalue()
 
 
-def check_password():
-    def login_form():
-        st.markdown("""<style>
-        html,body,[data-testid="stAppViewContainer"]{background:linear-gradient(145deg,#F13E93 40%,#FFA6A6 50%,#F26076 60%)!important;}
-        [data-testid="stSidebar"]{display:none!important;}
-        </style>""", unsafe_allow_html=True)
-        _, col, _ = st.columns([1, 1.5, 1])
-        with col:
-            st.markdown(f'<div style="text-align:center;padding:.5rem 0 .2rem;"><img src="{LOGO_URL}" style="max-width:200px;" /></div>', unsafe_allow_html=True)
-            st.markdown("""<div style="text-align:center;margin:1rem 0 1.5rem;">
-                <div style="font-size:1.5rem;font-weight:700;color:#6E253A;">DataFlow Automator</div>
-                <div style="color:#000;font-size:.85rem;margin-top:.3rem;">Masukkan passwordmu</div>
-            </div>""", unsafe_allow_html=True)
-            with st.form("login_form"):
-                password = st.text_input("🔒 Password", type="password", placeholder="Masukkan password...")
-                submitted = st.form_submit_button("Login", use_container_width=True)
-                if submitted:
-                    if password == st.secrets["glowithyou"]:
-                        st.session_state["authenticated"] = True
-                        st.rerun()
-                    else:
-                        st.error("❌ Password salah.")
-            st.markdown('<div style="text-align:center;margin-top:1.5rem;color:#6E253A;font-size:.72rem;">Glad2Glow</div>', unsafe_allow_html=True)
 
-    if st.session_state.get("authenticated"):
-        return True
-    login_form()
-    return False
-
-
-#if not check_password():
-#    st.stop()
 
 
 #################CSS
 
 st.markdown("""<style>
 body,p,div,span,label,input,textarea,select,button,h1,h2,h3,h4,h5,h6,li,td,th,caption,small,strong,em{font-family:'Trebuchet MS',sans-serif;box-sizing:border-box;}
+html{font-size:14px!important;}
 [data-testid="stSidebarCollapseButton"]{display:none!important;}
-:root{--rose:#CA6180;--rose-dark:#A84D6A;--blush:#FCB7C7;--dark:#BF3979;--g-rose:linear-gradient(135deg,#751F58,#A84D6A);}
+:root{--rose:#CA6180;--rose-dark:#A84D6A;--blush:#FCB7C7;--dark:#E07BA3;--g-rose:linear-gradient(135deg,#751F58,#A84D6A);}
 h1,h2,h3,h4,h5,h6{color:#FFFFFF!important;}
 [data-testid="stSidebar"]{background:var(--dark)!important;box-shadow:4px 0 24px rgba(0,0,0,.35);}
 [data-testid="stSidebar"],[data-testid="stSidebar"] *{color:#FFFFFF!important;}
@@ -784,8 +753,7 @@ h1,h2,h3,h4,h5,h6{color:#FFFFFF!important;}
 [data-testid="stMain"] input,[data-testid="stMain"] textarea{color:#FFFFFF!important;background:rgba(255,255,255,.15)!important;border:1.5px solid rgba(255,255,255,.35)!important;border-radius:10px!important;}
 [data-testid="stMain"] .stSelectbox>div>div{color:#FFFFFF!important;background:rgba(255,255,255,.15)!important;border:1.5px solid rgba(255,255,255,.35)!important;border-radius:10px!important;}
 [data-testid="stSidebar"] [data-testid="stButton-nav_po"] button {background: #FF89AA !important;  /* PO Simulator - RSA */
-}
-[data-testid="stMain"] [data-baseweb="select"] span,[data-testid="stMain"] [data-baseweb="select"] div{color:#FFFFFF!important;}
+}[data-testid="stMain"] [data-baseweb="select"] span,[data-testid="stMain"] [data-baseweb="select"] div{color:#FFFFFF!important;}
 .hero-wrap{padding:.5rem 0 1.5rem;} .hero-tag{display:inline-block;background:rgba(168,77,106,.6);color:#FFFFFF!important;font-size:.72rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:.25rem .8rem;border-radius:20px;border:1px solid rgba(255,255,255,.25);margin-bottom:.75rem;}
 .hero-title{font-size:2rem;font-weight:700;color:#FFFFFF!important;margin-bottom:.5rem;}
 .pipeline-step{background:#A84D6A;border:none;border-radius:12px;padding:.9rem 1.3rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,.15);}
@@ -836,8 +804,26 @@ html,body,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block
 with st.sidebar:
     st.markdown(f'<div style="text-align:center;padding:.5rem 0 .2rem;"><img src="{LOGO_URL}" style="max-width:200px;height:auto;" /></div>', unsafe_allow_html=True)
 
+    def _rsa_token():
+        import hmac, hashlib
+        day = datetime.now().strftime("%Y-%m-%d")
+        return hmac.new(str(st.secrets["glowithyou"]).encode(), day.encode(), hashlib.sha256).hexdigest()[:32]
+
+    def _rsa_token_valid():
+        import hmac
+        t = st.query_params.get("rsa_t", "")
+        return bool(t) and hmac.compare_digest(str(t), _rsa_token())
+
+    # Sesi baru (mis. habis refresh): kalau token hari ini masih valid, langsung masuk & kembali ke halaman terakhir
     if 'page' not in st.session_state:
         st.session_state['page'] = 'spv'
+        if _rsa_token_valid():
+            st.session_state['rsa_authenticated'] = True
+            _pg = st.query_params.get("pg", "spv")
+            st.session_state['page'] = _pg if _pg in ("spv", "po_spv", "po_changer") else "spv"
+    # Simpan halaman aktif di URL supaya refresh kembali ke halaman yang sama
+    if _rsa_token_valid() and st.session_state.get('page') != 'po_changer_login':
+        st.query_params["pg"] = st.session_state['page']
 
     st.markdown("<div style='padding:0 .4rem .3rem;text-align:center;font-size:1rem;font-weight:700;letter-spacing:2.5px;color:rgba(255,255,255,.35);text-transform:uppercase;'>MENU</div>", unsafe_allow_html=True)
 
@@ -848,8 +834,13 @@ with st.sidebar:
 
     st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
     if st.button("🔒 PO Simulator - RSA", use_container_width=True, key="nav_po"):
-        st.session_state['page'] = 'po_changer_login'
-        st.session_state.pop('rsa_authenticated', None)
+        # Login RSA bertahan sehari: token di URL (query param) tetap ada walau halaman di-refresh
+        if _rsa_token_valid():
+            st.session_state['rsa_authenticated'] = True
+            st.session_state['page'] = 'po_changer'
+        else:
+            st.session_state.pop('rsa_authenticated', None)
+            st.session_state['page'] = 'po_changer_login'
         st.rerun()
 
     st.link_button("🔍 Modify File", "https://po-modify.streamlit.app/", use_container_width=True)
@@ -857,9 +848,7 @@ with st.sidebar:
 
     # Shared constants used in PO simulation pages
     _MANUAL_REJECT_APPROVAL = ["G2G-840","G2G-844","G2G-841","G2G-800","G2G-213","G2G-217","G2G-243"]
-    #"G2G-30701","G2G-30702","G2G-30703","G2G-30704",
     _MANUAL_REJECT_NO_TOL = ["G2G-2721","G2G-224","G2G-226","G2G-228","G2G-74"]
-    _MANUAL_REJECT_ALL = _MANUAL_REJECT_APPROVAL + _MANUAL_REJECT_NO_TOL
     _LIMITED_SKUS_QTY = []
     ___MAX_QTY_LIMIT = 500
     _REJECTED_SKUS_1 = []
@@ -873,15 +862,13 @@ with st.sidebar:
         'G2G-212','G2G-213','G2G-214','G2G-215','G2G-216','G2G-217','G2G-218']
     STOP_PO_BB= ["BXS003001", "BXS012001", "BXS006001", "BXS009001","BXS005001", "BXS004001", "BXS017001",
 "BXS015" , "BXS014", "BXS013", "BXS008001"]
-    #FLUSH_OUT = ["G2G-74", "G2G-186", "G2G-252", "G2G-247", "G2G-216", "G2G-202"]
-    PROGRAM = ["G2G-262",	"G2G-264",	"G2G-267",	"G2G-271",	"G2G-272",	"G2G-276"]
-  #OR sku LIKE "%G2G-2970%
     st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
     st.divider()
 
     if st.button("Logout", key="logout_btn", use_container_width=True):
         st.session_state["authenticated"] = False
         st.session_state.pop('rsa_authenticated', None)
+        st.query_params.pop("rsa_t", None)
         for k in ("raw_df","data_source","source_type"):
             st.session_state.pop(k, None)
         st.rerun()
@@ -896,13 +883,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                        _rejected_skus_2, region_list_2,
                        limited_skus_qty, __MAX_QTY_LIMIT):
     manual_reject_all = manual_reject_approval + manual_reject_no_tol
-    def _norm(s):
-        return (s.astype(str)
-                 .str.replace(r'[\xa0\u200b\ufeff]', '', regex=True)
-                 .str.replace(r'\s+', ' ', regex=True)
-                 .str.replace(r'[–—]', '-', regex=True)
-                 .str.strip()
-                 .str.upper())                      
     sim_df[qty_col] = pd.to_numeric(sim_df[qty_col], errors="coerce")
     sim_df = sim_df.dropna(subset=[qty_col])
     sim_df = sim_df[sim_df[qty_col] > 0].copy()
@@ -934,7 +914,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             near = get_close_matches(d, list(valid_dist), n=2, cutoff=0.7)
             st.caption(f"  {d!r} → mirip: {near}")   
 
-    zero_sugg_all = []                   
 
     for di, dist_name in enumerate(distributors):
         prog.progress((di+1)/len(distributors), f"Processing {dist_name}...")
@@ -1014,16 +993,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         res_df = apply_oos_sellout_logic(res_df, _target_df, _actual_so_df)
 
 
-        with st.expander(f"🔍 Debug Target SO — {dist_name}", expanded=False):
-            st.write("distributor_code dipakai (dari stock_analysis):", _dist_code)
-            st.write("month dipakai:", datetime.now().month)
-            st.write("Jumlah baris hasil target_so:", len(_target_df))
-            if not _target_df.empty:
-                st.dataframe(_target_df)
-            else:
-                st.warning("Query kosong — cek apakah distributor_code ini memang ada di tabel target_q3_building_block dengan month & data_type yang sesuai.")
-
-        res_df = apply_oos_sellout_logic(res_df, _target_df, _actual_so_df)
 
   
         # --------------------------
@@ -1077,14 +1046,12 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 #-----------------KLO MAU TAMBAH KOLOM BARU---------------
 
         conds = [
-            #((res_df["Customer SKU Code"].isin(FLUSH_OUT)) | (res_df["Customer SKU Code"].str.contains("G2G-2970", case=False, na=False))) & (~res_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) , #0 
             res_df["Customer SKU Code"].isin(zero_price_skus), #1
             res_df["Customer SKU Code"].isin(skus_not_found), #2
             res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT), #3
             ra2 < 0, #4
             res_df["is_po_sku"] == False, #5
             (res_df["Customer SKU Code"].isin(VITA_C_INC_STOP) 
-            # & ~res_df["Customer SKU Code"].isin(FLUSH_OUT) 
              &((res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)) |(res_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False)))), #6
             res_df["Customer SKU Code"].isin(manual_reject_approval), #7
             res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
@@ -1096,7 +1063,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["PO Qty"] == bp3, #14
         ]
         choices = [
-            #"Proceed",                                              #0 FLUSH_OUT
             "Price Not Available Yet",                              #1
             "Reject (SKU Not Found in System)",                     #2
             f"Reject (Exceeds Qty Limit of {__MAX_QTY_LIMIT})",      #3
@@ -1129,13 +1095,11 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         if __REJECTED_SKUS_2:
             res_df = apply_sku_rejection_rules(__REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
         
-        #program_conds = [
-        #res_df["SKU"].isin(FLUSH_OUT) | res_df["SKU"].str.contains("G2G-2970", case=False, na=False),
-        #res_df["SKU"].isin(PROGRAM),]
-        #program_choices = ["Flush Out", "MSL WAR"]
-        #res_df["Program"] = np.select(program_conds, program_choices, default="")
-
         res_df["RSA Notes"] = ""
+        res_df["Suggested Value Final"] = (
+            pd.to_numeric(res_df["SIP"], errors="coerce").fillna(0)
+            * pd.to_numeric(res_df["Suggested QTY Final"], errors="coerce").fillna(0)
+        )
         moq_df_lookup = check_moq()
         if not moq_df_lookup.empty:
             moq_map_lookup = (moq_df_lookup.assign(sku=moq_df_lookup["sku"].astype(str).str.strip().str.upper())
@@ -1145,8 +1109,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             moq_lookup_val =  sku_upper.map(moq_map_lookup).astype(float) 
             po_qty_val = pd.to_numeric(res_df["PO Qty"], errors="coerce")
 
-            is_multiple = (po_qty_val < 50) & (np.mod(po_qty_val, moq_lookup_val) == 0)
-            under_moq_mask = (po_qty_val < moq_lookup_val) & ~is_multiple
+            # <50 pcs: wajib kelipatan inner pcs. >=50 pcs: tidak wajib (hanya direkomendasikan)
+            is_multiple = np.mod(po_qty_val, moq_lookup_val) == 0
+            under_moq_mask = (po_qty_val < 50) & ~is_multiple & (moq_lookup_val > 0)
             suggested_qty = np.ceil(po_qty_val / moq_lookup_val) * moq_lookup_val
 
             res_df["MOQ"] = moq_lookup_val
@@ -1176,7 +1141,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
                     "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark",
                     "Suggested PO buffer","Suggested PO Value",
-                    "Target SO","Suggested QTY SO","Suggested QTY Final",
+                    "Target SO","Suggested QTY SO","Suggested QTY Final","Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
@@ -1196,10 +1161,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         excel_dfs[dist_name] = res_df.copy()
 
     prog.progress(1.0, "Selesai")
-    if zero_sugg_all:
-        combined_zero = pd.concat(zero_sugg_all, ignore_index=True)
-        with st.expander(f"⚠️ {len(combined_zero)} SKU dari {combined_zero['Distributor'].nunique()} distributor memiliki Suggested PO Qty = 0", expanded=False):
-            st.dataframe(combined_zero, use_container_width=True, hide_index=True)
             
     missing_dist = [d for d in distributors if d not in excel_dfs]
     if missing_dist:
@@ -1215,7 +1176,6 @@ PO_TEMPLATE_COLS = [
     'Stock + Suggested Qty WOI (Projection at EOM)',
     'Remaining Allocation (By Region)','RSA Notes','MOQ', 'Check MOQ',
 ]
-#PO_IMG_COLS = [PO_TEMPLATE_COLS[0], PO_TEMPLATE_COLS[1], PO_TEMPLATE_COLS[2] + PO_TEMPLATE_COLS[3]+ PO_TEMPLATE_COLS[6:14]]
 PO_IMG_COLS = PO_TEMPLATE_COLS[0:4] + PO_TEMPLATE_COLS[6:14]
 PO_COLS_copy = PO_TEMPLATE_COLS[:14]
 
@@ -1475,7 +1435,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     final_step = 3 + (1 if alloc_col else 0)
 
-    dl_data = to_excel_single_sheet_with_sku(final_disp, e_npd)
+    dl_data = to_excel_single_sheet(final_disp, e_npd)
     st.download_button(label=f"Download PO Result.xlsx ({len(final_disp)} baris)", data=dl_data,
                         file_name=f"PO Result {datetime.now().strftime('%Y%m%d')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True,
@@ -1494,7 +1454,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     for nc in num_cols_img:
         img_df[nc] = img_df[nc].apply(lambda v: f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(v) else "")
     sc_col = next((c for c in img_df.columns if "supply" in c.lower() and "control" in c.lower()), None)
-    stop_mask = img_df[sc_col].str.strip().str.upper().isin(["STOP PO","OOS","DISCONTINUED","UNAVAILABLE"])
+    stop_mask = (img_df[sc_col].str.strip().str.upper().isin(["STOP PO","OOS","DISCONTINUED","UNAVAILABLE"])
+                 | img_df["Remark"].astype(str).str.strip().str.lower().eq("price not available yet"))
     stop_df = img_df[stop_mask].reset_index(drop=True)
     non_stop_df = img_df[~stop_mask].copy()
     steve_mask = (non_stop_df["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) |
@@ -1507,7 +1468,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     cat1, cat2, cat3 = st.columns(3)
     for col_ui, df_cat, title, label, icon in [
-        (cat1, stop_df, "Product <br> Stop PO / OOS / DISCONTINUED / UNAVAILABLE", "product_stop_po", "🚫"),
+        (cat1, stop_df, "Product <br> Stop PO / OOS / DISCONTINUED / UNAVAILABLE / Price Not Available Yet", "product_stop_po", "🚫"),
         (cat2, steve_df, "Reject by Steve", "reject_by_steve", "❌"),
         (cat3, approval_df, "Product Reject ≠ High WOI", "product_reject", "⚠️"),
     ]:
@@ -1530,10 +1491,11 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 ####################KHUSUS SULAWESI 1
     pairs = []
     if "SKU" in stop_df.columns and "Supply Control" in stop_df.columns:
-        pairs.append(
-            stop_df[["Distributor", "SKU", "Supply Control"]]
-            .rename(columns={"Supply Control": "Remark"})
-        )
+        _stop_pairs = stop_df[["Distributor", "SKU", "Supply Control"]].rename(columns={"Supply Control": "Remark"})
+        if "Remark" in stop_df.columns:
+            _price_na = stop_df["Remark"].astype(str).str.strip().str.lower().eq("price not available yet")
+            _stop_pairs.loc[_price_na.values, "Remark"] = "Price Not Available Yet"
+        pairs.append(_stop_pairs)
     if "SKU" in steve_df.columns and "Remark" in steve_df.columns:
         pairs.append(steve_df[["Distributor", "SKU", "Remark"]])
 
@@ -1583,37 +1545,6 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                             dist_lines.extend(row["SKU"])  
                             dist_lines.append("")  
                         st.code("\n".join(dist_lines), language=None)
-            #---------------TESTING MASUKKAN KOLOM SUMMARY PROGRAM------------------            
-            #if "Program" in final_disp.columns:
-            #    prog_df = final_disp[final_disp["Program"].astype(str).str.strip().ne("")].copy()
-            #    if not prog_df.empty:
-            #        prog_summary = (
-            #            prog_df.groupby("Program")["SKU"]
-            #            .nunique()
-            #            .reset_index()
-            #            .rename(columns={"SKU": "Jumlah SKU"})
-            #            .sort_values("Jumlah SKU", ascending=False)
-            #        )
-            #        pg1, pg2 = st.columns(2)
-            #        with pg1:
-            #            st.markdown("**Program**")
-            #            st.dataframe(prog_summary, use_container_width=True, hide_index=True)
-            #        with pg2:
-            #            prog_dist = (
-            #                prog_df.groupby(["Distributor", "Program"])["SKU"]
-            #                .apply(lambda s: sorted(set(s)))
-            #                .reset_index()
-            #            )
-            #            prog_dist["Jumlah SKU"] = prog_dist["SKU"].apply(len)
-            #            total_prog_sku = prog_df["SKU"].nunique()
-            #            with st.expander(f"📦 Copy SKU Program per Distributor ({total_prog_sku} SKU total)", expanded=False):
-            #                for dist_name, dist_grp in prog_dist.groupby("Distributor"):
-            #                    dist_lines = [f"=== {dist_name} ==="]
-            #                    for _, row in dist_grp.iterrows():
-            #                        dist_lines.append(f"-- {row['Program']} ({row['Jumlah SKU']} SKU)")
-            #                        dist_lines.extend(row["SKU"])
-            #                        dist_lines.append("")
-            #                    st.code("\n".join(dist_lines), language=None)
                     
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+3}</span><strong>Summary PO</strong></div>""", unsafe_allow_html=True)
     summary_df = final_disp.copy()
@@ -1627,24 +1558,29 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         try: return f"Rp {v:,.0f}".replace(",",".")
         except: return "Rp 0"
 
-    for dist_sum in sorted(summary_df["Distributor"].dropna().unique()):
-        grp = summary_df[summary_df["Distributor"] == dist_sum]
-        grp_po = grp[grp["is_po_sku"] == True] if "is_po_sku" in grp.columns else grp
-        stop_mask_s = grp_po["Supply Control"].str.strip().str.upper().isin([k.upper() for k in stop_kw])
+    def _brand_from_sku(sku):
+        s = str(sku).strip().upper()
+        if s.startswith("N"): return "NEXTPRIME"
+        if s.startswith("B"): return "BODIBREZE"
+        if s.startswith("G"): return "G2G"
+        return "LAINNYA"
+
+    def _render_summary(dist_sum, grp_po, brand_label=None):
+        sc_stop_s = grp_po["Supply Control"].str.strip().str.upper().isin([k.upper() for k in stop_kw])
+        price_na_s = grp_po["Remark"].str.strip().str.lower().eq("price not available yet")
+        stop_mask_s = sc_stop_s | price_na_s
         stop_grp = grp_po[stop_mask_s]
         steve_mask_s = (grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) |
                         grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False))
         steve_grp = grp_po[steve_mask_s]
-        #sul1_mask_s = grp_po["Remark"].str.strip().str.lower() == "reject (sulawesi 1 only)"
-        #sul1_mask_s = grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi 1 only", na=False)
         sul1_mask_s = (grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi only", na=False) & ~stop_mask_s)
         sul1_grp = grp_po[sul1_mask_s]
         total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum() + sul1_grp["PO Value"].sum()
-        #total_reduction = stop_grp["PO Value"].sum() + steve_grp["PO Value"].sum()
         grand_total_po = grp_po["PO Value"].sum()
         grand_total_after = grand_total_po - total_reduction
 
-        stop_cats = (stop_grp["Supply Control"].dropna().astype(str).str.strip().str.title().replace({"Stop Po":"STOP PO","Oos":"OOS"}).unique().tolist())
+        stop_cats = (stop_grp["Supply Control"].where(sc_stop_s[stop_mask_s], "Price Not Available Yet")
+                     .dropna().astype(str).str.strip().str.title().replace({"Stop Po":"STOP PO","Oos":"OOS"}).unique().tolist())
         stop_cats = [c for c in stop_cats if c]
         stop_label = ", ".join(stop_cats) if stop_cats else "Discontinued / Stop PO"
         steve_cats = []
@@ -1658,7 +1594,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         st.markdown(f"""
         <div style="background:#FFF5F8;border:1px solid #F0C8D6;border-radius:12px;padding:1rem 1.2rem;margin:.6rem 0 .4rem;">
             <div style="font-size:.95rem;font-weight:700;color:#8B2040;margin-bottom:.5rem;">
-                Summary PO dari Distributor <strong>{dist_sum}</strong> — PO Date: <strong>{po_date_str}</strong>
+                Summary PO dari Distributor <strong>{dist_sum}</strong>{f" — Brand: <strong>{brand_label}</strong>" if brand_label else ""} — PO Date: <strong>{po_date_str}</strong>
             </div>
             <ul style="margin:0;padding-left:1.2rem;color:#1F1F1F;font-size:.88rem;line-height:1.7;">
                 <li>Total SKU: <strong>{grp_po["SKU"].nunique():,}</strong></li>
@@ -1670,6 +1606,78 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                 <li>Grand Total setelah pengurangan: <strong>{_rp(grand_total_after)}</strong></li>
             </ul>
         </div>""", unsafe_allow_html=True)
+
+    for dist_sum in sorted(summary_df["Distributor"].dropna().unique()):
+        grp = summary_df[summary_df["Distributor"] == dist_sum]
+        grp_po = grp[grp["is_po_sku"] == True] if "is_po_sku" in grp.columns else grp
+        # Kalau dalam 1 distributor ada >1 brand (prefix SKU G2G / N / B), tampilkan summary per brand saja (tanpa total gabungan)
+        _brands = grp_po["SKU"].map(_brand_from_sku)
+        if _brands.nunique() > 1:
+            _blist = sorted(_brands.unique())
+            for _col, _b in zip(st.columns(len(_blist)), _blist):
+                with _col:
+                    _render_summary(dist_sum, grp_po[_brands == _b], brand_label=_b)
+        else:
+            _render_summary(dist_sum, grp_po)
+
+    # ---- Summary Pivot: Distributor > Status > Product > QTY > Value ----
+    def _pivot_status(r):
+        sc = str(r["Supply Control"]).strip().upper()
+        rm = str(r["Remark"]).strip().lower()
+        if sc in [k.upper() for k in stop_kw]:
+            return {"STOP PO": "STOP PO", "OOS": "OOS"}.get(sc, sc.title())
+        if rm == "price not available yet":
+            return "Price Not Available Yet"
+        if "reject (stop by steve" in rm:
+            return "Reject (Stop by Steve)"
+        if "reject (negative allocation)" in rm:
+            return "Reject (Negative Allocation)"
+        if "sulawesi only" in rm:
+            return "Reject (Sulawesi Only)"
+        return None
+
+    pv_src = summary_df[summary_df["is_po_sku"] == True].copy() if "is_po_sku" in summary_df.columns else summary_df.copy()
+    pv_src["_Status"] = pv_src.apply(_pivot_status, axis=1)
+    pv_src = pv_src[pv_src["_Status"].notna()]
+    pv_src["PO Qty"] = pd.to_numeric(pv_src["PO Qty"], errors="coerce").fillna(0)
+
+    st.markdown("""<div style="font-size:.95rem;font-weight:700;color:#FFFFFF;margin:1rem 0 .4rem;">Summary Pivot — Distributor › Status › Product</div>""", unsafe_allow_html=True)
+    if pv_src.empty:
+        st.info("Tidak ada produk berstatus Stop PO / OOS / Discontinued / Unavailable / Price Not Available / Reject.")
+    else:
+        pv_rows, pv_kind = [], []
+        for d_name, d_grp in pv_src.groupby("Distributor", sort=True):
+            first_d = True
+            for s_name, s_grp in d_grp.groupby("_Status", sort=True):
+                first_s = True
+                for _, r in s_grp.sort_values("SKU").iterrows():
+                    pv_rows.append({"Distributor": d_name if first_d else "", "Status": s_name if first_s else "",
+                                    "SKU": r["SKU"], "Product": r.get("Product Name", ""),
+                                    "QTY": r["PO Qty"], "Value": r["PO Value"]})
+                    pv_kind.append("item"); first_d = first_s = False
+                pv_rows.append({"Distributor": "", "Status": f"Total {s_name}", "SKU": "", "Product": "",
+                                "QTY": s_grp["PO Qty"].sum(), "Value": s_grp["PO Value"].sum()})
+                pv_kind.append("sub")
+            pv_rows.append({"Distributor": f"Total {d_name}", "Status": "", "SKU": "", "Product": "",
+                            "QTY": d_grp["PO Qty"].sum(), "Value": d_grp["PO Value"].sum()})
+            pv_kind.append("dist")
+        pv_rows.append({"Distributor": "GRAND TOTAL", "Status": "", "SKU": "", "Product": "",
+                        "QTY": pv_src["PO Qty"].sum(), "Value": pv_src["PO Value"].sum()})
+        pv_kind.append("grand")
+        pv_df = pd.DataFrame(pv_rows)
+        pv_df["QTY"] = pv_df["QTY"].apply(lambda v: f"{v:,.0f}")
+        pv_df["Value"] = pv_df["Value"].apply(_rp)
+        pv_df["Product"] = pv_df["Product"].fillna("").astype(str)
+
+        try:
+            pv_png = pivot_to_png_bytes(pv_df, pv_kind, title=f"Summary Pivot PO — {po_date_str}")
+            st.image(pv_png, width=720)
+            st.download_button(label="Download Summary Pivot (.png)", data=pv_png,
+                               file_name=f"summary_pivot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                               mime="image/png",
+                               key="dl_img_summary_pivot", on_click=_flag_po_downloaded)
+        except Exception as e:
+            st.error(f"Gagal generate gambar pivot: {e}")
 
     # ============ 8. Save Supply Control ============
     st.markdown("""<div class="pipeline-step active"><span class="step-number">8</span><strong>Save Supply Control</strong></div>""", unsafe_allow_html=True)
@@ -1790,23 +1798,6 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 def _file_upload_section(page_key: str):
     _INVALID_QTY = {"-","null","none","","0","0.0"}
 
-    def _read_one(fname, fbytes, sheet_name=0):
-        ext = fname.rsplit(".",1)[-1].lower()
-        if ext == "csv":
-            raw_preview = pd.read_csv(io.BytesIO(fbytes), header=None, dtype=str, nrows=15, encoding_errors="replace")
-            best_row, best_score = 0, -1
-            for i in range(len(raw_preview)):
-                vals = [str(v).strip() for v in raw_preview.iloc[i].values if pd.notna(v) and str(v).strip()]
-                text_count = sum(1 for v in vals if not v.replace('.','',1).replace(',','',1).lstrip('-').isdigit())
-                score = text_count * 10 + len(vals)
-                if score > best_score:
-                    best_score, best_row = score, i
-            return pd.read_csv(io.BytesIO(fbytes), header=best_row, dtype=str, encoding_errors="replace"), best_row
-        else:
-            engine = _excel_engine(fname)
-            hrow = detect_header_row(fbytes, fname, sheet_name=sheet_name)
-            return pd.read_excel(io.BytesIO(fbytes), sheet_name=sheet_name, header=hrow, engine=engine, dtype=str), hrow
-
     def _parse_idx(rng):
         rng = rng.strip()
         if not rng or rng == ":": return None, None
@@ -1867,7 +1858,7 @@ def _file_upload_section(page_key: str):
     if not folder_files:
         return None, None
 
-    raw_entries = []; converted_names = []
+    raw_entries = []
     for uf in folder_files:
         fb = uf.read()
         if uf.name.lower().endswith(".zip"):
@@ -1877,16 +1868,11 @@ def _file_upload_section(page_key: str):
                     if ext in ("xlsx","xls","csv"):
                         new_name, new_bytes = _convert_to_xlsx(zname, zf.read(zname))
                         raw_entries.append((new_name, new_bytes))
-                        if ext != "xlsx": converted_names.append(f"{zname} → {new_name}")
         else:
             
             new_name, new_bytes = _convert_to_xlsx(uf.name, fb)
             raw_entries.append((new_name, new_bytes))
-            if uf.name.rsplit(".",1)[-1].lower() != "xlsx":
-                converted_names.append(f"{uf.name} → {new_name}")
 
-    #if converted_names:
-    #    st.caption("🔄 Auto-convert: " + "  ·  ".join(converted_names)) 
 
     mode_sel = st.radio(
         "Mode",
@@ -2108,7 +2094,6 @@ def _file_upload_section(page_key: str):
                     dist_val = st.selectbox("Distributor", options=["(Pilih)"] + CUSTOMER_NAMES,
                                             key=f"dist_{key_suf}", label_visibility="collapsed")
 
-                auto_hrow_display = detect_header_row(fbytes, fname, sheet_name=sheet_sel) + 1
                 rc1, rc2 = st.columns(2)
                 with rc1:
                     if is_kalbar_mode:
@@ -2310,7 +2295,6 @@ def _file_upload_section(page_key: str):
             HEADER_FILL   = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
             HEADER_FONT   = Font(bold=True, size=11)
             TITLE_FONT    = Font(bold=True, size=14)
-            LABEL_FONT    = Font(bold=True, size=10)
             COL_HEADERS   = ["DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY", "DPP", "TOTAL PRICE"]
             COL_WIDTHS    = [30, 18, 45, 10, 15, 18]
             DATA_START_ROW = 8
@@ -2342,26 +2326,6 @@ def _file_upload_section(page_key: str):
                 for _c in ("A2", "B2", "D2", "E2", "A3", "B3", "D3", "E3", "A4", "B4"):
                     ws[_c].font = _plain
                     ws[_c].alignment = Alignment(horizontal="left", vertical="center")
-
-                # ws["A1"] = "PUCHASE ORDER FORM"
-                # ws["A1"].font = TITLE_FONT
-                # ws.merge_cells("A1:F1")
-
-                # ws["A2"] = "CUSTOMER NAME"
-                # ws["A2"].font = LABEL_FONT
-                # ws["B2"] = sheet_dist
-                # ws["B2"].font = Font(bold=True, size=10)
-                # ws["D2"] = "DATE"
-                # ws["D2"].font = LABEL_FONT
-                # ws["E2"] = datetime.now().strftime("%d/%m/%Y")
-
-                # ws["A3"] = "NPWP / ID CARD"
-                # ws["A3"].font = LABEL_FONT
-                # ws["D3"] = "ORDERED BY"
-                # ws["D3"].font = LABEL_FONT
-
-                # ws["A4"] = "ADDRESS"
-                # ws["A4"].font = LABEL_FONT
 
                 HDR_ROW = 7
                 for ci, (h, w) in enumerate(zip(COL_HEADERS, COL_WIDTHS), start=1):
@@ -2558,7 +2522,11 @@ def _file_upload_section(page_key: str):
                     qty_val = float(s.replace(",", "."))
                 except Exception:
                     return "N/A"
-                return "Under MOQ" if (qty_val < moq_val and qty_val < 50) else "SAFE MOQ"
+                if moq_val <= 0:
+                    return "SAFE MOQ"  # MOQ 0 = tidak ada batasan kelipatan
+                if qty_val < 50 and qty_val % moq_val != 0:
+                    return "Under MOQ"
+                return "SAFE MOQ"
 
             df_moq["MOQ Check"] = df_moq.apply(_moq_status, axis=1)
 
@@ -2693,6 +2661,10 @@ def _file_upload_section(page_key: str):
 
 # === HALAMAN BARU: Login RSA ===
 if st.session_state.get('page') == 'po_changer_login':
+    if _rsa_token_valid():
+        st.session_state['rsa_authenticated'] = True
+        st.session_state['page'] = 'po_changer'
+        st.rerun()
     st.markdown("""<div class="hero-wrap">
         <div class="hero-tag">✦ PO Management</div>
         <div class="hero-title">PO Simulator - RSA</div></div>""", unsafe_allow_html=True)
@@ -2710,6 +2682,7 @@ if st.session_state.get('page') == 'po_changer_login':
                 if rsa_password == st.secrets["glowithyou"]:
                     st.session_state['rsa_authenticated'] = True
                     st.session_state['page'] = 'po_changer'
+                    st.query_params["rsa_t"] = _rsa_token()
                     st.rerun()
                 else:
                     st.error("❌ Password salah.")
@@ -3093,8 +3066,6 @@ if st.session_state.get('page') == 'po_spv':
                         (result_df["is_po_sku"] == False),
                         #sulawesi 1 only
                         (result_df["Customer SKU Code"].isin(VITA_C_INC_STOP)  & 
-                        #(result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL) |  result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) &
-                        #~result_df["Customer SKU Code"].isin(FLUSH_OUT)& 
                         (result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)| result_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False))),
                         #end
                         result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
@@ -3180,8 +3151,8 @@ if st.session_state.get('page') == 'po_spv':
                         moq_val_spv = sku_upper_spv.map(moq_map_spv).astype(float)
                         po_qty_val_spv = pd.to_numeric(result_df["PO Qty"], errors="coerce")
 
-                        is_multiple_spv = (po_qty_val_spv < 50) & (np.mod(po_qty_val_spv, moq_val_spv) == 0)
-                        under_moq_mask_spv = (po_qty_val_spv < moq_val_spv) & ~is_multiple_spv
+                        is_multiple_spv = np.mod(po_qty_val_spv, moq_val_spv) == 0
+                        under_moq_mask_spv = (po_qty_val_spv < 50) & ~is_multiple_spv & (moq_val_spv > 0)
 
                         suggested_qty_spv = np.ceil(po_qty_val_spv / moq_val_spv) * moq_val_spv
 
