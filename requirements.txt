@@ -11,7 +11,6 @@ rapidfuzz>=3.6.0
 haversine
 openpyxl>=3.1.0
 db-dtypes>=1.2.0
-xlrd
 xlsxwriter
 google-cloud-storage
 gspread
