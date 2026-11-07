@@ -825,15 +825,39 @@ with st.sidebar:
     if _rsa_token_valid() and st.session_state.get('page') != 'po_changer_login':
         st.query_params["pg"] = st.session_state['page']
 
-    st.markdown("<div style='padding:0 .4rem .3rem;text-align:center;font-size:1rem;font-weight:700;letter-spacing:2.5px;color:rgba(255,255,255,.35);text-transform:uppercase;'>MENU</div>", unsafe_allow_html=True)
+    # ---- Gaya sidebar: terang & rapi, menu pakai ikon, item aktif ditandai garis di kiri ----
+    _active_key = {"spv": "nav_spv", "po_spv": "nav_po_spv", "po_changer": "nav_po",
+                   "po_changer_login": "nav_po"}.get(st.session_state.get('page'), "")
+    st.markdown("""<style>
+    [data-testid="stSidebar"]{background:#FDF1F5!important;box-shadow:none!important;border-right:1px solid #F0D3DE;}
+    [data-testid="stSidebar"] .sb-title,[data-testid="stSidebar"] .sb-title *{color:#3A2430!important;}
+    [data-testid="stSidebar"] .sb-sub{color:#8A6B78!important;}
+    [data-testid="stSidebar"] .sb-foot{color:#000000!important;}
+    [data-testid="stSidebar"] .stButton>button,[data-testid="stSidebar"] div.stLinkButton>a{
+        background:transparent!important;border:none!important;box-shadow:none!important;
+        border-left:4px solid transparent!important;border-radius:12px!important;
+        justify-content:flex-start!important;text-align:left!important;
+        font-weight:600!important;padding:.6rem .9rem!important;}
+    [data-testid="stSidebar"] .stButton>button>div,[data-testid="stSidebar"] div.stLinkButton>a>div,[data-testid="stSidebar"] div.stLinkButton>a>span{
+        display:flex!important;justify-content:flex-start!important;align-items:center!important;width:100%!important;text-align:left!important;}
+    [data-testid="stSidebar"] .stButton>button p,[data-testid="stSidebar"] div.stLinkButton>a p{text-align:left!important;margin:0!important;}
+    [data-testid="stSidebar"] .stButton>button *,[data-testid="stSidebar"] div.stLinkButton>a *{color:#4A3440!important;}
+    [data-testid="stSidebar"] .stButton>button:hover,[data-testid="stSidebar"] div.stLinkButton>a:hover{background:#F8E1EA!important;}
+    """ + (f"""[data-testid="stSidebar"] .st-key-{_active_key} button{{background:#F8DCE6!important;border-left:4px solid #8B2040!important;}}
+    [data-testid="stSidebar"] .st-key-{_active_key} button *{{color:#8B2040!important;}}""" if _active_key else "") + """
+    </style>""", unsafe_allow_html=True)
 
-    if st.button("📍 Request PO - SPV", use_container_width=True, key="nav_spv"):
+    # st.markdown("""<div class="sb-title" style="display:flex;align-items:center;gap:.6rem;margin:.6rem .2rem .1rem;font-size:1.05rem;font-weight:800;">
+    #     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3A2430" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+    #     <span>PO Simulator</span></div>
+    #     <div class="sb-sub" style="font-size:.8rem;margin:0 .2rem 1rem;"></div>""", unsafe_allow_html=True)
+
+    if st.button("Request PO - SPV", icon=":material/description:", use_container_width=True, key="nav_spv"):
         st.session_state['page'] = 'spv'; st.rerun()
-    if st.button("📍 PO Simulator - SPV", use_container_width=True, key="nav_po_spv"):
+    if st.button("PO Simulator - SPV", icon=":material/calculate:", use_container_width=True, key="nav_po_spv"):
         st.session_state['page'] = 'po_spv'; st.rerun()
 
-    st.markdown("<div style='height:50px;'></div>", unsafe_allow_html=True)
-    if st.button("🔒 PO Simulator - RSA", use_container_width=True, key="nav_po"):
+    if st.button("PO Simulator - RSA", icon=":material/lock:", use_container_width=True, key="nav_po"):
         # Login RSA bertahan sehari: token di URL (query param) tetap ada walau halaman di-refresh
         if _rsa_token_valid():
             st.session_state['rsa_authenticated'] = True
@@ -843,7 +867,7 @@ with st.sidebar:
             st.session_state['page'] = 'po_changer_login'
         st.rerun()
 
-    st.link_button("🔍 Modify File", "https://po-modify.streamlit.app/", use_container_width=True)
+    st.link_button("Modify File", "https://po-modify.streamlit.app/", icon=":material/search:", use_container_width=True)
     
 
     # Shared constants used in PO simulation pages
@@ -862,17 +886,17 @@ with st.sidebar:
         'G2G-212','G2G-213','G2G-214','G2G-215','G2G-216','G2G-217','G2G-218']
     STOP_PO_BB= ["BXS003001", "BXS012001", "BXS006001", "BXS009001","BXS005001", "BXS004001", "BXS017001",
 "BXS015" , "BXS014", "BXS013", "BXS008001"]
-    st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:40px;'></div>", unsafe_allow_html=True)
     st.divider()
 
-    if st.button("Logout", key="logout_btn", use_container_width=True):
+    if st.button("Logout", icon=":material/logout:", key="logout_btn", use_container_width=True):
         st.session_state["authenticated"] = False
         st.session_state.pop('rsa_authenticated', None)
         st.query_params.pop("rsa_t", None)
         for k in ("raw_df","data_source","source_type"):
             st.session_state.pop(k, None)
         st.rerun()
-    st.markdown("<div style='text-align:center;color:rgba(255,255,255,.25);font-size:.62rem;margin-top:1rem;'>DataFlow v1.0 · Glad2Glow</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='sb-foot' style='font-size:.7rem;margin:1rem .3rem 0;'>Last updated: {datetime.now().strftime('%d %b %Y %H:%M')}</div>", unsafe_allow_html=True)
 
 
 # PO SIMULATOR LOGIC - RSA PAGE--------------->>
