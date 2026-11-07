@@ -1,5 +1,10 @@
 import io
+import os
 import re
+import zipfile
+from collections import defaultdict
+from datetime import date
+import numpy as np
 from typing import Dict, List, Tuple, Optional
 import streamlit as st
 import pandas as pd
@@ -30,16 +35,24 @@ try:
     BQ_DATASET = st.secrets["bigquery"]["dataset"]
     BQ_CONFIGS_TABLE = st.secrets["bigquery"]["config_table"]
 except Exception:
-    GCP_CREDENTIALS_PATH = r"C:\script\skintific-data-warehouse-ea77119e2e7a.json"
+    _CRED_FILENAME = "skintific-data-warehouse-ea77119e2e7a.json"
+    # Tried in order: file next to this script, then the original C:\script location.
+    GCP_CREDENTIALS_PATHS = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), _CRED_FILENAME),
+        os.path.join(r"C:\script", _CRED_FILENAME), 
+    ]
     GCP_PROJECT_ID = "skintific-data-warehouse"
     BQ_DATASET = "gt_schema"
     BQ_CONFIGS_TABLE = "distributor_configs"
-    try:
-        credentials = service_account.Credentials.from_service_account_file(
-            GCP_CREDENTIALS_PATH
-        )
-    except Exception:
-        credentials = None
+    credentials = None
+    for _path in GCP_CREDENTIALS_PATHS:
+        if not os.path.isfile(_path):
+            continue
+        try:
+            credentials = service_account.Credentials.from_service_account_file(_path)
+            break
+        except Exception:
+            continue
 
 # =========================
 # Master Schema
@@ -250,7 +263,7 @@ def _parse_single_po_date(value) -> Optional[str]:
     return stamp.strftime("%Y-%m-%d")
 
 
-def parse_po_date(series: pd.Series) -> pd.Series:
+def _parse_po_date_legacy(series: pd.Series) -> pd.Series:
     """Parse a PO Date source column to ``YYYY-MM-DD`` strings.
 
     Values the vectorised parse already handled keep exactly the result they
@@ -268,6 +281,173 @@ def parse_po_date(series: pd.Series) -> pd.Series:
     if missing.any():
         source = series.to_numpy(dtype=object)
         values[missing] = [_parse_single_po_date(v) for v in source[missing]]
+    return pd.Series(values, index=series.index, dtype=object)
+
+
+# ISO-like date at the start of a cell: "2026-09-01", "2026-09-01 10:00:00",
+# "2026-09-01 10;00;00", "2026/9/1T10:00". Everything after the date (any time
+# format, even malformed ones) is ignored because only the date is needed.
+_ISO_LIKE_DATE_RE = re.compile(r"^\s*(\d{4})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})(?!\d)")
+
+# A date is treated as day/month-swapped only when its as-written month is a
+# clear minority of the file and the swapped month is the clear majority.
+_SWAP_MINORITY_MAX_SHARE = 0.10   # as-written month: <= 10% of rows (or a single row)
+_SWAP_MAJORITY_MIN_SHARE = 0.50   # swapped month:   >= 50% of rows ...
+_SWAP_MAJORITY_MIN_COUNT = 3      # ... and at least 3 rows
+
+
+def _extract_ymd(value) -> Optional[Tuple[int, int, int]]:
+    m = _ISO_LIKE_DATE_RE.match(as_text(value))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _valid_ymd(y: int, m: int, d: int) -> bool:
+    try:
+        date(y, m, d)
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_iso_dates(
+    triples: List[Tuple[int, int, int]],
+    fix_swapped: bool = True,
+    report: Optional[List[Dict]] = None,
+) -> List[Optional[str]]:
+    """Resolve (year, a, b) written as YYYY-a-b to YYYY-MM-DD strings.
+
+    ``a`` is *supposed* to be the month and ``b`` the day. When the file has
+    day and month swapped (YYYY-DD-MM):
+      * certain: ``a`` > 12 can only be a day  -> swap.
+      * likely:  both readings are valid dates, but ``a`` is a rare month in
+        this file while ``b`` is the dominant one -> swap.
+    Anything else is left as written. Swaps are appended to ``report``.
+    """
+    # Pass 1: classify, and count months from rows we can read unambiguously.
+    kinds: List[str] = []
+    month_count: Dict[Tuple[int, int], int] = {}
+    for y, a, b in triples:
+        as_is = 1 <= a <= 12 and _valid_ymd(y, a, b)
+        swapped = 1 <= b <= 12 and _valid_ymd(y, b, a)
+        if as_is and swapped and a != b:
+            kind, month = "ambiguous", a
+        elif as_is:
+            kind, month = "keep", a
+        elif swapped:
+            kind, month = "swap", b
+        else:
+            kind, month = "invalid", None
+        kinds.append(kind)
+        if month is not None:
+            month_count[(y, month)] = month_count.get((y, month), 0) + 1
+
+    total = max(sum(month_count.values()), 1)
+    out: List[Optional[str]] = []
+    for (y, a, b), kind in zip(triples, kinds):
+        do_swap = False
+        if kind == "invalid":
+            out.append(None)
+            continue
+        if kind == "swap":
+            do_swap = fix_swapped
+            if not fix_swapped:
+                out.append(None)
+                continue
+        elif kind == "ambiguous" and fix_swapped:
+            cnt_a = month_count.get((y, a), 0)
+            cnt_b = month_count.get((y, b), 0)
+            do_swap = (
+                cnt_a <= max(1, _SWAP_MINORITY_MAX_SHARE * total)
+                and cnt_b >= max(_SWAP_MAJORITY_MIN_COUNT, _SWAP_MAJORITY_MIN_SHARE * total)
+            )
+        month, day = (b, a) if do_swap else (a, b)
+        result = f"{y:04d}-{month:02d}-{day:02d}"
+        out.append(result)
+        if do_swap and report is not None:
+            report.append({"Original": f"{y:04d}-{a:02d}-{b:02d}", "Corrected": result})
+    return out
+
+
+# Written-out month names (Indonesian + English, full or abbreviated):
+# "01 okt 2026", "1-Oktober-2026", "01 Agu 26", "Oct 1, 2026". Unambiguous, so
+# they bypass the swap heuristic.
+_MONTH_NAMES = {
+    "jan": 1, "januari": 1, "january": 1,
+    "feb": 2, "februari": 2, "february": 2, "pebruari": 2,
+    "mar": 3, "maret": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "mei": 5, "may": 5,
+    "jun": 6, "juni": 6, "june": 6,
+    "jul": 7, "juli": 7, "july": 7,
+    "agu": 8, "agt": 8, "agus": 8, "agustus": 8, "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "okt": 10, "oktober": 10, "oct": 10, "october": 10,
+    "nov": 11, "nop": 11, "november": 11, "nopember": 11,
+    "des": 12, "dec": 12, "desember": 12, "december": 12,
+}
+_DAY_MON_YEAR_RE = re.compile(r"^\s*(\d{1,2})\s*[-/. ,]\s*([A-Za-z]{3,9})\.?\s*[-/. ,]\s*(\d{4}|\d{2})(?!\d)")
+_MON_DAY_YEAR_RE = re.compile(r"^\s*([A-Za-z]{3,9})\.?\s*[-/. ]\s*(\d{1,2})\s*[-/. ,]\s*(\d{4})(?!\d)")
+
+
+def _parse_named_month_date(value) -> Optional[str]:
+    """'01 okt 2026' / 'Oct 1, 2026' -> '2026-10-01'; None if not that style."""
+    text = as_text(value)
+    if not text:
+        return None
+    m = _DAY_MON_YEAR_RE.match(text)
+    if m:
+        day, mon, year = m.group(1), m.group(2), m.group(3)
+    else:
+        m = _MON_DAY_YEAR_RE.match(text)
+        if not m:
+            return None
+        mon, day, year = m.group(1), m.group(2), m.group(3)
+    month = _MONTH_NAMES.get(mon.lower())
+    if month is None:
+        return None
+    y = int(year)
+    if len(year) == 2:
+        y += 2000
+    if not _valid_ymd(y, month, int(day)):
+        return None
+    return f"{y:04d}-{month:02d}-{int(day):02d}"
+
+
+def parse_po_date(
+    series: pd.Series,
+    fix_swapped: bool = True,
+    report: Optional[List[Dict]] = None,
+) -> pd.Series:
+    """Parse a PO Date source column to ``YYYY-MM-DD`` strings (date only).
+
+    * ISO-like cells ("2026-09-01 10:00:00", "2026-09-01 10;00;00", ...) are read
+      by regex, so any time part is dropped and cannot break parsing.
+    * With ``fix_swapped``, YYYY-DD-MM typos are corrected (see
+      ``_resolve_iso_dates``); each correction is appended to ``report``.
+    * Written-out months ("01 okt 2026", "1-Agustus-2026", "Oct 1, 2026") are
+      converted directly (Indonesian and English names).
+    * All other formats go through the original pandas parser unchanged.
+    """
+    source = series.to_numpy(dtype=object)
+    triples = [_extract_ymd(v) for v in source]
+    iso_pos = [i for i, t in enumerate(triples) if t is not None]
+    other_pos = [i for i, t in enumerate(triples) if t is None]
+
+    values = np.full(len(source), None, dtype=object)
+    if iso_pos:
+        resolved = _resolve_iso_dates([triples[i] for i in iso_pos], fix_swapped, report)
+        for i, v in zip(iso_pos, resolved):
+            values[i] = v
+    legacy_pos = []
+    for i in other_pos:
+        named = _parse_named_month_date(source[i])
+        if named is not None:
+            values[i] = named
+        else:
+            legacy_pos.append(i)
+    if legacy_pos:
+        sub = series.iloc[legacy_pos]
+        values[legacy_pos] = _parse_po_date_legacy(sub).to_numpy(dtype=object)
     return pd.Series(values, index=series.index, dtype=object)
 
 
@@ -357,14 +537,54 @@ def _read_excel_cells_as_text(
     return pd.DataFrame(data, columns=columns)
 
 
+def sniff_file_kind(uploaded_file) -> str:
+    """Detect the real format from file content, not the extension.
+
+    Returns "xlsx" (also xlsm), "ods", "xls" (legacy binary), "html" (fake .xls
+    exported as an HTML table), or "unknown" (treated as CSV/text by callers).
+    Lets a mislabelled file (xlsx saved as .xls, .xls that is really xlsx, ...)
+    still load.
+    """
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+    data = uploaded_file.read()
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+    if isinstance(data, str):
+        data = data.encode("utf-8", errors="ignore")
+
+    if data[:4] == b"PK\x03\x04":
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                names = set(zf.namelist())
+                if "xl/workbook.xml" in names or "xl/workbook.bin" in names:
+                    return "xlsx"
+                if "content.xml" in names and "mimetype" in names:
+                    return "ods"
+        except zipfile.BadZipFile:
+            pass
+        return "unknown"
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "xls"
+    head = data[:2048].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if head.startswith((b"<html", b"<!doctype html", b"<table", b"<?xml")):
+        return "html"
+    return "unknown"
+
+
 def _read_excel_as_text(
     uploaded_file,
     sheet_name=0,
     header: Optional[int] = 0,
 ) -> pd.DataFrame:
-    """Read Excel as text; fall back to pandas dtype=str for .xls / engine issues."""
+    """Read any Excel-like file as text, whatever its extension says.
+
+    .xlsx goes through openpyxl (cell-by-cell, keeps leading zeros); .xls, .ods
+    and others fall back to pandas dtype=str.
+    """
     name = str(getattr(uploaded_file, "name", "") or "").lower()
-    use_openpyxl = (not name.endswith(".xls")) or name.endswith(".xlsx")
+    kind = sniff_file_kind(uploaded_file)
+    use_openpyxl = kind == "xlsx" or (kind == "unknown" and not name.endswith(".xls"))
     if use_openpyxl:
         try:
             return _read_excel_cells_as_text(
@@ -377,6 +597,18 @@ def _read_excel_as_text(
 
     if hasattr(uploaded_file, "seek"):
         uploaded_file.seek(0)
+
+    if kind == "html":
+        tables = pd.read_html(
+            uploaded_file,
+            header=header,
+            keep_default_na=False,
+            converters=defaultdict(lambda: str),  # keep text; "00123" must not become 123
+        )
+        if not tables:
+            raise ValueError("No table found in the uploaded file")
+        df = tables[0]
+        return df.apply(lambda col: col.map(as_text))
 
     kwargs = {"dtype": str, "keep_default_na": False, "header": header}
     if sheet_name is not None:
@@ -391,6 +623,12 @@ def _read_excel_as_text(
 # =========================
 @st.cache_resource(show_spinner=False)
 def get_bq_client() -> bigquery.Client:
+    if credentials is None:
+        raise RuntimeError(
+            "BigQuery credentials not found. Add [connections.bigquery] to "
+            ".streamlit/secrets.toml, or place the service-account JSON at: "
+            + " or ".join(GCP_CREDENTIALS_PATHS)
+        )
     return bigquery.Client(credentials=credentials, project=credentials.project_id)
 
 
@@ -698,6 +936,8 @@ def intelligent_mapping(
     distributor: str,   # ✅ required
     enable_fuzzy: bool = True,
     fuzzy_cutoff: float = 0.6,
+    date_fix_log: Optional[List[Dict]] = None,
+    manual_mapping: Optional[Dict[str, str]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, str], List[str]]:
 
     out = pd.DataFrame()
@@ -708,6 +948,9 @@ def intelligent_mapping(
     df.columns = uniquify_column_names([col.lower() for col in df.columns])
     df = force_text_columns(df)
     mapping_lower = {k: v.lower() for k, v in mapping.items()}
+    # User-picked columns win over the stored config (and skip fuzzy matching).
+    for target_col, source_col in (manual_mapping or {}).items():
+        mapping_lower[target_col] = str(source_col).lower()
 
     for col in FIXED_FIRST_5:
         out[col] = [static_fields.get(col, "")] * len(df)
@@ -732,7 +975,7 @@ def intelligent_mapping(
         src = mapping_lower.get(target, "")
         if src and src in df.columns:
             if target == "PO Date":
-                out[target] = parse_po_date(df[src])
+                out[target] = parse_po_date(df[src], report=date_fix_log)
             else:
                 out[target] = df[src]
             effective_mapping[target] = src
@@ -749,7 +992,10 @@ def intelligent_mapping(
                 )
                 if guesses:
                     src = guesses[0]
-                    out[target] = df[src]
+                    if target == "PO Date":
+                        out[target] = parse_po_date(df[src], report=date_fix_log)
+                    else:
+                        out[target] = df[src]
                     effective_mapping[target] = src
                 else:
                     failed_columns.append(target)
@@ -789,42 +1035,50 @@ def intelligent_mapping(
 # Utilities
 # =========================
 def read_any_table(uploaded_file) -> pd.DataFrame:
-    """Read CSV/Excel with every column as text so leading zeros are not inferred away."""
+    """Read CSV/Excel with every column as text so leading zeros are not inferred away.
+
+    The format is detected from the file content, so a file with the wrong
+    extension (xlsx named .xls, xls named .xlsx, HTML table named .xls, a CSV
+    named .xlsx) still loads.
+    """
     name = uploaded_file.name.lower()
+    kind = sniff_file_kind(uploaded_file)
+    if kind == "unknown":
+        if name.endswith((".csv", ".xlsx", ".xlsm", ".xls", ".ods")):
+            # No Excel signature: most likely a CSV/text export with an Excel extension.
+            kind = "csv"
+        else:
+            st.error("Unsupported file type. Please upload a .csv, .xls, .xlsx, or .ods file.")
+            return pd.DataFrame()
+
     if hasattr(uploaded_file, "seek"):
         uploaded_file.seek(0)
 
-    if name.endswith(".csv"):
-        first_line = uploaded_file.readline().decode("utf-8-sig", errors="ignore")
+    if kind == "csv":
+        raw = uploaded_file.read()
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8-sig", errors="ignore")
+        lines = raw.splitlines()
+        first_line = lines[0] if lines else ""
         uploaded_file.seek(0)
         sep = max([",", ";", "\t", "|"], key=first_line.count)
         df = pd.read_csv(
-        uploaded_file,
-        sep=sep,
-        dtype=str,
-        keep_default_na=False,
-        na_filter=False,
-        encoding="utf-8-sig",
-    )
-    elif name.endswith(".xlsx"):
-        df = _read_excel_as_text(uploaded_file, header=0)
-    elif name.endswith(".xls"):
-        df = pd.read_excel(
             uploaded_file,
+            sep=sep,
             dtype=str,
             keep_default_na=False,
-            engine="xlrd",
+            na_filter=False,
+            encoding="utf-8-sig",
         )
-    elif name.endswith(".ods"):
+    elif kind == "ods":
         df = pd.read_excel(
             uploaded_file,
             dtype=str,
             keep_default_na=False,
             engine="odf",
         )
-    else:
-        st.error("Unsupported file type. Please upload a .csv, .xls, or .xlsx file.")
-        return pd.DataFrame()
+    else:  # xlsx / xls / html
+        df = _read_excel_as_text(uploaded_file, header=0)
 
     # Sanitize every column: preserve leading-zero strings, turn NaN into "".
     df.columns = uniquify_column_names(df.columns)
@@ -838,11 +1092,14 @@ def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Data") -> bytes:
     buf = io.BytesIO()
     df = force_text_columns(df)
     with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, header=True, startrow=1, sheet_name=sheet_name)
+        # pandas styles its own header row (bold, centred, bordered). Write the data
+        # without a header and add a plain, unstyled header row ourselves.
+        df.to_excel(writer, index=False, header=False, startrow=2, sheet_name=sheet_name)
         workbook = writer.book
         worksheet = writer.sheets[sheet_name]
+        worksheet.write_row(1, 0, [str(c) for c in df.columns])  # header, row 2 in Excel
         text_fmt = workbook.add_format({"num_format": "@"})
-        # pandas startrow=1 -> header at row 1, data from row 2 (0-indexed)
+        # header at row 1, data from row 2 (0-indexed) - same layout as before
         data_start_row = 2
         for col_idx, col_name in enumerate(df.columns):
             if not is_text_field(col_name):
@@ -870,7 +1127,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     )
 
     uploaded = st.file_uploader(
-        "Upload 3M Daily ST File (.xlsx)", type=["xlsx", "xls"], key="m3_uploader"
+        "Upload 3M Daily ST File (.xlsx)", type=["xlsx", "xlsm", "xls"], key="m3_uploader"
     )
     if not uploaded:
         return
@@ -1025,7 +1282,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
 def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     """Handles upload + conversion for standard distributor formats."""
     uploaded = st.file_uploader(
-        "Upload Distributor File (.xlsx/.csv)", type=["xlsx", "xls", "csv", "ods"]
+        "Upload Distributor File (.xlsx/.csv)", type=["xlsx", "xlsm", "xls", "csv", "ods"]
     )
     if not uploaded:
         return
@@ -1047,13 +1304,41 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         )
         return
 
+    # First pass: config only. Tells us which target columns could not be matched.
+    try:
+        _, _, base_failed = intelligent_mapping(
+            df,
+            cfg["static_fields"],
+            cfg["mapping"],
+            brand_prefix,
+            distributor=dist,
+        )
+    except Exception as e:
+        st.error(f"Error during data mapping: {e}")
+        return
+
+    # Manual picks come from the selectboxes rendered at the bottom of the page.
+    # Streamlit stores a widget's value in session_state before the rerun, so the
+    # choice is already available here even though the widget is drawn later.
+    NOT_MAPPED = "— not mapped —"
+    manual_options = [NOT_MAPPED] + list(df.columns)
+    file_key = f"{dist}|{getattr(uploaded, 'name', '')}|{getattr(uploaded, 'size', '')}"
+    manual_mapping: Dict[str, str] = {}
+    for target in base_failed:
+        choice = st.session_state.get(f"manual_map|{file_key}|{target}", NOT_MAPPED)
+        if choice != NOT_MAPPED and choice in df.columns:
+            manual_mapping[target] = choice
+
+    date_fixes: List[Dict] = []
     try:
         mapped, effective_map, failed_columns = intelligent_mapping(
             df,
             cfg["static_fields"],
             cfg["mapping"],
             brand_prefix,
-            distributor=dist
+            distributor=dist,
+            date_fix_log=date_fixes,
+            manual_mapping=manual_mapping,
         )
     except Exception as e:
         st.error(f"Error during data mapping: {e}")
@@ -1072,6 +1357,14 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         )
 
     st.success("Mapped to master schema.")
+    if date_fixes:
+        fixes_df = pd.DataFrame(date_fixes).value_counts().reset_index(name="Rows")
+        st.warning(
+            f"⚠️ **{len(date_fixes)} PO Date value(s)** looked like day/month were "
+            "swapped (month was a minority in the file) and were auto-corrected. "
+            "Please verify:"
+        )
+        st.dataframe(fixes_df, hide_index=True)
     st.write("Converted sample:")
     st.dataframe(mapped.head())
 
@@ -1083,7 +1376,11 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
             {
                 "Target Column": target,
                 "Source Column": source,
-                "Status": "Mapped" if target in cfg["mapping"] else "Fuzzy Match",
+                "Status": (
+                    "Manual"
+                    if target in manual_mapping
+                    else "Mapped" if target in cfg["mapping"] else "Fuzzy Match"
+                ),
             }
             for target, source in effective_map.items()
         ]
@@ -1110,6 +1407,24 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         )
     except Exception as e:
         st.error(f"Error generating download file: {e}")
+
+    # ── Manual column picker (bottom of page) ─────────────────────────────────
+    if base_failed:
+        st.divider()
+        st.subheader("Manual Column Mapping")
+        st.warning(
+            "⚠️ Some columns in the config were not found in this file. "
+            "Pick the matching column from the uploaded file below "
+            "(leave as *not mapped* to keep it empty). The result above updates automatically."
+        )
+        cols_ui = st.columns(2)
+        for i, target in enumerate(base_failed):
+            expected = cfg["mapping"].get(target, "N/A")
+            cols_ui[i % 2].selectbox(
+                f"{target}  (config expects: {expected})",
+                manual_options,
+                key=f"manual_map|{file_key}|{target}",
+            )
 
 
 # =========================
