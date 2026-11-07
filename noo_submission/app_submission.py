@@ -19,7 +19,7 @@ from shared import (
     ZONA_WAKTU, PENGGUNA, STATUS_REVIEW, STATUS_VALID,
     # Supabase
     sb_insert, sb_select, sb_cari_duplikat_kode, sb_cari_duplikat_sku, sb_select_batch, ambil_raw_noo,
-    sb_patch_by_kode_nama,
+    sb_patch_by_kode_nama, swr_cache,
     # BigQuery
     bq_cari_duplikat_kode,
     # GSheets
@@ -164,7 +164,7 @@ def normalisasi_wilayah(teks) -> str:
 
 # MIFTAH EDIT (DIHAPUS): REGION_DUMMY, master dummy (6 toko tetap + 300 acak + kode CSC-xxxxx), PAKAI_MASTER_DUMMY.
 # MIFTAH EDIT (BARU): master toko sekarang diambil dari BigQuery (gt_schema.master_store_database_basis).
-@st.cache_data(ttl=600, show_spinner=False)
+@swr_cache(ttl=600, salin=False)     # data besar, hanya dibaca
 def ambil_master_toko() -> pd.DataFrame:
     client = _shared.get_bq_client()
     query = f"""
@@ -199,22 +199,34 @@ def _normalkan_master(m: pd.DataFrame) -> pd.DataFrame:
 
 # MIFTAH EDIT (BARU): pencocokan kode pasti. Customer Store Code NOO dicek ke reference_id_skt/g2g/tph di master,
 #   kalau ketemu -> tampilkan cust_id + store_name baris master itu.
+def _teks_distributor(dists, brand: str = "") -> str:
+    """Distributor toko master yang cocok: utamakan distributor_g2g; kalau kosong lihat distributor_skt,
+    lalu distributor_tph. Kosong kalau ketiganya kosong."""
+    d_skt, d_g2g, d_tph = (list(dists) + ["", "", ""])[:3] if dists else ("", "", "")
+    for d in (d_g2g, d_skt, d_tph):
+        d = str(d or "").strip()
+        if d and d not in ("-", "nan", "None"):
+            return d
+    return ""
+
 def _kunci_kode(v) -> str:
     return str(v or "").strip().upper()
 
-@st.cache_data(ttl=600, show_spinner=False)
+@swr_cache(ttl=600, salin=False)
 def _indeks_kode_master() -> dict:
-    """kode referensi (skt/g2g/tph) -> (cust_id, store_name, address, region)"""
+    """kode referensi (skt/g2g/tph) -> (cust_id, store_name, address, region, (distributor skt, g2g, tph))"""
     m = ambil_master_toko()
     indeks = {}
     for kol in KOLOM_REF:
-        for cid, nama, alamat, region, ref in zip(m["Cust ID"], m["Store Name"], m["Store Address"], m["Region"], m[kol]):
+        for cid, nama, alamat, region, ref, d1, d2, d3 in zip(
+                m["Cust ID"], m["Store Name"], m["Store Address"], m["Region"], m[kol],
+                m["distributor_skt"], m["distributor_g2g"], m["distributor_tph"]):
             k = _kunci_kode(ref)
             if k and k not in indeks:
-                indeks[k] = (str(cid), str(nama), str(alamat), str(region))
+                indeks[k] = (str(cid), str(nama), str(alamat), str(region), (str(d1), str(d2), str(d3)))
     return indeks
 
-@st.cache_data(ttl=600, show_spinner=False)
+@swr_cache(ttl=600, salin=False)
 def _master_ternormalisasi() -> pd.DataFrame:
     return _normalkan_master(ambil_master_toko())
 
@@ -322,7 +334,8 @@ def cari_kemiripan(nama, alamat, kota, master, region_noo=(), nama_min=AMBANG_NA
     region = str(baris["Region"])
     if region.strip() and h["ada_region"][terbaik]:
         region = f"{region} ({h['region'][terbaik]:.0f}%)"
-    return str(baris["Cust ID"]), f'{baris["Store Name"]} ({h["gabungan"][terbaik]:.0f}%)', alamat, region
+    return (str(baris["Cust ID"]), f'{baris["Store Name"]} ({h["gabungan"][terbaik]:.0f}%)', alamat, region,
+            (str(baris["distributor_skt"]), str(baris["distributor_g2g"]), str(baris["distributor_tph"])))
 
 def region_dari_master(distributor: str, min_porsi: float = 0.05) -> tuple:
     """Region distributor dari kolom `region` master store, dicari lewat kolom distributor_skt/g2g/tph
@@ -378,7 +391,12 @@ def terapkan_similarity(baris_spv, region_noo=()):
         hit = indeks.get(_kunci_kode(b["store_code"]))            # 1) cocok kode
         if not hit and master_b is not None:                       # 2) fallback fuzzy (hanya di region distributor baris ini)
             hit = cari_kemiripan(b["nama"], b["alamat"], b.get("kota",""), master_b, rg)
-        b["similarity_kode"], b["similarity_nama"], b["similarity_alamat"], b["similarity_region"] =             hit if hit else ("","","","")
+        if hit:
+            b["similarity_kode"], b["similarity_nama"], b["similarity_alamat"], b["similarity_region"] = hit[:4]
+            b["similarity_distri"] = _teks_distributor(hit[4] if len(hit) > 4 else (), b.get("brand", ""))
+        else:
+            b["similarity_kode"] = b["similarity_nama"] = b["similarity_alamat"] = b["similarity_region"] = ""
+            b["similarity_distri"] = ""
 
 def isi_similarity_spv(baris, region_noo):
     ss    = st.session_state
@@ -386,11 +404,13 @@ def isi_similarity_spv(baris, region_noo):
     if ss.get("sim_tanda") != tanda:
         terapkan_similarity(baris, region_noo)
         ss.sim_tanda = tanda
-        ss.sim_hasil = {b["id"]:(b["similarity_kode"],b["similarity_nama"],b["similarity_alamat"],b["similarity_region"]) for b in baris}
+        ss.sim_hasil = {b["id"]:(b["similarity_kode"],b["similarity_nama"],b["similarity_alamat"],b["similarity_region"],
+                                 b.get("similarity_distri","")) for b in baris}
     else:
         for b in baris:
-            hasil = tuple(ss.sim_hasil.get(b["id"],())) + ("","","","")   # toleran thd cache sesi lama
+            hasil = tuple(ss.sim_hasil.get(b["id"],())) + ("","","","","")   # toleran thd cache sesi lama
             b["similarity_kode"], b["similarity_nama"], b["similarity_alamat"], b["similarity_region"] = hasil[:4]
+            b["similarity_distri"] = hasil[4]
 
 def _teks(v) -> str:
     return "" if pd.isna(v) else str(v).strip()
@@ -425,6 +445,7 @@ def bangun_baris_spv(distributor: str = "") -> list:
             "similarity_nama":  "",
             "similarity_alamat":"",
             "similarity_region":"",
+            "similarity_distri":"",
             "tagging":          peta.get("tagging","") or "",   # ← tambah ini
             # penanda "sudah dikonfirmasi SPV" (kolom opsional spv_confirmed di INPUT_NOO)
             "ada_kolom_spv":    "spvconfirmed" in peta,
@@ -1348,8 +1369,8 @@ def halaman_pengajuan_noo():
 # ═════════════════════════════════════════════════════════════════════════════
 OPSI_JENIS_SPV  = ["NOO","Existing"]
 LABEL_KOSONG    = "\u200b"
-LEBAR_KOLOM_SPV = [0.5,2.2,2.2,1.6,1.1,2.2,2.8,2.4,2.0,2.8,2.2,2.0,2.0,2.2]
-IDX_JENIS, IDX_STORE_ID = 11, 12
+LEBAR_KOLOM_SPV = [0.5,2.2,2.2,1.6,1.1,2.2,2.8,2.4,2.0,2.8,2.2,2.6,2.0,2.0,2.2]
+IDX_JENIS, IDX_STORE_ID = 12, 13
 
 def _kid(baris) -> str:
     return re.sub(r"[^A-Za-z0-9_]","_",str(baris["id"]))
@@ -1500,7 +1521,7 @@ def halaman_konfirmasi_spv():
             for kolom, (teks, wajib) in zip(kepala,[
                 ("No.",False),("Customer Store Code",False),("Distributor",False),("Region",False),("Brand",False),
                 ("Store Name",False),("Store Address",False),("Similarity (Name)",False),
-                ("Similarity (Code)",False),("Similarity (Address)",False),("Similarity (Region)",False),("NOO / Existing",True),
+                ("Similarity (Code)",False),("Similarity (Address)",False),("Similarity (Region)",False),("Similarity (Distributor)",False),("NOO / Existing",True),
                 ("Store ID (Validation)",False),("Remarks",False)]):
                 kolom.markdown(komponen.html_kepala_kolom(teks, wajib), unsafe_allow_html=True)
 
@@ -1511,7 +1532,7 @@ def halaman_konfirmasi_spv():
                 ss.setdefault(kunci_sid, b["store_id_validasi"])
                 ss.setdefault(kunci_ket, b["keterangan"])
                 with st.container(key=f"baris_spv_{k}"):
-                    c_no,c_kode,c_distri,c_region_asli,c_brand,c_nama,c_alamat,c_sim_nama,c_sim_kode,c_sim_alamat,c_sim_region,c_jenis,c_sid,c_ket = \
+                    c_no,c_kode,c_distri,c_region_asli,c_brand,c_nama,c_alamat,c_sim_nama,c_sim_kode,c_sim_alamat,c_sim_region,c_sim_distri,c_jenis,c_sid,c_ket = \
                         st.columns(LEBAR_KOLOM_SPV)
                     c_no.markdown(komponen.html_sel_teks(b["no"]), unsafe_allow_html=True)
                     c_kode.markdown(komponen.html_sel_teks(b["store_code"],"sel-baca"), unsafe_allow_html=True)
@@ -1524,6 +1545,7 @@ def halaman_konfirmasi_spv():
                     c_sim_kode.markdown(komponen.html_sel_teks(b.get("similarity_kode",""),"sel-baca"), unsafe_allow_html=True)
                     c_sim_alamat.markdown(komponen.html_sel_teks(b.get("similarity_alamat",""),"sel-baca"), unsafe_allow_html=True)
                     c_sim_region.markdown(komponen.html_sel_teks(b.get("similarity_region",""),"sel-baca"), unsafe_allow_html=True)
+                    c_sim_distri.markdown(komponen.html_sel_teks(b.get("similarity_distri",""),"sel-baca"), unsafe_allow_html=True)
                     jenis    = c_jenis.selectbox(LABEL_KOSONG, OPSI_JENIS_SPV, index=None,
                                                  placeholder="Pilih", label_visibility="collapsed", key=kunci_jenis)
                     store_id = c_sid.text_input(LABEL_KOSONG, label_visibility="collapsed",
@@ -1593,7 +1615,7 @@ def halaman_konfirmasi_spv():
 # ═════════════════════════════════════════════════════════════════════════════
 # HISTORY (NOO yang sudah disubmit, per bulan)
 # ═════════════════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=60, show_spinner=False)
+@swr_cache(ttl=60)
 def ambil_history_noo() -> pd.DataFrame:
     import requests
     rows, start, step = [], 0, 1000
@@ -1692,6 +1714,8 @@ def nama_pengguna(user: dict) -> str:
     return uname or "Admin"
 def main():
     st.set_page_config(page_title="NOO & SKU Submission", page_icon=":material/inventory_2:", layout="wide")
+    # mulai memuat data berat di latar belakang selagi user masih di halaman login
+    _shared.prewarm(ambil_master_toko, _master_ternormalisasi, _indeks_kode_master, ambil_raw_noo, ambil_history_noo)
     user = require_login()
     _shared.PENGGUNA = nama_pengguna(user)
     inisialisasi_state()
