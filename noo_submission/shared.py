@@ -507,7 +507,96 @@ def sb_cari_duplikat_sku(table: str, pasangan):
             gagal_cek.add(cc)
     return ditemukan, gagal_cek
 
-@st.cache_data(ttl=15, show_spinner=False)
+
+# ══════════════════════════════════════════════
+# CACHE "STALE-WHILE-REVALIDATE": halaman tidak pernah menunggu fetch ulang setelah TTL habis
+# ══════════════════════════════════════════════
+import copy as _copy
+import threading as _threading
+import time as _time
+
+_SWR_STATE: dict = {}
+_SWR_LOCK = _threading.RLock()
+
+_PREWARM_SUDAH: set = set()
+
+def prewarm(*fungsi):
+    """Muat data berat di thread latar belakang (sekali per proses server) supaya halaman pertama tidak menunggu."""
+    baru = [f for f in fungsi if f.__name__ not in _PREWARM_SUDAH]
+    if not baru:
+        return
+    _PREWARM_SUDAH.update(f.__name__ for f in baru)
+    def kerja():
+        for f in baru:
+            try:
+                f()
+            except Exception:
+                _PREWARM_SUDAH.discard(f.__name__)
+    _threading.Thread(target=kerja, daemon=True).start()
+
+def _ada_isi(v) -> bool:
+    if hasattr(v, "empty"):                 # DataFrame
+        return not v.empty
+    try:
+        return bool(v)
+    except Exception:
+        return True
+
+def swr_cache(ttl: float, salin: bool = True):
+    """Untuk fungsi TANPA argumen yang mengambil data dari jaringan. Panggilan pertama (atau setelah .clear())
+    menunggu data; setelah itu data lama langsung dikembalikan dan, kalau sudah lewat `ttl` detik, data baru
+    diambil di thread latar belakang untuk panggilan berikutnya. Hasil dikembalikan sebagai salinan
+    (salin=False untuk data besar yang hanya dibaca, tanpa salinan)."""
+    def deco(fn):
+        # state disimpan di level modul (kunci = nama fungsi): file app dijalankan ulang tiap rerun sehingga
+        # fungsi di dalamnya dibuat ulang; state di closure akan ikut hilang
+        st_ = _SWR_STATE.setdefault(fn.__module__ + "." + fn.__qualname__,
+                                    {"val": None, "ada": False, "ts": 0.0, "sibuk": False,
+                                     "awal": _threading.Lock()})
+        kunci = _SWR_LOCK
+
+        def _segarkan():
+            try:
+                baru = fn()
+                with kunci:
+                    # fetch gagal biasanya mengembalikan kosong -> jangan timpa data bagus yang sudah ada
+                    if _ada_isi(baru) or not st_["ada"]:
+                        st_["val"], st_["ada"] = baru, True
+                    st_["ts"] = _time.time()
+            except Exception:
+                with kunci:
+                    st_["ts"] = _time.time() - ttl / 2          # coba lagi sebentar lagi
+            finally:
+                with kunci:
+                    st_["sibuk"] = False
+
+        def wrapper():
+            with kunci:
+                ada, umur, sibuk = st_["ada"], _time.time() - st_["ts"], st_["sibuk"]
+            if not ada:
+                with st_["awal"]:                       # satu fetch awal saja; yang lain menunggu hasilnya
+                    with kunci:
+                        sudah = st_["ada"]
+                    if not sudah:
+                        baru = fn()
+                        with kunci:
+                            st_["val"], st_["ada"], st_["ts"] = baru, True, _time.time()
+            elif umur > ttl and not sibuk:
+                with kunci:
+                    st_["sibuk"] = True
+                _threading.Thread(target=_segarkan, daemon=True).start()
+            with kunci:
+                return _copy.deepcopy(st_["val"]) if salin else st_["val"]
+
+        def clear():
+            with kunci:
+                st_["ada"], st_["val"], st_["ts"] = False, None, 0.0
+        wrapper.clear = clear
+        wrapper.__name__ = fn.__name__
+        return wrapper
+    return deco
+
+@swr_cache(ttl=30)
 def ambil_raw_noo() -> list:
     return sb_select(TABLE_SUBMIT_NOO, order="created_at.desc", limit=500)
 
