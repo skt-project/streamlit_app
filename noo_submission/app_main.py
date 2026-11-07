@@ -23,7 +23,7 @@ from shared import (
     daftar_distributor, muat_distributor_dari_sheet, muat_prefix_per_distributor, muat_distri_code_map,
     max_angka_per_prefix, resolve_distributor, sb_max_angka_store_id,
     # Utils
-    ke_wib_naive, waktu_sekarang, hitung_validasi, hasil_ke_excel, catat_riwayat,
+    ke_wib_naive, waktu_sekarang, hitung_validasi, hasil_ke_excel, catat_riwayat, swr_cache,
 )
 
 KOLOM_ORDER_EDITOR = ["#","Pilih","Validasi","Penanda","Store ID"] + list(KOLOM[2:])
@@ -1084,7 +1084,7 @@ def halaman_validasi_toko():
 # ═══════════════════════════════════════
 # HALAMAN: DASHBOARD
 # ═══════════════════════════════════════
-@st.cache_data(ttl=60, show_spinner=False)
+@swr_cache(ttl=60)
 def ambil_data_dashboard() -> dict:
     rows_noo = sb_select(TABLE_SUBMIT_NOO, order="created_at.desc", limit=1000)
     df_noo   = pd.DataFrame(rows_noo) if rows_noo else pd.DataFrame()
@@ -1522,7 +1522,7 @@ document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.get
 # HALAMAN: HISTORY
 # ═════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=30, show_spinner=False)
+@swr_cache(ttl=30)
 def _riwayat_cache():
     return sb_select(TABLE_RIWAYAT, order="waktu.desc", limit=200)
 
@@ -1554,7 +1554,7 @@ def _callback_ukuran_halaman():
 TABLE_USER = "users"
 TAGGING_BD = "BD SUPPORT"
 
-@st.cache_data(ttl=30, show_spinner=False)
+@swr_cache(ttl=60)
 def _sb_users_list() -> list:
     r = requests.get(
         f"{SUPABASE_URL}/rest/v1/{TABLE_USER}",
@@ -1916,6 +1916,8 @@ def main():
 
     # Login gate
     from login_page import require_login, keluar
+    # mulai memuat data berat di latar belakang selagi user masih di halaman login
+    _shared.prewarm(ambil_raw_noo, ambil_data_dashboard, _riwayat_cache)
     user = require_login()
 
     IZIN_MASUK = {"RSA", "BD SUPPORT"}
