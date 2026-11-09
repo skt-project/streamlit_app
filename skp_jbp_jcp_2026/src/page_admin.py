@@ -17,7 +17,7 @@ from src.service import (
     dashboard_stats,
 )
 from src.sheets import COL_BRAND, COL_CODE, COL_NAME, COL_PROGRAM, COL_REGION, expected_documents, now_wib
-from src.storage import StorageError, build_zip
+from src.storage import StorageError, build_zip, object_name
 from src.validation import BRANDS, PROGRAMS, QUARTERS
 
 MAX_ATTEMPTS = 5
@@ -196,7 +196,7 @@ def _gallery(uploaded: pd.DataFrame, backends: Backends) -> None:
                 columns={COL_PROGRAM: "Program", "Nama File": "Nama dokumen"})
             config = {}
             if can_link:
-                table["Buka"] = [backends.storage.signed_url(p) for p in docs["GCS Path"]]
+                table["Buka"] = [backends.storage.signed_url(object_name(p)) for p in docs["GCS Path"]]
                 config["Buka"] = st.column_config.LinkColumn("Buka", display_text="Buka PDF ↗",
                                                              help="Link berlaku 15 menit")
             st.dataframe(table, hide_index=True, width="stretch", column_config=config)

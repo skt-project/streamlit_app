@@ -67,8 +67,10 @@ dikosongkan dan diupload belakangan.
 Nama file : SKP - {NAMA TOKO} - {NOMOR SKP}.pdf      ("/" diganti "_", karakter ilegal dihapus)
 Object    : 2026 Q1/jbp/{region}/{nama file}
             2026 Q4/jcp/{region}/{nama file}
+GCS Path  : gs://{GCS_BUCKET}/{object}                 (nilai di kolom GCS Path pada log)
 ```
-Contoh: `2026 Q3/jbp/East Java/SKP - CONTOH BEAUTY STORE - 9280_FCR_SKP_P1B_GT_X_2026.pdf`
+Contoh object: `2026 Q3/jbp/East Java/SKP - CONTOH BEAUTY STORE - 9280_FCR_SKP_P1B_GT_X_2026.pdf`
+Di log tertulis: `gs://nama-bucket-skp/2026 Q3/jbp/East Java/SKP - CONTOH BEAUTY STORE - 9280_FCR_SKP_P1B_GT_X_2026.pdf`
 
 - Region kosong → folder `TANPA REGION`.
 - Karena setiap upload selalu punya nomor SKP, pola cadangan `TANPA-NOMOR_{BRAND}_{PROGRAM}_2026_Qx`
@@ -88,6 +90,9 @@ Dibuat otomatis **pada submit pertama** (membuka aplikasi tidak menulis apa pun)
 `Timestamp, PIC Submit, Kode Toko/Group, Nama Toko/Group, Region, Brand, Jenis Program, Kuartal, Nomor SKP,
 Nama File, GCS Path, Status, Uploader`.
 - `Timestamp` dalam WIB (`YYYY-MM-DD HH:MM:SS`).
+- `GCS Path`: lokasi lengkap file di bucket, `gs://{bucket}/{object}` (mode lokal: `local://{object}`).
+  Baris lama yang hanya berisi `{object}` tanpa `gs://` tetap terbaca. ZIP admin selalu memakai struktur
+  `{object}` (tanpa nama bucket).
 - `Status`: `Uploaded` (pertama kali) atau `Replaced` (upload ulang), opsional `(cek nama file)`.
 - `Uploader` = nama PIC Submit (upload tanpa login, jadi tidak ada identitas lain).
 - Data ditulis dengan mode **RAW**: kode seperti `0012` tetap teks dan isian seperti `=HYPERLINK(...)`

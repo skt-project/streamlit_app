@@ -24,9 +24,27 @@ class StorageError(RuntimeError):
     """Error with a message that is safe to show to end users."""
 
 
+def object_name(location: str) -> str:
+    """Object name inside the bucket from what the log's 'GCS Path' holds.
+
+    'gs://bucket/2026 Q1/jbp/R/f.pdf' -> '2026 Q1/jbp/R/f.pdf'
+    'local://2026 Q1/jbp/R/f.pdf'     -> '2026 Q1/jbp/R/f.pdf'
+    '2026 Q1/jbp/R/f.pdf' (older rows) -> unchanged
+    """
+    value = str(location or "").strip()
+    if value.startswith("gs://"):
+        rest = value[len("gs://"):]
+        return rest.split("/", 1)[1] if "/" in rest else ""
+    if value.startswith("local://"):
+        return value[len("local://"):]
+    return value
+
+
 class DocumentStorage(Protocol):
     label: str
     supports_links: bool
+
+    def uri(self, path: str) -> str: ...
 
     def upload_pdf(self, path: str, data: bytes) -> None: ...
 
@@ -59,6 +77,10 @@ class GCSStorage:
         self._bucket = client.bucket(bucket_name)
         self._bucket_name = bucket_name
         self.label = f"gs://{bucket_name}"
+
+    def uri(self, path: str) -> str:
+        """Full location written to the log, e.g. gs://bucket/2026 Q1/jbp/Region/file.pdf."""
+        return f"gs://{self._bucket_name}/{path}"
 
     def upload_pdf(self, path: str, data: bytes) -> None:
         from google.cloud.storage.retry import DEFAULT_RETRY
@@ -117,6 +139,9 @@ class LocalStorage:
         self._root = Path(root).resolve()
         self.label = f"folder lokal …/{self._root.parent.name}/{self._root.name}"
 
+    def uri(self, path: str) -> str:
+        return f"local://{path}"
+
     def _resolve(self, path: str) -> Path:
         target = (self._root / path).resolve()
         if self._root not in target.parents:
@@ -166,7 +191,8 @@ def build_zip(
     """Build a ZIP in memory (io.BytesIO). Entry names are the object paths, so
     the folder layout is '2026 Qx/jbp|jcp/{region}/{file}.pdf'. Nothing is
     written to GCS or to disk."""
-    unique = sorted({p for p in paths if p})
+    # Log rows hold gs://bucket/...; the ZIP keeps the in-bucket layout '2026 Qx/jbp|jcp/{region}/...'.
+    unique = sorted({object_name(p) for p in paths if object_name(p)})
     if len(unique) > max_files:
         raise StorageError(
             f"Terlalu banyak dokumen untuk satu ZIP ({len(unique)}). Maksimal {max_files}; persempit filter."

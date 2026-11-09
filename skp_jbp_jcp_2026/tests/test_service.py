@@ -17,7 +17,7 @@ from src.service import (
     submit_documents,
 )
 from src.sheets import LocalLogStore, expected_documents, logs_to_frame
-from src.storage import LocalStorage, StorageError, build_zip
+from src.storage import GCSStorage, LocalStorage, StorageError, build_zip, object_name
 from tests.conftest import pdf_bytes
 
 SKP_Q4 = "9784/SKT/SKP/P1B/GT/XI/2026"
@@ -43,7 +43,7 @@ def test_submit_uploads_file_and_writes_log(store, backends):
     assert storage.download(path) == doc.data
     df = logs_to_frame(logs.read_values())
     row = df.iloc[0]
-    assert (row["PIC Submit"], row["Kuartal"], row["Status"], row["GCS Path"]) == ("Budi", "2026 Q4", "Uploaded", path)
+    assert (row["PIC Submit"], row["Kuartal"], row["Status"], row["GCS Path"]) == ("Budi", "2026 Q4", "Uploaded", "local://" + path)
 
 
 def test_reupload_overwrites_file_and_metadata(store, backends):
@@ -55,7 +55,7 @@ def test_reupload_overwrites_file_and_metadata(store, backends):
     df = logs_to_frame(logs.read_values())
     assert len(logs.read_values()) == 2  # header + one row, no duplicate
     assert df.iloc[0]["PIC Submit"] == "Sari" and df.iloc[0]["Status"] == "Replaced"
-    assert storage.download(result.saved[0]["GCS Path"]) == new_bytes
+    assert storage.download(object_name(result.saved[0]["GCS Path"])) == new_bytes
 
 
 def test_reupload_with_corrected_skp_removes_superseded_file(store, backends):
@@ -64,7 +64,7 @@ def test_reupload_with_corrected_skp_removes_superseded_file(store, backends):
     old_path = first.saved[0]["GCS Path"]
     second = submit_documents(store, "Budi", [_doc(store)], storage, logs)
     assert second.removed_old == [old_path]
-    assert storage.download(old_path) is None
+    assert storage.download(object_name(old_path)) is None
     assert len(logs_to_frame(logs.read_values())) == 1
 
 
@@ -82,7 +82,7 @@ def test_multiple_documents_in_one_submit(store, backends):
             _doc(store, brand="FACERINNA", quarter="2026 Q1", skp="9280/FCR/SKP/P1B/GT/X/2026")]
     result = submit_documents(store, "Budi", docs, storage, logs)
     assert result.ok and len(result.saved) == 3
-    assert {r["GCS Path"].split("/")[1] for r in result.saved} == {"jbp", "jcp"}
+    assert {object_name(r["GCS Path"]).split("/")[1] for r in result.saved} == {"jbp", "jcp"}
 
 
 def test_manual_selection_without_skp_number_is_allowed(store, backends):
@@ -277,3 +277,63 @@ def test_loading_popup_runs_fast_to_98_then_done_shows_100():
     assert 'class="skp-loading"' in running
     done = loading_html("Memuat", done=True)
     assert 'class="skp-loading done"' in done and "Selesai" in done  # 100% only after real work
+
+
+# --- GCS Path = full gs:// location ------------------------------------------------------
+
+class GcsLikeStorage(LocalStorage):
+    """Local files, but log locations written in GCS form exactly like the live app."""
+
+    def uri(self, path):
+        return f"gs://skp-bucket/{path}"
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("gs://skp-bucket/2026 Q1/jbp/East Java/f.pdf", "2026 Q1/jbp/East Java/f.pdf"),
+    ("local://2026 Q1/jbp/East Java/f.pdf", "2026 Q1/jbp/East Java/f.pdf"),
+    ("2026 Q1/jbp/East Java/f.pdf", "2026 Q1/jbp/East Java/f.pdf"),  # older rows without scheme
+    ("gs://skp-bucket", ""),
+    ("", ""),
+])
+def test_object_name_from_log_location(value, expected):
+    assert object_name(value) == expected
+
+
+def test_gcs_storage_uri_is_full_bucket_location():
+    class FakeClient:
+        def bucket(self, name):
+            return object()
+
+    assert GCSStorage(FakeClient(), "skp-bucket").uri("2026 Q4/jbp/R/f.pdf") == "gs://skp-bucket/2026 Q4/jbp/R/f.pdf"
+
+
+def test_log_holds_full_gs_uri_and_zip_keeps_bucket_layout(store, tmp_path):
+    storage, logs = GcsLikeStorage(tmp_path / "gcs"), LocalLogStore(tmp_path / "log.csv")
+    submit_documents(store, "Budi", [_doc(store)], storage, logs)
+    location = logs_to_frame(logs.read_values()).iloc[0]["GCS Path"]
+    assert location == "gs://skp-bucket/2026 Q4/jbp/East Java/SKP - TOKO ALFA - 9784_SKT_SKP_P1B_GT_XI_2026.pdf"
+    names = zipfile.ZipFile(io.BytesIO(build_zip([location], storage).data)).namelist()
+    assert names == ["2026 Q4/jbp/East Java/SKP - TOKO ALFA - 9784_SKT_SKP_P1B_GT_XI_2026.pdf"]
+
+
+def test_reupload_overwrite_and_superseded_cleanup_work_with_gs_uris(store, tmp_path):
+    storage, logs = GcsLikeStorage(tmp_path / "gcs"), LocalLogStore(tmp_path / "log.csv")
+    first = submit_documents(store, "Budi", [_doc(store, skp="9999/SKT/TYPO")], storage, logs)
+    second = submit_documents(store, "Budi", [_doc(store)], storage, logs)
+    assert second.removed_old == [first.saved[0]["GCS Path"]]
+    assert storage.download(object_name(first.saved[0]["GCS Path"])) is None
+    assert storage.download(object_name(second.saved[0]["GCS Path"])) is not None
+    assert len(logs_to_frame(logs.read_values())) == 1
+
+
+def test_superseded_row_from_another_bucket_is_never_deleted(store, tmp_path):
+    storage, logs = GcsLikeStorage(tmp_path / "gcs"), LocalLogStore(tmp_path / "log.csv")
+    old_object = "2026 Q4/jbp/East Java/SKP - TOKO ALFA - OLD.pdf"
+    storage.upload_pdf(old_object, pdf_bytes())
+    logs.upsert([{"Timestamp": "2026-11-01 08:00:00", "PIC Submit": "Lama", "Kode Toko/Group": store.code,
+                  "Nama Toko/Group": store.name, "Region": store.region, "Brand": "SKINTIFIC", "Jenis Program": "JBP",
+                  "Kuartal": "2026 Q4", "Nomor SKP": "OLD", "Nama File": "x.pdf",
+                  "GCS Path": "gs://bucket-lain/" + old_object, "Uploader": "Lama"}])
+    result = submit_documents(store, "Budi", [_doc(store)], storage, logs)
+    assert result.ok and result.removed_old == []
+    assert storage.download(old_object) is not None  # different bucket -> left alone

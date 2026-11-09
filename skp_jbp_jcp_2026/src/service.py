@@ -21,7 +21,7 @@ from src.sheets import (
     log_key,
     now_wib,
 )
-from src.storage import DocumentStorage, StorageError
+from src.storage import DocumentStorage, StorageError, object_name
 from src.validation import (
     FileCheck,
     build_object_path,
@@ -71,11 +71,11 @@ def plan_document(store: Store, brand: str, program: str, quarter: str, skp_numb
 def resolve_path_collisions(store: Store, docs: list[PlannedDocument], logs: pd.DataFrame) -> list[PlannedDocument]:
     """Two different combinations must never share one object (that would
     overwrite another document). On a clash the brand is added to the name."""
-    owner: dict[str, tuple[str, ...]] = {}
+    owner: dict[str, tuple[str, ...]] = {}  # object name inside the bucket -> combination key
     if not logs.empty:
         for rec in logs.to_dict("records"):
-            if rec.get("GCS Path"):
-                owner.setdefault(rec["GCS Path"], log_key(rec))
+            if object_name(rec.get("GCS Path")):
+                owner.setdefault(object_name(rec["GCS Path"]), log_key(rec))
     for doc in docs:
         key = log_key({COL_CODE: store.code, COL_BRAND: doc.brand, COL_PROGRAM: doc.program, "Kuartal": doc.quarter})
         holder = owner.get(doc.object_path)
@@ -138,7 +138,7 @@ def submit_documents(store: Store, pic: str, docs: list[PlannedDocument], storag
             "Kuartal": doc.quarter,
             "Nomor SKP": doc.skp_number,
             "Nama File": doc.target_filename,
-            "GCS Path": doc.object_path,
+            "GCS Path": storage.uri(doc.object_path),  # full location, e.g. gs://bucket/2026 Q4/jbp/...
             "Uploader": uploader or pic,
             "_note": NOTE_NAME_CHECK if doc.name_warning and doc.skp_number else "",
         })
@@ -161,13 +161,18 @@ def submit_documents(store: Store, pic: str, docs: list[PlannedDocument], storag
         key = log_key(rec)
         rec["Status"] = ("Replaced" if key in plan.previous else "Uploaded") + (f" ({rec['_note']})" if rec["_note"] else "")
         result.saved.append({k: v for k, v in rec.items() if not k.startswith("_")})
-        old_path = plan.previous.get(key, {}).get("GCS Path", "")
+        old_location = plan.previous.get(key, {}).get("GCS Path", "")
+        old_path, new_path = object_name(old_location), object_name(rec["GCS Path"])
+        in_use = {object_name(p) for p in plan.paths_in_use}
+        # Only touch objects in the bucket this app writes to (a row written for
+        # another bucket is left alone).
+        same_bucket = "://" not in old_location or old_location == storage.uri(old_path)
         # Same combination, new object name (e.g. SKP number corrected in the
         # source sheet): remove the superseded file so one combination = one file.
-        if old_path and old_path != rec["GCS Path"] and old_path not in plan.paths_in_use:
+        if old_path and same_bucket and old_path != new_path and old_path not in in_use:
             try:
                 if storage.delete(old_path):
-                    result.removed_old.append(old_path)
+                    result.removed_old.append(storage.uri(old_path))
             except Exception as exc:  # noqa: BLE001 - cleanup must never fail a submit
                 log.warning("Could not remove superseded object: %s", type(exc).__name__)
     return result
