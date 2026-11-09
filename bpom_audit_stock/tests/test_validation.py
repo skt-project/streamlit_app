@@ -152,7 +152,7 @@ def test_missing_is_reported_per_distributor():
 # ── data referensi & template ───────────────────────────────────────────────
 
 def test_reference_data_loads():
-    assert len(r.load_distributors(DIST_FILE)) == 94
+    assert len(r.load_distributors(DIST_FILE)) == 97
     skus = catalogue()
     assert len(skus) == 66 and all(s.isi and s.product_name for s in skus)
 
