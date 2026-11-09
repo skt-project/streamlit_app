@@ -1065,6 +1065,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         ra2 = res_df.get("remaining_allocation_qty_region", pd.Series([0]*len(res_df), index=res_df.index))
         sc2 = res_df.get("supply_control_status_gt", pd.Series([""]*len(res_df), index=res_df.index))
         bp3 = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
+        bp_fin = pd.to_numeric(res_df["sugg_qty_final"], errors="coerce").fillna(0)
         avg2 = res_df.get("avg_weekly_st_lm_qty", pd.Series([0]*len(res_df), index=res_df.index))
 
 #-----------------KLO MAU TAMBAH KOLOM BARU---------------
@@ -1080,11 +1081,11 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["Customer SKU Code"].isin(manual_reject_approval), #7
             res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
             sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]), #9
-            ((avg2 == 0) & (bp3 == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])), #10
-            bp3 == 0, #11
-            (res_df["PO Qty"] > bp3)  , #12
-            res_df["PO Qty"] < bp3, #13
-            res_df["PO Qty"] == bp3, #14
+            ((avg2 == 0) & (bp_fin == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])), #10
+            bp_fin == 0, #11
+            (res_df["PO Qty"] > bp_fin)  , #12
+            res_df["PO Qty"] < bp_fin, #13
+            res_df["PO Qty"] == bp_fin, #14
         ]
         choices = [
             "Price Not Available Yet",                              #1
