@@ -6,7 +6,10 @@ import re
 import zipfile
 from datetime import datetime
 
-st.set_page_config(page_title="Modify Qty per SKU", layout="wide", page_icon="✏️")
+try:  # saat dijalankan dari pu.py, set_page_config sudah dipanggil di sana
+    st.set_page_config(page_title="Modify Qty per SKU", layout="wide", page_icon="✏️")
+except Exception:
+    pass
 
 # ---------- Global font size override ----------
 st.markdown("""
