@@ -19,7 +19,8 @@ CSS = """
   --skp-line: #e3e3e3;
   --skp-soft: #f6f6f6;
 }
-.block-container { max-width: 1240px; padding-top: 1.25rem; padding-bottom: 4rem; }
+/* Top padding clears Streamlit's header bar (~3.75rem; opaque on Streamlit Cloud). */
+.block-container { max-width: 1240px; padding-top: 5rem; padding-bottom: 4rem; }
 html, body, [class*="css"] { font-size: 16px; }
 h1, h2, h3 { letter-spacing: -0.02em; }
 
@@ -73,7 +74,7 @@ button[data-variant="pills"][aria-pressed="true"] * { color: #ffffff !important;
   background: var(--skp-soft); border-radius: 8px; padding: .2rem .45rem; word-break: break-all; }
 
 @media (max-width: 760px) {
-  .block-container { padding: .75rem 1rem 3rem; }
+  .block-container { padding: 4.5rem 1rem 3rem; }
   .skp-steps { grid-template-columns: 1fr; }
   .skp-facts { grid-template-columns: 1fr 1fr; }
   .skp-wordmark span { display: none; }

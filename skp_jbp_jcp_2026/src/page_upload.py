@@ -8,7 +8,17 @@ import streamlit as st
 from src import ui
 from src.runtime import Backends, DataUnavailable, clear_log_cache, load_logs, load_source
 from src.service import PlannedDocument, plan_document, resolve_path_collisions, submit_documents, uploads_for_store
-from src.sheets import Detection, Store, detect_programs, search_stores_by_code, search_stores_by_name, store_from_index
+from src.sheets import (
+    Detection,
+    Store,
+    detect_programs,
+    list_stores,
+    region_options,
+    search_stores_by_code,
+    search_stores_by_name,
+    store_from_index,
+    stores_in_region,
+)
 from src.validation import (
     BRANDS,
     PROGRAMS,
@@ -19,7 +29,7 @@ from src.validation import (
     validate_pic,
 )
 
-SEARCH_LIMIT = 50
+NO_REGION_LABEL = "Region belum diisi"
 
 
 def _nonce() -> int:
@@ -30,9 +40,9 @@ def _k(name: str) -> str:
     return f"{name}__{_nonce()}"
 
 
-def _clear_search() -> None:
-    st.session_state[_k("q_code")] = ""
-    st.session_state[_k("q_name")] = ""
+def _clear_search(*keys: str) -> None:
+    for key in keys:
+        st.session_state[key] = ""
 
 
 def _go(page: str) -> None:
@@ -83,38 +93,56 @@ def render(backends: Backends) -> None:
 # --------------------------------------------------------------------------
 
 def _search_store(index: pd.DataFrame) -> Store | None:
-    ui.section(1, "Cari toko")
-    st.caption("Isi **salah satu** saja: Kode atau Nama. Kolom yang lain otomatis terkunci.")
-    code_key, name_key = _k("q_code"), _k("q_name")
+    """Region first, then only that region's stores are listed (optionally
+    narrowed by code OR name — the other field locks)."""
+    ui.section(1, "Pilih region dan toko")
+    regions = dict(region_options(index))
+    region = st.selectbox(
+        "📍 Region",
+        options=list(regions),
+        format_func=lambda r: f"{r or NO_REGION_LABEL} ({regions[r]} toko)",
+        index=None,
+        placeholder="Pilih region terlebih dahulu…",
+        key=_k("region"),
+    )
+    if region is None:
+        st.info("Pilih region untuk menampilkan daftar toko.")
+        return None
+
+    subset = stores_in_region(index, region)
+    rk = region or "-"
+    code_key, name_key = _k(f"q_code_{rk}"), _k(f"q_name_{rk}")
     code_val = clean_cell(st.session_state.get(code_key, ""))
     name_val = clean_cell(st.session_state.get(name_key, ""))
+    st.caption("Pilih toko langsung dari daftar di bawah, atau persempit dengan **salah satu**: Kode atau Nama "
+               "(kolom yang lain otomatis terkunci).")
     c1, c2 = st.columns(2)
     c1.text_input("🔎 Kode Toko/Group", key=code_key, disabled=bool(name_val),
                   placeholder="contoh: ICES02525 atau nama group", max_chars=60)
     c2.text_input("🏪 Nama Toko/Group", key=name_key, disabled=bool(code_val),
                   placeholder="contoh: Beauty", max_chars=80)
     if code_val or name_val:
-        st.button("✖ Kosongkan pencarian", on_click=_clear_search)
-    if not (code_val or name_val):
-        st.info("Ketik kode atau nama toko, lalu tekan Enter.")
-        return None
+        st.button("✖ Kosongkan pencarian", on_click=_clear_search, args=(code_key, name_key))
 
     by_code = bool(code_val)
     query = code_val if by_code else name_val
-    results = (search_stores_by_code if by_code else search_stores_by_name)(index, query, SEARCH_LIMIT)
-    if not results:
-        st.warning(f"Tidak ada toko dengan {'kode' if by_code else 'nama'} yang mengandung “{query}”.")
-        return None
-    note = f" (ditampilkan {SEARCH_LIMIT} teratas — ketik lebih spesifik)" if len(results) >= SEARCH_LIMIT else ""
-    st.caption(f"{len(results)} toko ditemukan{note}.")
-    labels = {s.code: s.label for s in results}
+    if query:
+        results = (search_stores_by_code if by_code else search_stores_by_name)(subset, query, len(subset))
+        if not results:
+            st.warning(f"Tidak ada toko di region {region or NO_REGION_LABEL} dengan "
+                       f"{'kode' if by_code else 'nama'} yang mengandung “{query}”.")
+            return None
+        st.caption(f"{len(results)} dari {len(subset)} toko cocok.")
+    else:
+        results = list_stores(subset)
+    labels = {s.code: s.short_label for s in results}
     picked = st.selectbox(
-        "Pilih toko",
+        "🏪 Pilih toko",
         options=list(labels),
         format_func=lambda c: labels[c],
         index=0 if len(results) == 1 else None,
-        placeholder="Pilih toko dari hasil pencarian…",
-        key=_k(f"pick_{'code' if by_code else 'name'}_{query.upper()}"),
+        placeholder=f"Pilih dari {len(results)} toko (bisa diketik untuk mencari)…",
+        key=_k(f"pick_{rk}_{'code' if by_code else 'name'}_{query.upper()}"),
     )
     if not picked:
         return None

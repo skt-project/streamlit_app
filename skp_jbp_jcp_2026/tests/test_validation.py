@@ -7,12 +7,15 @@ from src.sheets import (
     SourceFormatError,
     detect_programs,
     expected_documents,
+    list_stores,
     logs_to_frame,
     parse_source_values,
     plan_log_upsert,
+    region_options,
     search_stores_by_code,
     search_stores_by_name,
     store_from_index,
+    stores_in_region,
 )
 from src.validation import (
     MAX_FILE_BYTES,
@@ -362,3 +365,25 @@ def test_pic_is_required_and_bounded():
     assert validate_pic("  ") == "PIC Submit wajib diisi."
     assert validate_pic("A" * 81) is not None
     assert validate_pic("Budi Santoso") is None
+
+
+# --- region dulu, baru daftar toko --------------------------------------------------
+
+def test_region_options_sorted_with_counts_and_blank_region_last(index):
+    assert region_options(index) == [("Bali Nusa Tenggara", 1), ("East Java", 2), ("Papua Maluku", 2), ("", 1)]
+
+
+def test_stores_in_region_and_list_sorted_by_name(index):
+    stores = list_stores(stores_in_region(index, "East Java"))
+    assert [s.code for s in stores] == ["BETA GROUP", "T100"]  # "Beta Beauty" < "TOKO ALFA"
+    assert stores[0].short_label == "BETA GROUP — Beta Beauty"
+
+
+def test_blank_region_stores_are_reachable(index):
+    assert [s.code for s in list_stores(stores_in_region(index, ""))] == ["E400"]
+
+
+def test_search_inside_region_only(index):
+    papua = stores_in_region(index, "Papua Maluku")
+    assert {s.code for s in search_stores_by_name(papua, "delta")} == {"D300", "D301"}
+    assert search_stores_by_code(papua, "T100") == []

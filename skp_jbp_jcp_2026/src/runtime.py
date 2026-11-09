@@ -124,6 +124,14 @@ def _source_values(cache_key: str, _source: SourceReader) -> list[list[str]]:
     return _source.read_values()
 
 
+@st.cache_data(ttl=SOURCE_TTL_SECONDS, show_spinner=False)
+def _parsed_source(cache_key: str, _source: SourceReader) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """One sheet read + parse + store index, shared by all users for 5 minutes,
+    so a click in the form does not re-process ~1,500 rows."""
+    df = parse_source_values(_source_values(cache_key, _source))
+    return df, build_store_index(df)
+
+
 @st.cache_data(ttl=LOG_TTL_SECONDS, show_spinner=False)
 def _log_values(cache_key: str, _logs: LogStore) -> list[list[str]]:
     return _logs.read_values()
@@ -134,13 +142,11 @@ def load_source(backends: Backends) -> tuple[pd.DataFrame, pd.DataFrame]:
     if backends.source is None:
         raise DataUnavailable(backends.error or "Sumber data toko belum dikonfigurasi.")
     try:
-        values = _source_values(backends.source.label + backends.settings.source_spreadsheet_id, backends.source)
-        df = parse_source_values(values)
+        return _parsed_source(backends.source.label + backends.settings.source_spreadsheet_id, backends.source)
     except ValueError as exc:  # SourceFormatError
         raise DataUnavailable(str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise DataUnavailable(friendly_google_error(exc, backends.settings)) from exc
-    return df, build_store_index(df)
 
 
 def load_logs(backends: Backends) -> pd.DataFrame:
@@ -159,3 +165,4 @@ def clear_log_cache() -> None:
 def clear_all_caches() -> None:
     _log_values.clear()
     _source_values.clear()
+    _parsed_source.clear()

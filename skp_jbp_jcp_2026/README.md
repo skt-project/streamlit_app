@@ -4,7 +4,9 @@ Aplikasi Streamlit untuk mengumpulkan dokumen **SKP JBP / JCP 2026** per toko, b
 Dokumen PDF disimpan di **Google Cloud Storage**, metadata dicatat di sheet **`SKP_UPLOAD_LOG`**, dan admin
 mendapat dashboard, compliance, gallery per toko, serta download ZIP.
 
-- Upload: tanpa login. Cari toko → pilih brand/program/kuartal → upload PDF (maks 1 MB) → rangkuman → konfirmasi.
+- Upload: tanpa login. Pilih region → pilih toko (daftar hanya berisi toko di region itu; bisa dipersempit
+  dengan Kode **atau** Nama) → pilih brand/program/kuartal → upload PDF (maks 1 MB) → rangkuman → konfirmasi.
+  Toko yang region-nya kosong di spreadsheet ada di pilihan "Region belum diisi".
 - Admin: login sederhana (username/password dari Secrets).
 - Responsif: desktop (lebar maks ±1240 px) dan mobile (satu kolom, tombol besar, tabel bisa digeser).
 

@@ -129,6 +129,11 @@ class Store:
         region = self.region or "Region belum diisi"
         return f"{self.code} — {self.name} · {region}"
 
+    @property
+    def short_label(self) -> str:
+        """Label inside one region's store list (region already chosen)."""
+        return f"{self.code} — {self.name}"
+
 
 def build_store_index(df: pd.DataFrame) -> pd.DataFrame:
     """One row per store code with a canonical name (most frequent, then first seen)."""
@@ -144,6 +149,29 @@ def build_store_index(df: pd.DataFrame) -> pd.DataFrame:
         region = next((r for r in grp[COL_REGION] if r), "")
         rows.append({"code": code, "name": canonical, "region": region, "aliases": aliases, "order": order})
     return pd.DataFrame(rows, columns=columns)
+
+
+def region_options(index: pd.DataFrame) -> list[tuple[str, int]]:
+    """(region, store count) sorted by name; stores without a region ('') come last
+    so they can still be reached."""
+    if index.empty:
+        return []
+    counts = index["region"].value_counts()
+    named = sorted((r, int(n)) for r, n in counts.items() if r)
+    return named + ([("", int(counts[""]))] if "" in counts.index else [])
+
+
+def stores_in_region(index: pd.DataFrame, region: str) -> pd.DataFrame:
+    """Store index rows for one region ('' = region not filled in)."""
+    if index.empty:
+        return index
+    return index[index["region"] == region]
+
+
+def list_stores(index: pd.DataFrame) -> list[Store]:
+    """All stores of an index subset, sorted by name (for the store dropdown)."""
+    rows = index.sort_values("name", key=lambda s: s.str.upper()) if not index.empty else index
+    return [Store(r.code, r.name, r.region, tuple(r.aliases)) for r in rows.itertuples(index=False)]
 
 
 def store_from_index(index: pd.DataFrame, code: str) -> Store | None:
