@@ -448,11 +448,11 @@ def tab_noo():
              help="Click to change status"),
         dict(name="Store ID",            label="Store ID (Existing: Editable)", kind="storeid", width=210,
              help="Type the Store ID here only when Validation = Existing. Otherwise it is generated automatically."),
-        dict(name="Distributor",         label="Distributor",         kind="select",  width=230, options=[""] + daftar_distributor()),
+        dict(name="Distributor",         label="Distributor",         kind="ro",      width=230),
         dict(name="Store Name",          label="Store Name",          kind="text",    width=180),
         dict(name="Customer Code",       label="Customer Code",       kind="ro",      width=150),
         dict(name="Customer Store Code", label="Customer Store Code", kind="text",    width=190),
-        dict(name="Customer Store Name", label="Customer Store Name", kind="text",    width=180),
+        dict(name="Customer Store Name", label="Customer Store Name", kind="ro",      width=180),
         dict(name="City",                label="City",                kind="select",  width=150, options=[""] + CITY),
         dict(name="Store Address",       label="Store Address",       kind="text",    width=200),
         dict(name="Longitude",           label="Longitude",           kind="number",  width=110),
@@ -463,8 +463,13 @@ def tab_noo():
     ]
     tempat_hapus = st.empty()      # pernyataan konfirmasi hapus ditaruh DI ATAS tabel (sama seperti SKU Mapping)
     warna_css = {k: v for k, v in WARNA_VALIDASI.items()}
-    hasil_edit = noo_grid(ss.snapshot, kolom_grid, key=f"noo_grid_{ss.kunci_editor}",
+    # Customer Store Name ditampilkan = Store Name (bukan nama distributor). Hanya tampilan: nilai asli di df_toko
+    # tetap dipakai sbg kunci Supabase (Customer Store Code + Customer Store Name), jadi dikembalikan setelah render.
+    tampil_grid = ss.snapshot.copy()
+    tampil_grid["Customer Store Name"] = tampil_grid["Store Name"]
+    hasil_edit = noo_grid(tampil_grid, kolom_grid, key=f"noo_grid_{ss.kunci_editor}",
                           select_all=select_all, warna=warna_css)
+    hasil_edit["Customer Store Name"] = ss.snapshot["Customer Store Name"]
 
     # Download: baris yang dicentang (kolom Select) saja; kalau tidak ada yang dicentang -> semua hasil filter
     dipilih_unduh = hasil_edit.index[hasil_edit["Pilih"] == True]
