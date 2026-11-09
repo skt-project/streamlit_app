@@ -715,8 +715,8 @@ def pivot_to_png_bytes(df: pd.DataFrame, kinds: list, title: str = "") -> bytes:
     fig, ax = plt.subplots(figsize=(max(8, n_cols * 1.5), max(1.0, n_rows * 0.24 + 0.6)))
     ax.axis('off')
     if title:
-        ax.set_title(title, fontsize=9, fontweight='bold', color='#5A1E38', pad=8, loc='left')
-    tbl = ax.table(cellText=df.values.tolist(), colLabels=df.columns.tolist(), loc='center', cellLoc='left')
+        ax.set_title(title, fontsize=9, fontweight='bold', color='#5A1E38', pad=20, loc='left')
+    tbl = ax.table(cellText=df.values.tolist(), colLabels=df.columns.tolist(), loc='upper left', cellLoc='left')
     tbl.auto_set_font_size(False); tbl.set_fontsize(7)
     tbl.auto_set_column_width(col=list(range(n_cols)))
     tbl.scale(1, 1.3)
