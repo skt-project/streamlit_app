@@ -5,7 +5,7 @@ Dokumen PDF disimpan di **Google Cloud Storage**, metadata dicatat di sheet **`S
 mendapat dashboard, compliance, gallery per toko, serta download ZIP.
 
 - Upload: tanpa login. Pilih region → pilih toko (daftar hanya berisi toko di region itu; bisa dipersempit
-  dengan Kode **atau** Nama) → pilih brand/program/kuartal → upload PDF (maks 1 MB) → rangkuman → konfirmasi.
+  dengan Kode **atau** Nama) → upload PDF (maks 1 MB) untuk setiap SKP toko itu → rangkuman → konfirmasi.
   Toko yang region-nya kosong di spreadsheet ada di pilihan "Region belum diisi".
 - Admin: login sederhana (username/password dari Secrets).
 - Responsif: desktop (lebar maks ±1240 px) dan mobile (satu kolom, tombol besar, tabel bisa digeser).
@@ -56,8 +56,11 @@ Pembersihan otomatis saat dibaca:
 - Satu kode bisa punya beberapa baris (group). Nama kanonik = nama yang paling sering muncul untuk kode itu;
   variasi nama lain tetap bisa dicari.
 
-**Auto-detect:** brand dari kolom *Brand*, program dari *Jenis Program*, kuartal dipilih otomatis jika
-kolom *SKP Qx 2026* berisi nomor. User tetap boleh menambah pilihan manual.
+**Dokumen yang diupload = paten sesuai spreadsheet:** untuk toko yang dipilih, aplikasi menampilkan satu area
+upload untuk setiap kombinasi *Brand* + *Jenis Program* + kuartal yang kolom *SKP Qx 2026*-nya berisi nomor.
+Tidak ada pilihan manual; untuk menambah dokumen, lengkapi dulu nomor SKP di spreadsheet (perubahan terbaca
+≤ 5 menit). Toko tanpa nomor SKP sama sekali tidak bisa mengupload. Kombinasi yang belum ada filenya boleh
+dikosongkan dan diupload belakangan.
 
 ### Nama file & lokasi di GCS
 ```
@@ -68,7 +71,8 @@ Object    : 2026 Q1/jbp/{region}/{nama file}
 Contoh: `2026 Q3/jbp/East Java/SKP - CONTOH BEAUTY STORE - 9280_FCR_SKP_P1B_GT_X_2026.pdf`
 
 - Region kosong → folder `TANPA REGION`.
-- Pilihan manual tanpa nomor SKP → `SKP - {NAMA TOKO} - TANPA-NOMOR_{BRAND}_{PROGRAM}_2026_Qx.pdf`.
+- Karena setiap upload selalu punya nomor SKP, pola cadangan `TANPA-NOMOR_{BRAND}_{PROGRAM}_2026_Qx`
+  di kode (`validation.fallback_skp_id`) tidak dipakai dari UI; hanya pengaman jika nomor kosong.
 - Nama file asli user **tidak** dipakai sebagai nama tujuan. Jika tidak mirip dengan nomor SKP, muncul
   **peringatan saja** (tidak ditolak) dan kolom *Status* di log diberi catatan `(cek nama file)`.
 

@@ -68,7 +68,7 @@ def test_region_lists_only_its_stores_without_typing(app):
     assert not app.exception and "Contoh Beauty Group" in _texts(app)
 
 
-def test_upload_search_by_code_autodetects_programs(app):
+def test_upload_list_is_fixed_by_the_skp_numbers_in_the_sheet(app):
     _open_upload(app, "East Java")
     assert "Mode lokal" in _texts(app)
     app.text_input[0].set_value("demo001").run()
@@ -77,13 +77,15 @@ def test_upload_search_by_code_autodetects_programs(app):
     assert app.selectbox[1].value == "DEMO001"  # satu hasil -> otomatis terpilih
     text = _texts(app)
     assert "TOKO CONTOH CANTIK" in text and "9951/SKT/SKP/P1B/GT/XI/2026" in text
-    checks = {c.label: c.value for c in app.checkbox}
-    assert checks["SKINTIFIC ✓"] and checks["FACERINNA ✓"] and not checks["TIMEPHORIA"]
-    assert checks["JBP ✓ terdeteksi"]
-    # Langkah 3 & 4 muncul, submit terkunci karena belum ada file/PIC
+    # No brand/program/quarter picking any more: no checkboxes, no pills, no old step title
+    assert not app.checkbox and "Pilih brand, program, dan kuartal" not in text
+    # Exactly the 4 SKP numbers of DEMO001 get an upload area, in brand -> program -> quarter order
+    headers = [m.value for m in app.markdown if str(m.value).startswith("**") and " · 2026 Q" in str(m.value)]
+    assert headers == ["**SKINTIFIC · JBP · 2026 Q3**", "**SKINTIFIC · JBP · 2026 Q4**",
+                       "**SKINTIFIC · JCP · 2026 Q4**", "**FACERINNA · JBP · 2026 Q3**"]
+    assert "4 dokumen SKP untuk toko ini" in text
     assert "Upload dokumen PDF" in text and "Periksa rangkuman" in text
-    submit = _button(app, "Submit dan tampilkan konfirmasi")
-    assert submit.disabled
+    assert _button(app, "Submit dan tampilkan konfirmasi").disabled  # belum ada file/PIC
 
 
 def test_upload_search_by_name_locks_code_field(app):
@@ -105,6 +107,13 @@ def test_store_without_region_can_be_selected(app):
     _open_upload(app, "")
     assert app.selectbox[1].value == "DEMO004"  # only store -> auto-selected
     assert "TANPA REGION" in _texts(app)
+
+
+def test_store_without_any_skp_number_cannot_upload(app):
+    _open_upload(app, "")  # DEMO004: no SKP numbers in the sheet
+    text = _texts(app)
+    assert "Belum ada nomor SKP untuk toko ini" in text
+    assert "Upload dokumen PDF" not in text and not app.text_input[2:]  # no PIC / upload step
 
 
 def test_admin_login_rejects_wrong_password_and_locks_out(app):

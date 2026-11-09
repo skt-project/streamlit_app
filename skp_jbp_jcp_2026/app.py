@@ -38,7 +38,7 @@ def landing() -> None:
         "Dokumen tersimpan rapi dan dapat dipantau oleh tim admin.</p></div>",
         unsafe_allow_html=True,
     )
-    steps = ["Pilih region, lalu toko.", "Pilih brand, program, dan kuartal.", "Upload PDF (maks 1 MB).",
+    steps = ["Pilih region, lalu toko.", "Upload PDF untuk setiap SKP (maks 1 MB).",
              "Periksa rangkuman.", "Konfirmasi submit."]
     st.markdown(
         '<div class="skp-steps">' + "".join(
@@ -50,7 +50,8 @@ def landing() -> None:
     with c1:
         st.markdown(
             '<div class="skp-card"><div class="icon">📤</div><h3>Upload SKP JBP atau JCP</h3>'
-            "<p>Pilih region dan toko, pilih program dan kuartal, lalu upload dokumen PDF. Tidak perlu login.</p></div>",
+            "<p>Pilih region dan toko, lalu upload PDF untuk setiap SKP yang tercatat di spreadsheet. "
+            "Tidak perlu login.</p></div>",
             unsafe_allow_html=True,
         )
         if st.button("Mulai upload →", type="primary", width="stretch", key="go_upload"):

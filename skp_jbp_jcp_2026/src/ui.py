@@ -31,11 +31,6 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 }
 .stTextInput input { min-height: 2.9rem; font-size: 1rem; }
 
-/* Quarter pills: make the selected state unmistakable */
-button[data-variant="pills"] { min-height: 2.6rem; padding: 0 1rem; }
-button[data-variant="pills"][aria-pressed="true"] { background: var(--skp-ink) !important; border-color: var(--skp-ink) !important; }
-button[data-variant="pills"][aria-pressed="true"] * { color: #ffffff !important; }
-
 .skp-wordmark { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .5rem; }
 .skp-wordmark b { font-size: 1.15rem; letter-spacing: .32em; color: var(--skp-ink); }
 .skp-wordmark span { font-size: .72rem; letter-spacing: .12em; color: var(--skp-muted); text-transform: uppercase; }
@@ -43,7 +38,7 @@ button[data-variant="pills"][aria-pressed="true"] * { color: #ffffff !important;
 .skp-hero h1 { font-size: clamp(2rem, 6vw, 3.4rem); line-height: 1.05; margin: .25rem 0 .5rem; }
 .skp-hero p { color: var(--skp-muted); font-size: 1.05rem; max-width: 720px; margin: 0; }
 
-.skp-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .6rem; margin: 1.25rem 0 1.5rem; }
+.skp-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; margin: 1.25rem 0 1.5rem; }
 .skp-step { border: 1px solid var(--skp-line); border-radius: 14px; padding: .8rem .9rem; background: #fff; }
 .skp-step b { display: inline-flex; width: 1.6rem; height: 1.6rem; border-radius: 999px; align-items: center;
   justify-content: center; background: var(--skp-ink); color: #fff; font-size: .85rem; margin-bottom: .35rem; }

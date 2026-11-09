@@ -1,4 +1,4 @@
-"""Upload flow: cari toko -> pilih brand/program/kuartal -> upload PDF ->
+"""Upload flow: region -> toko -> one PDF per SKP number in the spreadsheet ->
 rangkuman -> dialog konfirmasi -> GCS + SKP_UPLOAD_LOG."""
 from __future__ import annotations
 
@@ -81,9 +81,11 @@ def render(backends: Backends) -> None:
     previous = uploads_for_store(logs_df, store.code)
     _store_card(store, detection)
 
-    combos = _pick_programs(store, detection)
+    # Fixed by the spreadsheet: one upload per brand/program/quarter that has an SKP number.
+    combos = detection.combos()
     if not combos:
-        st.info("Pilih minimal satu brand, program, dan kuartal untuk menampilkan area upload.")
+        st.warning("Belum ada nomor SKP untuk toko ini di spreadsheet, jadi belum ada dokumen yang bisa diupload. "
+                   "Hubungi admin untuk melengkapi nomor SKP.")
         return
 
     docs, missing = _upload_documents(store, detection, combos, previous)
@@ -161,57 +163,20 @@ def _store_card(store: Store, detection: Detection) -> None:
             st.caption("Nama lain di spreadsheet: " + "; ".join(store.aliases))
         if not store.region:
             st.warning("Region toko kosong di spreadsheet. Dokumen akan disimpan di folder “TANPA REGION”.")
-        programs = sorted(detection.programs, key=lambda bp: (BRANDS.index(bp[0]), PROGRAMS.index(bp[1])))
+        programs = sorted({(b, p) for b, p, _ in detection.combos()},
+                          key=lambda bp: (BRANDS.index(bp[0]), PROGRAMS.index(bp[1])))
         if programs:
-            st.markdown("**Program terdeteksi**<br>" + ui.chips([f"{b} · {p}" for b, p in programs]),
-                        unsafe_allow_html=True)
             rows = [[b, p, *[detection.skp_number(b, p, q) or "—" for q in QUARTERS]] for b, p in programs]
-            st.markdown("**Nomor SKP per kuartal**")
+            st.markdown("**SKP yang tersedia di spreadsheet**")
             ui.scroll_table(["Brand", "Program", *QUARTERS], rows)
-        else:
-            st.info("Belum ada program/nomor SKP untuk toko ini di spreadsheet. Anda tetap bisa memilih manual.")
         for conflict in detection.conflicts:
             st.warning(conflict)
 
 
-def _pick_programs(store: Store, detection: Detection) -> list[tuple[str, str, str]]:
-    ui.section(2, "Pilih brand, program, dan kuartal")
-    st.caption("Tanda ✓ = terdeteksi dari spreadsheet dan sudah dipilih otomatis. Anda boleh menambah atau mengurangi pilihan.")
-    sk = f"{_nonce()}_{store.code}"
-    brand_cols = st.columns(len(BRANDS))
-    chosen_brands = [
-        brand for col, brand in zip(brand_cols, BRANDS)
-        if col.checkbox(f"{brand}{' ✓' if brand in detection.brands else ''}", value=brand in detection.brands,
-                        key=f"brand_{sk}_{brand}")
-    ]
-    combos: list[tuple[str, str, str]] = []
-    for brand in chosen_brands:
-        with st.container(border=True):
-            st.markdown(f"**{brand}**")
-            for program in PROGRAMS:
-                detected = (brand, program) in detection.programs
-                on = st.checkbox(f"{program}{' ✓ terdeteksi' if detected else ''}", value=detected,
-                                 key=f"prog_{sk}_{brand}_{program}")
-                if not on:
-                    continue
-                picked = st.pills(
-                    f"Kuartal {brand} {program}",
-                    QUARTERS,
-                    selection_mode="multi",
-                    default=detection.quarters_for(brand, program),
-                    format_func=lambda q, b=brand, p=program: f"{q} ✓" if detection.skp_number(b, p, q) else q,
-                    key=f"qtr_{sk}_{brand}_{program}",
-                    label_visibility="collapsed",
-                ) or []
-                if not picked:
-                    st.caption(f"Pilih kuartal untuk {program}.")
-                combos.extend((brand, program, q) for q in QUARTERS if q in picked)
-    return combos
-
-
 def _upload_documents(store: Store, detection: Detection, combos, previous) -> tuple[list[PlannedDocument], list]:
-    ui.section(3, "Upload dokumen PDF")
-    st.caption("Satu file PDF per kombinasi, maksimal 1 MB. Upload ulang untuk kombinasi yang sama akan menimpa file lama.")
+    ui.section(2, "Upload dokumen PDF")
+    st.caption(f"{len(combos)} dokumen SKP untuk toko ini, sesuai nomor SKP di spreadsheet. Satu file PDF per SKP, "
+               "maksimal 1 MB. Yang belum ada filenya boleh dikosongkan dulu; upload ulang akan menimpa file lama.")
     st.text_input("👤 PIC Submit (wajib)", key=_k("pic"), max_chars=80, placeholder="Nama lengkap yang mengupload")
     sk = f"{_nonce()}_{store.code}"
     keys = {combo: f"file_{sk}_{combo[0]}_{combo[1]}_{combo[2]}" for combo in combos}
@@ -240,10 +205,7 @@ def _upload_areas(store: Store, detection: Detection, combos, previous, keys) ->
         target = build_target_filename(store.name, skp, brand, program, quarter)
         with st.container(border=True):
             st.markdown(f"**{brand} · {program} · {quarter}**")
-            if skp:
-                st.markdown(f"Nomor SKP: **{ui.esc(skp)}**", unsafe_allow_html=True)
-            else:
-                st.caption("⚠️ Nomor SKP tidak ada di spreadsheet (pilihan manual). Upload tetap diperbolehkan.")
+            st.markdown(f"Nomor SKP: **{ui.esc(skp)}**", unsafe_allow_html=True)
             st.markdown(f'Disimpan sebagai: <span class="skp-filename">{ui.esc(target)}</span>', unsafe_allow_html=True)
             prev = previous.get((brand, program, quarter))
             if prev:
@@ -287,7 +249,7 @@ def _summary_rows(docs: list[PlannedDocument], missing) -> list[dict]:
 
 
 def _summary_and_submit(backends: Backends, store: Store, combos, docs, missing, detection: Detection) -> None:
-    ui.section(4, "Periksa rangkuman")
+    ui.section(3, "Periksa rangkuman")
     pic = clean_cell(st.session_state.get(_k("pic"), ""))
     with st.container(border=True):
         ui.facts([

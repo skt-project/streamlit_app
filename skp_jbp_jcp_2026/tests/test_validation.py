@@ -387,3 +387,10 @@ def test_search_inside_region_only(index):
     papua = stores_in_region(index, "Papua Maluku")
     assert {s.code for s in search_stores_by_name(papua, "delta")} == {"D300", "D301"}
     assert search_stores_by_code(papua, "T100") == []
+
+
+def test_combos_are_the_fixed_upload_list_in_brand_program_quarter_order(source_df):
+    det = detect_programs(source_df, "T100")
+    assert det.combos() == [("SKINTIFIC", "JBP", "2026 Q3"), ("SKINTIFIC", "JBP", "2026 Q4"),
+                            ("SKINTIFIC", "JCP", "2026 Q4"), ("FACERINNA", "JBP", "2026 Q1")]
+    assert detect_programs(source_df, "E400").combos() == []  # no SKP number -> nothing to upload

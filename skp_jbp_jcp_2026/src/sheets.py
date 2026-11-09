@@ -249,6 +249,11 @@ class Detection:
     def quarters_for(self, brand: str, program: str) -> list[str]:
         return [q for q in QUARTERS if (brand, program, q) in self.skp]
 
+    def combos(self) -> list[tuple[str, str, str]]:
+        """The fixed upload list: every (brand, program, quarter) with an SKP number,
+        ordered brand -> program -> quarter."""
+        return [(b, p, q) for b in BRANDS for p in PROGRAMS for q in QUARTERS if (b, p, q) in self.skp]
+
 
 def detect_programs(df: pd.DataFrame, code: str) -> Detection:
     """Auto-detection: brand from 'Brand', program from 'Jenis Program', quarter
