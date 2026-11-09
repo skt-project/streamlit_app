@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -131,3 +132,89 @@ def mode_banner(mode, source_label: str, storage_label: str, log_label: str) -> 
         )
     for problem in mode.problems:
         st.error(problem)
+
+
+# --------------------------------------------------------------------------
+# Loading popup: 1% -> 98% is a fast CSS animation in the browser (no server
+# round-trips); it then holds at 98% until the real work finishes, shows 100%
+# briefly and disappears.
+# --------------------------------------------------------------------------
+
+LOADING_CSS = """
+<style>
+@property --skp-p { syntax: '<integer>'; initial-value: 0; inherits: true; }
+@keyframes skp-fill { from { --skp-p: 1; } to { --skp-p: 98; } }
+.skp-loading { position: fixed; inset: 0; z-index: 1000100; display: flex; align-items: center;
+  justify-content: center; background: rgba(255, 255, 255, .86); backdrop-filter: blur(2px); }
+.skp-loading .skp-card-l { width: min(380px, 86vw); background: #fff; border: 1px solid #e3e3e3; border-radius: 18px;
+  padding: 1.4rem 1.5rem 1.2rem; box-shadow: 0 12px 40px rgba(0, 0, 0, .12); --skp-p: 98;
+  animation: skp-fill var(--skp-dur, 1s) cubic-bezier(.25, .8, .3, 1) both; counter-reset: skp var(--skp-p); }
+.skp-loading.done .skp-card-l { animation: none; --skp-p: 100; }
+.skp-loading .brand { font-weight: 800; letter-spacing: .32em; font-size: .85rem; color: #111; }
+.skp-loading .msg { margin: .55rem 0 .9rem; color: #111; font-size: 1rem; font-weight: 600; }
+.skp-loading .bar { height: 8px; background: #ececec; border-radius: 999px; overflow: hidden; }
+.skp-loading .bar i { display: block; height: 100%; width: calc(var(--skp-p) * 1%); background: #111; border-radius: 999px; }
+.skp-loading .row { display: flex; justify-content: space-between; margin-top: .45rem; font-size: .85rem; color: #5f6368; }
+.skp-loading .pct::after { content: counter(skp) "%"; font-variant-numeric: tabular-nums; color: #111; font-weight: 600; }
+</style>
+"""
+
+
+def loading_html(label: str, done: bool = False, fast_seconds: float = 1.0) -> str:
+    state = "Selesai" if done else "Mohon tunggu…"
+    return (
+        LOADING_CSS
+        + f'<div class="skp-loading{" done" if done else ""}" role="status" aria-live="polite">'
+        + f'<div class="skp-card-l" style="--skp-dur: {fast_seconds:.2f}s">'
+        + '<div class="brand">SKINTIFIC</div>'
+        + f'<div class="msg">{esc(label)}</div>'
+        + '<div class="bar"><i></i></div>'
+        + f'<div class="row"><span>{state}</span><span class="pct"></span></div>'
+        + "</div></div>"
+    )
+
+
+class LoadingOverlay:
+    """Full-screen loading popup around real work.
+
+    with ui.LoadingOverlay("Mengupload dokumen…"):
+        do_the_real_work()
+
+    `min_seconds` keeps the popup visible long enough to be readable when the
+    real work is very short; 100% is only shown after the work has finished.
+    """
+
+    def __init__(self, label: str, fast_seconds: float = 1.0, min_seconds: float = 0.9, done_seconds: float = 0.3):
+        self.label = label
+        self.fast_seconds = fast_seconds
+        self.min_seconds = min_seconds
+        self.done_seconds = done_seconds
+        self._placeholder = None
+        self._started = 0.0
+
+    def start(self) -> "LoadingOverlay":
+        self._placeholder = st.empty()
+        self._placeholder.markdown(loading_html(self.label, fast_seconds=self.fast_seconds), unsafe_allow_html=True)
+        self._started = time.monotonic()
+        return self
+
+    def finish(self, ok: bool = True) -> None:
+        """ok=True: hold until min_seconds, show 100% briefly, then close.
+        ok=False (error): close immediately; the caller shows the error."""
+        if self._placeholder is None:
+            return
+        if ok:
+            remaining = self.min_seconds - (time.monotonic() - self._started)
+            if remaining > 0:
+                time.sleep(remaining)
+            self._placeholder.markdown(loading_html(self.label, done=True), unsafe_allow_html=True)
+            time.sleep(self.done_seconds)
+        self._placeholder.empty()
+        self._placeholder = None
+
+    def __enter__(self) -> "LoadingOverlay":
+        return self.start()
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.finish(ok=exc_type is None)
+        return False  # never swallow errors

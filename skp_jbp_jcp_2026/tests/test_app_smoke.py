@@ -144,3 +144,15 @@ def test_admin_dashboard_with_seeded_uploads(app, tmp_path):
     _button(app, "📦 Siapkan ZIP").click().run()
     assert not app.exception
     assert "ZIP siap: 1 dokumen" in _texts(app)
+
+
+def test_warm_up_popup_runs_once_per_session(app):
+    import time
+
+    t0 = time.monotonic()
+    app.run()
+    first = time.monotonic() - t0
+    assert app.session_state["booted"] and not app.exception
+    t0 = time.monotonic()
+    app.run()
+    assert time.monotonic() - t0 < first  # no second popup on the next interaction

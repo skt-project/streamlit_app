@@ -58,6 +58,7 @@ def render(backends: Backends) -> None:
     ui.mode_banner(backends.mode, backends.source.label if backends.source else "-",
                    backends.storage.label if backends.storage else "-", backends.logs.label if backends.logs else "-")
 
+    _run_pending_submit(backends)
     last = st.session_state.pop("submit_problem", None)
     if last:
         st.error(last)
@@ -213,6 +214,25 @@ def _upload_documents(store: Store, detection: Detection, combos, previous) -> t
     st.caption("Satu file PDF per kombinasi, maksimal 1 MB. Upload ulang untuk kombinasi yang sama akan menimpa file lama.")
     st.text_input("👤 PIC Submit (wajib)", key=_k("pic"), max_chars=80, placeholder="Nama lengkap yang mengupload")
     sk = f"{_nonce()}_{store.code}"
+    keys = {combo: f"file_{sk}_{combo[0]}_{combo[1]}_{combo[2]}" for combo in combos}
+    # Loading popup only on the rerun in which a NEW file arrived (not on every click).
+    seen: set = st.session_state.setdefault("seen_file_ids", set())
+    new_files = [f for f in (st.session_state.get(k) for k in keys.values())
+                 if f is not None and getattr(f, "file_id", None) not in seen]
+    overlay = ui.LoadingOverlay("Memeriksa file PDF…", fast_seconds=0.8, min_seconds=0.8).start() if new_files else None
+    try:
+        docs, missing = _upload_areas(store, detection, combos, previous, keys)
+    except Exception:
+        if overlay:
+            overlay.finish(ok=False)
+        raise
+    if overlay:
+        overlay.finish()
+        seen.update(f.file_id for f in new_files)
+    return docs, missing
+
+
+def _upload_areas(store: Store, detection: Detection, combos, previous, keys) -> tuple[list[PlannedDocument], list]:
     docs: list[PlannedDocument] = []
     missing: list[tuple[str, str, str]] = []
     for brand, program, quarter in combos:
@@ -232,7 +252,7 @@ def _upload_documents(store: Store, detection: Detection, combos, previous) -> t
             uploaded = st.file_uploader(
                 "File PDF (maks 1 MB)",
                 type=["pdf"],
-                key=f"file_{sk}_{brand}_{program}_{quarter}",
+                key=keys[(brand, program, quarter)],
                 max_upload_size=1,
                 help="Hanya PDF, maksimal 1 MB.",
             )
@@ -324,25 +344,45 @@ def _confirm_dialog(backends: Backends) -> None:
         st.session_state.pop("pending_submit", None)
         st.rerun()
     if c2.button("Konfirmasi & Upload", type="primary", width="stretch", key="dlg_confirm"):
-        with st.spinner("Menyimpan dokumen…"):
-            try:
-                result = submit_documents(store, pending["pic"], docs, backends.storage, backends.logs)
-            except ValueError as exc:
-                st.error(str(exc))
-                return
-        clear_log_cache()
-        st.session_state.pop("pending_submit", None)
-        if result.ok:
-            st.session_state["last_result"] = {"store": store, "pic": pending["pic"], "saved": result.saved,
-                                               "removed": result.removed_old}
-            st.session_state["form_nonce"] = _nonce() + 1  # fresh, empty form next time
-            _go("success")
-        else:
-            lines = [f"• {d.brand} {d.program} {d.quarter}: {msg}" for d, msg in result.failed]
-            if result.log_error:
-                lines.insert(0, result.log_error)
-            saved = len(result.saved)
-            head = f"{saved} dokumen tersimpan, {len(result.failed)} gagal." if saved else "Upload gagal."
-            st.session_state["submit_problem"] = head + "  \n" + "  \n".join(lines) + \
-                "  \nFile Anda masih terisi di form; tekan Submit lagi untuk mencoba ulang (tidak akan dobel)."
+        # Close the dialog; the page shows the loading popup while saving (_run_pending_submit).
+        st.session_state["submit_now"] = True
         st.rerun()
+
+
+def _run_pending_submit(backends: Backends) -> None:
+    """Runs right after the dialog closed: upload to GCS + write the log behind a
+    full-screen loading popup (which also prevents a second click)."""
+    if not st.session_state.pop("submit_now", False):
+        return
+    pending = st.session_state.pop("pending_submit", None)
+    if not pending:
+        return
+    store: Store = pending["store"]
+    docs: list[PlannedDocument] = pending["docs"]
+    overlay = ui.LoadingOverlay(f"Mengupload {len(docs)} dokumen & menyimpan data…",
+                                fast_seconds=1.2, min_seconds=1.2).start()
+    try:
+        result = submit_documents(store, pending["pic"], docs, backends.storage, backends.logs)
+    except ValueError as exc:
+        overlay.finish(ok=False)
+        st.session_state["submit_problem"] = str(exc)
+        return
+    except Exception:
+        overlay.finish(ok=False)
+        raise
+    finally:
+        clear_log_cache()
+    overlay.finish(ok=result.ok)
+    if result.ok:
+        st.session_state["last_result"] = {"store": store, "pic": pending["pic"], "saved": result.saved,
+                                           "removed": result.removed_old}
+        st.session_state["form_nonce"] = _nonce() + 1  # fresh, empty form next time
+        _go("success")
+        st.rerun()
+    lines = [f"• {d.brand} {d.program} {d.quarter}: {msg}" for d, msg in result.failed]
+    if result.log_error:
+        lines.insert(0, result.log_error)
+    saved = len(result.saved)
+    head = f"{saved} dokumen tersimpan, {len(result.failed)} gagal." if saved else "Upload gagal."
+    st.session_state["submit_problem"] = head + "  \n" + "  \n".join(lines) + \
+        "  \nFile Anda masih terisi di form; tekan Submit lagi untuk mencoba ulang (tidak akan dobel)."

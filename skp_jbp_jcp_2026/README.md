@@ -222,6 +222,11 @@ Semua test memakai fake lokal; tidak ada panggilan ke Google.
 
 ## 7. Batasan & catatan operasional
 
+- **Popup loading**: muncul (1) sekali per sesi saat aplikasi dibuka — sambil menyiapkan koneksi Google dan daftar
+  toko, (2) setelah file PDF baru masuk — sambil memeriksa file, (3) setelah *Konfirmasi & Upload* — sambil
+  mengupload ke GCS dan menulis spreadsheet. Angka 1→98% adalah animasi cepat di browser (±1 detik); popup
+  **berhenti di 98%** sampai proses aslinya selesai, baru tampil 100% lalu tertutup. Proses upload file dari
+  perangkat ke server terjadi di browser sebelum app berjalan, jadi progresnya tampil di kotak upload bawaan Streamlit.
 - **Ukuran file**: dibatasi 1 MB oleh `config.toml`, oleh widget, dan divalidasi ulang di server
   (cek ekstensi `.pdf` + signature `%PDF-`). File > 1 MB ditolak langsung oleh Streamlit dengan pesan
   bawaan *"File must be 1.0MB or smaller"*; di bawah setiap area upload ada penjelasan dalam Bahasa Indonesia.

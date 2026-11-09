@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 from src import page_admin, page_upload, ui  # noqa: E402  (set_page_config must run first)
-from src.runtime import get_backends  # noqa: E402
+from src.runtime import get_backends, load_source  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -93,8 +93,23 @@ def success_page() -> None:
         st.rerun()
 
 
+def warm_up() -> None:
+    """Once per browser session: loading popup while the Google clients and the
+    store list are prepared, so the upload page opens instantly afterwards.
+    Failures are not shown here; each page reports its own friendly error."""
+    if st.session_state.get("booted"):
+        return
+    with ui.LoadingOverlay("Menyiapkan aplikasi…", fast_seconds=1.0, min_seconds=1.0):
+        try:
+            load_source(get_backends())
+        except Exception:  # noqa: BLE001
+            logging.getLogger("skp").info("Warm-up incomplete; the page will show the error")
+    st.session_state["booted"] = True
+
+
 def main() -> None:
     ui.inject_css()
+    warm_up()
     if "page" not in st.session_state:
         requested = st.query_params.get("page", "home")
         st.session_state["page"] = requested if requested in ("home", "upload", "admin") else "home"

@@ -264,3 +264,16 @@ def test_explicit_mock_mode_with_credentials_reads_live_source_but_writes_locall
                                "SOURCE_SPREADSHEET_ID": "abc"}, env={})
     mode = resolve_mode(s)
     assert mode.mock and mode.source_live
+
+
+# --- loading popup ------------------------------------------------------------------
+
+def test_loading_popup_runs_fast_to_98_then_done_shows_100():
+    from src.ui import loading_html
+
+    running = loading_html("Memuat <data>", fast_seconds=0.8)
+    assert "from { --skp-p: 1; } to { --skp-p: 98; }" in running  # fast phase stops at 98%
+    assert "--skp-dur: 0.80s" in running and "Memuat &lt;data&gt;" in running  # label escaped
+    assert 'class="skp-loading"' in running
+    done = loading_html("Memuat", done=True)
+    assert 'class="skp-loading done"' in done and "Selesai" in done  # 100% only after real work
