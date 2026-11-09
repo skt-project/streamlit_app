@@ -19,6 +19,7 @@ from typing import Iterable, Protocol
 
 import pandas as pd
 
+from src.storage import browser_url
 from src.validation import BRANDS, PROGRAMS, QUARTER_SOURCE_COLUMNS, QUARTERS, clean_cell
 
 log = logging.getLogger("skp.sheets")
@@ -480,18 +481,80 @@ class SheetsLogStore:
         batch = []
         if plan.write_header:
             batch.append({"range": f"A1:{rowcol_to_a1(1, last_col)}", "values": [plan.header]})
+        # Updates write only the app's own columns, so columns an admin added
+        # (and any formulas in them) are never touched.
         for sheet_row, row in plan.updates:
-            batch.append({"range": f"{rowcol_to_a1(sheet_row, 1)}:{rowcol_to_a1(sheet_row, last_col)}", "values": [row]})
+            for start, end in app_column_runs(plan.header):
+                batch.append({"range": f"{rowcol_to_a1(sheet_row, start + 1)}:{rowcol_to_a1(sheet_row, end)}",
+                              "values": [row[start:end]]})
         if batch:
-            ws.batch_update(batch, value_input_option="RAW")
+            ws.batch_update(batch, value_input_option="RAW")  # RAW: user text never becomes a formula/date
         if plan.write_header:
             try:
                 ws.freeze(rows=1)
             except Exception:  # cosmetic only
                 pass
+        written = list(plan.updates)
         if plan.appends:
-            ws.append_rows(plan.appends, value_input_option="RAW", insert_data_option="INSERT_ROWS", table_range="A1")
+            response = ws.append_rows(plan.appends, value_input_option="RAW", insert_data_option="INSERT_ROWS",
+                                      table_range="A1")
+            first = first_appended_row(response)
+            if first:
+                written += [(first + i, row) for i, row in enumerate(plan.appends)]
+        self._link_gcs_paths(ws, plan.header, written)
         return plan
+
+    @staticmethod
+    def _link_gcs_paths(ws, header: list[str], written: list[tuple[int, list[str]]]) -> None:
+        """Make each written 'GCS Path' cell clickable: =HYPERLINK(https URL, "gs://...").
+        The cell still shows the gs:// text (that is what the app reads back). Best
+        effort: if this fails the cell keeps the plain gs:// location."""
+        from gspread.utils import rowcol_to_a1
+
+        col = header.index("GCS Path")
+        links = []
+        for sheet_row, row in written:
+            formula = hyperlink_formula(row[col] if col < len(row) else "")
+            if formula:
+                links.append({"range": rowcol_to_a1(sheet_row, col + 1), "values": [[formula]]})
+        if not links:
+            return
+        try:
+            ws.batch_update(links, value_input_option="USER_ENTERED")
+        except Exception as exc:  # noqa: BLE001 - the data is already saved
+            log.warning("Could not make GCS Path clickable: %s", type(exc).__name__)
+
+
+def app_column_runs(header: list[str]) -> list[tuple[int, int]]:
+    """Contiguous [start, end) column-index runs that hold the app's LOG_HEADERS."""
+    idx = sorted(header.index(h) for h in LOG_HEADERS if h in header)
+    runs: list[tuple[int, int]] = []
+    for i in idx:
+        if runs and runs[-1][1] == i:
+            runs[-1] = (runs[-1][0], i + 1)
+        else:
+            runs.append((i, i + 1))
+    return runs
+
+
+def first_appended_row(response) -> int | None:
+    """First sheet row written by append_rows ("'Tab'!A3:M4" -> 3), or None."""
+    from gspread.utils import a1_to_rowcol
+
+    try:
+        updated = response["updates"]["updatedRange"]
+        return a1_to_rowcol(updated.split("!")[-1].split(":")[0])[0]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def hyperlink_formula(location: str) -> str | None:
+    """=HYPERLINK("https://storage.cloud.google.com/...", "gs://bucket/...") or None."""
+    url = browser_url(location)
+    if not url:
+        return None
+    url_q, label_q = url.replace('"', '""'), str(location).strip().replace('"', '""')
+    return f'=HYPERLINK("{url_q}","{label_q}")'
 
 
 class LocalLogStore:

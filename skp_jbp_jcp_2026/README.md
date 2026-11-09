@@ -91,8 +91,12 @@ Dibuat otomatis **pada submit pertama** (membuka aplikasi tidak menulis apa pun)
 Nama File, GCS Path, Status, Uploader`.
 - `Timestamp` dalam WIB (`YYYY-MM-DD HH:MM:SS`).
 - `GCS Path`: lokasi lengkap file di bucket, `gs://{bucket}/{object}` (mode lokal: `local://{object}`).
-  Baris lama yang hanya berisi `{object}` tanpa `gs://` tetap terbaca. ZIP admin selalu memakai struktur
-  `{object}` (tanpa nama bucket).
+  Sel ini **bisa diklik**: app menulisnya sebagai `=HYPERLINK("https://storage.cloud.google.com/{bucket}/{object}",
+  "gs://{bucket}/{object}")`, jadi yang tampil tetap `gs://…` tetapi link-nya membuka PDF di browser. Link hanya
+  bisa dibuka akun Google yang punya akses baca ke bucket (mis. role Viewer di project, atau Storage Object Viewer
+  pada bucket); user lain memakai tombol *Buka PDF* di gallery admin (link sementara 15 menit). Baris lama yang
+  hanya berisi `{object}` tanpa `gs://` tetap terbaca. ZIP admin selalu memakai struktur `{object}` (tanpa nama bucket).
+- Saat upload ulang, app hanya menulis kolom A–M; kolom tambahan buatan admin di kanan (termasuk formulanya) tidak disentuh.
 - `Status`: `Uploaded` (pertama kali) atau `Replaced` (upload ulang), opsional `(cek nama file)`.
 - `Uploader` = nama PIC Submit (upload tanpa login, jadi tidak ada identitas lain).
 - Data ditulis dengan mode **RAW**: kode seperti `0012` tetap teks dan isian seperti `=HYPERLINK(...)`

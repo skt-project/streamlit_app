@@ -40,6 +40,21 @@ def object_name(location: str) -> str:
     return value
 
 
+def browser_url(location: str) -> str | None:
+    """https address that opens a gs:// object in the browser (Google Cloud
+    Storage authenticated URL): works for Google accounts with access to the
+    bucket, others are asked to sign in / get 403. None for non-gs locations."""
+    from urllib.parse import quote
+
+    value = str(location or "").strip()
+    if not value.startswith("gs://") or "/" not in value[len("gs://"):]:
+        return None
+    bucket, name = value[len("gs://"):].split("/", 1)
+    if not bucket or not name:
+        return None
+    return f"https://storage.cloud.google.com/{bucket}/{quote(name, safe='/')}"
+
+
 class DocumentStorage(Protocol):
     label: str
     supports_links: bool
