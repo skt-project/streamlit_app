@@ -786,7 +786,8 @@ st.markdown("""<style>
 st.markdown("""<style>
 html,body,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block-container{background:#FFFFFF!important;}
 [data-testid="stHeader"]{background:#FFFFFF!important;}
-[data-testid="stMain"] *:not(svg):not(path):not(button){color:#1F1F1F!important;}
+[data-testid="stMain"] *:not(svg):not(path):not(button):not([style*="color"]){color:#1F1F1F!important;}
+[data-testid="stMain"] [data-baseweb="select"] input,[data-testid="stMain"] [data-baseweb="select"] input:focus{background:transparent!important;border:none!important;box-shadow:none!important;border-radius:0!important;}
 [data-testid="stMain"] input,[data-testid="stMain"] textarea{color:#1F1F1F!important;background:#FFFFFF!important;border:1.5px solid #C9C9C9!important;}
 [data-testid="stMain"] .stSelectbox>div>div{color:#1F1F1F!important;background:#FFFFFF!important;border:1.5px solid #C9C9C9!important;}
 [data-testid="stMain"] [data-baseweb="select"] span,[data-testid="stMain"] [data-baseweb="select"] div{color:#1F1F1F!important;}
@@ -2937,7 +2938,20 @@ if st.session_state.get('page') == 'po_spv':
         uploaded_file = st.file_uploader(
             "Upload a PO file (.xlsx/.csv) containing: 'PRODUCT CODE', 'DESCRIPTION', 'QTY', and 'DISTRIBUTOR'.",
             type=["xlsx", "xls", "csv"],
+            key="po_spv_uploader",
         )
+        # Uploader hilang kalau pindah halaman -> simpan & pulihkan dari session_state
+        if uploaded_file:
+            st.session_state["_up_cache_po_spv"] = (uploaded_file.name, uploaded_file.getvalue())
+        elif st.session_state.get("_up_cache_po_spv"):
+            _n, _b = st.session_state["_up_cache_po_spv"]
+            uploaded_file = io.BytesIO(_b)
+            uploaded_file.name = _n
+            _c1, _c2 = st.columns([5, 1])
+            _c1.caption(f"♻️ File dipulihkan dari sesi sebelumnya: {_n}")
+            if _c2.button("✖ Hapus", key="clear_up_cache_po_spv", use_container_width=True):
+                st.session_state.pop("_up_cache_po_spv", None)
+                st.rerun()
 
         if uploaded_file:
             try:
