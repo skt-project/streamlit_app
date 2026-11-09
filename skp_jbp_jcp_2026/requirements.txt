@@ -1,0 +1,6 @@
+streamlit==1.66.1
+gspread>=6.1,<7
+google-auth>=2.34,<3
+google-cloud-storage>=2.18,<4
+pandas>=2.2,<3
+pytest>=8.0

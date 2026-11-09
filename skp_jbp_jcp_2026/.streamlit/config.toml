@@ -1,0 +1,22 @@
+[theme]
+base = "light"
+primaryColor = "#111111"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f6f6"
+textColor = "#111111"
+borderColor = "#e3e3e3"
+baseRadius = "medium"
+font = "sans serif"
+
+[server]
+# Batas upload 1 MB per file (aplikasi juga memvalidasi ulang di server).
+maxUploadSize = 1
+
+[client]
+# Jangan tampilkan stack trace ke pengguna; detail error masuk ke log server.
+showErrorDetails = "none"
+toolbarMode = "minimal"
+showSidebarNavigation = false
+
+[browser]
+gatherUsageStats = false

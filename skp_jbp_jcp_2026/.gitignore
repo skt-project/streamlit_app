@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Secrets — never commit
+.streamlit/secrets.toml
+*.json
+*.pem
+*.p12
+
+# Local/mock mode data (uploaded PDFs + CSV log)
+.local_data/
