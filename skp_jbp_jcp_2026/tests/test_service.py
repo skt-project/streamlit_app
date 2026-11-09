@@ -16,7 +16,7 @@ from src.service import (
     resolve_path_collisions,
     submit_documents,
 )
-from src.sheets import LocalLogStore, Store, expected_documents, logs_to_frame
+from src.sheets import LocalLogStore, expected_documents, logs_to_frame
 from src.storage import LocalStorage, StorageError, build_zip
 from tests.conftest import pdf_bytes
 
