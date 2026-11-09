@@ -1935,6 +1935,23 @@ def _file_upload_section(page_key: str):
     folder_files = st.file_uploader("📁 Upload File PO (.xlsx / .xls / .csv / .zip)",
                                      type=["xlsx","xls","csv","zip"],
                                      accept_multiple_files=True, key=f"po_folder_{page_key}")
+    # Widget uploader hilang kalau pindah halaman (mis. ke Modify File) -> simpan isinya di session_state
+    _up_cache_key = f"_up_cache_{page_key}"
+    if folder_files:
+        st.session_state[_up_cache_key] = [(uf.name, uf.getvalue()) for uf in folder_files]
+    elif st.session_state.get(_up_cache_key):
+        class _CachedUpload:
+            def __init__(self, name, data): self.name, self._data = name, data
+            def read(self): return self._data
+            def getvalue(self): return self._data
+        folder_files = [_CachedUpload(n, b) for n, b in st.session_state[_up_cache_key]]
+        _c1, _c2 = st.columns([5, 1])
+        _c1.caption("♻️ File dipulihkan dari sesi sebelumnya: " + ", ".join(n for n, _ in st.session_state[_up_cache_key]))
+        if _c2.button("✖ Hapus", key=f"clear_up_cache_{page_key}", use_container_width=True):
+            st.session_state.pop(_up_cache_key, None)
+            st.session_state.pop(f"folder_result_{page_key}", None)
+            st.session_state.pop(f"sim_result_{page_key}", None)
+            st.rerun()
     if not folder_files:
         return None, None
 
@@ -2738,6 +2755,23 @@ def _file_upload_section(page_key: str):
         st.dataframe(combined_df, use_container_width=True, hide_index=True)
 
     return raw_entries, res
+
+# === Simpan/pulihkan nilai widget halaman RSA saat pindah ke Modify File & kembali ===
+# Streamlit membuang state widget yang tidak dirender; nilai disalin ke _widget_snap lalu dikembalikan.
+_SNAP_PREFIXES = ("region_mode_radio_", "kalbar_submode_", "sheetpick_", "fs_", "row_", "col_", "dist_",
+                  "skupick_", "qtypick_", "kalbar_preview_pick_", "moq_preview_pick_",
+                  "pi_refs_", "pi_primary_", "pi_choice_", "pi_manual_")
+if st.session_state.get('page') == 'modify':
+    _snap = st.session_state.setdefault('_widget_snap', {})
+    _snap.update({k: v for k, v in st.session_state.items()
+                  if isinstance(k, str) and k.startswith(_SNAP_PREFIXES)})
+elif st.session_state.get('page') == 'po_changer' and st.session_state.get('_widget_snap'):
+    for _k, _v in st.session_state.pop('_widget_snap').items():
+        if _k not in st.session_state:
+            try:
+                st.session_state[_k] = _v
+            except Exception:
+                pass
 
 # === HALAMAN: Modify File (dijalankan dari po_modify.py, satu app dengan pu.py) ===
 if st.session_state.get('page') == 'modify':
