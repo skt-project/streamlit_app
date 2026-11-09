@@ -10,12 +10,13 @@ import requests
 import shared as _shared
 import streamlit as st
 import komponen
+from noo_grid import noo_grid
 from shared import (
     # Constants
     KOLOM, KOLOM_EDIT, KOLOM_TAMPIL, WAJIB_ISI, MAPPING_SUPABASE_KE_VALIDASI,
     KOLOM_VALIDASI, STATUS_VALID, STATUS_REVIEW, WARNA_VALIDASI, warnai_validasi,
     TABLE_SUBMIT_NOO, TABLE_RIWAYAT, ZONA_WAKTU, PENGGUNA, SUPABASE_URL, _SB_HEADERS,
-    PANJANG_PREFIX, PANJANG_ANGKA, JENIS_TOKO_DEFAULT,
+    PANJANG_PREFIX, PANJANG_ANGKA, JENIS_TOKO_DEFAULT, CITY,
     KOLOM_NOO_OUTPUT,
     # Supabase
     sb_insert, sb_select, sb_patch_by_kode_nama, ambil_raw_noo, sb_delete,
@@ -26,7 +27,7 @@ from shared import (
     ke_wib_naive, waktu_sekarang, hitung_validasi, hasil_ke_excel, catat_riwayat, swr_cache,
 )
 
-KOLOM_ORDER_EDITOR = ["#","Pilih","Validasi","Penanda","Store ID"] + list(KOLOM[2:])
+KOLOM_ORDER_EDITOR =["#","Pilih","Validasi","Store ID"] + list(KOLOM[2:])
 
 NAVIGASI = [
     ("Dashboard",          ":material/trending_up:", "dashboard"),
@@ -439,39 +440,31 @@ def tab_noo():
     with c_hapus:
         tombol_hapus = st.button(":material/delete: Delete", type="primary", key="tombol_hapus_noo", width="stretch")
 
-    konfigurasi_kolom = {
-        "#":                     st.column_config.NumberColumn("#",format="%d",width=50),
-        "Pilih":                 st.column_config.CheckboxColumn("Select",width=50,default=False),
-        "Validasi":              st.column_config.SelectboxColumn("Validation ▾",options=KOLOM_VALIDASI,width=140,required=True),
-        "Penanda":               st.column_config.TextColumn("Marker",width=110),
-        "Store ID":              st.column_config.TextColumn("Store ID",width=150,
-                                     help="Editable only when Validation = Existing. Otherwise it is generated automatically."),
-        "Generated At":          st.column_config.TextColumn("Generated At",width=150,disabled=True),
-        "Distributor":           st.column_config.SelectboxColumn("Distributor",options=[""] + daftar_distributor(),width=220),
-        "Store Name":            st.column_config.TextColumn("Store Name",width=170,required=True),
-        "Customer Code":         st.column_config.TextColumn("Customer Code",width=160,disabled=True),
-        "Customer Store Code":   st.column_config.TextColumn("Customer Store Code",width=200),
-        "Customer Store Name":   st.column_config.TextColumn("Customer Store Name",width=170),
-        "City":                  st.column_config.TextColumn("City",width=110),
-        "Store Address":         st.column_config.TextColumn("Store Address",width=190),
-        "Longitude":             st.column_config.NumberColumn("Longitude",format="%.4f",min_value=-180.0,max_value=180.0,step=0.0001,width=100),
-        "Latitude":              st.column_config.NumberColumn("Latitude",format="%.4f",min_value=-90.0,max_value=90.0,step=0.0001,width=100),
-        "Store Type":            st.column_config.SelectboxColumn("Store Type",options=opsi_jenis,width=130),
-    }
-    if ss.get("tampilan_kunci") != ss.kunci_editor:
-        tampil = ss.snapshot.copy()
-        tampil["Penanda"] = tampil["Validasi"]
-        ss.tampilan      = tampil.style.map(warnai_validasi, subset=["Penanda"])
-        ss.tampilan_kunci = ss.kunci_editor
-
+    # Tabel = custom component (noo_grid.py): dropdown Validation berwarna + Store ID jelas bisa/tidak diedit
+    kolom_grid = [
+        dict(name="#",                   label="#",                   kind="index",   width=50),
+        dict(name="Pilih",               label="Select",              kind="check",   width=60),
+        dict(name="Validasi",            label="Validation",          kind="status",  width=150, options=KOLOM_VALIDASI,
+             help="Click to change status"),
+        dict(name="Store ID",            label="Store ID (Existing: Editable)", kind="storeid", width=210,
+             help="Type the Store ID here only when Validation = Existing. Otherwise it is generated automatically."),
+        dict(name="Distributor",         label="Distributor",         kind="select",  width=230, options=[""] + daftar_distributor()),
+        dict(name="Store Name",          label="Store Name",          kind="text",    width=180),
+        dict(name="Customer Code",       label="Customer Code",       kind="ro",      width=150),
+        dict(name="Customer Store Code", label="Customer Store Code", kind="text",    width=190),
+        dict(name="Customer Store Name", label="Customer Store Name", kind="text",    width=180),
+        dict(name="City",                label="City",                kind="select",  width=150, options=[""] + CITY),
+        dict(name="Store Address",       label="Store Address",       kind="text",    width=200),
+        dict(name="Longitude",           label="Longitude",           kind="number",  width=110),
+        dict(name="Latitude",            label="Latitude",            kind="number",  width=110),
+        dict(name="Store Type",          label="Store Type",          kind="select",  width=140, options=opsi_jenis),
+        dict(name="Created At",          label="Created At",          kind="ro",      width=150),
+        dict(name="Generated At",        label="Generated At",        kind="ro",      width=150),
+    ]
     tempat_hapus = st.empty()      # pernyataan konfirmasi hapus ditaruh DI ATAS tabel (sama seperti SKU Mapping)
-    hasil_edit = st.data_editor(
-        ss.tampilan, key=f"editor_{ss.kunci_editor}",
-        column_config=konfigurasi_kolom, column_order=KOLOM_ORDER_EDITOR,
-        disabled=["#","Penanda","Created At","Generated At"],
-        hide_index=True, num_rows="fixed", width="stretch",
-        height=len(ss.snapshot)*35+38,
-    )
+    warna_css = {k: v for k, v in WARNA_VALIDASI.items()}
+    hasil_edit = noo_grid(ss.snapshot, kolom_grid, key=f"noo_grid_{ss.kunci_editor}",
+                          select_all=select_all, warna=warna_css)
 
     # Download: baris yang dicentang (kolom Select) saja; kalau tidak ada yang dicentang -> semua hasil filter
     dipilih_unduh = hasil_edit.index[hasil_edit["Pilih"] == True]
