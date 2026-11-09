@@ -820,14 +820,14 @@ with st.sidebar:
         if _rsa_token_valid():
             st.session_state['rsa_authenticated'] = True
             _pg = st.query_params.get("pg", "spv")
-            st.session_state['page'] = _pg if _pg in ("spv", "po_spv", "po_changer") else "spv"
+            st.session_state['page'] = _pg if _pg in ("spv", "po_spv", "po_changer", "modify") else "spv"
     # Simpan halaman aktif di URL supaya refresh kembali ke halaman yang sama
     if _rsa_token_valid() and st.session_state.get('page') != 'po_changer_login':
         st.query_params["pg"] = st.session_state['page']
 
     # ---- Gaya sidebar: terang & rapi, menu pakai ikon, item aktif ditandai garis di kiri ----
     _active_key = {"spv": "nav_spv", "po_spv": "nav_po_spv", "po_changer": "nav_po",
-                   "po_changer_login": "nav_po"}.get(st.session_state.get('page'), "")
+                   "po_changer_login": "nav_po", "modify": "nav_modify"}.get(st.session_state.get('page'), "")
     st.markdown("""<style>
     [data-testid="stSidebar"]{background:#FDF1F5!important;box-shadow:none!important;border-right:1px solid #F0D3DE;}
     [data-testid="stSidebar"] .sb-title,[data-testid="stSidebar"] .sb-title *{color:#3A2430!important;}
@@ -867,7 +867,8 @@ with st.sidebar:
             st.session_state['page'] = 'po_changer_login'
         st.rerun()
 
-    st.link_button("Modify File", "https://po-modify.streamlit.app/", icon=":material/search:", use_container_width=True)
+    if st.button("Modify File", icon=":material/edit:", use_container_width=True, key="nav_modify"):
+        st.session_state['page'] = 'modify'; st.rerun()
     
 
     # Shared constants used in PO simulation pages
@@ -2737,6 +2738,12 @@ def _file_upload_section(page_key: str):
         st.dataframe(combined_df, use_container_width=True, hide_index=True)
 
     return raw_entries, res
+
+# === HALAMAN: Modify File (dijalankan dari po_modify.py, satu app dengan pu.py) ===
+if st.session_state.get('page') == 'modify':
+    import runpy
+    runpy.run_path(os.path.join(BASE_DIR, "po_modify.py"), run_name="po_modify")
+    st.stop()
 
 # === HALAMAN BARU: Login RSA ===
 if st.session_state.get('page') == 'po_changer_login':
