@@ -244,10 +244,17 @@ div[data-baseweb="select"] input {
 .st-key-kartu_sku, .st-key-kartu_noo {
   border: 1px solid #dfe6ef; border-radius: 12px; padding: 17px; background: #fff;
 }
-.pengajuan-header { display:flex; gap:11px; align-items:center; margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid #e7ecf2; }
-.pengajuan-ikon { width:38px; height:38px; border-radius:50%; background:#e4efff; color:#2563eb; display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0; }
-.pengajuan-header h3 { margin:0; font-size:14px; color:#192b47; letter-spacing:-.2px; }
-.pengajuan-header p { margin:2px 0 0; font-size:9.5px; color:#8995a7; }
+.pengajuan-header { display:flex; gap:14px; align-items:center; margin-bottom:16px; padding:2px 0 16px 14px; border-bottom:2px solid #dbe6f7; border-left:5px solid #2563eb; }
+.pengajuan-ikon { width:48px; height:48px; border-radius:50%; background:#e4efff; color:#2563eb; display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0; }
+.pengajuan-header h3 { margin:0; font-size:24px; font-weight:800; line-height:1.15; color:#0f2a55; letter-spacing:-.4px; }
+.pengajuan-header p { margin:4px 0 0; font-size:12px; color:#6b7a90; }
+/* Warna beda per kartu: SKU Mapping = biru, NOO = hijau teal */
+.st-key-kartu_sku .pengajuan-header { border-left-color:#2563eb; border-bottom-color:#cfdffb; }
+.st-key-kartu_sku .pengajuan-header h3 { color:#1d4ed8; }
+.st-key-kartu_sku .pengajuan-ikon { background:#dbe8ff !important; color:#1d4ed8 !important; }
+.st-key-kartu_noo .pengajuan-header { border-left-color:#0d9488; border-bottom-color:#c4ece7; }
+.st-key-kartu_noo .pengajuan-header h3 { color:#0f766e; }
+.st-key-kartu_noo .pengajuan-ikon { background:#d5f3ee !important; color:#0f766e !important; }
 .judul-bagian { display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#3d4c63; margin:10px 0 8px; font-weight:600; }
 .judul-bagian b { color:#2865c6; background:#eaf2ff; padding:3px 7px; border-radius:8px; font-size:8px; }
 
@@ -884,7 +891,7 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stIconMaterial"] 
 .header-ikon { background: none !important; box-shadow: none !important; color: #2b3f66 !important;
   width: auto !important; height: auto !important; border-radius: 0 !important; }
 .st-key-dash .header-ikon .mi { font-size: 24px; }
-.pengajuan-ikon .mi { font-size: 20px; }
+.pengajuan-ikon .mi { font-size: 24px; }
 
 /* ---------- ICON NETRAL (tanpa warna) ---------- */
 .kpi-ikon, .hijau .kpi-ikon, .kuning .kpi-ikon, .merah .kpi-ikon,
