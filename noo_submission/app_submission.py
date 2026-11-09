@@ -1163,7 +1163,7 @@ def halaman_pengajuan_noo():
                     baris.update({
                         "Customer Code":baris.get("Customer Code","") or custcode_final,
                         "Customer Branch Code":branch_code,
-                        "Customer Store Name":distri_nama,
+                        "Customer Store Name":str(baris.get("Store Name","")).strip(),   # = Store Name (bukan nama distributor)
                         "Group Name":distri_nama,
                         "Channel":"GT",
                         "Store Address":alamat,
