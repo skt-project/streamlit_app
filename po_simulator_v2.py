@@ -1230,30 +1230,31 @@ def fetch_pi_anomaly() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _update_pi_validation(distributor_name: str, file_name: str, validation_text: str, ref_no: str = "") -> bool:
-    """Overwrite reference_cust_order_no + validation_by_rsa untuk SEMUA row
-    pasangan distributor + file_name ini."""
-    client = get_bq_client()
-    safe_val  = validation_text.replace("\\", "\\\\").replace("'", "\\'")
-    safe_dist = distributor_name.replace("'", "\\'")
-    safe_file = file_name.replace("\\", "\\\\").replace("'", "\\'")
+def _update_pi_validation(
+    distributor_name: str,
+    file_name: str,
+    validation_text: str,
+    selected_refs: list[str],
+    primary_ref: str,
+    candidate_refs: list[str],
+) -> bool:
+    """Simpan many PI ke tabel link; primary ditulis ke reference_cust_order_no."""
+    from po_pi_map import apply_pi_mapping, plan_pi_mapping
 
-    set_clauses = [f"validation_by_rsa = '{safe_val}'"]
-    ref_no = str(ref_no or "").strip()
-    if ref_no:
-        safe_ref = ref_no.replace("\\", "\\\\").replace("'", "\\'")
-        set_clauses.append(f"reference_cust_order_no = '{safe_ref}'")
-    set_sql = ", ".join(set_clauses)
-
-    query = f"""
-        UPDATE `{TEST_TABLE}`
-        SET {set_sql}
-        WHERE UPPER(distributor_name) = '{safe_dist}'
-          AND file_name               = '{safe_file}'
-          AND reference_cust_order_no IS NOT NULL
-    """
+    plan = plan_pi_mapping(
+        distributor_name=distributor_name,
+        file_name=file_name,
+        candidate_refs=candidate_refs,
+        selected_refs=selected_refs,
+        primary_ref=primary_ref,
+        validation_by_rsa=validation_text,
+    )
+    if not plan.ok:
+        for message in plan.errors:
+            st.error(message)
+        return False
     try:
-        client.query(query).result()
+        apply_pi_mapping(get_bq_client(), plan.selection)
         return True
     except Exception as e:
         st.error(f"Gagal update PI Validation ({distributor_name} / {file_name}): {e}")
@@ -1261,6 +1262,8 @@ def _update_pi_validation(distributor_name: str, file_name: str, validation_text
 
     
 def _render_pi_validation():
+    from po_pi_map import fetch_existing_maps, render_ref_badges_html
+
     st.markdown(
         """<div class="pipeline-step active">
                <strong>PI Validation — Double Reference Order No (Semua Distributor)</strong>
@@ -1283,7 +1286,10 @@ def _render_pi_validation():
         f"⚠️ **{len(anomaly_df)} file** memiliki lebih dari 1 `reference_cust_order_no` "
         f"dari {anomaly_df['distributor_name'].nunique()} distributor."
     )
-    st.caption("Pilih ref yang benar per file. Semua row di file tersebut akan otomatis ikut berubah.")
+    st.caption(
+        "Centang satu atau banyak nomor PI yang sah. Primary (hijau) ditulis ke kolom utama; "
+        "semua nomor yang dicentang disimpan di tabel link."
+    )
 
     st.markdown("""
     <style>
@@ -1296,7 +1302,7 @@ def _render_pi_validation():
     /* scroll horizontal untuk seluruh tabel PI */
     .pi-scroll-anchor + div[data-testid="stVerticalBlock"] { overflow-x: auto; }
     .pi-scroll-anchor + div[data-testid="stVerticalBlock"] div[data-testid="stHorizontalBlock"] {
-        min-width: 1300px;
+        min-width: 1500px;
         flex-wrap: nowrap !important;
     }
     /* panel opsi dropdown ref saja: tampil penuh tanpa "..." */
@@ -1305,13 +1311,23 @@ def _render_pi_validation():
     """, unsafe_allow_html=True)
 
     _NOTE_OPTIONS = ["Mapping PI by RSA", "Others"]
-    _col_widths = [2, 3, 0.8, 4.5, 1.6, 2]
+    _col_widths = [2, 3, 0.7, 3.2, 2.0, 1.6, 2]
+
+    existing_maps = {}
+    try:
+        existing_maps = fetch_existing_maps(
+            get_bq_client(),
+            anomaly_df["distributor_name"].astype(str).tolist(),
+            anomaly_df["file_name"].astype(str).tolist(),
+        )
+    except Exception as e:
+        st.warning(f"⚠️ Gagal memuat mapping PI yang sudah tersimpan: {e}")
 
     st.markdown("<div class='pi-scroll-anchor'></div>", unsafe_allow_html=True)
     with st.container():
         h = st.columns(_col_widths, gap="small")
-    for col, txt in zip(h, ["Distributor", "File", "Jumlah Ref", "Reference Order No ✏️",
-                            "Validation by RSA ✏️", "Catatan (jika Others)"]):
+    for col, txt in zip(h, ["Distributor", "File", "Jumlah Ref", "PI yang di-map ✏️",
+                            "Primary PI ✏️", "Validation by RSA ✏️", "Catatan (jika Others)"]):
         col.markdown(f"<p class='pi-row-header'>{txt}</p>", unsafe_allow_html=True)
 
     _pending_rows = []
@@ -1320,13 +1336,20 @@ def _render_pi_validation():
         _file = str(anom_row["file_name"]).strip()
         _refs = [r.strip() for r in str(anom_row.get("ref_list") or "").split("|") if r.strip()]
         _existing_note = str(anom_row.get("validation_by_rsa") or "").strip()
+        _saved = existing_maps.get((_dist, _file), {})
+        _default_selected = [r for r in _saved.get("selected", []) if r in _refs] or list(_refs)
+        _default_primary = _saved.get("primary") if _saved.get("primary") in _default_selected else (
+            _default_selected[0] if _default_selected else None
+        )
+        if _saved.get("note"):
+            _existing_note = _saved["note"]
 
         if _existing_note == "Mapping PI by RSA" or not _existing_note:
             _default_choice, _default_manual = "Mapping PI by RSA", ""
         else:
             _default_choice, _default_manual = "Others", _existing_note
 
-        c1, c2, c3, c4, c5, c6 = st.columns(_col_widths, gap="small")
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(_col_widths, gap="small")
         with c1:
             st.markdown(f"<p class='pi-row-text'>{_dist}</p>", unsafe_allow_html=True)
         with c2:
@@ -1334,13 +1357,35 @@ def _render_pi_validation():
         with c3:
             st.markdown(f"<p class='pi-row-text'>{int(anom_row.get('cnt_ref', 0))}</p>", unsafe_allow_html=True)
         with c4:
-            ref_pick = st.selectbox("ref", options=_refs, index=None, placeholder="Pilih ref...",
-                                    key=f"pi_ref_{i}_{_dist}_{_file}", label_visibility="collapsed")
+            ref_picks = st.multiselect(
+                "refs",
+                options=_refs,
+                default=_default_selected,
+                key=f"pi_refs_{i}_{_dist}_{_file}",
+                label_visibility="collapsed",
+            )
         with c5:
+            primary_options = ref_picks or ["(centang PI dulu)"]
+            primary_index = 0
+            if ref_picks and _default_primary in ref_picks:
+                primary_index = ref_picks.index(_default_primary)
+            primary_pick = st.selectbox(
+                "primary",
+                options=primary_options,
+                index=primary_index if ref_picks else 0,
+                key=f"pi_primary_{i}_{_dist}_{_file}",
+                label_visibility="collapsed",
+                disabled=not bool(ref_picks),
+            )
+            st.markdown(
+                render_ref_badges_html(ref_picks, primary_pick if ref_picks else None),
+                unsafe_allow_html=True,
+            )
+        with c6:
             choice_pick = st.selectbox("note_choice", options=_NOTE_OPTIONS,
                                        index=_NOTE_OPTIONS.index(_default_choice),
                                        key=f"pi_choice_{i}_{_dist}_{_file}", label_visibility="collapsed")
-        with c6:
+        with c7:
             if choice_pick == "Others":
                 manual_val = st.text_input("manual_note", value=_default_manual,
                                            key=f"pi_manual_{i}_{_dist}_{_file}",
@@ -1352,7 +1397,9 @@ def _render_pi_validation():
         _pending_rows.append({
             "Distributor": _dist,
             "File": _file,
-            "Reference Order No": ref_pick or "",
+            "Selected Refs": list(ref_picks),
+            "Primary Ref": primary_pick if ref_picks else "",
+            "Candidate Refs": list(_refs),
             "Validation by RSA": choice_pick if choice_pick != "Others" else manual_val.strip(),
         })
 
@@ -1360,23 +1407,30 @@ def _render_pi_validation():
     if st.button("💾 Save PI Validation", use_container_width=True, key="btn_save_pi_validation"):
         _saved, _skipped = 0, 0
         for row in _pending_rows:
-            _ref  = row["Reference Order No"].strip()
+            _refs_sel = row["Selected Refs"]
             _note = row["Validation by RSA"].strip()
-            if not _ref:                      # belum dipilih -> jangan ditimpa
+            if not _refs_sel:
                 _skipped += 1
                 continue
-            if _update_pi_validation(row["Distributor"], row["File"], _note, _ref):
+            if _update_pi_validation(
+                row["Distributor"],
+                row["File"],
+                _note,
+                _refs_sel,
+                row["Primary Ref"],
+                row["Candidate Refs"],
+            ):
                 _saved += 1
 
         if _saved:
             fetch_pi_anomaly.clear()
-            msg = f"✅ {_saved} file berhasil di-remap."
+            msg = f"✅ {_saved} file berhasil di-map (one-to-many)."
             if _skipped:
-                msg += f" ({_skipped} file dilewati karena ref belum dipilih.)"
+                msg += f" ({_skipped} file dilewati karena belum ada PI yang dicentang.)"
             st.session_state["pi_flash"] = msg
             st.rerun()
         else:
-            st.info("Tidak ada perubahan — pilih Reference Order No dulu.")
+            st.info("Tidak ada perubahan — centang nomor PI dan pilih Primary dulu.")
 
 def _flag_po_downloaded():
     st.session_state["show_save_reminder"] = True
