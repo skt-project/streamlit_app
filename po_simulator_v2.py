@@ -2805,7 +2805,7 @@ if _restore_prefixes:
             except Exception:
                 pass
 
-# === HALAMAN: Modify File (dijalankan dari po_modify.py, satu app dengan pu.py) ===
+# === HALAMAN: Modify File (dijalankan dari fy.py, satu app dengan pu.py) ===
 if st.session_state.get('page') == 'modify':
     import runpy
     runpy.run_path(os.path.join(BASE_DIR, "po_modify.py"), run_name="po_modify")
