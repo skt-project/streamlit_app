@@ -1241,7 +1241,11 @@ def _update_pi_validation(
     candidate_refs: list[str],
 ) -> bool:
     """Simpan many PI ke tabel link; primary ditulis ke reference_cust_order_no."""
-    from po_pi_map import apply_pi_mapping, plan_pi_mapping
+    try:
+        from po_pi_map import apply_pi_mapping, plan_pi_mapping
+    except ImportError:
+        st.error("Save belum bisa: modul `po_pi_map.py` tidak ditemukan di folder app.")
+        return False
 
     plan = plan_pi_mapping(
         distributor_name=distributor_name,
@@ -1264,7 +1268,12 @@ def _update_pi_validation(
 
     
 def _render_pi_validation():
-    from po_pi_map import fetch_existing_maps, render_ref_badges_html
+    try:
+        from po_pi_map import fetch_existing_maps
+    except ImportError:
+        def fetch_existing_maps(*_a, **_k):
+            return {}
+        st.info("ℹ️ Modul `po_pi_map.py` tidak ditemukan: mapping tersimpan tidak dimuat dan tombol Save belum aktif.")
 
     st.markdown(
         """<div class="pipeline-step active">
@@ -1289,31 +1298,68 @@ def _render_pi_validation():
         f"dari {anomaly_df['distributor_name'].nunique()} distributor."
     )
     st.caption(
-        "Centang satu atau banyak nomor PI yang sah. Primary (hijau) ditulis ke kolom utama; "
-        "semua nomor yang dicentang disimpan di tabel link."
+        "Pilih satu atau banyak nomor PI yang sah (default: semua reference_cust_order_no unik dari file). "
+        "PI pertama yang dipilih ditulis ke kolom utama; semua yang dipilih disimpan di tabel link."
     )
 
     st.markdown("""
     <style>
     div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; }
-    .pi-row-text { font-size: 0.78rem; line-height: 1.1; margin: 0; padding-top: 0.5rem; word-break: break-all; }
-    .pi-row-header { font-size: 0.78rem; font-weight: 700; margin: 0; }
-    div[data-baseweb="select"] { font-size: 0.78rem; min-height: 2rem; }
-    .stTextInput input { font-size: 0.78rem; padding: 0.25rem 0.5rem; height: 2rem; }
+    .pi-row-text { font-size: 0.68rem; line-height: 1.1; margin: 0; padding-top: 0.5rem; white-space: normal; overflow-wrap: anywhere; }
+    .pi-row-header { font-size: 0.7rem; font-weight: 700; margin: 0; white-space: nowrap; }
+    div[data-baseweb="select"] { font-size: 0.7rem; min-height: 2rem; }
+    .st-key-pi_table div[data-baseweb="select"] * { font-size: 0.7rem !important; }
+    .stTextInput input { font-size: 0.7rem; padding: 0.25rem 0.5rem; height: 2rem; }
 
-    /* scroll horizontal untuk seluruh tabel PI */
-    .pi-scroll-anchor + div[data-testid="stVerticalBlock"] { overflow-x: auto; }
-    .pi-scroll-anchor + div[data-testid="stVerticalBlock"] div[data-testid="stHorizontalBlock"] {
-        min-width: 1500px;
-        flex-wrap: nowrap !important;
-    }
+    /* scroll horizontal untuk seluruh tabel PI (header + semua baris dalam 1 container) */
+    .st-key-pi_table { overflow-x: auto; padding-bottom: .5rem; }
+    .st-key-pi_table div[data-testid="stColumn"],
+    .st-key-pi_table div[data-testid="stColumn"] div[data-testid="stMarkdownContainer"] {
+        min-width: 0 !important; overflow-wrap: anywhere !important; }
+    .st-key-pi_table .pi-row-text, .st-key-pi_table div[data-testid="stMarkdownContainer"] p.pi-row-text {
+        font-size: 0.62rem !important; line-height: 1.15 !important;
+        white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important; }
+    .st-key-pi_table .pi-row-header, .st-key-pi_table div[data-testid="stMarkdownContainer"] p.pi-row-header {
+        font-size: 0.66rem !important; white-space: nowrap !important; }
     /* panel opsi dropdown ref saja: tampil penuh tanpa "..." */
     div[data-baseweb="popover"] li[role="option"] { white-space: nowrap !important; }
+    /* tag multiselect PI: tampilkan nama PI penuh (tanpa "...") */
+    div[data-baseweb="tag"] { max-width: 100% !important; height: auto !important; }
+    div[data-baseweb="tag"] span { max-width: none !important; overflow: visible !important;
+                                   text-overflow: clip !important; white-space: nowrap !important; }
     </style>
     """, unsafe_allow_html=True)
 
     _NOTE_OPTIONS = ["Mapping PI by RSA", "Others"]
-    _col_widths = [2, 3, 0.7, 3.2, 2.0, 1.6, 2]
+
+    _dist_opts = sorted(anomaly_df["distributor_name"].astype(str).str.strip().str.upper().unique())
+    _dist_filter = st.multiselect("🔎 Filter Distributor", options=_dist_opts, key="pi_filter_dist",
+                                  placeholder="Semua distributor")
+    _all_anomaly_df = anomaly_df
+    if _dist_filter:
+        anomaly_df = anomaly_df[anomaly_df["distributor_name"].astype(str).str.strip().str.upper().isin(_dist_filter)]
+        st.caption(f"Menampilkan {len(anomaly_df)} dari {len(_all_anomaly_df)} file. "
+                   "Save hanya menyimpan baris yang sedang tampil.")
+    _headers = ["Distributor", "File", "Jumlah Ref", "PI yang di-map ✏️",
+                "Validation by RSA ✏️", "Catatan (jika Others)"]
+    _CH = 6.6  # perkiraan px per karakter (font 0.62rem; teks panjang otomatis wrap)
+    def _fit(hdr, vals, minpx=0, maxpx=320):
+        # kalau isi lebih panjang dari maxpx, teks turun ke baris berikutnya (wrap)
+        return min(maxpx, max(minpx, _CH * max([len(hdr)] + [len(str(v)) for v in vals]) + 24))
+    _col_widths = [
+        _fit(_headers[0], anomaly_df["distributor_name"].astype(str).str.strip().str.upper()),
+        _fit(_headers[1], anomaly_df["file_name"].astype(str).str.strip()),
+        _fit(_headers[2], []),
+        _fit(_headers[3], [r for rl in anomaly_df["ref_list"].astype(str) for r in rl.split("|")], 200, 420) + 30,
+        _fit(_headers[4], ["Mapping PI by RSA"], 170),
+        _fit(_headers[5], [], 200),
+    ]
+    st.markdown(
+        f"<style>.st-key-pi_table div[data-testid='stHorizontalBlock']"
+        f"{{min-width:{int(sum(_col_widths) + 8 * len(_col_widths))}px;flex-wrap:nowrap !important;}}"
+        f".st-key-pi_table div[data-testid='stColumn']{{min-width:0 !important;}}</style>",
+        unsafe_allow_html=True,
+    )
 
     existing_maps = {}
     try:
@@ -1325,85 +1371,66 @@ def _render_pi_validation():
     except Exception as e:
         st.warning(f"⚠️ Gagal memuat mapping PI yang sudah tersimpan: {e}")
 
-    st.markdown("<div class='pi-scroll-anchor'></div>", unsafe_allow_html=True)
-    with st.container():
-        h = st.columns(_col_widths, gap="small")
-    for col, txt in zip(h, ["Distributor", "File", "Jumlah Ref", "PI yang di-map ✏️",
-                            "Primary PI ✏️", "Validation by RSA ✏️", "Catatan (jika Others)"]):
-        col.markdown(f"<p class='pi-row-header'>{txt}</p>", unsafe_allow_html=True)
-
     _pending_rows = []
-    for i, (_, anom_row) in enumerate(anomaly_df.iterrows()):
-        _dist = str(anom_row["distributor_name"]).strip().upper()
-        _file = str(anom_row["file_name"]).strip()
-        _refs = [r.strip() for r in str(anom_row.get("ref_list") or "").split("|") if r.strip()]
-        _existing_note = str(anom_row.get("validation_by_rsa") or "").strip()
-        _saved = existing_maps.get((_dist, _file), {})
-        _default_selected = [r for r in _saved.get("selected", []) if r in _refs] or list(_refs)
-        _default_primary = _saved.get("primary") if _saved.get("primary") in _default_selected else (
-            _default_selected[0] if _default_selected else None
-        )
-        if _saved.get("note"):
-            _existing_note = _saved["note"]
+    with st.container(key="pi_table"):
+        h = st.columns(_col_widths, gap="small")
+        for col, txt in zip(h, _headers):
+            col.markdown(f"<p class='pi-row-header'>{txt}</p>", unsafe_allow_html=True)
 
-        if _existing_note == "Mapping PI by RSA" or not _existing_note:
-            _default_choice, _default_manual = "Mapping PI by RSA", ""
-        else:
-            _default_choice, _default_manual = "Others", _existing_note
+        for i, anom_row in anomaly_df.iterrows():  # i = index asli, stabil walau difilter
+            _dist = str(anom_row["distributor_name"]).strip().upper()
+            _file = str(anom_row["file_name"]).strip()
+            _refs = list(dict.fromkeys(r.strip() for r in str(anom_row.get("ref_list") or "").split("|") if r.strip()))
+            _existing_note = str(anom_row.get("validation_by_rsa") or "").strip()
+            _saved = existing_maps.get((_dist, _file), {})
+            _default_selected = [r for r in _saved.get("selected", []) if r in _refs] or list(_refs)
+            _default_primary = _saved.get("primary") if _saved.get("primary") in _default_selected else (
+                _default_selected[0] if _default_selected else None
+            )
+            if _saved.get("note"):
+                _existing_note = _saved["note"]
 
-        c1, c2, c3, c4, c5, c6, c7 = st.columns(_col_widths, gap="small")
-        with c1:
-            st.markdown(f"<p class='pi-row-text'>{_dist}</p>", unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"<p class='pi-row-text'>{_file}</p>", unsafe_allow_html=True)
-        with c3:
-            st.markdown(f"<p class='pi-row-text'>{int(anom_row.get('cnt_ref', 0))}</p>", unsafe_allow_html=True)
-        with c4:
-            ref_picks = st.multiselect(
-                "refs",
-                options=_refs,
-                default=_default_selected,
-                key=f"pi_refs_{i}_{_dist}_{_file}",
-                label_visibility="collapsed",
-            )
-        with c5:
-            primary_options = ref_picks or ["(centang PI dulu)"]
-            primary_index = 0
-            if ref_picks and _default_primary in ref_picks:
-                primary_index = ref_picks.index(_default_primary)
-            primary_pick = st.selectbox(
-                "primary",
-                options=primary_options,
-                index=primary_index if ref_picks else 0,
-                key=f"pi_primary_{i}_{_dist}_{_file}",
-                label_visibility="collapsed",
-                disabled=not bool(ref_picks),
-            )
-            st.markdown(
-                render_ref_badges_html(ref_picks, primary_pick if ref_picks else None),
-                unsafe_allow_html=True,
-            )
-        with c6:
-            choice_pick = st.selectbox("note_choice", options=_NOTE_OPTIONS,
-                                       index=_NOTE_OPTIONS.index(_default_choice),
-                                       key=f"pi_choice_{i}_{_dist}_{_file}", label_visibility="collapsed")
-        with c7:
-            if choice_pick == "Others":
-                manual_val = st.text_input("manual_note", value=_default_manual,
-                                           key=f"pi_manual_{i}_{_dist}_{_file}",
-                                           label_visibility="collapsed", placeholder="Tulis catatan...")
+            if _existing_note == "Mapping PI by RSA" or not _existing_note:
+                _default_choice, _default_manual = "Mapping PI by RSA", ""
             else:
-                manual_val = ""
-                st.markdown("<p class='pi-row-text'>—</p>", unsafe_allow_html=True)
+                _default_choice, _default_manual = "Others", _existing_note
 
-        _pending_rows.append({
-            "Distributor": _dist,
-            "File": _file,
-            "Selected Refs": list(ref_picks),
-            "Primary Ref": primary_pick if ref_picks else "",
-            "Candidate Refs": list(_refs),
-            "Validation by RSA": choice_pick if choice_pick != "Others" else manual_val.strip(),
-        })
+            c1, c2, c3, c4, c6, c7 = st.columns(_col_widths, gap="small")
+            with c1:
+                st.markdown(f"<p class='pi-row-text'>{_dist}</p>", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"<p class='pi-row-text'>{_file}</p>", unsafe_allow_html=True)
+            with c3:
+                st.markdown(f"<p class='pi-row-text'>{int(anom_row.get('cnt_ref', 0))}</p>", unsafe_allow_html=True)
+            with c4:
+                _sel_idx = _refs.index(_default_primary) if _default_primary in _refs else 0
+                ref_pick = st.selectbox(
+                    "pi_map", options=_refs or ["(tidak ada PI)"], index=_sel_idx,
+                    key=f"pi_sel_{i}_{_dist}_{_file}", label_visibility="collapsed",
+                    disabled=not _refs,
+                )
+                ref_picks = [ref_pick] if _refs else []
+            with c6:
+                choice_pick = st.selectbox("note_choice", options=_NOTE_OPTIONS,
+                                           index=_NOTE_OPTIONS.index(_default_choice),
+                                           key=f"pi_choice_{i}_{_dist}_{_file}", label_visibility="collapsed")
+            with c7:
+                if choice_pick == "Others":
+                    manual_val = st.text_input("manual_note", value=_default_manual,
+                                               key=f"pi_manual_{i}_{_dist}_{_file}",
+                                               label_visibility="collapsed", placeholder="Tulis catatan...")
+                else:
+                    manual_val = ""
+                    st.markdown("<p class='pi-row-text'>—</p>", unsafe_allow_html=True)
+
+            _pending_rows.append({
+                "Distributor": _dist,
+                "File": _file,
+                "Selected Refs": list(ref_picks),
+                "Primary Ref": ref_picks[0] if ref_picks else "",
+                "Candidate Refs": list(_refs),
+                "Validation by RSA": choice_pick if choice_pick != "Others" else manual_val.strip(),
+            })
 
     st.divider()
     if st.button("💾 Save PI Validation", use_container_width=True, key="btn_save_pi_validation"):
@@ -1432,7 +1459,7 @@ def _render_pi_validation():
             st.session_state["pi_flash"] = msg
             st.rerun()
         else:
-            st.info("Tidak ada perubahan — centang nomor PI dan pilih Primary dulu.")
+            st.info("Tidak ada perubahan — pilih nomor PI dulu.")
 
 def _flag_po_downloaded():
     st.session_state["show_save_reminder"] = True
@@ -2761,13 +2788,17 @@ def _file_upload_section(page_key: str):
 # Streamlit membuang state widget yang tidak dirender; nilai disalin ke _widget_snap lalu dikembalikan.
 _SNAP_PREFIXES = ("region_mode_radio_", "kalbar_submode_", "sheetpick_", "fs_", "row_", "col_", "dist_",
                   "skupick_", "qtypick_", "kalbar_preview_pick_", "moq_preview_pick_",
-                  "pi_refs_", "pi_primary_", "pi_choice_", "pi_manual_")
-if st.session_state.get('page') == 'modify':
-    _snap = st.session_state.setdefault('_widget_snap', {})
-    _snap.update({k: v for k, v in st.session_state.items()
-                  if isinstance(k, str) and k.startswith(_SNAP_PREFIXES)})
-elif st.session_state.get('page') == 'po_changer' and st.session_state.get('_widget_snap'):
-    for _k, _v in st.session_state.pop('_widget_snap').items():
+                  "pi_sel_", "pi_ck_", "pi_refs_", "pi_primary_", "pi_choice_", "pi_manual_")
+_MOD_PREFIXES = ("check_sheet_", "check_hrow_", "del_", "edit_", "mass_del", "mass_edit", "mass_dist_",
+                 "tab3_enable_", "tab3_file_select", "tab3_del_input", "tab3_edit_input", "tab3_map_")
+_ALL_SNAP = _SNAP_PREFIXES + _MOD_PREFIXES
+_snap = st.session_state.setdefault('_widget_snap', {})
+# tangkap nilai widget yang masih ada di setiap run (run pertama setelah pindah halaman masih memegangnya)
+_snap.update({k: v for k, v in st.session_state.items() if isinstance(k, str) and k.startswith(_ALL_SNAP)})
+_restore_prefixes = {"modify": _MOD_PREFIXES, "po_changer": _SNAP_PREFIXES}.get(st.session_state.get('page'))
+if _restore_prefixes:
+    for _k in [k for k in _snap if k.startswith(_restore_prefixes)]:
+        _v = _snap.pop(_k)
         if _k not in st.session_state:
             try:
                 st.session_state[_k] = _v
