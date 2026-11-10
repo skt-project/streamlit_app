@@ -860,6 +860,21 @@ def muat_produk_lookup(nama_sheet: str) -> dict:
 def cari_nama_produk(product: str, lookup: dict) -> str:
     return lookup.get(_kunci_produk(product), "")
 
+def _rapikan_nama(t) -> str:
+    return " ".join(str(t or "").split())
+
+def _kunci_nama(t) -> str:
+    return _rapikan_nama(t).upper()
+
+def _gabung_unik(kumpulan) -> list:
+    """Gabungkan nama dari beberapa daftar; ejaan sama (abaikan huruf besar/kecil & spasi) hanya muncul sekali."""
+    lihat, hasil = set(), []
+    for nama in kumpulan:
+        k = _kunci_nama(nama)
+        if k and k not in lihat:
+            lihat.add(k); hasil.append(_rapikan_nama(nama))
+    return hasil
+
 @st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_spv_sales_lookup() -> dict:
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}/gviz/tq"
@@ -873,12 +888,15 @@ def muat_spv_sales_lookup() -> dict:
     hasil = {}
     for _, r in df.iterrows():
         distri = r.iloc[0].strip().upper()
-        sales  = r.iloc[1].strip()
-        spv    = r.iloc[2].strip()
+        sales  = _rapikan_nama(r.iloc[1])
+        spv    = _rapikan_nama(r.iloc[2])
         if not distri or distri == "NAMA_DISTRIBUTOR" or not spv:
             continue
-        lst = hasil.setdefault(distri, {}).setdefault(spv, [])
-        if sales and sales not in lst:
+        peta_d = hasil.setdefault(distri, {})
+        # ejaan sama (beda huruf besar/kecil atau spasi) dianggap satu: pakai penulisan yang pertama muncul
+        spv = next((k for k in peta_d if _kunci_nama(k) == _kunci_nama(spv)), spv)
+        lst = peta_d.setdefault(spv, [])
+        if sales and _kunci_nama(sales) not in {_kunci_nama(x) for x in lst}:
             lst.append(sales)
     return hasil
 
@@ -920,11 +938,13 @@ def input_spv_sales(distri: str, kunci: str, c_spv, c_sales, lookup: dict) -> tu
     if not peta:
         peta = _cocokkan_distributor_spv(distri, lookup)
     if not peta:
-        peta = {}
+        gab = {}
         for d in lookup.values():
             for s, lst in d.items():
-                peta.setdefault(s, [])
-                peta[s] = sorted(set(peta[s]) | set(lst))
+                ks = _kunci_nama(s)
+                nama_spv, daftar = gab.setdefault(ks, (_rapikan_nama(s), []))
+                daftar.extend(lst)
+        peta = {nama_spv: _gabung_unik(daftar) for nama_spv, daftar in gab.values()}
     daftar_spv = sorted(peta)
     if len(daftar_spv) == 1:
         spv = daftar_spv[0]
