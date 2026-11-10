@@ -2805,12 +2805,21 @@ if _restore_prefixes:
             except Exception:
                 pass
 
-# === HALAMAN: Modify File (dijalankan dari fy.py, satu app dengan pu.py) ===
+# === HALAMAN: Modify File (dijalankan dari po_modify.py, satu app dengan pu.py) ===
 if st.session_state.get('page') == 'modify':
     import runpy
-    if st.session_state.get('page') != 'modify':
-        runpy.run_path(os.path.join(BASE_DIR, "po_modify.py"), run_name="po_modify")
-    #runpy.run_path(os.path.join(BASE_DIR, "po_modify.py"), run_name="po_modify")
+    _mod_path = os.path.join(BASE_DIR, "po_modify.py")
+    try:
+        _mod_src = open(_mod_path, encoding="utf-8").read()
+    except OSError:
+        _mod_src = None
+    if _mod_src is None:
+        st.error("File `po_modify.py` tidak ditemukan di folder yang sama dengan app ini.")
+    elif 'key="nav_spv"' in _mod_src:
+        st.error("`po_modify.py` di repo ini masih versi lama (salinan app PO Simulator). "
+                 "Ganti dengan versi Modify Qty yang baru, lalu push lagi.")
+    else:
+        runpy.run_path(_mod_path, run_name="po_modify")
     st.stop()
 
 # === HALAMAN BARU: Login RSA ===
