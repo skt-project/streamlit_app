@@ -37,6 +37,10 @@ ACTION_CHANGE_USERNAME = "CHANGE_USERNAME"
 ACTION_ACTIVATE = "ACTIVATE_ACCOUNT"
 ACTION_DEACTIVATE = "DEACTIVATE_ACCOUNT"
 ACTION_LOGIN = "LOGIN"
+# A salesman moved between distributors keeping its salesman_id (see
+# salesman_transfer.py). One row per side, so each distributor's audit shows it.
+ACTION_TRANSFER_SALESMAN_OUT = "TRANSFER_SALESMAN_OUT"
+ACTION_TRANSFER_SALESMAN_IN = "TRANSFER_SALESMAN_IN"
 
 _ACCOUNT_FIELDS = (
     "distributor_code", "distributor_name", "username", "is_active",
