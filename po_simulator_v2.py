@@ -2808,7 +2808,9 @@ if _restore_prefixes:
 # === HALAMAN: Modify File (dijalankan dari fy.py, satu app dengan pu.py) ===
 if st.session_state.get('page') == 'modify':
     import runpy
-    runpy.run_path(os.path.join(BASE_DIR, "po_modify.py"), run_name="po_modify")
+    if st.session_state.get('page') != 'modify':
+        runpy.run_path(os.path.join(BASE_DIR, "po_modify.py"), run_name="po_modify")
+    #runpy.run_path(os.path.join(BASE_DIR, "po_modify.py"), run_name="po_modify")
     st.stop()
 
 # === HALAMAN BARU: Login RSA ===
