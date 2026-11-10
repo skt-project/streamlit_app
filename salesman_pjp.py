@@ -33,6 +33,7 @@ st.set_page_config(page_title="Salesman & PJP Template", page_icon="📋", layou
 
 import pjp_accounts  # noqa: E402
 import pjp_auth  # noqa: E402
+import salesman_transfer  # noqa: E402
 
 
 # ─── BigQuery credentials ─────────────────────────────────────────────────────
@@ -564,29 +565,29 @@ def get_pjp_list(
 
 
 def get_latest_running_number(distributor_code: str, salesman_type: str) -> int:
-    try:
-        credentials, project_id = get_credentials()
-        client = bigquery.Client(credentials=credentials, project=project_id)
-        prefix = f"{salesman_type}{distributor_code}"
-        query = f"""
-            SELECT MAX(CAST(SUBSTR(salesman_id, {len(prefix) + 1}) AS INT64)) AS max_num
-            FROM `{MAPPING_TABLE}`
-            WHERE UPPER(distributor_code) = UPPER(@kode)
-              AND UPPER(salesman_type)    = UPPER(@stype)
-              AND STARTS_WITH(salesman_id, @prefix)
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("kode", "STRING", distributor_code),
-                bigquery.ScalarQueryParameter("stype", "STRING", salesman_type),
-                bigquery.ScalarQueryParameter("prefix", "STRING", prefix),
-            ]
-        )
-        result = client.query(query, job_config=job_config).to_dataframe()
-        max_num = result["max_num"].iloc[0]
-        return int(max_num) if pd.notna(max_num) else 0
-    except Exception:
-        return 0
+    # Deliberately NOT wrapped in try/except: a BigQuery failure used to come back
+    # as 0, which made the next ID "...001" and could duplicate an existing code.
+    # Callers must treat an exception as "no ID could be issued".
+    credentials, project_id = get_credentials()
+    client = bigquery.Client(credentials=credentials, project=project_id)
+    prefix = f"{salesman_type}{distributor_code}"
+    query = f"""
+        SELECT MAX(CAST(SUBSTR(salesman_id, {len(prefix) + 1}) AS INT64)) AS max_num
+        FROM `{MAPPING_TABLE}`
+        WHERE UPPER(distributor_code) = UPPER(@kode)
+          AND UPPER(salesman_type)    = UPPER(@stype)
+          AND STARTS_WITH(salesman_id, @prefix)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("kode", "STRING", distributor_code),
+            bigquery.ScalarQueryParameter("stype", "STRING", salesman_type),
+            bigquery.ScalarQueryParameter("prefix", "STRING", prefix),
+        ]
+    )
+    result = client.query(query, job_config=job_config).to_dataframe()
+    max_num = result["max_num"].iloc[0]
+    return int(max_num) if pd.notna(max_num) else 0
 
 
 def generate_salesman_id(distributor_code: str, salesman_type: str) -> str:
@@ -756,6 +757,48 @@ def deactivate_previous_mapping(salesman_id: str) -> tuple[bool, str]:
 
 def deactivate_salesman_mapping(salesman_id: str) -> tuple[bool, str]:
     return deactivate_previous_mapping(salesman_id)
+
+
+def add_salesman_with_mapping(
+    sal_data: dict,
+    salesman_id: str,
+    distributor_code: str,
+    salesman_type: str,
+    nama_salesman: str,
+) -> tuple[bool, str]:
+    """
+    Create a salesman as two writes that must never end up out of step.
+
+    salesman_id exists ONLY in gt_salesman_mapping; the HR row in
+    gt_master_salesman is joined to it by name + distributor. The old order
+    (HR first, mapping second, no rollback) left an HR row with no ID whenever
+    the second write failed or the session was cut between them (ANDI / DST358,
+    2026-10-09). Such a row is invisible in Kelola Salesman and absent from the
+    PJP-upload Salesman ID dropdown, so nobody could see or repair it.
+
+    Mapping goes first, so a failure at either step now leaves nothing or a row
+    the roster can show, and a failed HR write cancels the just-created mapping.
+    """
+    ok_map, err_map = insert_mapping_record(
+        salesman_id, distributor_code, salesman_type, nama_salesman=nama_salesman
+    )
+    if not ok_map:
+        return False, f"Gagal membuat mapping salesman. Tidak ada data yang tersimpan: {err_map}"
+
+    ok_hr, err_hr = insert_salesman_record(sal_data)
+    if ok_hr:
+        return True, ""
+
+    ok_undo, err_undo = deactivate_previous_mapping(salesman_id)
+    if ok_undo:
+        return False, (
+            f"Gagal menyimpan data salesman, ID `{salesman_id}` dibatalkan. "
+            f"Silakan coba lagi: {err_hr}"
+        )
+    return False, (
+        f"Gagal menyimpan data salesman: {err_hr}. ID `{salesman_id}` sudah terbuat "
+        f"tetapi gagal dibatalkan ({err_undo}). Mohon hubungi admin data."
+    )
 
 
 # ─── Static option lists ──────────────────────────────────────────────────────
@@ -2980,6 +3023,179 @@ def _render_audit_log():
     st.dataframe(audit_df, use_container_width=True, hide_index=True)
 
 
+# ─── Admin: move a salesman to another distributor, keeping the ID ────────────
+
+
+def _transfer_destinations() -> dict:
+    """{CODE: {name, region, asm}} for every Active distributor — the only valid
+    destinations (same source as the login list and `_build_salesman_data`)."""
+    return {
+        str(r["distributor_code"]).strip().upper(): {
+            "name": r["distributor_name"], "region": r["region"], "asm": r["asm"]}
+        for _, r in dist_df.iterrows()
+    }
+
+
+def _render_transfer_salesman():
+    """Move an ACTIVE salesman to another distributor KEEPING the salesman_id.
+
+    Admin-only on purpose. A distributor account is scoped to its own code, and a
+    transfer reads and writes TWO distributors; offering it to a distributor user
+    would let one branch take over another branch's active salesman.
+
+    The ID is the salesman's identity, not the distributor's (see
+    salesman_transfer.py). Nothing here generates an ID, deletes a row or touches
+    PJP: the old mapping row is deactivated and kept as history, a new active row is
+    written for the destination, and the HR snapshot is copied — all in one
+    BigQuery transaction.
+    """
+    if not require_admin():
+        return
+    st.caption(
+        "Pindahkan salesman aktif ke distributor lain **dengan mempertahankan Salesman ID**. "
+        "Baris mapping lama dinonaktifkan (tidak dihapus) sehingga riwayat tetap ada; PJP yang "
+        "sudah tersimpan tidak diubah. Untuk salesman yang benar-benar baru, gunakan "
+        "**Tambah Salesman Baru** di akun distributor.")
+
+    try:
+        roster = load_all_salesman_mapping()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] salesman roster load failed: {exc}", file=sys.stderr)
+        st.error("Gagal memuat daftar salesman aktif. Silakan coba lagi.")
+        return
+    if roster.empty:
+        st.info("Belum ada salesman aktif.")
+        return
+
+    query = st.text_input("🔍 Cari salesman (ID atau nama)", key="transfer_search",
+                          placeholder="mis. MIXDST358003 atau ANDI").strip().upper()
+    if not query:
+        st.info("Ketik ID atau nama salesman untuk mencari.")
+        return
+    hits = roster[
+        roster["salesman_id"].str.upper().str.contains(query, regex=False)
+        | roster["salesman"].str.upper().str.contains(query, regex=False)
+    ].head(50)
+    if hits.empty:
+        st.warning("Tidak ada salesman aktif yang cocok.")
+        return
+
+    labels = {
+        r.salesman_id: f"{r.salesman_id} — {r.salesman} ({r.distributor_code} · {r.salesman_type})"
+        for r in hits.itertuples()
+    }
+    sid = st.selectbox("Salesman", list(labels), format_func=labels.get,
+                       key="transfer_pick")
+    src_code = str(hits.loc[hits["salesman_id"] == sid, "distributor_code"].iloc[0]).strip().upper()
+
+    destinations = _transfer_destinations()
+    dest_codes = sorted((c for c in destinations if c != src_code),
+                        key=lambda c: str(destinations[c]["name"]))
+    NONE = "— Pilih distributor tujuan —"
+    to_code = st.selectbox(
+        "Distributor tujuan", [NONE] + dest_codes,
+        format_func=lambda c: c if c == NONE else f"{c} — {destinations[c]['name']}",
+        key="transfer_dest")
+    if to_code == NONE:
+        return
+
+    # Everything below is read fresh — the cached roster above only fills the picker.
+    try:
+        credentials, project_id = get_credentials()
+        client = bigquery.Client(credentials=credentials, project=project_id)
+        rows, hr_row = salesman_transfer.load_plan_inputs(
+            client, MAPPING_TABLE, SALESMAN_TABLE, sid, to_code)
+        plan = salesman_transfer.plan_transfer(sid, to_code, rows, hr_row, destinations)
+    except salesman_transfer.TransferError as err:
+        st.error(err.message)
+        return
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] transfer review failed for {sid}: {exc}", file=sys.stderr)
+        st.error("Gagal memuat data untuk pemindahan. Tidak ada data yang diubah.")
+        return
+
+    st.markdown("#### Tinjau pemindahan")
+    col_from, col_to = st.columns(2)
+    col_from.markdown(f"**Dari (akan dinonaktifkan)**\n\n`{plan.from_distributor}`")
+    col_to.markdown(
+        f"**Ke (akan aktif)**\n\n`{plan.to_distributor}` — {plan.to_distributor_name}")
+    st.info(
+        f"Salesman ID tetap **`{plan.salesman_id}`** ({plan.salesman_name} · tipe "
+        f"{plan.salesman_type}). Tidak ada ID baru yang dibuat; awalan ID tidak perlu "
+        "sama dengan distributor tujuan.")
+    try:
+        pjp_n = salesman_transfer.count_pjp_rows(
+            client, PJP_TABLE, plan.salesman_id, plan.from_distributor,
+            datetime.now().strftime("%Y-%m"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[pjp-admin] pjp count failed for {sid}: {exc}", file=sys.stderr)
+        pjp_n = None
+    if pjp_n:
+        st.warning(
+            f"Ada **{pjp_n} baris PJP bulan ini** untuk `{plan.salesman_id}` di "
+            f"{plan.from_distributor}. Baris itu **tidak dipindahkan** dan tetap menjadi "
+            f"riwayat {plan.from_distributor}; PJP untuk {plan.to_distributor} harus "
+            "diunggah oleh distributor tujuan.")
+    elif pjp_n is None:
+        st.caption("Jumlah PJP bulan ini di distributor asal tidak dapat dihitung.")
+
+    suffix = f"{plan.salesman_id}_{plan.to_distributor}"
+    with st.form("form_transfer_salesman"):
+        st.markdown("**SPV di distributor tujuan** — terisi dari data lama; "
+                    "kosongkan SPV External / Internal 2 untuk memakai nilai lama.")
+        c1, c2, c3 = st.columns(3)
+        spv_int = c1.text_input("Nama SPV Internal *",
+                                value=plan.spv["nama_spv_internal"] or "",
+                                key=f"transfer_spv_int_{suffix}")
+        spv_ext = c2.text_input("Nama SPV External",
+                                value=plan.spv["nama_spv_external"] or "",
+                                key=f"transfer_spv_ext_{suffix}")
+        spv_int2 = c3.text_input("Nama SPV Internal 2",
+                                 value=plan.spv["nama_spv_internal_2"] or "",
+                                 key=f"transfer_spv_int2_{suffix}")
+        confirmed = st.checkbox(
+            f"Saya konfirmasi memindahkan `{plan.salesman_id}` dari "
+            f"{plan.from_distributor} ke {plan.to_distributor}.",
+            key=f"transfer_confirm_{suffix}")
+        submitted = st.form_submit_button("🔀 Pindahkan Salesman", type="primary")
+
+    if not submitted:
+        return
+    if not confirmed:
+        st.error("Centang konfirmasi terlebih dahulu.")
+        return
+    if not require_admin():
+        return
+    try:
+        final = salesman_transfer.plan_transfer(
+            sid, to_code, rows, hr_row, destinations,
+            spv_overrides={"nama_spv_internal": spv_int, "nama_spv_external": spv_ext,
+                           "nama_spv_internal_2": spv_int2})
+    except salesman_transfer.TransferError as err:
+        st.error(err.message)
+        return
+
+    with st.spinner("Memindahkan salesman..."):
+        ok, msg = salesman_transfer.execute_transfer(
+            client, final, MAPPING_TABLE, SALESMAN_TABLE)
+    if not ok:
+        st.error(msg)
+        return
+
+    note = (f"{final.salesman_id} {final.salesman_name}: "
+            f"{final.from_distributor} -> {final.to_distributor}")
+    _audit(final.from_distributor, pjp_accounts.ACTION_TRANSFER_SALESMAN_OUT, note)
+    _audit(final.to_distributor, pjp_accounts.ACTION_TRANSFER_SALESMAN_IN, note)
+    st.cache_data.clear()
+    st.success(
+        f"✅ **{final.salesman_name}** dipindahkan ke **{final.to_distributor}** dengan "
+        f"Salesman ID tetap **`{final.salesman_id}`**.")
+    if msg:
+        st.info(msg)
+    st.caption("Sesi distributor yang sedang terbuka perlu menekan 🔄 Refresh atau login ulang "
+               "untuk melihat perubahan.")
+
+
 def render_admin_dashboard():
     with st.sidebar:
         st.title("🔐 Admin")
@@ -2998,10 +3214,11 @@ def render_admin_dashboard():
                "distributor. Perubahan langsung berlaku pada percobaan "
                "login dan penulisan data berikutnya.")
 
-    (tab_list, tab_add, tab_edit, tab_bulk, tab_status,
+    (tab_list, tab_add, tab_edit, tab_bulk, tab_status, tab_transfer,
      tab_audit) = st.tabs([
         "📋 Daftar Akun", "➕ Tambah Distributor", "✏️ Edit Akun",
-        "🗓️ Setting Deadline", "🔁 Aktif/Nonaktif", "🧾 Audit",
+        "🗓️ Setting Deadline", "🔁 Aktif/Nonaktif", "🔀 Pindah Salesman",
+        "🧾 Audit",
     ])
     with tab_list:
         _render_account_list()
@@ -3013,6 +3230,8 @@ def render_admin_dashboard():
         _render_bulk_deadline()
     with tab_status:
         _render_deactivate_account()
+    with tab_transfer:
+        _render_transfer_salesman()
     with tab_audit:
         _render_audit_log()
 
@@ -3640,10 +3859,23 @@ if PAGES[selected_page] == "salesman":
                 "Sistem akan otomatis membuat **Salesman ID** baru berdasarkan:\n"
                 "`Tipe Salesman + Kode Distributor + Nomor Urut`"
             )
+            st.warning(
+                "**Salesman pindahan dari distributor lain?** Jangan ditambahkan sebagai "
+                "salesman baru — itu akan membuat ID baru dan membuat satu orang punya dua ID. "
+                "Minta administrator memindahkannya lewat Admin → **🔀 Pindah Salesman** "
+                "agar Salesman ID lama tetap dipakai."
+            )
             salesman_type_add = st.selectbox(
                 "Tipe Salesman *", SALESMAN_TYPES, key="add_type_bottom"
             )
-            preview_id = generate_salesman_id(selected_dist_code, salesman_type_add)
+            try:
+                preview_id = generate_salesman_id(selected_dist_code, salesman_type_add)
+            except Exception as e:
+                st.error(
+                    f"Gagal membuat nomor ID salesman dari BigQuery: {e}\n\n"
+                    "Tidak ada data yang disimpan. Silakan muat ulang halaman dan coba lagi."
+                )
+                st.stop()
             st.info(f"ID yang akan dibuat: **`{preview_id}`**")
 
             with st.form("form_add_salesman_bottom"):
@@ -3662,46 +3894,47 @@ if PAGES[selected_page] == "salesman":
                     sal_data_add = _build_salesman_data(
                         fields_add, dist_df, selected_dist_code, selected_dist_name
                     )
-                    salesman_id_new = generate_salesman_id(
-                        selected_dist_code, salesman_type_add
-                    )
+                    try:
+                        salesman_id_new = generate_salesman_id(
+                            selected_dist_code, salesman_type_add
+                        )
+                    except Exception as e:
+                        st.error(
+                            f"Gagal membuat nomor ID salesman dari BigQuery: {e}\n\n"
+                            "Tidak ada data yang disimpan. Silakan coba lagi."
+                        )
+                        st.stop()
                     if not assert_distributor_write_access(selected_dist_code):
                         st.stop()
 
                     with st.spinner("Menyimpan data salesman..."):
-                        ok1, err1 = insert_salesman_record(sal_data_add)
-                    if not ok1:
-                        st.error(f"Gagal menyimpan ke tabel salesman: {err1}")
+                        ok_add, err_add = add_salesman_with_mapping(
+                            sal_data_add,
+                            salesman_id_new,
+                            selected_dist_code,
+                            salesman_type_add,
+                            nama_salesman=sanitize_salesman_name(fields_add["nama"]),
+                        )
+                    if not ok_add:
+                        st.error(err_add)
                     else:
-                        with st.spinner("Membuat mapping salesman..."):
-                            ok2, err2 = insert_mapping_record(
-                                salesman_id_new,
-                                selected_dist_code,
-                                salesman_type_add,
-                                nama_salesman=sanitize_salesman_name(fields_add["nama"]),
-                            )
-                        if not ok2:
-                            st.error(
-                                f"Data salesman tersimpan, tapi gagal membuat mapping: {err2}"
-                            )
-                        else:
-                            st.success(
-                                f"✅ Salesman baru berhasil ditambahkan!\n\n**ID Salesman: `{salesman_id_new}`**"
-                            )
-                            st.session_state.show_add_form = False
-                            for key in [
-                                "add_bottom_status",
-                                "add_bottom_nama",
-                                "add_bottom_hp",
-                            ]:
-                                st.session_state.pop(key, None)
-                            st.cache_data.clear()
-                            st.session_state.pop("salesman_df", None)
-                            st.session_state.pop("_cached_dist", None)
-                            st.session_state.pop("pjp_salesman_df", None)
-                            st.session_state.pop("_pjp_cached_dist", None)
-                            st.session_state.pop("pjp_salesman_all_df", None)
-                            st.rerun()
+                        st.success(
+                            f"✅ Salesman baru berhasil ditambahkan!\n\n**ID Salesman: `{salesman_id_new}`**"
+                        )
+                        st.session_state.show_add_form = False
+                        for key in [
+                            "add_bottom_status",
+                            "add_bottom_nama",
+                            "add_bottom_hp",
+                        ]:
+                            st.session_state.pop(key, None)
+                        st.cache_data.clear()
+                        st.session_state.pop("salesman_df", None)
+                        st.session_state.pop("_cached_dist", None)
+                        st.session_state.pop("pjp_salesman_df", None)
+                        st.session_state.pop("_pjp_cached_dist", None)
+                        st.session_state.pop("pjp_salesman_all_df", None)
+                        st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4013,6 +4246,35 @@ elif PAGES[selected_page] == "pjp_template":
                     # while the user sat on this confirmation screen. Nothing
                     # below runs unless the fresh check passes.
                     if not assert_distributor_write_access(scope_dist_code):
+                        st.stop()
+
+                    # Salesman ownership is re-read HERE. The roster validated above
+                    # is held in this session since login, so an ID that an admin has
+                    # since moved to another distributor (Pindah Salesman) or
+                    # deactivated would still pass and be written under the wrong
+                    # distributor. Fails closed: no fresh roster, no DELETE.
+                    try:
+                        load_all_salesman_mapping.clear()
+                        _fresh_roster = load_all_salesman_mapping()
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[pjp] ownership re-check failed: {exc}", file=sys.stderr)
+                        st.error("Gagal memverifikasi kepemilikan Salesman ID. "
+                                 "Tidak ada data yang diubah. Silakan coba lagi.")
+                        st.stop()
+                    _own_errors, _ = validate_pjp_df(
+                        pjp_new_df,
+                        distributor_map,
+                        store_df=pjp_store_lookup_df,
+                        salesman_df=_fresh_roster,
+                        selected_dist_code=selected_dist_code,
+                    )
+                    if _own_errors:
+                        st.session_state.pjp_salesman_all_df = _fresh_roster
+                        st.error(f"**❌ Data salesman berubah sejak validasi — {len(_own_errors)} "
+                                 "ERROR.** Tidak ada data yang diubah. Download ulang template, "
+                                 "isi ulang, lalu upload kembali.")
+                        for e in _own_errors[:20]:
+                            st.markdown(f"- {e}")
                         st.stop()
 
                     with st.spinner(f"Menghapus data PJP bulan {_current_snapshot_month}..."):
