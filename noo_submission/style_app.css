@@ -526,7 +526,7 @@ section[data-testid="stSidebar"] .stLinkButton a [data-testid="stMarkdownContain
 }
 .st-key-tabel_spv_scroll > div[data-testid="stVerticalBlock"],
 .st-key-tabel_spv_scroll [data-testid="stHorizontalBlock"] {
-  min-width: 2450px;
+  min-width: 2850px;
   flex-wrap: nowrap;
 }
 .st-key-tabel_spv_scroll [data-testid="stColumn"] { min-width: 0; }
