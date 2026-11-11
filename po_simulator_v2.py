@@ -2653,7 +2653,7 @@ def _file_upload_section(page_key: str):
                     return "N/A"
                 if moq_val <= 0:
                     return "SAFE MOQ"  # MOQ 0 = tidak ada batasan kelipatan
-                if qty_val < 50 and qty_val % moq_val != 0:
+                if qty_val < 50 and qty_val < moq_val and qty_val % moq_val != 0:
                     return "Under MOQ"
                 return "SAFE MOQ"
 
