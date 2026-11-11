@@ -86,12 +86,28 @@ DATA_COLS = ["region", "distributor_name", "brand", "sku", "product_name",
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_distributor_region_map(distributor_names: tuple) -> dict:
-    """Mapping distributor -> region, via get_distributor_suggestions (cached)."""
-    df = get_distributor_suggestions(list(distributor_names), "All")
-    if df.empty or "DISTRIBUTOR" not in df.columns or "REGION" not in df.columns:
+    """Mapping distributor -> region langsung dari tabel (tanpa filter buffer plan / SKU)."""
+    names = [d for d in distributor_names if d]
+    if not names:
         return {}
-    df["DISTRIBUTOR"] = df["DISTRIBUTOR"].astype(str).str.strip().str.upper()
-    return df.drop_duplicates("DISTRIBUTOR").set_index("DISTRIBUTOR")["REGION"].to_dict()
+    client = get_bq_client()
+    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ArrayQueryParameter("names", "STRING", [n.strip().upper() for n in names])]
+    )
+    query = f"""
+    SELECT UPPER(TRIM(distributor)) AS DISTRIBUTOR, ANY_VALUE(UPPER(TRIM(region))) AS REGION
+    FROM `{table_id}`
+    WHERE UPPER(TRIM(distributor)) IN UNNEST(@names)
+      AND region IS NOT NULL AND TRIM(region) != ''
+    GROUP BY 1
+    """
+    try:
+        df = client.query(query, job_config=job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"Error fetching region map: {e}")
+        return {}
+    return df.set_index("DISTRIBUTOR")["REGION"].to_dict()
 
 
 def _insert_supply_control(df: pd.DataFrame):
@@ -2732,14 +2748,14 @@ def _file_upload_section(page_key: str):
             df_tmp = _apply_range(p["df"].copy(), p["row_rng"], p["col_rng"])
             df_tmp = _unify_columns(df_tmp)          # <-- samakan nama kolom
             if p["dist_val"] not in ("","(Pilih)"):
-                if p["has_dist"]:
+                if "DISTRIBUTOR" in df_tmp.columns:
                     df_tmp["DISTRIBUTOR"] = p["dist_val"]
                 else:
                     df_tmp.insert(0, "DISTRIBUTOR", p["dist_val"])
             df_tmp["_source_file"] = p["name"]
             frames.append(df_tmp)
 
-    
+
         _bad = [f"{p['name']} ({p.get('sheet_name')})" for p, f in zip(ready, frames)
                 if "PRODUCT CODE" not in f.columns or "QTY" not in f.columns]
         if _bad:
