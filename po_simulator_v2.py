@@ -1142,7 +1142,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 
             # <50 pcs: wajib kelipatan inner pcs. >=50 pcs: tidak wajib (hanya direkomendasikan)
             is_multiple = np.mod(po_qty_val, moq_lookup_val) == 0
-            under_moq_mask = (po_qty_val < 50) & ~is_multiple & (moq_lookup_val > 0)
+            under_moq_mask = (po_qty_val < 50) & ~is_multiple & (moq_lookup_val > 0) &(po_qty_val < moq_lookup_val)
             suggested_qty = np.ceil(po_qty_val / moq_lookup_val) * moq_lookup_val
 
             res_df["MOQ"] = moq_lookup_val
