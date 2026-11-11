@@ -355,8 +355,7 @@ def get_target_so(distributor_code: str, month: int) -> pd.DataFrame:
     )
     return result
 
-_STOP_SC = {"STOP PO", "OOS", "DISCONTINUED", "UNAVAILABLE"}
-
+##################################--------LOGIC SO : QTY FINAL SUGGESTED
 def apply_oos_sellout_logic(
     df: pd.DataFrame,
     target_df: pd.DataFrame,
@@ -388,29 +387,24 @@ def apply_oos_sellout_logic(
     po        = pd.to_numeric(df["PO Qty"], errors="coerce").fillna(0)
     alloc     = pd.to_numeric(df["remaining_allocation_qty_region"], errors="coerce").fillna(0)
 
-    sc_upper  = df["supply_control_status_gt"].fillna("").astype(str).str.upper()
-    is_normal = sc_upper.eq("NORMAL")
-    is_stop   = sc_upper.isin(_STOP_SC)   # <-- flag baru: STOP PO / OOS / dst
-
     # --- Gap pakai net_target (bukan target_so mentah) ---
     gap  = df["net_target_so"] - stock
     calc = np.maximum(sugg_init, gap)
     calc = np.where(alloc > 0, np.minimum(calc, alloc), calc)
-    final = np.where(calc > 0, calc, po)
+
+    # calc > 0 -> final = calc. Kalau tidak ada / 0 -> 0 (JANGAN fallback ke PO Qty),
+    # supaya Remark ngikutin aturan WOI (bp_fin == 0 -> Reject / avg==0 -> Proceed)
+    final = np.where(calc > 0, calc, 0)
 
     df["target_so_minus_stock"] = gap
 
-    # Kalau STOP PO/OOS → pakai po_qty awal (jangan suggest qty apapun)
-    # Kalau NORMAL       → pakai final (target-based)
-    # Selain itu (non-normal non-stop) → pakai sugg_init
-    df["sugg_qty_so"] = np.select(
-        [is_stop, is_normal],
-        [po,      final],
-        default=sugg_init,
-    )
-    df["sugg_qty_final"] = np.where(is_stop, po, np.maximum(df["sugg_qty_so"], sugg_init))
-    return df
+    # Suggested QTY SO = final (tanpa cabang STOP / NORMAL)
+    df["sugg_qty_so"] = final
 
+    # Suggested QTY Final = max(Suggested QTY SO, Suggested PO buffer)
+    df["sugg_qty_final"] = np.maximum(df["sugg_qty_so"], sugg_init)
+    return df
+##################################--------LOGIC SO : QTY FINAL SUGGESTED
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_brand_list() -> list:
@@ -889,8 +883,8 @@ with st.sidebar:
     
 
     # Shared constants used in PO simulation pages
-    _MANUAL_REJECT_APPROVAL = ["G2G-840","G2G-844","G2G-841","G2G-800","G2G-213","G2G-217","G2G-243"]
-    _MANUAL_REJECT_NO_TOL = ["G2G-2721","G2G-224","G2G-226","G2G-228","G2G-74"]
+    _MANUAL_REJECT_APPROVAL = []
+    _MANUAL_REJECT_NO_TOL = []
     _LIMITED_SKUS_QTY = []
     ___MAX_QTY_LIMIT = 500
     _REJECTED_SKUS_1 = []
@@ -924,7 +918,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                        rejected_skus_1, _region_list_1,
                        _rejected_skus_2, region_list_2,
                        limited_skus_qty, __MAX_QTY_LIMIT):
-    manual_reject_all = manual_reject_approval + manual_reject_no_tol
     sim_df[qty_col] = pd.to_numeric(sim_df[qty_col], errors="coerce")
     sim_df = sim_df.dropna(subset=[qty_col])
     sim_df = sim_df[sim_df[qty_col] > 0].copy()
@@ -1062,7 +1055,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         bp_s = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
 
         excl = (res_df["Customer SKU Code"].isin(skus_not_found) |
-                res_df["Customer SKU Code"].isin(manual_reject_all) |
                 (ra_s < 0) |
                 sc_s.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]) |
                 (res_df["Customer SKU Code"].isin(limited_skus_qty) & (bp_s > __MAX_QTY_LIMIT)) |
@@ -1096,8 +1088,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["is_po_sku"] == False, #5
             (res_df["Customer SKU Code"].isin(VITA_C_INC_STOP) 
              &((res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)) |(res_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False)))), #6
-            res_df["Customer SKU Code"].isin(manual_reject_approval), #7
-            res_df["Customer SKU Code"].isin(manual_reject_no_tol), #8
             sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]), #9
             ((avg2 == 0) & (bp_fin == 0) & ~res_df["Customer SKU Code"].str.upper().isin(npd_sku_upper) & ~sc2.str.upper().isin(["STOP PO","DISCONTINUED","OOS"])), #10
             bp_fin == 0, #11
@@ -1112,8 +1102,6 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             "Reject (Negative Allocation)",                          #4
             "Additional Suggestion",                                 #5
             "Reject (Sulawesi Only)",                              #6
-            "Reject (Stop by Steve - Need approval email)",          #7
-            "Reject (Stop by Steve - No tolerance to open)",         #8
             "Reject",                                                 #9
             "Proceed",                                                #10
             "Reject",                                                 #11
@@ -1832,7 +1820,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     is_unavailable = sc_base["status_supply"] == "UNAVAILABLE"
 
-    # =========== LOGIC FINAL QTY (kolom baru: final_qty) ===========
+    # =========== LOGIC SUPPLY CONTROL FINAL QTY (kolom baru: final_qty) ===========
     # 1. Supply control TIDAK normal (STOP PO / DISCONTINUED / OOS) -> final_qty = po_qty
     # 2. Supply control normal & remaining allocation > 0           -> final_qty = N/A (baris di-skip, tidak disimpan)
     # 3. Supply control normal & (tidak ada allocation / alloc = 0) & po_qty > suggested -> final_qty = suggested_po_qty
