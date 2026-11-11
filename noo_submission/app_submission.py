@@ -1373,7 +1373,7 @@ def halaman_pengajuan_noo():
                     data_noo.loc[i,"SPV"]        = spv_noo
                     data_noo.loc[i,"Store Type"] = tipe_noo
                     data_noo.loc[i,"Channel"] = channel_noo
-                    if not (kode_val.strip() and csn_noo and tipe_noo and spv_noo.strip() and sales_noo.strip()):
+                    if not (kode_val.strip() and csn_noo and alamat_noo.strip() and tipe_noo and spv_noo.strip() and sales_noo.strip()):
                         semua_terisi = False
                 tabel_noo.__exit__(None, None, None)
                 # status tombol Submit NOO ada di luar fragment: kalau berubah, segarkan seluruh halaman sekali
