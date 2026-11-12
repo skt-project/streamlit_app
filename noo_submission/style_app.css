@@ -339,6 +339,15 @@ div[data-baseweb="select"] input {
   background: #f3f4f6; color: #4b5563; border-radius: 8px; padding: .35rem .6rem; min-height: 40px;
 }
 .sel-tebal { font-weight: 600; }
+/* kolom Similarity (hasil pencocokan master): warna sendiri, beda dari kolom data abu-abu */
+.sel-baca.sel-sim { background: #eef2ff; color: #3730a3; border: 1px solid #dbe3ff; }
+.kepala-kolom.kepala-sim { color: #4338ca; }
+/* Latar satu blok untuk 6 kolom Similarity di tabel SPV (kolom ke-9 s/d ke-14: Name, Distributor, Code, Address, City, Region).
+   box-shadow melebar setengah jarak antar kolom/baris supaya latarnya menyambung, tidak bergaris putih. */
+.st-key-tabel_spv_scroll [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(n+9):nth-child(-n+14) {
+  background: #f4f6ff;
+  box-shadow: 0 0 0 .5rem #f4f6ff;
+}
 
 .pesan-error-kecil { color: #b42318; font-size: .75rem; font-weight: 600; margin: -.35rem 0 .35rem; }
 
