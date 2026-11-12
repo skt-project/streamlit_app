@@ -7,11 +7,11 @@ import numpy as np
 import pandas as pd
 import bcrypt
 import requests
-import shared as _shared
+import streamlit.noo_submission.shared as _shared
 import streamlit as st
 import komponen
-from noo_grid import noo_grid
-from shared import (
+from streamlit.noo_submission.noo_grid import noo_grid
+from streamlit.noo_submission.shared import (
     # Constants
     KOLOM, KOLOM_EDIT, KOLOM_TAMPIL, WAJIB_ISI, MAPPING_SUPABASE_KE_VALIDASI,
     KOLOM_VALIDASI, STATUS_VALID, STATUS_REVIEW, WARNA_VALIDASI, warnai_validasi,
@@ -589,34 +589,19 @@ def tab_noo():
                 df.loc[baru_generate,"Store ID"]     = generate_store_ids(df.loc[baru_generate], df, kolom_target="Store ID")
                 df.loc[baru_generate,"Generated At"] = datetime.datetime.now(ZONA_WAKTU).replace(tzinfo=None)
             gagal_prefix = [i for i in baris_dipilih if df.loc[i,"Store ID"] in ("","-",None)]
-            gagal_push   = []
-            for idx in baris_dipilih:
-                if idx in gagal_prefix:
-                    continue
-                kode = str(df.loc[idx,"Customer Store Code"]).strip()
-                nama = str(df.loc[idx,"Customer Store Name"]).strip()
-                if not kode or not nama:
-                    continue
-                gen_at = df.loc[idx,"Generated At"]
-                gen_at_iso = None
-                if pd.notna(gen_at):
-                    wt = pd.Timestamp(gen_at)
-                    if wt.tzinfo is None:
-                        wt = wt.tz_localize(ZONA_WAKTU)
-                    gen_at_iso = wt.isoformat()
-                patch = {"tagging":STATUS_VALID,"Store ID":str(df.loc[idx,"Store ID"]).strip(),"generated_at":gen_at_iso}
-                if not sb_patch_by_kode_nama(TABLE_SUBMIT_NOO, kode, nama, patch):
-                    gagal_push.append(kode)
-            berhasil = len(baris_dipilih) - len(gagal_prefix) - len(gagal_push)
-            pesan = f"{berhasil} rows successfully generated"
+            # Tidak langsung push ke Supabase: hanya ditandai belum tersimpan.
+            # Baru tersimpan lewat "Save changes"; kalau tidak, hilang saat Refresh / reload.
+            berhasil_idx = [i for i in baris_dipilih if i not in gagal_prefix]
+            ss.baris_kotor.update(berhasil_idx)
+            ss.baris_perlu_push.update(berhasil_idx)
+            for i in gagal_prefix:                      # gagal generate -> kembalikan status semula
+                df.loc[i,"Validasi"] = STATUS_REVIEW
+                ss.baris_kotor.discard(i); ss.baris_perlu_push.discard(i)
+            berhasil = len(berhasil_idx)
+            pesan = f"{berhasil} rows generated — click Save changes to save to Supabase"
             if gagal_prefix:
                 distri_gagal = sorted({str(df.loc[i,"Distributor"]) or "(empty)" for i in gagal_prefix})
                 pesan += f" | {len(gagal_prefix)} failed (prefix not found: {', '.join(distri_gagal)})"
-            if gagal_push:
-                pesan += f" | {len(gagal_push)} failed to push"
-            catat_riwayat("Bulk Generate ID", f"{berhasil} rows")
-            ss.baris_kotor -= set(baris_dipilih)
-            ss.baris_perlu_push -= set(baris_dipilih)
             ss.tanda_tangan = None; ss.snapshot = None
             ss.terakhir_update = waktu_sekarang()
             ss.pesan_toast = pesan
@@ -1872,7 +1857,7 @@ def halaman_pengaturan():
 
     # ── Tambah user ──
     with tab_add:
-        from login_page import do_signup, TAGGING_USER         
+        from streamlit.noo_submission.login_page import do_signup, TAGGING_USER         
         with st.form("form_add_user", clear_on_submit=True):
             n_user  = st.text_input("Username")
             n_email = st.text_input("Email")
@@ -1956,7 +1941,7 @@ def main():
     ss = st.session_state
 
     # Login gate
-    from login_page import require_login, keluar
+    from streamlit.noo_submission.login_page import require_login, keluar
     # mulai memuat data berat di latar belakang selagi user masih di halaman login
     _shared.prewarm(ambil_raw_noo, ambil_data_dashboard, _riwayat_cache)
     user = require_login()
