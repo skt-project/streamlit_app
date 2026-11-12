@@ -1428,7 +1428,8 @@ def halaman_pengajuan_noo():
 # ═════════════════════════════════════════════════════════════════════════════
 OPSI_JENIS_SPV  = ["NOO","Existing"]
 LABEL_KOSONG    = "\u200b"
-LEBAR_KOLOM_SPV = [0.5,2.2,2.2,1.6,1.1,2.2,2.8,1.8,2.4,2.0,2.8,1.8,2.2,2.6,2.0,2.0,2.2]
+# urutan: ... | Sim Name, Sim Distributor, Sim Code, Sim Address, Sim City, Sim Region | NOO/Existing, Store ID, Remarks
+LEBAR_KOLOM_SPV = [0.5,2.2,2.2,1.6,1.1,2.2,2.8,1.8,2.4,2.6,2.0,2.8,1.8,2.2,2.0,2.0,2.2]
 IDX_JENIS, IDX_STORE_ID = 14, 15
 
 def _kid(baris) -> str:
@@ -1580,9 +1581,10 @@ def halaman_konfirmasi_spv():
             for kolom, (teks, wajib) in zip(kepala,[
                 ("No.",False),("Customer Store Code",False),("Distributor",False),("Region",False),("Brand",False),
                 ("Store Name",False),("Store Address",False),("City",False),("Similarity (Name)",False),
-                ("Similarity (Code)",False),("Similarity (Address)",False),("Similarity (City)",False),("Similarity (Region)",False),("Similarity (Distributor)",False),("NOO / Existing",True),
+                ("Similarity (Distributor)",False),("Similarity (Code)",False),("Similarity (Address)",False),("Similarity (City)",False),("Similarity (Region)",False),("NOO / Existing",True),
                 ("Store ID (Validation)",False),("Remarks",False)]):
-                kolom.markdown(komponen.html_kepala_kolom(teks, wajib), unsafe_allow_html=True)
+                kolom.markdown(komponen.html_kepala_kolom(teks, wajib, "kepala-sim" if teks.startswith("Similarity") else ""),
+                               unsafe_allow_html=True)
 
             for b in baris_tampil:
                 k = _kid(b)
@@ -1591,7 +1593,7 @@ def halaman_konfirmasi_spv():
                 ss.setdefault(kunci_sid, b["store_id_validasi"])
                 ss.setdefault(kunci_ket, b["keterangan"])
                 with st.container(key=f"baris_spv_{k}"):
-                    c_no,c_kode,c_distri,c_region_asli,c_brand,c_nama,c_alamat,c_kota,c_sim_nama,c_sim_kode,c_sim_alamat,c_sim_kota,c_sim_region,c_sim_distri,c_jenis,c_sid,c_ket = \
+                    c_no,c_kode,c_distri,c_region_asli,c_brand,c_nama,c_alamat,c_kota,c_sim_nama,c_sim_distri,c_sim_kode,c_sim_alamat,c_sim_kota,c_sim_region,c_jenis,c_sid,c_ket = \
                         st.columns(LEBAR_KOLOM_SPV)
                     c_no.markdown(komponen.html_sel_teks(b["no"]), unsafe_allow_html=True)
                     c_kode.markdown(komponen.html_sel_teks(b["store_code"],"sel-baca"), unsafe_allow_html=True)
@@ -1604,12 +1606,11 @@ def halaman_konfirmasi_spv():
                     if b.get("kota_efektif") and b["kota_efektif"] != b.get("kota"):
                         kota_tampil = f'{kota_tampil} → {b["kota_efektif"]} (from address)'
                     c_kota.markdown(komponen.html_sel_teks(kota_tampil,"sel-baca"), unsafe_allow_html=True)
-                    c_sim_kota.markdown(komponen.html_sel_teks(b.get("similarity_kota",""),"sel-baca"), unsafe_allow_html=True)
-                    c_sim_nama.markdown(komponen.html_sel_teks(b.get("similarity_nama",""),"sel-baca"), unsafe_allow_html=True)
-                    c_sim_kode.markdown(komponen.html_sel_teks(b.get("similarity_kode",""),"sel-baca"), unsafe_allow_html=True)
-                    c_sim_alamat.markdown(komponen.html_sel_teks(b.get("similarity_alamat",""),"sel-baca"), unsafe_allow_html=True)
-                    c_sim_region.markdown(komponen.html_sel_teks(b.get("similarity_region",""),"sel-baca"), unsafe_allow_html=True)
-                    c_sim_distri.markdown(komponen.html_sel_teks(b.get("similarity_distri",""),"sel-baca"), unsafe_allow_html=True)
+                    # kolom Similarity diberi warna sendiri (sel-sim) supaya beda dari data biasa (abu-abu)
+                    for sel, kunci_sim in ((c_sim_nama,"similarity_nama"),(c_sim_distri,"similarity_distri"),
+                                           (c_sim_kode,"similarity_kode"),(c_sim_alamat,"similarity_alamat"),
+                                           (c_sim_kota,"similarity_kota"),(c_sim_region,"similarity_region")):
+                        sel.markdown(komponen.html_sel_teks(b.get(kunci_sim,""),"sel-baca sel-sim"), unsafe_allow_html=True)
                     jenis    = c_jenis.selectbox(LABEL_KOSONG, OPSI_JENIS_SPV, index=None,
                                                  placeholder="Pilih", label_visibility="collapsed", key=kunci_jenis)
                     store_id = c_sid.text_input(LABEL_KOSONG, label_visibility="collapsed",
