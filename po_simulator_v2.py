@@ -295,7 +295,12 @@ SELECT UPPER(region) AS region, UPPER(distributor) AS distributor,
     AND (UPPER(sku) IN ({sku_list_str}) OR buffer_plan_by_lm_qty_adj > 0)
     """
     try:
-        return client.query(query).to_dataframe()
+        df = client.query(query).to_dataframe()
+        # Supply control mengandung "Hold" diperlakukan sama dengan "Stop PO"
+        if "supply_control_status_gt" in df.columns:
+            _is_hold = df["supply_control_status_gt"].astype(str).str.contains("hold", case=False, na=False)
+            df.loc[_is_hold, "supply_control_status_gt"] = "Stop PO"
+        return df
     except Exception as e:
         st.error(f"Error fetching stock data: {e}")
         return pd.DataFrame()
