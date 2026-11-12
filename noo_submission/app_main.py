@@ -1857,7 +1857,7 @@ def halaman_pengaturan():
 
     # ── Tambah user ──
     with tab_add:
-        from streamlit.noo_submission.login_page import do_signup, TAGGING_USER         
+        from login_page import do_signup, TAGGING_USER         
         with st.form("form_add_user", clear_on_submit=True):
             n_user  = st.text_input("Username")
             n_email = st.text_input("Email")
@@ -1941,7 +1941,7 @@ def main():
     ss = st.session_state
 
     # Login gate
-    from streamlit.noo_submission.login_page import require_login, keluar
+    from login_page import require_login, keluar
     # mulai memuat data berat di latar belakang selagi user masih di halaman login
     _shared.prewarm(ambil_raw_noo, ambil_data_dashboard, _riwayat_cache)
     user = require_login()
