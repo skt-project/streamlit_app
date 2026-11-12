@@ -347,9 +347,8 @@ def signup_dialog():
             except Exception as e:
                 st.error(f"Gagal daftar: {e}")
             else:
-                st.session_state["pesan_toast"] = "Akun berhasil dibuat. Silakan login."
-                st.session_state["pesan_toast_icon"] = ":material/check_circle:"
-                st.rerun()   # menutup dialog; toast muncul di require_login()
+                st.session_state["pesan_sukses"] = "Akun berhasil dibuat. Silakan login."
+                st.rerun()
 
 
 
@@ -453,6 +452,9 @@ def require_login():
             with st.container(key="formp"):
                 st.markdown(FORM_HEAD_HTML, unsafe_allow_html=True)
 
+                if ss.get("pesan_sukses"):
+                    st.success(ss["pesan_sukses"])
+
                 with st.form("login_form", border=False):
                     username = st.text_input("Username", placeholder="Username", label_visibility="collapsed")
                     password = st.text_input("Password", placeholder="Password", type="password", label_visibility="collapsed")
@@ -460,6 +462,7 @@ def require_login():
                     submitted = st.form_submit_button("Login →", type="primary", width="stretch")
 
                 if submitted:
+                    ss.pop("pesan_sukses", None)   # banner hilang setelah user mencoba login
                     if not username or not password:
                         st.error("Isi username dan password.")
                     else:
