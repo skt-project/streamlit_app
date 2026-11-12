@@ -12,8 +12,8 @@ import bcrypt
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
-
-from streamlit.noo_submission.shared import SUPABASE_URL, SUPABASE_KEY, _SB_HEADERS, sb_insert, muat_distri_code_map
+from shared import SUPABASE_URL, SUPABASE_KEY, _SB_HEADERS, sb_insert, muat_distri_code_map
+#from streamlit.noo_submission.shared import SUPABASE_URL, SUPABASE_KEY, _SB_HEADERS, sb_insert, muat_distri_code_map
 
 TABLE_USER = "users"        
 TAGGING_RSA = "RSA"
