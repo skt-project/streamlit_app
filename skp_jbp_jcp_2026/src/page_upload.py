@@ -19,6 +19,7 @@ from src.sheets import (
     store_from_index,
     stores_in_region,
 )
+from src.storage import object_name
 from src.validation import (
     BRANDS,
     PROGRAMS,
@@ -79,7 +80,7 @@ def render(backends: Backends) -> None:
         return
     detection = detect_programs(source_df, store.code)
     previous = uploads_for_store(logs_df, store.code)
-    _store_card(store, detection)
+    _store_card(store, detection, previous)
 
     # Fixed by the spreadsheet: one upload per brand/program/quarter that has an SKP number.
     combos = detection.combos()
@@ -88,9 +89,11 @@ def render(backends: Backends) -> None:
                    "Hubungi admin untuk melengkapi nomor SKP.")
         return
 
-    docs, missing = _upload_documents(store, detection, combos, previous)
+    # docs = new/replacement files to send; missing = no file yet (optional);
+    # kept = already uploaded and not being replaced (never touched by a submit).
+    docs, missing, kept = _upload_documents(backends, store, detection, combos, previous)
     resolve_path_collisions(store, docs, logs_df)
-    _summary_and_submit(backends, store, combos, docs, missing, detection)
+    _summary_and_submit(backends, store, combos, docs, missing, kept, previous, detection)
 
 
 # --------------------------------------------------------------------------
@@ -152,7 +155,7 @@ def _search_store(index: pd.DataFrame) -> Store | None:
     return store_from_index(index, picked)
 
 
-def _store_card(store: Store, detection: Detection) -> None:
+def _store_card(store: Store, detection: Detection, previous: dict) -> None:
     with st.container(border=True):
         ui.facts([
             ("Kode Toko/Group", store.code),
@@ -166,27 +169,39 @@ def _store_card(store: Store, detection: Detection) -> None:
         programs = sorted({(b, p) for b, p, _ in detection.combos()},
                           key=lambda bp: (BRANDS.index(bp[0]), PROGRAMS.index(bp[1])))
         if programs:
-            rows = [[b, p, *[detection.skp_number(b, p, q) or "—" for q in QUARTERS]] for b, p in programs]
+            def cell(b, p, q):
+                number = detection.skp_number(b, p, q)
+                if not number:
+                    return "—"
+                return f"{number} ✅" if (b, p, q) in previous else number
+
+            rows = [[b, p, *[cell(b, p, q) for q in QUARTERS]] for b, p in programs]
             st.markdown("**SKP yang tersedia di spreadsheet**")
             ui.scroll_table(["Brand", "Program", *QUARTERS], rows)
+            st.caption("✅ = dokumennya sudah diupload.")
         for conflict in detection.conflicts:
             st.warning(conflict)
 
 
-def _upload_documents(store: Store, detection: Detection, combos, previous) -> tuple[list[PlannedDocument], list]:
+def _upload_documents(backends: Backends, store: Store, detection: Detection, combos, previous):
+    """Returns (docs to send, combos without file, combos already uploaded and kept)."""
     ui.section(2, "Upload dokumen PDF")
-    st.caption(f"{len(combos)} dokumen SKP untuk toko ini, sesuai nomor SKP di spreadsheet. Satu file PDF per SKP, "
-               "maksimal 1 MB. Yang belum ada filenya boleh dikosongkan dulu; upload ulang akan menimpa file lama.")
+    done = sum(1 for c in combos if c in previous)
+    st.caption(f"{len(combos)} dokumen SKP untuk toko ini sesuai spreadsheet: {done} sudah diupload, "
+               f"{len(combos) - done} belum. Upload bersifat **opsional**: kirim yang sudah ada saja, sisanya bisa "
+               "menyusul. File yang sudah diupload tetap tersimpan dan tidak berubah selama tidak diganti.")
     st.text_input("👤 PIC Submit (wajib)", key=_k("pic"), max_chars=80, placeholder="Nama lengkap yang mengupload")
     sk = f"{_nonce()}_{store.code}"
     keys = {combo: f"file_{sk}_{combo[0]}_{combo[1]}_{combo[2]}" for combo in combos}
+    edit_keys = {combo: f"edit_{sk}_{combo[0]}_{combo[1]}_{combo[2]}" for combo in combos}
     # Loading popup only on the rerun in which a NEW file arrived (not on every click).
     seen: set = st.session_state.setdefault("seen_file_ids", set())
-    new_files = [f for f in (st.session_state.get(k) for k in keys.values())
+    visible = [k for c, k in keys.items() if c not in previous or st.session_state.get(edit_keys[c])]
+    new_files = [f for f in (st.session_state.get(k) for k in visible)
                  if f is not None and getattr(f, "file_id", None) not in seen]
     overlay = ui.LoadingOverlay("Memeriksa file PDF…", fast_seconds=0.8, min_seconds=0.8).start() if new_files else None
     try:
-        docs, missing = _upload_areas(store, detection, combos, previous, keys)
+        result = _upload_areas(backends, store, detection, combos, previous, keys, edit_keys)
     except Exception:
         if overlay:
             overlay.finish(ok=False)
@@ -194,34 +209,75 @@ def _upload_documents(store: Store, detection: Detection, combos, previous) -> t
     if overlay:
         overlay.finish()
         seen.update(f.file_id for f in new_files)
-    return docs, missing
+    return result
 
 
-def _upload_areas(store: Store, detection: Detection, combos, previous, keys) -> tuple[list[PlannedDocument], list]:
+def _existing_file(backends: Backends, prev: dict, target: str, key: str) -> None:
+    """Already-uploaded document: name, when/who, and a way to open it."""
+    st.markdown(f'File tersimpan: <span class="skp-filename">{ui.esc(prev.get("Nama File", ""))}</span>',
+                unsafe_allow_html=True)
+    st.caption(f"Diupload {prev.get('Timestamp', '')} oleh {prev.get('PIC Submit', '')}.")
+    if prev.get("Nama File") and prev.get("Nama File") != target:
+        st.caption(f"⚠️ Nomor SKP di spreadsheet sudah berubah sejak file ini diupload. Upload ulang supaya "
+                   f"tersimpan sebagai {target}.")
+    storage = backends.storage
+    path = object_name(prev.get("GCS Path", ""))
+    if storage is None or not path:
+        return
+    if storage.supports_links:
+        url = storage.signed_url(path, minutes=30)
+        if url:
+            st.link_button("📄 Lihat file", url, help="Link sementara, berlaku 30 menit.")
+        else:
+            st.caption(f"Lokasi: {prev.get('GCS Path', '')}")
+        return
+    data = storage.download(path)  # local/mock storage only
+    if data:
+        st.download_button("📄 Lihat / unduh file", data, file_name=prev.get("Nama File") or "dokumen.pdf",
+                           mime="application/pdf", key=f"dl_{key}", on_click="ignore")
+    else:
+        st.caption("File tidak ditemukan di penyimpanan.")
+
+
+def _upload_areas(backends: Backends, store: Store, detection: Detection, combos, previous, keys, edit_keys):
     docs: list[PlannedDocument] = []
     missing: list[tuple[str, str, str]] = []
-    for brand, program, quarter in combos:
+    kept: list[tuple[str, str, str]] = []
+    for combo in combos:
+        brand, program, quarter = combo
         skp = detection.skp_number(brand, program, quarter)
         target = build_target_filename(store.name, skp, brand, program, quarter)
+        prev = previous.get(combo)
         with st.container(border=True):
             st.markdown(f"**{brand} · {program} · {quarter}**")
-            st.markdown(f"Nomor SKP: **{ui.esc(skp)}**", unsafe_allow_html=True)
-            st.markdown(f'Disimpan sebagai: <span class="skp-filename">{ui.esc(target)}</span>', unsafe_allow_html=True)
-            prev = previous.get((brand, program, quarter))
             if prev:
-                st.info(f"Sudah pernah diupload {prev.get('Timestamp', '')} oleh {prev.get('PIC Submit', '')}. "
-                        "Upload baru akan menimpa file dan metadata lama.")
+                st.badge("Sudah diupload", icon=":material/check_circle:", color="green")
+            else:
+                st.badge("Belum diupload", icon=":material/radio_button_unchecked:", color="gray")
+            st.markdown(f"Nomor SKP: **{ui.esc(skp)}**", unsafe_allow_html=True)
+            if prev:
+                _existing_file(backends, prev, target, keys[combo])
+                if not st.toggle("✏️ Edit / upload ulang file ini", key=edit_keys[combo]):
+                    kept.append(combo)
+                    continue
+                st.caption("Pilih PDF pengganti. Jika tidak jadi, matikan tombol Edit: file lama tetap tersimpan.")
+                label = "PDF pengganti (maks 1 MB)"
+            else:
+                st.markdown(f'Disimpan sebagai: <span class="skp-filename">{ui.esc(target)}</span>',
+                            unsafe_allow_html=True)
+                label = "Upload PDF (opsional · maks 1 MB)"
             uploaded = st.file_uploader(
-                "File PDF (maks 1 MB)",
+                label,
                 type=["pdf"],
-                key=keys[(brand, program, quarter)],
+                key=keys[combo],
                 max_upload_size=1,
                 help="Hanya PDF, maksimal 1 MB.",
             )
             st.caption("File bertanda merah / pesan *“File must be 1.0MB or smaller”* = ukuran lebih dari 1 MB "
                        "dan ditolak. Kompres PDF terlebih dahulu, lalu upload ulang.")
             if uploaded is None:
-                missing.append((brand, program, quarter))
+                # No file chosen: an existing upload stays exactly as it is.
+                (kept if prev else missing).append(combo)
                 continue
             doc = plan_document(store, brand, program, quarter, skp, uploaded.name, uploaded.getvalue())
             for err in doc.check.errors:
@@ -231,32 +287,52 @@ def _upload_areas(store: Store, detection: Detection, combos, previous, keys) ->
             if doc.check.ok and not doc.check.warnings:
                 st.success(f"✅ {uploaded.name} · {format_size(len(doc.data))}")
             docs.append(doc)
-    return docs, missing
+    return docs, missing, kept
 
 
-def _summary_rows(docs: list[PlannedDocument], missing) -> list[dict]:
-    rows = [{
-        "Brand": d.brand, "Program": d.program, "Kuartal": d.quarter, "Nomor SKP": d.skp_number or "—",
-        "Nama file": d.target_filename, "File asli": d.original_filename, "Status validasi": d.check.label,
-    } for d in docs]
-    rows += [{
-        "Brand": b, "Program": p, "Kuartal": q, "Nomor SKP": "", "Nama file": "—", "File asli": "—",
-        "Status validasi": "⏭️ Belum ada file (dilewati)",
-    } for b, p, q in missing]
-    order = {(b, p, q): i for i, (b, p, q) in enumerate(
-        (b, p, q) for b in BRANDS for p in PROGRAMS for q in QUARTERS)}
-    return sorted(rows, key=lambda r: order[(r["Brand"], r["Program"], r["Kuartal"])])
+ACTION_NEW = "🆕 Upload baru"
+ACTION_REPLACE = "🔄 Ganti file"
+ACTION_KEEP = "✅ Tetap (tidak diubah)"
+ACTION_SKIP = "⏭️ Dilewati"
 
 
-def _summary_and_submit(backends: Backends, store: Store, combos, docs, missing, detection: Detection) -> None:
+def summary_rows(combos, detection: Detection, docs: list[PlannedDocument], previous: dict) -> list[dict]:
+    """One row per SKP of the store, saying what a submit will do with it."""
+    by_key = {d.key: d for d in docs}
+    rows = []
+    for combo in combos:
+        brand, program, quarter = combo
+        prev = previous.get(combo)
+        # "Aksi" first so it is visible on a phone without scrolling the table sideways.
+        base = {"Brand": brand, "Program": program, "Kuartal": quarter,
+                "Nomor SKP": detection.skp_number(*combo) or "—"}
+        doc = by_key.get(combo)
+        if doc is not None:
+            rows.append({"Aksi": ACTION_REPLACE if prev else ACTION_NEW, **base, "Nama file": doc.target_filename,
+                         "File asli": doc.original_filename, "Status": doc.check.label})
+        elif prev:
+            rows.append({"Aksi": ACTION_KEEP, **base, "Nama file": prev.get("Nama File", ""), "File asli": "—",
+                         "Status": f"Sudah diupload {prev.get('Timestamp', '')}"})
+        else:
+            rows.append({"Aksi": ACTION_SKIP, **base, "Nama file": "—", "File asli": "—",
+                         "Status": "Belum ada file (opsional)"})
+    return rows
+
+
+def _summary_and_submit(backends: Backends, store: Store, combos, docs, missing, kept, previous,
+                        detection: Detection) -> None:
     ui.section(3, "Periksa rangkuman")
     pic = clean_cell(st.session_state.get(_k("pic"), ""))
+    replacing = [d.key for d in docs if d.key in previous]
     with st.container(border=True):
         ui.facts([
             ("Nama toko", store.name), ("Kode toko", store.code), ("Region", store.region or "Belum diisi"),
-            ("PIC Submit", pic or "Belum diisi"), ("Dokumen siap", f"{sum(d.check.ok for d in docs)} dari {len(combos)}"),
+            ("PIC Submit", pic or "Belum diisi"),
+            ("Akan dikirim", f"{len(docs) - len(replacing)} baru · {len(replacing)} ganti"),
+            ("Sudah tersimpan (tetap)", str(len(kept))),
+            ("Belum ada file", str(len(missing))),
         ])
-        st.dataframe(pd.DataFrame(_summary_rows(docs, missing)), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame(summary_rows(combos, detection, docs, previous)), hide_index=True, width="stretch")
 
     blockers: list[str] = []
     if not backends.mode.can_upload or backends.storage is None or backends.logs is None:
@@ -265,16 +341,23 @@ def _summary_and_submit(backends: Backends, store: Store, combos, docs, missing,
     if pic_error:
         blockers.append(pic_error)
     if not docs:
-        blockers.append("Belum ada file PDF yang dipilih.")
+        if kept and not missing:
+            st.success("Semua dokumen SKP toko ini sudah tersimpan. Nyalakan **Edit / upload ulang** pada dokumen "
+                       "yang ingin diganti.")
+        blockers.append("Belum ada file baru untuk dikirim." + (
+            " Dokumen yang sudah tersimpan tidak perlu diupload ulang." if kept else ""))
     if any(not d.check.ok for d in docs):
         blockers.append("Perbaiki atau hapus file bertanda ❌ terlebih dahulu.")
-    if docs and missing:
-        st.info(f"{len(missing)} kombinasi belum memiliki file dan akan dilewati.")
+    if docs and (kept or missing):
+        parts = [f"{len(kept)} dokumen yang sudah tersimpan tidak diubah"] if kept else []
+        parts += [f"{len(missing)} SKP tanpa file dilewati"] if missing else []
+        st.info(f"Hanya {len(docs)} dokumen yang dikirim; " + " dan ".join(parts) + ".")
     for blocker in blockers:
         st.warning(blocker)
 
     if st.button("Submit dan tampilkan konfirmasi", type="primary", disabled=bool(blockers), width="stretch"):
-        st.session_state["pending_submit"] = {"store": store, "pic": pic, "docs": docs}
+        st.session_state["pending_submit"] = {"store": store, "pic": pic, "docs": docs, "replacing": replacing,
+                                              "kept": len(kept)}
         _confirm_dialog(backends)
 
 
@@ -286,12 +369,16 @@ def _confirm_dialog(backends: Backends) -> None:
         return
     store: Store = pending["store"]
     docs: list[PlannedDocument] = pending["docs"]
+    replacing = set(pending.get("replacing", []))
     ui.facts([("Nama toko", store.name), ("Kode toko", store.code), ("Region", store.region or "Belum diisi"),
               ("PIC Submit", pending["pic"]), ("Jumlah dokumen", str(len(docs)))])
     st.dataframe(pd.DataFrame([{
+        "Aksi": ACTION_REPLACE if d.key in replacing else ACTION_NEW,
         "Brand": d.brand, "Program": d.program, "Kuartal": d.quarter, "Nomor SKP": d.skp_number or "—",
         "Nama file": d.target_filename, "Catatan": "⚠️ cek nama file" if d.name_warning else "",
     } for d in docs]), hide_index=True, width="stretch")
+    if pending.get("kept"):
+        st.info(f"{pending['kept']} dokumen lain yang sudah tersimpan tidak ikut dikirim dan tidak berubah.")
     if backends.mode.mock:
         st.warning("🧪 Mode lokal (mock): file PDF dan metadata hanya disimpan di komputer ini "
                    f"({backends.storage.label}; {backends.logs.label}), **bukan** ke GCS / spreadsheet.")

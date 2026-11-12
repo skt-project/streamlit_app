@@ -165,3 +165,62 @@ def test_warm_up_popup_runs_once_per_session(app):
     t0 = time.monotonic()
     app.run()
     assert time.monotonic() - t0 < first  # no second popup on the next interaction
+
+
+def _seed_upload(tmp_path, quarter="2026 Q4", skp="9951/SKT/SKP/P1B/GT/XI/2026"):
+    from src.service import plan_document, submit_documents
+    from src.sheets import Store
+
+    store = Store("DEMO001", "TOKO CONTOH CANTIK", "East Java")
+    doc = plan_document(store, "SKINTIFIC", "JBP", quarter, skp,
+                        f"SKP - TOKO CONTOH CANTIK - {skp.replace('/', '_')}.pdf", pdf_bytes())
+    submit_documents(store, "Budi", [doc], LocalStorage(tmp_path / "gcs"),
+                     LocalLogStore(tmp_path / "SKP_UPLOAD_LOG.csv"), timestamp="2026-11-10 09:00:00")
+
+
+def _open_demo001(app):
+    _open_upload(app, "East Java")
+    app.text_input[0].set_value("demo001").run()
+    assert not app.exception
+
+
+def test_uploaded_skp_shows_file_link_and_edit_instead_of_uploader(app, tmp_path):
+    _seed_upload(tmp_path)
+    _open_demo001(app)
+    text = _texts(app)
+    assert "1 sudah diupload, 3 belum" in text and "opsional" in text
+    assert "9951/SKT/SKP/P1B/GT/XI/2026 ✅" in text  # marked in the store's SKP table
+    assert "Diupload 2026-11-10 09:00:00 oleh Budi" in text
+    assert len(app.get("download_button")) == 1  # mock storage: view/download existing file
+    assert [t.label for t in app.toggle] == ["✏️ Edit / upload ulang file ini"] and not app.toggle[0].value
+    assert len(app.get("file_uploader")) == 3  # uploaded SKP has no uploader until Edit is on
+    summary = app.dataframe[-1].value
+    actions = dict(zip(summary["Kuartal"] + " " + summary["Program"] + " " + summary["Brand"], summary["Aksi"]))
+    assert actions["2026 Q4 JBP SKINTIFIC"] == "✅ Tetap (tidak diubah)"
+    assert list(summary["Aksi"]).count("⏭️ Dilewati") == 3
+    assert "Belum ada file baru untuk dikirim" in text  # nothing new chosen -> submit blocked
+
+
+def test_edit_toggle_reveals_replacement_uploader_without_dropping_the_file(app, tmp_path):
+    _seed_upload(tmp_path)
+    _open_demo001(app)
+    app.toggle[0].set_value(True).run()
+    assert not app.exception
+    assert len(app.get("file_uploader")) == 4
+    assert "Pilih PDF pengganti" in _texts(app)
+    summary = app.dataframe[-1].value
+    assert "✅ Tetap (tidak diubah)" in list(summary["Aksi"])  # edit on but no new file -> still kept
+
+
+def test_all_uploaded_store_says_everything_is_saved(app, tmp_path):
+    from src.service import plan_document, submit_documents
+    from src.sheets import Store
+
+    store = Store("DEMO003", "Toko Contoh Sejahtera", "Bali Nusa Tenggara")
+    doc = plan_document(store, "FACERINNA", "JCP", "2026 Q4", "9045/FCR/SKP/P2/GT/X/2026",
+                        "SKP - Toko Contoh Sejahtera - 9045_FCR_SKP_P2_GT_X_2026.pdf", pdf_bytes())
+    submit_documents(store, "Budi", [doc], LocalStorage(tmp_path / "gcs"), LocalLogStore(tmp_path / "SKP_UPLOAD_LOG.csv"))
+    _open_upload(app, "Bali Nusa Tenggara")
+    assert app.selectbox[1].value == "DEMO003"
+    assert "Semua dokumen SKP toko ini sudah tersimpan" in _texts(app)
+    assert _button(app, "Submit dan tampilkan konfirmasi").disabled

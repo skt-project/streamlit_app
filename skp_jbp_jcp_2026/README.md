@@ -78,6 +78,17 @@ Di log tertulis: `gs://nama-bucket-skp/2026 Q3/jbp/East Java/SKP - CONTOH BEAUTY
 - Nama file asli user **tidak** dipakai sebagai nama tujuan. Jika tidak mirip dengan nomor SKP, muncul
   **peringatan saja** (tidak ditolak) dan kolom *Status* di log diberi catatan `(cek nama file)`.
 
+### Upload opsional, upload sebagian, dan edit
+- Upload per SKP **opsional**: user mengirim file yang sudah ada saja (minimal satu), sisanya bisa menyusul.
+- Kotak SKP yang **sudah diupload** tidak menampilkan uploader. Isinya: status *Sudah diupload*, nama file
+  tersimpan, kapan dan oleh siapa, tombol **📄 Lihat file** (link sementara 30 menit; mode lokal: unduh), dan
+  toggle **✏️ Edit / upload ulang file ini** yang memunculkan uploader pengganti.
+- **Kotak kosong tidak pernah menimpa apa pun.** Submit hanya mengirim file yang dipilih; baris log dan file
+  SKP lain tetap persis sama (diuji: baris lama identik sebelum dan sesudah upload sebagian).
+- Rangkuman (langkah 3) menampilkan kolom **Aksi** per SKP: 🆕 Upload baru, 🔄 Ganti file, ✅ Tetap (tidak
+  diubah), ⏭️ Dilewati. Dialog konfirmasi hanya berisi file yang benar-benar dikirim.
+- Jika semua SKP toko sudah tersimpan, tombol Submit nonaktif sampai ada file pengganti.
+
 ### Upload ulang = menimpa
 Kunci satu dokumen: **Kode Toko/Group + Brand + Jenis Program + Kuartal**.
 - Object path deterministik → upload ulang menimpa file yang sama di GCS.
@@ -248,8 +259,9 @@ Semua test memakai fake lokal; tidak ada panggilan ke Google.
 - **ZIP**: dibuat di memori (`io.BytesIO`), tidak disimpan ke GCS. Maksimal 500 file / 300 MB per ZIP;
   persempit filter jika lebih.
 - **Gallery**: link *Buka PDF* adalah signed URL yang berlaku 15 menit (hanya mode live).
-- **Upload tanpa login**: siapa pun yang punya URL dapat mengupload. Bagikan URL hanya ke tim terkait.
-- **Kombinasi tanpa file** di form tidak diupload (ditandai *dilewati* di rangkuman).
+- **Upload tanpa login**: siapa pun yang punya URL dapat mengupload, dan juga **membuka PDF SKP yang sudah
+  diupload** untuk toko mana pun lewat tombol *Lihat file*. Bagikan URL hanya ke tim terkait.
+- **Kombinasi tanpa file** di form tidak diupload (ditandai *Dilewati* di rangkuman) dan tidak mengubah data lama.
 
 ## 8. Troubleshooting
 

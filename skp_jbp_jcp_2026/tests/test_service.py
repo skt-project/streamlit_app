@@ -337,3 +337,25 @@ def test_superseded_row_from_another_bucket_is_never_deleted(store, tmp_path):
     result = submit_documents(store, "Budi", [_doc(store)], storage, logs)
     assert result.ok and result.removed_old == []
     assert storage.download(old_object) is not None  # different bucket -> left alone
+
+
+# --- partial upload: blanks never replace earlier uploads -------------------------------
+
+def test_partial_submit_never_blanks_or_touches_earlier_uploads(store, backends):
+    storage, logs = backends
+    q3 = _doc(store, quarter="2026 Q3", skp="9104/SKT/SKP/P1B/GT/X/2026",
+              name="SKP - TOKO ALFA - 9104_SKT_SKP_P1B_GT_X_2026.pdf", data=pdf_bytes(1500))
+    q4 = _doc(store, data=pdf_bytes(2500))
+    submit_documents(store, "Budi", [q3, q4], storage, logs, timestamp="2026-11-01 08:00:00")
+    before = {r["Kuartal"]: r for r in logs_to_frame(logs.read_values()).to_dict("records")}
+
+    # Later visit: only Q4 gets a new file, Q3 is left empty in the form.
+    new_q4 = pdf_bytes(3500)
+    submit_documents(store, "Sari", [_doc(store, data=new_q4)], storage, logs, timestamp="2026-11-12 09:00:00")
+    after = {r["Kuartal"]: r for r in logs_to_frame(logs.read_values()).to_dict("records")}
+
+    assert after["2026 Q3"] == before["2026 Q3"]  # row untouched: same PIC, time, file, status
+    assert storage.download(object_name(before["2026 Q3"]["GCS Path"])) == q3.data  # file still there
+    assert after["2026 Q4"]["PIC Submit"] == "Sari" and after["2026 Q4"]["Status"] == "Replaced"
+    assert storage.download(object_name(after["2026 Q4"]["GCS Path"])) == new_q4
+    assert len(after) == 2

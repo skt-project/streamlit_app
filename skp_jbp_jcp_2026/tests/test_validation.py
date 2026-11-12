@@ -394,3 +394,29 @@ def test_combos_are_the_fixed_upload_list_in_brand_program_quarter_order(source_
     assert det.combos() == [("SKINTIFIC", "JBP", "2026 Q3"), ("SKINTIFIC", "JBP", "2026 Q4"),
                             ("SKINTIFIC", "JCP", "2026 Q4"), ("FACERINNA", "JBP", "2026 Q1")]
     assert detect_programs(source_df, "E400").combos() == []  # no SKP number -> nothing to upload
+
+
+# --- rangkuman: what a submit does with each SKP --------------------------------------------
+
+def test_summary_rows_new_replace_keep_skip(source_df):
+    from src.page_upload import ACTION_KEEP, ACTION_NEW, ACTION_REPLACE, ACTION_SKIP, summary_rows
+    from src.service import plan_document
+    from src.sheets import Store
+    from tests.conftest import pdf_bytes
+
+    store = Store("T100", "TOKO ALFA", "East Java")
+    det = detect_programs(source_df, "T100")
+    combos = det.combos()  # SKT JBP Q3, SKT JBP Q4, SKT JCP Q4, FCR JBP Q1
+    previous = {("SKINTIFIC", "JBP", "2026 Q3"): {"Nama File": "lama-q3.pdf", "Timestamp": "2026-11-01 08:00:00"},
+                ("SKINTIFIC", "JCP", "2026 Q4"): {"Nama File": "lama-jcp.pdf", "Timestamp": "2026-11-02 08:00:00"}}
+    docs = [plan_document(store, "SKINTIFIC", "JBP", "2026 Q3", det.skp_number("SKINTIFIC", "JBP", "2026 Q3"),
+                          "baru-q3.pdf", pdf_bytes()),
+            plan_document(store, "FACERINNA", "JBP", "2026 Q1", det.skp_number("FACERINNA", "JBP", "2026 Q1"),
+                          "fcr.pdf", pdf_bytes())]
+    rows = {(r["Brand"], r["Program"], r["Kuartal"]): r for r in summary_rows(combos, det, docs, previous)}
+    assert rows[("SKINTIFIC", "JBP", "2026 Q3")]["Aksi"] == ACTION_REPLACE
+    assert rows[("SKINTIFIC", "JCP", "2026 Q4")]["Aksi"] == ACTION_KEEP
+    assert rows[("SKINTIFIC", "JCP", "2026 Q4")]["Nama file"] == "lama-jcp.pdf"
+    assert rows[("SKINTIFIC", "JBP", "2026 Q4")]["Aksi"] == ACTION_SKIP
+    assert rows[("FACERINNA", "JBP", "2026 Q1")]["Aksi"] == ACTION_NEW
+    assert [r["Kuartal"] for r in summary_rows(combos, det, docs, previous)] == [c[2] for c in combos]  # order kept
