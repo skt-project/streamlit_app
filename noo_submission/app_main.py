@@ -1200,6 +1200,7 @@ def tab_feedback():
                 "title":  str(r.get("title", "") or "").strip(),
                 "issue":  str(r.get("issue", "")).strip(),
                 "user":   str(r.get("username", "")),
+                "wa":     re.sub(r"\D", "", str(r.get("nomor_wa", "") or "")),   # hanya angka
                 "prio":   str(r.get("priority", "")),
                 "status": _status_fb(r.get("status")),
                 "waktu":  waktu.iloc[i],
@@ -1215,7 +1216,7 @@ def tab_feedback():
         pilih = ss.get("fb_filter") or "All"
         tampil = [x for x in items
                   if (pilih == "All" or x["status"] == pilih)
-                  and (not kata or kata.lower() in f'{x["title"]} {x["issue"]} {x["user"]} #{x["no"]}'.lower())]
+                  and (not kata or kata.lower() in f'{x["title"]} {x["issue"]} {x["user"]} {x["wa"]} #{x["no"]}'.lower())]
 
         total = len(tampil)
         n_hal = max(1, math.ceil(total / FB_PER_HALAMAN))
@@ -1239,6 +1240,8 @@ def tab_feedback():
                     f'<div class="fb-isi"><div class="fb-teks">{_html.escape(judul)}</div>'
                     f'<div class="fb-meta"><span class="fb-no">#{_html.escape(x["no"])}</span>'
                     f'<span>{_html.escape(x["user"])}</span><span>{_html.escape(x["prio"])}</span>'
+                    + (f'<span>WA: <a href="https://wa.me/{x["wa"]}" target="_blank" rel="noopener" '
+                       f'style="color:inherit">{x["wa"]}</a></span>' if x["wa"] else '<span>WA: -</span>')
                     + (f'<span>· {_html.escape(isi1[:70])}</span>' if x["title"] else '') +
                     '</div></div>'
                     f'<div class="fb-kanan"><span class="fb-badge {kelas}">● {x["status"]}</span>'
