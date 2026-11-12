@@ -121,9 +121,9 @@ def html_badge_status(status: str) -> str:
 # ----------------------------------------------------------------------
 # Konfirmasi SPV (tabel outlet)
 # ----------------------------------------------------------------------
-def html_kepala_kolom(teks: str, wajib: bool = False) -> str:
+def html_kepala_kolom(teks: str, wajib: bool = False, gaya: str = "") -> str:
     bintang = ' <span class="bintang">*</span>' if wajib else ""
-    return f'<div class="kepala-kolom">{escape(teks)}{bintang}</div>'
+    return f'<div class="kepala-kolom {gaya}">{escape(teks)}{bintang}</div>'
 
 
 def html_sel_teks(teks, gaya: str = "") -> str:
