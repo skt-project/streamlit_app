@@ -417,10 +417,14 @@ def require_login():
             ss["_ingat"] = pulih.pop("_r", False)           # pilihan "Remember me" ikut dipulihkan dari cookie
             ss.user = pulih
     if ss.get("user") is not None:
-        if time.time() - ss.get("_cookie_ts", 0) > _JEDA_PERBARUI_COOKIE:
+        ulang = ss.get("_cookie_ulang", 0)
+        if ulang > 0 or time.time() - ss.get("_cookie_ts", 0) > _JEDA_PERBARUI_COOKIE:
             ingat = bool(ss.get("_ingat"))
             _js_cookie(_buat_token(ss.user, ingat), MASA_INGAT_DETIK if ingat else MASA_LOGIN_DETIK)
             ss["_cookie_ts"] = time.time()
+            # Setelah login, tulis cookie di beberapa run pertama: kalau run pertama keburu di-rerun sebelum iframe
+            # sempat menjalankan script, run berikutnya mencoba lagi (bukan menunggu 5 menit).
+            ss["_cookie_ulang"] = max(0, ulang - 1)
         return ss.user
     # slot tetap (selalu ada, kadang kosong): jumlah elemen di halaman login SAMA di setiap run, jadi tidak ada
     # elemen sisa (kartu login ganda) saat Streamlit mencocokkan elemen run lama dengan run baru
@@ -460,6 +464,7 @@ def require_login():
                             do_login(username, password)
                             ss["_ingat"] = bool(ingat_saya)
                             ss["_cookie_ts"] = 0          # tulis cookie segera dengan masa berlaku yang sesuai
+                            ss["_cookie_ulang"] = 3       # dan ulangi di 3 run pertama (lihat require_login)
                             login_ph.empty()      # hapus halaman login dari layar sebelum app dimuat
                             css_ph.empty()        # latar/gaya login ikut dihapus, kalau tidak tertinggal saat app memuat
                             st.rerun()
