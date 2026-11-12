@@ -224,6 +224,31 @@ def refresh_data_toko():
     catat_riwayat("Refresh data","Manual reload from Supabase")
     ss.pesan_toast = "Data successfully refreshed from Supabase"
 
+# Kolom grid yang boleh diedit user dan harus ikut tersimpan ke INPUT_NOO.
+# (Customer Store Code/Name tidak dimasukkan: dipakai sebagai kunci pencarian baris.)
+KOLOM_EDIT_KE_SUPABASE = ["Store Name", "City", "Store Address", "Longitude", "Latitude", "Store Type"]
+
+def _patch_kolom_edit(baris: pd.Series) -> dict:
+    """Nilai kolom hasil edit grid -> dict patch, memakai nama kolom ASLI di Supabase
+    (huruf besar/spasi/snake_case dicocokkan lewat normalisasi). Kolom yang tidak ada di tabel dilewati."""
+    norm = lambda s: re.sub(r"[^a-z0-9]","",str(s).lower())
+    rows = ambil_raw_noo()
+    asli = {norm(k): k for k in rows[0]} if rows else {}
+    patch = {}
+    for kol in KOLOM_EDIT_KE_SUPABASE:
+        nama_sb = asli.get(norm(kol))
+        if not nama_sb or kol not in baris.index:
+            continue
+        v = baris[kol]
+        if pd.isna(v) or (isinstance(v, str) and not v.strip()):
+            v = None
+        elif kol in ("Longitude", "Latitude"):
+            v = float(v)
+        else:
+            v = str(v).strip()
+        patch[nama_sb] = v
+    return patch
+
 def simpan_perubahan():
     ss = st.session_state
     df = ss.df_toko
@@ -246,6 +271,7 @@ def simpan_perubahan():
         kunci   = (kode, nama)
         tagging = str(df.loc[idx,"Validasi"]).strip()
         patch   = {"tagging": tagging}
+        patch.update(_patch_kolom_edit(df.loc[idx]))     # City, Address, Long/Lat, Store Type, Store Name
         if tagging == "Existing" and pd.isna(df.loc[idx,"Generated At"]):
             # Existing dari SPV Confirmation: Store ID diisi SPV -> simpan apa adanya, jangan dikosongkan
             sid_ada = str(df.loc[idx,"Store ID"]).strip()
