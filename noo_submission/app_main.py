@@ -1897,19 +1897,33 @@ def halaman_pengaturan():
 
     # ── Hapus user ──
     with tab_del:
+        pesan_del = ss.pop("_del_sukses", None)          # pesan sukses hapus, tampil sekali di bawah tombol
+        if ss.pop("_reset_del_user", False):
+            ss["set_del_user"] = ""                      # dropdown kembali kosong (harus diset sebelum widget dibuat)
         if not hapus_opts:
             st.info("No users available to delete.")
+            if pesan_del:
+                st.success(pesan_del)
         else:
-            u_del = st.selectbox("Select username", hapus_opts, key="set_del_user")
-            yakin = st.checkbox(f"I understand '{u_del}' will lose access", key="set_del_yakin")
-            if st.button("Delete user", type="primary", disabled=not yakin, key="set_del_btn"):
+            u_del = st.selectbox("Select username", [""] + list(hapus_opts), key="set_del_user",
+                                 format_func=lambda x: x or "Select a user...")
+            # key checkbox mengikuti username: ganti user / habis hapus -> checkbox otomatis kosong lagi,
+            # jadi centang dari user sebelumnya tidak terbawa ke user berikutnya
+            kunci_yakin = f"set_del_yakin_{u_del}"
+            yakin = st.checkbox(f"I understand '{u_del}' will lose access" if u_del else "I understand the user will lose access",
+                                key=kunci_yakin, disabled=not u_del)
+            if st.button("Delete user", type="primary", disabled=not (u_del and yakin), key="set_del_btn"):
+                ss.pop(kunci_yakin, None)      # centang dipakai sekali saja
                 if not _sb_user_delete(u_del):
                     st.error(f"Delete failed: {ss.pop('_err_del', '-')}")
                 else:
                     _sb_users_list.clear()
                     catat_riwayat("Delete user", u_del)
-                    ss.pesan_toast = f"User '{u_del}' deleted."
+                    ss["_del_sukses"] = f"User '{u_del}' deleted."
+                    ss["_reset_del_user"] = True
                     st.rerun()
+            if pesan_del:
+                st.success(pesan_del)
 
     # ── Reset password ──
     with tab_pw:
