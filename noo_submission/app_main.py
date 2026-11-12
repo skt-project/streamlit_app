@@ -7,11 +7,11 @@ import numpy as np
 import pandas as pd
 import bcrypt
 import requests
-import streamlit.noo_submission.shared as _shared
+import shared as _shared
 import streamlit as st
 import komponen
-from streamlit.noo_submission.noo_grid import noo_grid
-from streamlit.noo_submission.shared import (
+from noo_grid import noo_grid
+from shared import (
     # Constants
     KOLOM, KOLOM_EDIT, KOLOM_TAMPIL, WAJIB_ISI, MAPPING_SUPABASE_KE_VALIDASI,
     KOLOM_VALIDASI, STATUS_VALID, STATUS_REVIEW, WARNA_VALIDASI, warnai_validasi,
