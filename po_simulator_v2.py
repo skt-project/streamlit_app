@@ -2326,43 +2326,69 @@ def _file_upload_section(page_key: str):
         def _find_sku_col(cols):
             return next((c for c in cols if any(k in str(c).upper() for k in ["PRODUCT CODE", "SKU", "KODE"])), None)
 
-        kalbar_clean_sheets = {}
-        kalbar_dist_map = {}
+        # Satu file output per brand, dipisah berdasarkan SKU:
+        #   mengandung G2G/GLAD2GLOW -> G2G, awalan N -> NEXTPRIME, awalan B -> BODIBREZE
+        KALBAR_BRANDS = ["G2G", "NEXTPRIME", "BODIBREZE"]
+        kalbar_by_brand = {b: {} for b in KALBAR_BRANDS}   # brand -> {sheet: df}
+        kalbar_dist_map = {}                               # (brand, sheet) -> distributor
         _brand_missing = []
+
+        def _kalbar_brand_masks(sku_series):
+            s = sku_series.astype(str).str.strip().str.upper()
+            valid = s.ne("") & s.ne("NAN")
+            is_g2g = s.str.contains("G2G", na=False) | s.str.contains("GLAD2GLOW", na=False)
+            return {
+                "G2G": is_g2g,
+                "NEXTPRIME": valid & ~is_g2g & s.str.startswith("N"),
+                "BODIBREZE": valid & ~is_g2g & s.str.startswith("B"),
+            }
 
         for p in ready:
             df_src = p["df"].copy()
 
-            # 1. FILTER BRAND: contains G2G / GLAD2GLOW
             _SKU_KEYS = ["SKU", "PRODUCT CODE", "KODE", "KODE G2G", "SKU CODE"]
-            brand_col = next(
+            sku_col = next(
                 (c for c in df_src.columns if any(k in str(c).upper() for k in _SKU_KEYS)),
                 None,
             )
-            if brand_col:
-                _b = df_src[brand_col].astype(str).str.upper()
-                df_src = df_src[_b.str.contains("G2G", na=False) | _b.str.contains("GLAD2GLOW", na=False)]
-            else:
-                _brand_missing.append(p["name"])
-
-            clean_df = _apply_range(df_src, p["row_rng"], p["col_rng"])
-            clean_df = clean_df.dropna(how="all")
 
             sheet_label = p.get("sheet_name") or p["name"]
             base_name = re.sub(r'[\\/*?:\[\]]', "", str(sheet_label)).strip()[:31] or "Sheet"
-            safe_sheet_name = base_name
-            dupe_i = 1
-            while safe_sheet_name in kalbar_clean_sheets:
-                suffix = f"_{dupe_i}"
-                safe_sheet_name = base_name[:31 - len(suffix)] + suffix
-                dupe_i += 1
-
-            kalbar_clean_sheets[safe_sheet_name] = clean_df
             _dv = p.get("dist_val", "")
-            kalbar_dist_map[safe_sheet_name] = _dv if _dv not in ("", "(Pilih)", None) else ""
+            _dv = _dv if _dv not in ("", "(Pilih)", None) else ""
+
+            if sku_col:
+                _masks = _kalbar_brand_masks(df_src[sku_col])
+                brand_frames = {b: df_src[_masks[b].values] for b in KALBAR_BRANDS}
+            else:
+                # kolom SKU tidak ketemu -> tidak bisa dipisah, semua masuk G2G
+                _brand_missing.append(p["name"])
+                brand_frames = {"G2G": df_src, "NEXTPRIME": df_src.iloc[0:0], "BODIBREZE": df_src.iloc[0:0]}
+
+            for brand, df_b in brand_frames.items():
+                clean_df = _apply_range(df_b, p["row_rng"], p["col_rng"])
+                clean_df = clean_df.dropna(how="all")
+                # NEXTPRIME / BODIBREZE: lewati sheet yang tidak punya baris brand tsb
+                if clean_df.empty and brand != "G2G":
+                    continue
+
+                safe_sheet_name = base_name
+                dupe_i = 1
+                while safe_sheet_name in kalbar_by_brand[brand]:
+                    suffix = f"_{dupe_i}"
+                    safe_sheet_name = base_name[:31 - len(suffix)] + suffix
+                    dupe_i += 1
+
+                kalbar_by_brand[brand][safe_sheet_name] = clean_df
+                kalbar_dist_map[(brand, safe_sheet_name)] = _dv
 
         if _brand_missing:
-            st.warning(f"⚠️ Kolom SKU/Product Code tidak ditemukan, filter G2G/GLAD2GLOW dilewati: {', '.join(_brand_missing)}")
+            st.warning(f"⚠️ Kolom SKU/Product Code tidak ditemukan, pemisahan brand dilewati (semua masuk G2G): {', '.join(_brand_missing)}")
+
+        # Gabungan berlabel "[BRAND] sheet" untuk summary & preview
+        kalbar_clean_sheets = {
+            f"[{b}] {sn}": d for b, sheets in kalbar_by_brand.items() for sn, d in sheets.items()
+        }
 
         # 3. DESCRIPTION: kumpulkan SKU unik, panggil get_sku_data sekali
         _all_skus = set()
@@ -2382,8 +2408,16 @@ def _file_upload_section(page_key: str):
                 dpp_map = pd.to_numeric(_m["dpp"], errors="coerce").to_dict()
 
         # 2. NOTIF sebelum download
-        _g2g_skus = {s for s in _all_skus if "GLAD2GLOW" in s}
-        st.info(f"Ada {len(_g2g_skus)} SKU GLAD2GLOW")
+        _brand_sku_cnt = {}
+        for _b, _sheets in kalbar_by_brand.items():
+            _u = set()
+            for _d in _sheets.values():
+                _sc = _find_sku_col(_d.columns)
+                if _sc:
+                    _s = _d[_sc].astype(str).str.strip().str.upper()
+                    _u.update(_s[_s.ne("") & _s.ne("NAN")].tolist())
+            _brand_sku_cnt[_b] = len(_u)
+        st.info("SKU unik per brand — " + " · ".join(f"{b}: {n}" for b, n in _brand_sku_cnt.items()))
 
         # ── Preview ringkas ──
         summary_df = pd.DataFrame(
@@ -2566,17 +2600,26 @@ def _file_upload_section(page_key: str):
             buf.seek(0)
             return buf.getvalue()
 
-        kalbar_excel_bytes = _build_kalbar_clean_excel(
-            kalbar_clean_sheets, dist_map=kalbar_dist_map, desc_map=desc_map, dpp_map=dpp_map
-        )
-        st.download_button(
-            label=f"Download({len(kalbar_clean_sheets)} sheet)",
-            data=kalbar_excel_bytes,
-            file_name=f"Kalimantan_File_PO{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            key=f"dl_kalbar_clean_{page_key}",
-        )
+        _ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        _active_brands = [b for b in KALBAR_BRANDS if kalbar_by_brand[b]]
+        if _active_brands:
+            _dl_cols = st.columns(len(_active_brands))
+            for _col, _brand in zip(_dl_cols, _active_brands):
+                _sheets = kalbar_by_brand[_brand]
+                _brand_dist_map = {sn: kalbar_dist_map.get((_brand, sn), "") for sn in _sheets}
+                _bytes = _build_kalbar_clean_excel(
+                    _sheets, dist_map=_brand_dist_map, desc_map=desc_map, dpp_map=dpp_map
+                )
+                _col.download_button(
+                    label=f"Download {_brand} ({len(_sheets)} sheet)",
+                    data=_bytes,
+                    file_name=f"Kalimantan_{_brand}_File_PO{_ts}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key=f"dl_kalbar_clean_{_brand}_{page_key}",
+                )
+        else:
+            st.info("Tidak ada baris G2G / NEXTPRIME / BODIBREZE yang terdeteksi.")
         st.divider()
     # === END DOWNLOAD SHEET ===
 
