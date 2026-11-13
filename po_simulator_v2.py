@@ -1074,7 +1074,8 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         stk = res_df.get("total_stock", pd.Series([0]*len(res_df), index=res_df.index))
         bp2 = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
         res_df["WOI PO Original"] = calculate_woi(stk, res_df["PO Qty"], avg)
-        res_df["WOI Suggest"] = calculate_woi(stk, bp2, avg)
+        bp_fin = pd.to_numeric(res_df["sugg_qty_final"], errors="coerce").fillna(0)
+        res_df["WOI Suggest"] = calculate_woi(stk, bp_fin, avg)
         res_df["Current WOI"] = calculate_woi(stk, 0, avg)
 
         ra2 = res_df.get("remaining_allocation_qty_region", pd.Series([0]*len(res_df), index=res_df.index))
