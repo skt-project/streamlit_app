@@ -3022,8 +3022,11 @@ if st.session_state.get('page') == 'po_spv':
         with st.expander("🚫 SKU yang di-reject manual (Steve)"):
             reject_data = [{"SKU": s, "Remark": "Need approval email"} for s in _MANUAL_REJECT_APPROVAL]
             reject_data += [{"SKU": s, "Remark": "No tolerance to open"} for s in _MANUAL_REJECT_NO_TOL]
-            st.dataframe(pd.DataFrame(reject_data).sort_values("SKU").reset_index(drop=True),
-                         use_container_width=True, hide_index=True)
+            if reject_data:
+                st.dataframe(pd.DataFrame(reject_data, columns=["SKU", "Remark"]).sort_values("SKU").reset_index(drop=True),
+                             use_container_width=True, hide_index=True)
+            else:
+                st.caption("Belum ada SKU yang di-reject manual.")
 
         if _REJECTED_SKUS_1:
             st.header("Regional Rejection Rules")
