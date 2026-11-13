@@ -2777,6 +2777,8 @@ def _file_upload_section(page_key: str):
                 c_str = str(c).strip()
                 if c_str and c_str not in seen:
                     seen.add(c_str); ref_cols.append(c_str)
+        # reindex gagal kalau satu frame punya nama kolom kembar -> simpan kolom pertama saja
+        frames = [f.loc[:, ~f.columns.duplicated()] for f in frames]
         frames = [f.reindex(columns=ref_cols) for f in frames]
         combined_df = pd.concat(frames, ignore_index=True)
         combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
