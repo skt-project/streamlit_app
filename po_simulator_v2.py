@@ -139,18 +139,24 @@ def get_actual_so(distributor_code: str) -> pd.DataFrame:
 
     
 def _filter_already_saved(df: pd.DataFrame) -> pd.DataFrame:
-    """Buang baris yang kombinasi file_name+sku+po_qty-nya sudah pernah ter-insert di BigQuery."""
+    """Buang baris yang kombinasi file_name+sku+po_qty+calendar_date-nya sudah pernah ter-insert di BigQuery.
+    Tanggal ikut jadi kunci: file/SKU/qty yang sama di tanggal berbeda dianggap PO baru dan tetap masuk."""
     if df.empty:
         return df
     client = get_bq_client()
     file_names = sorted(set(df["file_name"].dropna().astype(str)))
     if not file_names:
         return df
-    file_str = ", ".join([f"'{f}'" for f in file_names])
+    file_str = ", ".join(["'" + f.replace("\\", "\\\\").replace("'", "\\'") + "'" for f in file_names])
+    dates = sorted({pd.Timestamp(d).strftime("%Y-%m-%d") for d in df["calendar_date"].dropna()})
+    if not dates:
+        return df
+    date_str = ", ".join([f"DATE '{d}'" for d in dates])
     query = f"""
-        SELECT DISTINCT file_name, sku, po_qty
+        SELECT DISTINCT file_name, sku, po_qty, calendar_date
         FROM `{TEST_TABLE}`
         WHERE file_name IN ({file_str})
+          AND calendar_date IN ({date_str})
     """
     try:
         existing = client.query(query).to_dataframe()
@@ -159,15 +165,18 @@ def _filter_already_saved(df: pd.DataFrame) -> pd.DataFrame:
         return df
     if existing.empty:
         return df
+    _to_date = lambda s: pd.to_datetime(s).dt.date
     existing_keys = set(zip(
         existing["file_name"].astype(str),
         existing["sku"].astype(str),
         existing["po_qty"].astype(int),
+        _to_date(existing["calendar_date"]),
     ))
     key_series = list(zip(
         df["file_name"].astype(str),
         df["sku"].astype(str),
         df["po_qty"].astype(int),
+        _to_date(df["calendar_date"]),
     ))
     mask = [k not in existing_keys for k in key_series]
     return df[mask]
@@ -684,6 +693,7 @@ _REMARK_STYLES = [
 ]
 
 
+@st.cache_data(show_spinner=False, max_entries=64)
 def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
     if not MATPLOTLIB_OK:
         raise RuntimeError("matplotlib tidak tersedia.")
@@ -722,6 +732,7 @@ def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
     return buf.getvalue()
 
 
+@st.cache_data(show_spinner=False, max_entries=16)
 def pivot_to_png_bytes(df: pd.DataFrame, kinds: list, title: str = "") -> bytes:
     """Render tabel pivot (df sudah berisi string terformat) jadi PNG. kinds: item/sub/dist/grand per baris."""
     if not MATPLOTLIB_OK:
@@ -1559,8 +1570,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True,
                         key="dl_po_result", on_click=_flag_po_downloaded)
 
-    if st.session_state.pop("show_save_reminder", False):
-        _save_reminder_dialog()
+    # Dialog reminder dipanggil di AKHIR fungsi (setelah semua gambar/pivot selesai dirender),
+    # supaya tombol "OK, Got it" langsung bisa diklik tanpa nunggu loading.
+    _show_reminder = st.session_state.pop("show_save_reminder", False)
 
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+1}</span><strong>Auto Kategorisasi &amp; Download Gambar</strong></div>""", unsafe_allow_html=True)
 
@@ -1902,16 +1914,19 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
                 if filtered_df.empty:
                     st.session_state["supply_control_saved"] = True
-                    st.warning(f"All rows already exist (file_name+sku+qty).")
+                    st.warning("All rows already exist (file_name+sku+qty+tanggal).")
                 else:
                     _insert_supply_control(filtered_df)
                     st.session_state["supply_control_saved"] = True
                     msg = f"{len(filtered_df)} baris baru tersimpan ke po_supply_control_g2g"
                     if n_skipped:
-                        msg += f" ({n_skipped} baris dilewati karena sudah pernah tersimpan)"
+                        msg += f" ({n_skipped} baris dilewati karena sudah pernah tersimpan di tanggal yang sama)"
                     st.success(msg)
             except Exception as e:
                 st.error(f"Gagal simpan ke BigQuery: {e}")
+
+    if _show_reminder:
+        _save_reminder_dialog()
 
 def _file_upload_section(page_key: str):
     _INVALID_QTY = {"-","null","none","","0","0.0"}
