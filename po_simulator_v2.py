@@ -2293,6 +2293,18 @@ def _file_upload_section(page_key: str):
                     f"👁 Lihat isi · header row {hrow+1}{override_note} · {len(df_preview)} baris × {df_preview.shape[1]} kolom",
                     expanded=False
                 ):
+                    _seen = {}
+                    _cols = []
+                    for _c in df_preview.columns:
+                        _c = str(_c)
+                        if _c in _seen:
+                            _seen[_c] += 1
+                            _c = f"{_c}.{_seen[_c]}"
+                        else:
+                            _seen[_c] = 0
+                        _cols.append(_c)
+                    df_preview = df_preview.copy()
+                    df_preview.columns = _cols
                     st.dataframe(df_preview.reset_index(drop=True), use_container_width=True)
 
                 parsed.append({"name":fname,"df":df_f,"row_rng":row_rng,"col_rng":col_rng,
