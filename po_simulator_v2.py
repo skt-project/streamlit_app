@@ -3970,23 +3970,32 @@ with tabs[0]:
                  ['','','','','Tax (11%)', f"{tax:,.0f}"],
                  ['','','','','GRAND TOTAL', f"{grand_total:,.0f}"]]
         n_data_rows = len(data)
+        # Pakai indeks absolut (bukan negatif) supaya tabel aman saat terbelah ke halaman 2
+        # (indeks negatif bikin reportlab IndexError di batas halaman).
+        last_item = n_data_rows - 5          # baris item terakhir
+        sub_r, last_r = n_data_rows - 4, n_data_rows - 1
+        last_c = 5
         tbl = Table(data, colWidths=[10*mm,25*mm,70*mm,20*mm,20*mm,30*mm],
-            rowHeights=[5.5*mm] + [4*mm]*(n_data_rows-1))
-        tbl.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0),colors.HexColor("#F1F382")),
-            ('TEXTCOLOR',(0,0),(-1,0),colors.black),
-            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),     
-            ('FONTSIZE',(0,0),(-1,0),6),
-            ('ALIGN',(0,0),(-1,0),'CENTER'),
-            ('FONTNAME',(0,1),(-1,-5),'Helvetica-Bold'),     
-            ('FONTSIZE',(0,1),(-1,-1),6), ('ALIGN',(3,1),(-1,-1),'RIGHT'),
-            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-            ('GRID',(0,0),(-1,-5),0.4,colors.HexColor("#000000")),
-            ('FONTNAME',(4,-4),(-1,-1),'Helvetica-Bold'),
-            ('BACKGROUND',(4,-1),(-1,-1),colors.HexColor('#F7F0F0')),
-            ('BOTTOMPADDING',(0,0),(-1,-1),2), ('TOPPADDING',(0,0),(-1,-1),2),
-            ('ROWBACKGROUNDS',(0,1),(-1,-5),[colors.white,colors.HexColor('#FAFAFA')]),
-            ]))
+            rowHeights=[5.5*mm] + [4*mm]*(n_data_rows-1), repeatRows=1)
+        _style = [
+            ('BACKGROUND',(0,0),(last_c,0),colors.HexColor("#F1F382")),
+            ('TEXTCOLOR',(0,0),(last_c,0),colors.black),
+            ('FONTNAME',(0,0),(last_c,0),'Helvetica-Bold'),
+            ('FONTSIZE',(0,0),(last_c,0),6),
+            ('ALIGN',(0,0),(last_c,0),'CENTER'),
+            ('FONTSIZE',(0,1),(last_c,last_r),6), ('ALIGN',(3,1),(last_c,last_r),'RIGHT'),
+            ('VALIGN',(0,0),(last_c,last_r),'MIDDLE'),
+            ('FONTNAME',(4,sub_r),(last_c,last_r),'Helvetica-Bold'),
+            ('BACKGROUND',(4,last_r),(last_c,last_r),colors.HexColor('#F7F0F0')),
+            ('BOTTOMPADDING',(0,0),(last_c,last_r),2), ('TOPPADDING',(0,0),(last_c,last_r),2),
+        ]
+        if last_item >= 1:
+            _style += [
+                ('FONTNAME',(0,1),(last_c,last_item),'Helvetica-Bold'),
+                ('ROWBACKGROUNDS',(0,1),(last_c,last_item),[colors.white,colors.HexColor('#FAFAFA')]),
+            ]
+        _style.append(('GRID',(0,0),(last_c,last_item),0.4,colors.HexColor("#000000")))
+        tbl.setStyle(TableStyle(_style))
         elements.append(tbl)
         elements.append(Spacer(1, 30*mm))
         sig_data = [['Initiated by,', f'ASM Approval, ({distributor})', '', 'APPROVE'],
