@@ -11,6 +11,7 @@ import requests
 import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
+from distributor_overrides import company_code_efektif, lengkapi_prefix   # override SEMENTARA, lihat file itu
 
 # ─────────────────────────────── ZONA & PENGGUNA ──────────────────────────────
 ZONA_WAKTU = ZoneInfo("Asia/Jakarta")
@@ -697,7 +698,11 @@ def muat_prefix_per_distributor() -> dict:
     df_cov = df_cov.drop_duplicates("_key")
     gabung = df_distri.merge(df_cov[["_key","Combine"]], on="_key", how="left")
     gabung = gabung[gabung["Combine"].notna() & gabung["Combine"].str.strip().ne("")]
-    return dict(zip(gabung["Distributor Name"].str.strip(), gabung["Combine"].str.strip()))
+    hasil = dict(zip(gabung["Distributor Name"].str.strip(), gabung["Combine"].str.strip()))
+    try:    # isi prefix distributor yang belum punya (sheet menang); gagal -> kembali ke perilaku semula
+        return lengkapi_prefix(hasil, {k: v["distributor"] for k, v in muat_distri_code_map().items()})
+    except Exception:
+        return hasil
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -749,6 +754,7 @@ def muat_distri_code_map() -> dict:
         if not h:
             continue
         g = r.iloc[6].strip()
+        g = company_code_efektif(h, g)      # sheet menang; override hanya kalau kosong
         if g[:2] in ("12","17"):
             g = g[2:]
         hasil[h] = {"distributor": nama, "company_code": g}
@@ -795,6 +801,7 @@ def muat_distri_customer_code_raw() -> dict:
         if kol_status is not None and str(r[kol_status]).strip().lower() != "active":
             continue
         g = r.iloc[6].strip()
+        g = company_code_efektif(r.iloc[7] if len(r) > 7 else "", g)   # sheet menang; override hanya kalau kosong
         if nama not in hasil or (not hasil[nama] and g):
             hasil[nama] = g
     return hasil
