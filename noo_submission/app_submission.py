@@ -1054,12 +1054,18 @@ def halaman_pengajuan_noo():
                             "Product Description (Reference)", "Product", "Customer Product Code",
                             "Customer Product Name"]
 
+            # checkbox Select dikecilkan & label tidak boleh turun baris (kolom sempit)
+            st.markdown(
+                '<style>.st-key-tabel_sku_upload_scroll [data-testid="stCheckbox"]'
+                '{transform:scale(.75);transform-origin:left center;white-space:nowrap;min-height:0}'
+                '.st-key-tabel_sku_upload_scroll [data-testid="stCheckbox"] p{font-size:.78rem;white-space:nowrap}'
+                '</style>', unsafe_allow_html=True)
             tabel_sku_upload = st.container(key="tabel_sku_upload_scroll")
             tabel_sku_upload.__enter__()
             kepala = st.columns(LEBAR_SKU_UPLOAD)
             for kolom, teks in zip(kepala, kolom_tampil):
                 if teks == "Select":
-                    kolom.checkbox("Select", key=_sel_all_key, on_change=_pilih_semua_upload,
+                    kolom.checkbox("All", key=_sel_all_key, on_change=_pilih_semua_upload,
                                    help="Select / unselect all rows")
                     continue
                 kolom.markdown(
