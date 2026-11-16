@@ -97,7 +97,7 @@ CUSTOMER_CODE_OVERRIDES = {
 }
 
 STORE_CODE_FROM_NAME_DIST = "CV SUKSES SEHATI SELARAS - BAU BAU"  
-STORE_CODE_FROM_NAME_PREFIX = "DST356-"  
+STORE_CODE_FROM_NAME_PREFIX = "DST363-"  
 # Master distributor table for BQ lookups
 BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
 
@@ -1162,6 +1162,75 @@ def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Data") -> bytes:
     return buf.getvalue()
 
 
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# Customer SKU Code prefix -> output file label.
+#   1G      -> G2G
+#   1B / 1N -> NXP_BB (NEXTPRIME + BODIBREZE share one file)
+_SKU_PREFIX_LABELS = {"1G": "G2G", "1B": "NXP_BB", "1N": "NXP_BB"}
+# Output label -> brand prefix used to rebuild Customer Code for the split rows.
+_LABEL_BRAND_PREFIX = {"G2G": BRAND_PREFIXES["G2G"], "NXP_BB": BRAND_PREFIXES["NEXTPRIME"]}
+
+
+def split_by_sku_prefix(df: pd.DataFrame, default_label: str) -> Dict[str, pd.DataFrame]:
+    """Split rows by the first 2 chars of Customer SKU Code (see _SKU_PREFIX_LABELS).
+
+    Rows with any other prefix stay under ``default_label``. If no row matches a
+    known prefix, the result is just ``{default_label: df}`` (old behaviour).
+    """
+    prefix = (
+        series_as_text(df["Customer SKU Code"]).str.strip().str.upper().str[:2]
+    )
+    labels = prefix.map(_SKU_PREFIX_LABELS).fillna(default_label).astype(object)
+    if (labels == default_label).all():
+        return {default_label: df}
+    groups: Dict[str, pd.DataFrame] = {}
+    for label in dict.fromkeys(labels):  # keep first-seen order
+        groups[label] = force_text_columns(df[labels == label].reset_index(drop=True))
+    return groups
+
+
+def apply_split_customer_code(
+    frame: pd.DataFrame, label: str, dist: str, static_code: str
+) -> pd.DataFrame:
+    """Rebuild Customer Code for a split group, same rules as intelligent_mapping
+    (CUSTOMER_CODE_OVERRIDES first, else brand prefix + static Customer Code)."""
+    brand_prefix = _LABEL_BRAND_PREFIX.get(label)
+    if brand_prefix is None:  # the originally selected brand: leave as is
+        return frame
+    frame = frame.copy()
+    override = CUSTOMER_CODE_OVERRIDES.get((dist.strip().upper(), brand_prefix))
+    frame["Customer Code"] = override or (brand_prefix + static_code)
+    return frame
+
+
+def render_split_downloads(
+    df: pd.DataFrame, dist: str, brand: str, key_prefix: str, static_code: str = ""
+) -> None:
+    """Download button(s) for a converted frame, split by Customer SKU Code prefix."""
+    groups = split_by_sku_prefix(df, brand)
+    if len(groups) == 1:
+        label = next(iter(groups))
+        st.download_button(
+            "📥 Download Converted Excel",
+            data=to_excel_bytes(df, "MappedData"),
+            file_name=output_file_name(dist, label),
+            mime=_XLSX_MIME,
+            key=f"{key_prefix}|single",
+        )
+        return
+    st.write("Customer SKU Code prefix detected — output is split per brand:")
+    for label, frame in groups.items():
+        frame = apply_split_customer_code(frame, label, dist, static_code)
+        st.download_button(
+            f"📥 Download {label} ({len(frame)} rows)",
+            data=to_excel_bytes(frame, "MappedData"),
+            file_name=output_file_name(dist, label),
+            mime=_XLSX_MIME,
+            key=f"{key_prefix}|{label}",
+        )
+
+
 # =========================
 # UI – 3M pipeline section
 # =========================
@@ -1314,12 +1383,9 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
 
     # Download
     try:
-        xlsx = to_excel_bytes(mapped, "MappedData")
-        st.download_button(
-            label="📥 Download Converted Excel",
-            data=xlsx,
-            file_name=output_file_name(dist, brand),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        render_split_downloads(
+            mapped, dist, brand, key_prefix="dl3m",
+            static_code=cfg["static_fields"].get("Customer Code", ""),
         )
     except Exception as e:
         st.error(f"Error generating download file: {e}")
@@ -1588,11 +1654,9 @@ def render_standard_pipeline(dist: str):
     # Single-sheet file: original behaviour, one direct download
     if len(sheets) <= 1:
         try:
-            st.download_button(
-                "📥 Download Converted Excel",
-                data=to_excel_bytes(jobs[0]["mapped"], "MappedData"),
-                file_name=output_file_name(dist, jobs[0]["brand"]),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            render_split_downloads(
+                jobs[0]["mapped"], dist, jobs[0]["brand"], key_prefix=f"dl1|{file_key}",
+                static_code=cfg["static_fields"].get("Customer Code", ""),
             )
         except Exception as e:
             st.error(f"Error generating download file: {e}")
