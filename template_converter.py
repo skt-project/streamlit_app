@@ -1440,7 +1440,7 @@ def _render_manual_picker(job: Dict, cfg: Dict) -> None:
         )
 
 
-def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
+def render_standard_pipeline(dist: str):
     """Handles upload + conversion for standard distributor formats.
 
     A workbook with several sheets lets the user choose, per brand, which sheet
@@ -1473,17 +1473,13 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     if len(sheets) > 1:
         st.subheader("Sheet Converter")
         st.caption(
-            f"This file has {len(sheets)} sheets. Pick a sheet for the selected brand, "
+            f"This file has {len(sheets)} sheets. Pick a brand and its sheet, "
             "then use *Add Sheet Converter* to convert another brand. "
             "A brand already used by another converter is not offered again."
         )
         rows: List[int] = ss["_conv_rows"]
         max_rows = min(len(sheets), len(BRAND_OPTIONS))
-        # The first converter starts on the brand from "Select Brand" (its key
-        # includes that brand, so changing "Select Brand" resets it), but can be changed.
-        brand_key = lambda rid: (  # noqa: E731
-            f"conv_brand|{file_key}|{rid}" + (f"|{brand}" if rid == 0 else "")
-        )
+        brand_key = lambda rid: f"conv_brand|{file_key}|{rid}"  # noqa: E731
 
         for pos, rid in enumerate(rows):
             c_brand, c_sheet = st.columns(2)  # brand first, then sheet
@@ -1491,8 +1487,6 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
             opts = [b for b in BRAND_OPTIONS if b not in taken]
             if ss.get(brand_key(rid)) not in opts:
                 ss.pop(brand_key(rid), None)  # unset or now used by another converter
-                if rid == 0 and brand in opts:
-                    ss[brand_key(rid)] = brand
             chosen = c_brand.selectbox(
                 f"Brand (converter {pos + 1})", opts, key=brand_key(rid)
             )
@@ -1518,6 +1512,7 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
             "➖ Remove last", on_click=_remove_converter, disabled=len(rows) <= 1
         )
     else:
+        brand = st.selectbox("Select Brand", BRAND_OPTIONS, key=f"single_brand|{file_key}")
         assignments = [(brand, None)]
 
     cfg = get_config(dist)
@@ -1659,14 +1654,12 @@ def main():
         return
 
     dist = st.selectbox("Select Distributor", distributors)
-    brand = st.selectbox("Select Brand", BRAND_OPTIONS)
-    brand_prefix = BRAND_PREFIXES.get(brand, "")
-
     # ── Route to the correct pipeline ────────────────────────────────────────
     if is_3m_distributor(dist):
-        render_3m_pipeline(dist, brand, brand_prefix)
+        brand = st.selectbox("Select Brand", BRAND_OPTIONS)
+        render_3m_pipeline(dist, brand, BRAND_PREFIXES.get(brand, ""))
     else:
-        render_standard_pipeline(dist, brand, brand_prefix)
+        render_standard_pipeline(dist)
 
 
 if __name__ == "__main__":
