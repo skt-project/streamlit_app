@@ -97,7 +97,7 @@ CUSTOMER_CODE_OVERRIDES = {
 }
 
 STORE_CODE_FROM_NAME_DIST = "CV SUKSES SEHATI SELARAS - BAU BAU"  
-STORE_CODE_FROM_NAME_PREFIX = "DST363-"  
+STORE_CODE_FROM_NAME_PREFIX = "DST356-"  
 # Master distributor table for BQ lookups
 BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
 
