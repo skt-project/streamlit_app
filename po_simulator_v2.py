@@ -3125,6 +3125,39 @@ if st.session_state.get('page') == 'po_spv':
 
                 st.header("3. PO Simulation")
 
+                # Logika simulasi SAMA dengan PO Simulator - RSA (_run_po_simulation).
+                # Hasil di-cache per file supaya ganti format output / rerun tidak simulasi ulang.
+                import hashlib as _hashlib
+                _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
+                _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final"}
+                _spv_cache = st.session_state.get("sim_result_spv")
+                if _spv_cache and _spv_cache.get("dfs"):
+                    _first = next(iter(_spv_cache["dfs"].values()))
+                    if not _need_cols.issubset(_first.columns):
+                        _spv_cache = None
+                if _spv_cache is None or _spv_cache.get("sig") != _sig:
+                    _sim_in = po_df[["Distributor", "Customer SKU Code", "PO Qty"]].copy()
+                    _dfs, _npd, _bm = _run_po_simulation(
+                        _sim_in, "Customer SKU Code", "PO Qty", "Distributor",
+                        _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
+                        _REJECTED_SKUS_1, __REGION_LIST_1,
+                        __REJECTED_SKUS_2, _REGION_LIST_2,
+                        _LIMITED_SKUS_QTY, ___MAX_QTY_LIMIT,
+                    )
+                    _spv_cache = {"sig": _sig, "dfs": _dfs, "npd": _npd}
+                    st.session_state["sim_result_spv"] = _spv_cache
+
+                excel_dfs = _spv_cache["dfs"]
+                all_npd_sku_list = _spv_cache["npd"]
+                if not excel_dfs:
+                    st.warning("Tidak ada distributor yang berhasil diproses.")
+                    st.stop()
+                st.success(f"Simulasi selesai — {len(excel_dfs)} distributor")
+
+                # SPV: output sama persis dengan RSA, KECUALI kolom MOQ tidak ikut di Excel
+                _MOQ_COLS = ["MOQ", "Check MOQ", "Suggested Min Order Qty"]
+                spv_dfs = {k: v.drop(columns=_MOQ_COLS, errors="ignore") for k, v in excel_dfs.items()}
+
                 st.subheader("4. Select Output Format and Download")
                 output_format = st.radio(
                     "Choose Excel Output Format:",
@@ -3132,377 +3165,12 @@ if st.session_state.get('page') == 'po_spv':
                     index=0
                 )
 
-                progress = st.progress(0)
-                progress_step = 1.0 / len(po_df["Distributor"].unique())
-
-                all_npd_sku_list = []
-                excel_dfs = {}
-                display_dfs = []
-                zero_price_skus = get_zero_price_skus()
-
-                uploaded_distributors = po_df["Distributor"].unique().tolist()
-
-                for i, distributor_name in enumerate(uploaded_distributors):
-                    st.subheader(f"Processing data for: **{distributor_name}**")
-                    progress.progress((i * progress_step), f"Processing {distributor_name}...")
-
-                    current_po_df = po_df[po_df["Distributor"] == distributor_name].copy()
-                    sku_list = current_po_df["Customer SKU Code"].unique().tolist()
-
-                    # --- Fetch data from BigQuery ---
-                    sku_df = get_sku_data(sku_list)
-                    sku_data_df = get_stock_data(distributor_name, sku_list)
-
-                    # Rename sku_df columns — now includes product_name
-                    sku_df.rename(
-                        columns={
-                            "sku": "Customer SKU Code",
-                            "price_for_distri": "SIP",
-                            "product_name": "Product Name",
-                        },
-                        inplace=True,
-                    )
-
-                    if sku_data_df.empty:
-                        st.warning(
-                            "Could not find stock and sales data for the uploaded Distributor/SKUs in BigQuery. Please check the Distributor Name or SKU codes."
-                        )
-                        st.stop()
-
-                    # Rename stock data columns
-                    if "sku" in sku_data_df.columns:
-                        sku_data_df.rename(
-                            columns={"sku": "Customer SKU Code", "distributor": "Distributor"},
-                            inplace=True,
-                        )
-
-                    # Drop product_name from stock data — we use master_product's version
-                    if "product_name" in sku_data_df.columns:
-                        sku_data_df.drop(columns=["product_name"], inplace=True)
-
-                    #TRACK SKUs NOT FOUND IN BIGQUERY
-                    skus_in_sku_df = set(sku_df["Customer SKU Code"].tolist()) if not sku_df.empty else set()
-                    skus_in_stock_df = set(sku_data_df["Customer SKU Code"].tolist()) if not sku_data_df.empty else set()
-                    skus_not_in_bq = set(sku_list) - (skus_in_sku_df | skus_in_stock_df)
-
-                    if skus_not_in_bq:
-                        st.warning(
-                            f"The following SKUs were **not found** in the system and will be rejected: "
-                            f"`{', '.join(sorted(skus_not_in_bq))}`"
-                        )
-                    # ===== END TRACK SKUs NOT FOUND =====
-
-                    # Merge PO data with SKU price + product_name data
-                    result_df = pd.merge(current_po_df, sku_df, on="Customer SKU Code", how="left")
-
-                    result_df["SIP"] = pd.to_numeric(result_df["SIP"], errors="coerce").fillna(0)
-                    result_df["PO Value"] = result_df["SIP"] * result_df["PO Qty"]
-
-                    # Merge with stock data (outer to include suggested SKUs)
-                    result_df = pd.merge(result_df, sku_data_df, on="Customer SKU Code", how="outer")
-
-                    missing_product_names = result_df["Product Name"].isna()
-                    if missing_product_names.any():
-                        suggested_skus = result_df.loc[missing_product_names, "Customer SKU Code"].unique().tolist()
-                        if suggested_skus:
-                            extra_sku_df = get_sku_data(suggested_skus)
-                            if not extra_sku_df.empty:
-                                extra_sku_df.rename(
-                                    columns={
-                                        "sku": "Customer SKU Code",
-                                        "price_for_distri": "SIP",
-                                        "product_name": "Product Name",
-                                    },
-                                    inplace=True,
-                                )
-                                extra_name_map = extra_sku_df.set_index("Customer SKU Code")["Product Name"].to_dict()
-                                result_df.loc[missing_product_names, "Product Name"] = (
-                                    result_df.loc[missing_product_names, "Customer SKU Code"].map(extra_name_map)
-                                )
-
-                    result_sku_list = result_df["Customer SKU Code"].unique().tolist()
-
-                    npd_df = get_npd_data(result_sku_list)
-                    current_npd_sku_list = npd_df['sku'].unique().tolist() if not npd_df.empty else []
-
-                    all_npd_sku_list.extend(current_npd_sku_list)
-                    all_npd_sku_list = list(set(all_npd_sku_list))
-
-                    result_df["is_po_sku"] = result_df["is_po_sku"].astype("boolean")
-                    result_df["is_po_sku"] = result_df["is_po_sku"].fillna(False)
-
-                    result_df[
-                        [
-                            "PO Qty",
-                            "PO Value",
-                            "total_stock",
-                            "buffer_plan_by_lm_qty_adj",
-                            "avg_weekly_st_lm_qty",
-                            "buffer_plan_by_lm_val_adj",
-                            "remaining_allocation_qty_region",
-                            "woi_end_of_month_by_lm",
-                        ]
-                    ] = result_df[
-                        [
-                            "PO Qty",
-                            "PO Value",
-                            "total_stock",
-                            "buffer_plan_by_lm_qty_adj",
-                            "avg_weekly_st_lm_qty",
-                            "buffer_plan_by_lm_val_adj",
-                            "remaining_allocation_qty_region",
-                            "woi_end_of_month_by_lm",
-                        ]
-                    ].fillna(0)
-
-                    result_df = result_df[
-                        (result_df["PO Qty"] > 0) | (result_df["buffer_plan_by_lm_qty_adj"] > 0)
-                    ]
-
-                    # ===== ENHANCED REJECTION LOGIC FOR SUGGESTED SKUs =====
-                    suggested_skus_mask = result_df["is_po_sku"] == False
-
-                    exclude_suggested = (
-                        (result_df["Customer SKU Code"].isin(skus_not_in_bq)) |
-                        (result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL)) |
-                        (result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL)) |
-                        (result_df["remaining_allocation_qty_region"] < 0) |
-                        (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])) |
-                        (
-                            (result_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY)) &
-                            (result_df["buffer_plan_by_lm_qty_adj"] > ___MAX_QTY_LIMIT)
-                        ) |
-                        (result_df["buffer_plan_by_lm_qty_adj"] == 0)
-                    )
-
-                    if _REJECTED_SKUS_1:
-                        regions_upper_1 = [r.upper() for r in _REJECTED_SKUS_1]
-                        regional_reject_1 = (
-                            (result_df["Customer SKU Code"].isin(_REJECTED_SKUS_1)) &
-                            (~result_df["region"].str.upper().isin(regions_upper_1))
-                        )
-                        exclude_suggested = exclude_suggested | regional_reject_1
-
-                    result_df = result_df[~(suggested_skus_mask & exclude_suggested)]
-                    # ===== END ENHANCED REJECTION LOGIC =====
-
-                    result_df["distributor_name"] = distributor_name
-
-                    result_df["WOI PO Original"] = calculate_woi(
-                        result_df["total_stock"],
-                        result_df["PO Qty"],
-                        result_df["avg_weekly_st_lm_qty"],
-                    )
-
-                    result_df["WOI Suggest"] = calculate_woi(
-                        result_df["total_stock"],
-                        result_df["buffer_plan_by_lm_qty_adj"],
-                        result_df["avg_weekly_st_lm_qty"],
-                    )
-
-                    result_df["Current WOI"] = calculate_woi(
-                        result_df["total_stock"],
-                        0,
-                        result_df["avg_weekly_st_lm_qty"],
-                    )
-                    for sku, allowed_regions in _STOP_PO_SKU_ALLOWED_REGION.items():
-                        allowed_up = [r.upper() for r in allowed_regions]
-                        sku_mask = result_df["Customer SKU Code"] == sku
-                        region_allowed = result_df["region"].str.upper().isin(allowed_up)
-                        result_df.loc[sku_mask & ~region_allowed, "supply_control_status_gt"] = "Stop PO"
-                    #STOP PO BB-------------------------------
-                    STOP_PO_BB_NORM = set(s.strip().upper() for s in STOP_PO_BB)
-                    sku_norm = result_df["Customer SKU Code"].astype(str).str.strip().str.upper()
-                    is_bodibreze = result_df["Product Name"].str.lower().str.contains("bodibreze", case=False, na=False)
-                    is_in_allowlist = sku_norm.isin(STOP_PO_BB_NORM)
-                    mask_stop = ~is_bodibreze & is_in_allowlist
-                    result_df.loc[mask_stop, "supply_control_status_gt"] = "Stop PO"
-                    ##-------------------------------
-
-                    conditions = [
-                        result_df["Customer SKU Code"].isin(zero_price_skus),
-                        result_df["Customer SKU Code"].isin(skus_not_in_bq),
-                        (result_df["Customer SKU Code"].isin(_LIMITED_SKUS_QTY)) & (result_df["PO Qty"] > ___MAX_QTY_LIMIT),
-                        (result_df["remaining_allocation_qty_region"] < 0),
-                        (result_df["is_po_sku"] == False),
-                        #sulawesi 1 only
-                        (result_df["Customer SKU Code"].isin(VITA_C_INC_STOP)  & 
-                        (result_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)| result_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False))),
-                        #end
-                        result_df["Customer SKU Code"].isin(_MANUAL_REJECT_APPROVAL),
-                        result_df["Customer SKU Code"].isin(_MANUAL_REJECT_NO_TOL),
-                        
-                        (result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS", "UNAVAILABLE"])),
-                        (
-                            (result_df["avg_weekly_st_lm_qty"] == 0) &
-                            (result_df["buffer_plan_by_lm_qty_adj"] == 0) &
-                            (~result_df["Customer SKU Code"].str.upper().isin(all_npd_sku_list)) &
-                            (~result_df["supply_control_status_gt"].str.upper().isin(["STOP PO", "DISCONTINUED", "OOS"]))
-                        ),
-                        (result_df["buffer_plan_by_lm_qty_adj"] == 0),
-                        (result_df["PO Qty"] > result_df["buffer_plan_by_lm_qty_adj"]),
-                        (result_df["PO Qty"] < result_df["buffer_plan_by_lm_qty_adj"]),
-                        (result_df["PO Qty"] == result_df["buffer_plan_by_lm_qty_adj"]),
-                    ]
-
-                    choices = [
-                        "Price Not Available Yet",
-                        "Reject (SKU Not Found in System)",
-                        f"Reject (Exceeds Qty Limit of {___MAX_QTY_LIMIT})",
-                        "Reject (Negative Allocation)",
-                        "Additional Suggestion",
-                        "Reject (Sulawesi Only)",
-                        "Reject (Stop by Steve - Need approval email)",
-                        "Reject (Stop by Steve - No tolerance to open)",
-                        "Reject",
-                        "Proceed",
-                        "Reject",
-                        "Reject with suggestion",
-                        "Proceed with suggestion",
-                        "Proceed",
-                    ]
-
-                    result_df["Remark"] = np.select(conditions, choices, default="N/A (Missing Data)")
-                    new_column_names = {
-                        "distributor_name": "Distributor",
-                        "Customer SKU Code": "SKU",
-                        "assortment": "Assortment",
-                        "supply_control_status_gt": "Supply Control",
-                        "PO Qty": "PO Qty",
-                        "PO Value": "PO Value",
-                        "total_stock": "Total Stock (Qty)",
-                        "avg_weekly_st_lm_qty": "Avg Weekly Sales LM (Qty)",
-                        "buffer_plan_by_lm_qty_adj": "Suggested PO Qty",
-                        "buffer_plan_by_lm_val_adj": "Suggested PO Value",
-                        "WOI PO Original": "WOI (Stock + PO Ori)",
-                        "WOI Suggest": "WOI After Buffer (Stock + Suggested Qty)",
-                        "woi_end_of_month_by_lm": "Stock + Suggested Qty WOI (Projection at EOM)",
-                        "remaining_allocation_qty_region": "Remaining Allocation (By Region)",
-                    }
-
-                    result_df.rename(columns=new_column_names, inplace=True)
-
-                    if _REJECTED_SKUS_1:
-                        result_df = apply_sku_rejection_rules(
-                            _REJECTED_SKUS_1,
-                            result_df,
-                            __REGION_LIST_1,
-                            is_in=False
-                        )
-
-                    if __REJECTED_SKUS_2:
-                        result_df = apply_sku_rejection_rules(
-                            __REJECTED_SKUS_2,
-                            result_df,
-                            _REGION_LIST_2,
-                            is_in=False
-                        )
-
-                    result_df.sort_values(
-                        by=["is_po_sku", "SKU"], ascending=[False, True], inplace=True
-                    )
-
-                    result_df["RSA Notes"] = ""
-
-                    moq_df_lookup_spv = check_moq()
-                    if not moq_df_lookup_spv.empty:
-                        moq_map_spv = (moq_df_lookup_spv.assign(sku=moq_df_lookup_spv["sku"].astype(str).str.strip().str.upper())
-                                                          .set_index("sku")["MOQ"].to_dict())
-                        sku_upper_spv = result_df["SKU"].astype(str).str.strip().str.upper()
-                        moq_val_spv = sku_upper_spv.map(moq_map_spv).astype(float)
-                        po_qty_val_spv = pd.to_numeric(result_df["PO Qty"], errors="coerce")
-
-                        is_multiple_spv = np.mod(po_qty_val_spv, moq_val_spv) == 0
-                        under_moq_mask_spv = (po_qty_val_spv < 50) & ~is_multiple_spv & (moq_val_spv > 0)
-
-                        suggested_qty_spv = np.ceil(po_qty_val_spv / moq_val_spv) * moq_val_spv
-
-                        result_df["MOQ"] = moq_val_spv
-                        result_df["Check MOQ"] = np.select(
-                            [
-                                moq_val_spv.isna(),
-                                under_moq_mask_spv,
-                            ],
-                            [
-                                "MOQ Not Found",
-                                "Under MOQ",
-                            ],
-                            default="SAFE MOQ"
-                        )
-                        result_df["Suggested Min Order Qty"] = np.where(under_moq_mask_spv, suggested_qty_spv, np.nan)
-                    else:
-                        result_df["MOQ"] = np.nan
-                        result_df["Check MOQ"] = "MOQ Not Found"
-                        result_df["Suggested Min Order Qty"] = np.nan
-
-                        
-
-                    excel_cols = [
-                        "Distributor",
-                        "SKU",
-                        "Product Name",
-                        "Assortment",
-                        "Supply Control",
-                        "Avg Weekly Sales LM (Qty)",
-                        "Total Stock (Qty)",
-                        "Current WOI",
-                        "PO Qty",
-                        "PO Value",
-                        "WOI (Stock + PO Ori)",
-                        "Remark",
-                        "Suggested PO Qty",
-                        "Suggested PO Value",
-                        "WOI After Buffer (Stock + Suggested Qty)",
-                        "Stock + Suggested Qty WOI (Projection at EOM)",
-                        "Remaining Allocation (By Region)",
-                        "is_po_sku",
-                        "RSA Notes",
-                        "MOQ",
-                        "Check MOQ",
-                        "Suggested Min Order Qty"
-                    ]
-
-
-                    result_df = result_df.reindex(columns=excel_cols)
-
-                    excel_dfs[distributor_name] = result_df.copy()
-
-                    # Format columns for display
-                    result_df["PO Value"] = result_df["PO Value"].apply(
-                        lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
-                    )
-                    result_df["Suggested PO Value"] = result_df["Suggested PO Value"].apply(
-                        lambda x: f"{x:,.2f}" if pd.notnull(x) else 0
-                    )
-                    result_df["Remaining Allocation (By Region)"] = result_df["Remaining Allocation (By Region)"].apply(
-                        lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
-                    )
-                    result_df["Avg Weekly Sales LM (Qty)"] = result_df["Avg Weekly Sales LM (Qty)"].apply(
-                        lambda x: f"{round(x):,d}" if pd.notnull(x) else 0
-                    )
-                    result_df["WOI (Stock + PO Ori)"] = result_df["WOI (Stock + PO Ori)"].apply(
-                        lambda x: f"{x:.2f}" if pd.notnull(x) else ""
-                    )
-                    result_df["Stock + Suggested Qty WOI (Projection at EOM)"] = result_df[
-                        "Stock + Suggested Qty WOI (Projection at EOM)"
-                    ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-                    result_df["Current WOI"] = result_df["Current WOI"].apply(
-                        lambda x: f"{x:.2f}" if pd.notnull(x) else ""
-                    )
-                    result_df["WOI After Buffer (Stock + Suggested Qty)"] = result_df[
-                        "WOI After Buffer (Stock + Suggested Qty)"
-                    ].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-
-                    display_dfs.append(result_df)
-
-                progress.progress(1.0, "Processing complete")
-
                 if output_format == "Single Sheet (All Distributors Stacked)":
-                    final_excel_df = pd.concat(excel_dfs.values(), ignore_index=True)
+                    final_excel_df = pd.concat(spv_dfs.values(), ignore_index=True)
                     xlsx_data = to_excel_single_sheet(final_excel_df, all_npd_sku_list)
                     file_name = "po_simulator_result_single_sheet.xlsx"
                 else:
-                    xlsx_data = to_excel_with_styling(excel_dfs, all_npd_sku_list)
+                    xlsx_data = to_excel_with_styling(spv_dfs, all_npd_sku_list)
                     file_name = "po_simulator_result_separate_sheets.xlsx"
 
                 st.download_button(
@@ -3510,31 +3178,21 @@ if st.session_state.get('page') == 'po_spv':
                     data=xlsx_data,
                     file_name=file_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_po_spv_excel",
                 )
 
                 st.subheader("Simulated PO Data")
-                final_display_df = pd.concat(display_dfs, ignore_index=True)
-
+                final_display_df = pd.concat(spv_dfs.values(), ignore_index=True)
                 final_cols = [
-                    "Distributor",
-                    "SKU",
-                    "Product Name",
-                    "Assortment",
-                    "Supply Control",
-                    "Avg Weekly Sales LM (Qty)",
-                    "Total Stock (Qty)",
-                    "Current WOI",
-                    "PO Qty",
-                    "PO Value",
-                    "WOI (Stock + PO Ori)",
-                    "Remark",
-                    "Suggested PO Qty",
-                    "Suggested PO Value",
+                    "Distributor", "SKU", "Product Name", "Assortment", "Supply Control",
+                    "Avg Weekly Sales LM (Qty)", "Total Stock (Qty)", "Current WOI",
+                    "PO Qty", "PO Value", "WOI (Stock + PO Ori)", "Remark",
+                    "Suggested PO buffer", "Suggested PO Value",
+                    "Target SO", "Suggested QTY SO", "Suggested QTY Final", "Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)",
                 ]
-
                 st.dataframe(final_display_df.reindex(columns=final_cols).reset_index(drop=True))
 
             except Exception as e:
