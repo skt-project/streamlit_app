@@ -1479,30 +1479,26 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         )
         rows: List[int] = ss["_conv_rows"]
         max_rows = min(len(sheets), len(BRAND_OPTIONS))
-        brand_key = lambda rid: f"conv_brand|{file_key}|{rid}"  # noqa: E731
+        # The first converter starts on the brand from "Select Brand" (its key
+        # includes that brand, so changing "Select Brand" resets it), but can be changed.
+        brand_key = lambda rid: (  # noqa: E731
+            f"conv_brand|{file_key}|{rid}" + (f"|{brand}" if rid == 0 else "")
+        )
 
         for pos, rid in enumerate(rows):
-            c_sheet, c_brand = st.columns(2)
+            c_brand, c_sheet = st.columns(2)  # brand first, then sheet
+            taken = {ss.get(brand_key(other)) for other in rows if other != rid}
+            opts = [b for b in BRAND_OPTIONS if b not in taken]
+            if ss.get(brand_key(rid)) not in opts:
+                ss.pop(brand_key(rid), None)  # unset or now used by another converter
+                if rid == 0 and brand in opts:
+                    ss[brand_key(rid)] = brand
+            chosen = c_brand.selectbox(
+                f"Brand (converter {pos + 1})", opts, key=brand_key(rid)
+            )
             sheet = c_sheet.selectbox(
                 f"Sheet (converter {pos + 1})", sheets, key=f"conv_sheet|{file_key}|{rid}"
             )
-            if pos == 0:
-                # First converter always uses the brand picked in "Select Brand".
-                c_brand.selectbox(
-                    f"Brand (converter {pos + 1})", [brand],
-                    key=f"{brand_key(rid)}|{brand}", disabled=True,
-                )
-                chosen = brand
-            else:
-                taken = {brand} | {
-                    ss.get(brand_key(other)) for other in rows if other != rid
-                }
-                opts = [b for b in BRAND_OPTIONS if b not in taken]
-                if ss.get(brand_key(rid)) not in opts:
-                    ss.pop(brand_key(rid), None)  # stale choice (now used elsewhere)
-                chosen = c_brand.selectbox(
-                    f"Brand (converter {pos + 1})", opts, key=brand_key(rid)
-                )
             assignments.append((chosen, sheet))
 
         def _add_converter():
@@ -1566,6 +1562,20 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     if not jobs:
         return
 
+    # ── Single-sheet file: original behaviour, one direct download ────────────
+    if len(sheets) <= 1:
+        try:
+            st.download_button(
+                "📥 Download Converted Excel",
+                data=to_excel_bytes(jobs[0]["mapped"], "MappedData"),
+                file_name=f"{dist}_converted.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        except Exception as e:
+            st.error(f"Error generating download file: {e}")
+        _render_manual_pickers(jobs, cfg, multi)
+        return
+
     # ── Generate: one file per brand, named with brand + generate time ────────
     st.divider()
     if st.button("⚙️ Generate", type="primary"):
@@ -1594,20 +1604,32 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
             )
             st.caption(item["name"])
 
-    # ── Manual column picker (bottom of page) ─────────────────────────────────
+    _render_manual_pickers(jobs, cfg, multi, regenerate_hint=True)
+
+
+def _render_manual_pickers(
+    jobs: List[Dict], cfg: Dict, multi: bool, regenerate_hint: bool = False
+) -> None:
+    """Manual column picker section (bottom of page)."""
     needs_picker = [j for j in jobs if j["base_failed"]]
-    if needs_picker:
-        st.divider()
-        st.subheader("Manual Column Mapping")
-        st.warning(
-            "⚠️ Some columns in the config were not found in this file. "
-            "Pick the matching column from the uploaded file below "
-            "(leave as *not mapped* to keep it empty). The preview updates automatically; press Generate again to refresh the download."
-        )
-        for j in needs_picker:
-            if multi:
-                st.markdown(f"**{j['brand']}** ← sheet `{j['sheet']}`")
-            _render_manual_picker(j, cfg)
+    if not needs_picker:
+        return
+    st.divider()
+    st.subheader("Manual Column Mapping")
+    hint = (
+        "The preview updates automatically; press Generate again to refresh the download."
+        if regenerate_hint
+        else "The result above updates automatically."
+    )
+    st.warning(
+        "⚠️ Some columns in the config were not found in this file. "
+        "Pick the matching column from the uploaded file below "
+        f"(leave as *not mapped* to keep it empty). {hint}"
+    )
+    for j in needs_picker:
+        if multi:
+            st.markdown(f"**{j['brand']}** ← sheet `{j['sheet']}`")
+        _render_manual_picker(j, cfg)
 
 
 # =========================
