@@ -1555,12 +1555,18 @@ def _render_manual_picker(job: Dict, cfg: Dict) -> None:
         )
 
 
-def _render_address_picker(job: Dict, cfg: Dict) -> None:
+def _render_address_pickers(jobs: List[Dict], cfg: Dict, multi: bool) -> None:
+    """Optional Customer Address pickers, shown just above the download button(s)."""
+    for j in jobs:
+        _render_address_picker(j, cfg, label_suffix=f" - {j['brand']}" if multi else "")
+
+
+def _render_address_picker(job: Dict, cfg: Dict, label_suffix: str = "") -> None:
     """Optional selectbox: map Customer Address from a column instead of the static value."""
     options = [_NOT_MAPPED] + list(job["df"].columns)
     configured = cfg["mapping"].get(_ADDRESS_COL, "")
     st.selectbox(
-        f"{_ADDRESS_COL} (optional)"
+        f"{_ADDRESS_COL} (optional){label_suffix}"
         + (f"  (config expects: {configured})" if configured else ""),
         options,
         key=f"manual_map|{job['job_key']}|{_ADDRESS_COL}",
@@ -1687,6 +1693,7 @@ def render_standard_pipeline(dist: str):
 
     # Single-sheet file: original behaviour, one direct download
     if len(sheets) <= 1:
+        _render_address_pickers(jobs, cfg, multi)
         try:
             render_split_downloads(
                 jobs[0]["mapped"], dist, jobs[0]["brand"], key_prefix=f"dl1|{file_key}",
@@ -1699,6 +1706,7 @@ def render_standard_pipeline(dist: str):
 
     # Generate: one file per brand, named with brand + generate time
     st.divider()
+    _render_address_pickers(jobs, cfg, multi)
     if st.button("⚙️ Generate", type="primary"):
         # File names get their timestamp now, at click time, not when the page renders.
         try:
@@ -1750,14 +1758,10 @@ def _render_manual_pickers(
 ) -> None:
     """Manual column picker section (bottom of page)."""
     needs_picker = [j for j in jobs if j["base_failed"]]
-    st.divider()
-    st.subheader("Manual Column Mapping")
-    for j in jobs:
-        if multi:
-            st.markdown(f"**{j['brand']}** ← sheet `{j['sheet']}`")
-        _render_address_picker(j, cfg)
     if not needs_picker:
         return
+    st.divider()
+    st.subheader("Manual Column Mapping")
     hint = (
         "The preview updates automatically; press Generate again to refresh the download."
         if regenerate_hint
