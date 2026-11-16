@@ -1256,7 +1256,7 @@ def tab_feedback():
             st.markdown("".join(baris), unsafe_allow_html=True)
 
             # ubah In Progress -> Solved (tiket di halaman ini yang punya id)
-            is_bd = (ss.get("user") or {}).get("tagging") in ("BD SUPPORT", "BD_SUPPORT")
+            is_bd = (ss.get("user") or {}).get("tagging") in ("RSA", "BD SUPPORT", "BD_SUPPORT")
             bisa = [x for x in potong if is_bd and x["status"] == "In Progress" and x["id"] is not None]
             if bisa:
                 st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
