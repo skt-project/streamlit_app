@@ -1126,6 +1126,13 @@ def read_any_table(uploaded_file, sheet_name=0) -> pd.DataFrame:
     return df
 
 
+def output_file_name(dist: str, brand_label: str) -> str:
+    """<distributor>_<BRAND>_<YYYYMMDD_HHMMSS>.xlsx"""
+    base = re.sub(r"[^A-Za-z0-9]+", "_", dist).strip("_") or "converted"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{base}_{brand_label}_{stamp}.xlsx"
+
+
 def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Data") -> bytes:
     """Serialize a DataFrame to Excel, writing identity fields as true Excel text."""
     buf = io.BytesIO()
@@ -1311,7 +1318,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         st.download_button(
             label="📥 Download Converted Excel",
             data=xlsx,
-            file_name=f"{dist}_converted.xlsx",
+            file_name=output_file_name(dist, brand),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except Exception as e:
@@ -1584,7 +1591,7 @@ def render_standard_pipeline(dist: str):
             st.download_button(
                 "📥 Download Converted Excel",
                 data=to_excel_bytes(jobs[0]["mapped"], "MappedData"),
-                file_name=f"{dist}_converted.xlsx",
+                file_name=output_file_name(dist, jobs[0]["brand"]),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         except Exception as e:
@@ -1595,9 +1602,7 @@ def render_standard_pipeline(dist: str):
     # Generate: one file per brand, named with brand + generate time
     st.divider()
     if st.button("⚙️ Generate", type="primary"):
-        # Timestamp is taken here, at click time, so every file name is stable.
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base = re.sub(r"[^A-Za-z0-9]+", "_", dist).strip("_") or "converted"
+        # File names get their timestamp now, at click time, not when the page renders.
         try:
             # Brands in a merge group are written into ONE file (rows combined).
             by_brand = {j["brand"]: j for j in jobs}
@@ -1621,7 +1626,7 @@ def render_standard_pipeline(dist: str):
                 fname = label.replace(" + ", "_")
                 ss["_generated"][label] = {
                     "data": to_excel_bytes(frame, "MappedData"),
-                    "name": f"{base}_{fname}_{stamp}.xlsx",
+                    "name": output_file_name(dist, fname),
                 }
         except Exception as e:
             st.error(f"Error generating download file: {e}")
