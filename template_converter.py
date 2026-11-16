@@ -3,7 +3,7 @@ import os
 import re
 import zipfile
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 import streamlit as st
@@ -1460,28 +1460,67 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
 
     # ── Which sheet belongs to which brand? ───────────────────────────────────
     sheets = list_sheet_names(uploaded)
+
+    # Converter state lives in session_state so it survives reruns; reset per file.
+    ss = st.session_state
+    if ss.get("_conv_file_key") != file_key:
+        ss["_conv_file_key"] = file_key
+        ss["_conv_rows"] = [0]
+        ss["_conv_next_id"] = 1
+        ss["_generated"] = {}  # {brand: {"data": bytes, "name": str}}
+
     assignments: List[Tuple[str, Optional[str]]] = []
     if len(sheets) > 1:
-        st.subheader("Sheet per Brand")
+        st.subheader("Sheet Converter")
         st.caption(
-            f"This file has {len(sheets)} sheets. Choose which sheet holds the data of "
-            "each brand (leave a brand on *skip* to ignore it)."
+            f"This file has {len(sheets)} sheets. Pick a sheet for the selected brand, "
+            "then use *Add Sheet Converter* to convert another brand. "
+            "A brand already used by another converter is not offered again."
         )
-        options = [_SKIP_SHEET] + sheets
-        cols_sheet = st.columns(3)
-        for i, b in enumerate(BRAND_OPTIONS):
-            default = _default_sheet_for_brand(b, sheets, brand)
-            choice = cols_sheet[i % 3].selectbox(
-                b,
-                options,
-                index=options.index(default) if default in options else 0,
-                key=f"sheet_for|{file_key}|{brand}|{b}",
+        rows: List[int] = ss["_conv_rows"]
+        max_rows = min(len(sheets), len(BRAND_OPTIONS))
+        brand_key = lambda rid: f"conv_brand|{file_key}|{rid}"  # noqa: E731
+
+        for pos, rid in enumerate(rows):
+            c_sheet, c_brand = st.columns(2)
+            sheet = c_sheet.selectbox(
+                f"Sheet (converter {pos + 1})", sheets, key=f"conv_sheet|{file_key}|{rid}"
             )
-            if choice != _SKIP_SHEET:
-                assignments.append((b, choice))
-        if not assignments:
-            st.info("Pick a sheet for at least one brand to continue.")
-            return
+            if pos == 0:
+                # First converter always uses the brand picked in "Select Brand".
+                c_brand.selectbox(
+                    f"Brand (converter {pos + 1})", [brand],
+                    key=f"{brand_key(rid)}|{brand}", disabled=True,
+                )
+                chosen = brand
+            else:
+                taken = {brand} | {
+                    ss.get(brand_key(other)) for other in rows if other != rid
+                }
+                opts = [b for b in BRAND_OPTIONS if b not in taken]
+                if ss.get(brand_key(rid)) not in opts:
+                    ss.pop(brand_key(rid), None)  # stale choice (now used elsewhere)
+                chosen = c_brand.selectbox(
+                    f"Brand (converter {pos + 1})", opts, key=brand_key(rid)
+                )
+            assignments.append((chosen, sheet))
+
+        def _add_converter():
+            ss["_conv_rows"].append(ss["_conv_next_id"])
+            ss["_conv_next_id"] += 1
+
+        def _remove_converter():
+            if len(ss["_conv_rows"]) > 1:
+                ss["_conv_rows"].pop()
+
+        b_add, b_remove, _ = st.columns([1, 1, 4])
+        b_add.button(
+            "➕ Add Sheet Converter", on_click=_add_converter,
+            disabled=len(rows) >= max_rows,
+        )
+        b_remove.button(
+            "➖ Remove last", on_click=_remove_converter, disabled=len(rows) <= 1
+        )
     else:
         assignments = [(brand, None)]
 
@@ -1527,24 +1566,33 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
     if not jobs:
         return
 
-    # ── One combined download ─────────────────────────────────────────────────
-    combined = pd.concat([j["mapped"] for j in jobs], ignore_index=True)
-    combined = force_text_columns(combined[MASTER_SCHEMA])
-    if multi:
-        st.info(
-            f"ℹ️ Combined **{len(combined)} rows** from {len(jobs)} brand(s): "
-            + ", ".join(f"{j['brand']} ({len(j['mapped'])})" for j in jobs)
-        )
-    try:
-        xlsx = to_excel_bytes(combined, "MappedData")
-        st.download_button(
-            "📥 Download Converted Excel",
-            data=xlsx,
-            file_name=f"{dist}_converted.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    except Exception as e:
-        st.error(f"Error generating download file: {e}")
+    # ── Generate: one file per brand, named with brand + generate time ────────
+    st.divider()
+    if st.button("⚙️ Generate", type="primary"):
+        # Timestamp is taken here, at click time, so every file name is stable.
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = re.sub(r"[^A-Za-z0-9]+", "_", dist).strip("_") or "converted"
+        try:
+            for j in jobs:
+                ss["_generated"][j["brand"]] = {
+                    "data": to_excel_bytes(j["mapped"], "MappedData"),
+                    "name": f"{base}_{j['brand']}_{stamp}.xlsx",
+                }
+        except Exception as e:
+            st.error(f"Error generating download file: {e}")
+
+    generated = ss.get("_generated", {})
+    if generated:
+        st.subheader("Downloads")
+        for b, item in generated.items():
+            st.download_button(
+                f"📥 Download {b}",
+                data=item["data"],
+                file_name=item["name"],
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"dl|{file_key}|{b}",
+            )
+            st.caption(item["name"])
 
     # ── Manual column picker (bottom of page) ─────────────────────────────────
     needs_picker = [j for j in jobs if j["base_failed"]]
@@ -1554,7 +1602,7 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         st.warning(
             "⚠️ Some columns in the config were not found in this file. "
             "Pick the matching column from the uploaded file below "
-            "(leave as *not mapped* to keep it empty). The result above updates automatically."
+            "(leave as *not mapped* to keep it empty). The preview updates automatically; press Generate again to refresh the download."
         )
         for j in needs_picker:
             if multi:
