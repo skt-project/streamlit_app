@@ -1164,24 +1164,30 @@ def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Data") -> bytes:
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-# Customer SKU Code prefix -> output file label.
-#   1G      -> G2G
-#   1B / 1N -> NXP_BB (NEXTPRIME + BODIBREZE share one file)
-_SKU_PREFIX_LABELS = {"1G": "G2G", "1B": "NXP_BB", "1N": "NXP_BB"}
+# Customer SKU Code first character -> output file label.
+#   G (e.g. "G2G-42")        -> G2G
+#   anything else (e.g. "NJM102001", B...) -> NXP_BB (NEXTPRIME + BODIBREZE)
+#   blank SKU                -> stays with the brand chosen in the UI
+def _sku_label(code: str, default_label: str) -> str:
+    code = code.strip().upper()
+    if not code:
+        return default_label
+    return "G2G" if code[0] == "G" else "NXP_BB"
+
+
 # Output label -> brand prefix used to rebuild Customer Code for the split rows.
 _LABEL_BRAND_PREFIX = {"G2G": BRAND_PREFIXES["G2G"], "NXP_BB": BRAND_PREFIXES["NEXTPRIME"]}
 
 
 def split_by_sku_prefix(df: pd.DataFrame, default_label: str) -> Dict[str, pd.DataFrame]:
-    """Split rows by the first 2 chars of Customer SKU Code (see _SKU_PREFIX_LABELS).
+    """Split rows by the first character of Customer SKU Code (see _sku_label).
 
-    Rows with any other prefix stay under ``default_label``. If no row matches a
-    known prefix, the result is just ``{default_label: df}`` (old behaviour).
+    Blank SKU rows stay under ``default_label``. If every row ends up there,
+    the result is just ``{default_label: df}`` (old behaviour).
     """
-    prefix = (
-        series_as_text(df["Customer SKU Code"]).str.strip().str.upper().str[:2]
-    )
-    labels = prefix.map(_SKU_PREFIX_LABELS).fillna(default_label).astype(object)
+    labels = series_as_text(df["Customer SKU Code"]).map(
+        lambda c: _sku_label(c, default_label)
+    ).astype(object)
     if (labels == default_label).all():
         return {default_label: df}
     groups: Dict[str, pd.DataFrame] = {}
