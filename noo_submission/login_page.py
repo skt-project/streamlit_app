@@ -13,7 +13,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from shared import SUPABASE_URL, SUPABASE_KEY, _SB_HEADERS, sb_insert, muat_distri_code_map
-#from streamlit.noo_submission.shared import SUPABASE_URL, SUPABASE_KEY, _SB_HEADERS, sb_insert, muat_distri_code_map
+#from shared import SUPABASE_URL, SUPABASE_KEY, _SB_HEADERS, sb_insert, muat_distri_code_map
 
 TABLE_USER = "users"        
 TAGGING_RSA = "RSA"
@@ -480,7 +480,7 @@ def require_login():
                 with st.container(key="forgot"):
                     c_chat, c_forgot = st.columns([1.3, 1], vertical_alignment="center")
                     if c_chat.button(":material/help: Help & Support", key="login_help"):
-                        from streamlit.noo_submission.help_support import dialog_help_support      # popup tiket (tanpa Google Form)
+                        from help_support import dialog_help_support     # popup tiket (tanpa Google Form)
                         dialog_help_support()
                     if c_forgot.button("Forgot password?"):
                         st.toast("Hubungi admin untuk reset password.", icon=":material/info:")
