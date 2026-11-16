@@ -725,9 +725,19 @@ def render_manual_sku():
                 ss.sku_last_n     = len(payload)
                 ss.sku_staged     = []
                 ss.sku_editor_key += 1
-                catat_riwayat("Submit Manual SKU Mapping", f"{len(payload)} rows")
+                catat_riwayat("Submit Manual SKU Mapping", f"{len(payload)} rows",
+                              distributor=next((r["Distributor"] for r in rows_now if r["Distributor"]), None))
                 ss.pesan_toast = f"Manual SKU Mapping saved — {len(payload)} rows"
                 st.rerun()
+def _distri_dari_noo(df) -> str:
+    """Nama distributor dari baris NOO yang disubmit (kolom Group Name), untuk identifier RSA di history."""
+    if df is None or "Group Name" not in df.columns:
+        return ""
+    for v in df["Group Name"]:
+        if pd.notna(v) and str(v).strip():
+            return str(v).strip()
+    return ""
+
 def _set_produk_dari_deskripsi(produk_key: str, desc_key: str, desc_map: dict):
     deskripsi = st.session_state.get(desc_key, "")
     if deskripsi and deskripsi in desc_map:
@@ -981,6 +991,7 @@ def halaman_pengajuan_noo():
         st.markdown(judul_opsi(2,"Upload Option","extracted from Failure List file"),
                     unsafe_allow_html=True)
         produk_kosong = False
+        ada_pilihan = True
         if file_siap and len(data_sku):
             try:
                 map_produk_upload = muat_produk_lookup(SHEET_PRODUCT)
@@ -1024,8 +1035,22 @@ def halaman_pengajuan_noo():
 
             if ss.get("sku_fix_on"):
                 df_edit = perbaiki_cc(df_edit)     # tampilan Customer Code ikut terkoreksi
-            LEBAR_SKU_UPLOAD = [1.0, 1.2, 1.8, 2.0, 1.2, 1.3, 3.0]
-            kolom_tampil = ["Customer Code", "Customer Name", "Customer SKU Name",
+            LEBAR_SKU_UPLOAD = [0.6, 1.0, 1.2, 1.8, 2.0, 1.2, 1.3, 3.0]
+            _ek, _n_baris = ss.sku_upload_editor_key, len(df_edit)
+            _sel_keys = [f"sku_upload_sel_{_ek}_{i}" for i in range(_n_baris)]
+            _sel_all_key = f"sku_upload_sel_all_{_ek}"
+            for _k in _sel_keys:
+                ss.setdefault(_k, True)            # default: semua baris tercentang
+            ss.setdefault(_sel_all_key, True)
+
+            def _pilih_semua_upload(keys=tuple(_sel_keys), all_key=_sel_all_key):
+                for _k in keys:
+                    st.session_state[_k] = st.session_state[all_key]
+
+            def _sinkron_pilih_semua(keys=tuple(_sel_keys), all_key=_sel_all_key):
+                st.session_state[all_key] = all(st.session_state[_k] for _k in keys)
+
+            kolom_tampil = ["Select", "Customer Code", "Customer Name", "Customer SKU Name",
                             "Product Description (Reference)", "Product", "Customer Product Code",
                             "Customer Product Name"]
 
@@ -1033,6 +1058,10 @@ def halaman_pengajuan_noo():
             tabel_sku_upload.__enter__()
             kepala = st.columns(LEBAR_SKU_UPLOAD)
             for kolom, teks in zip(kepala, kolom_tampil):
+                if teks == "Select":
+                    kolom.checkbox("Select", key=_sel_all_key, on_change=_pilih_semua_upload,
+                                   help="Select / unselect all rows")
+                    continue
                 kolom.markdown(
                     f'<b style="font-size:0.78rem; white-space:nowrap">{teks}</b>',
                     unsafe_allow_html=True)
@@ -1045,7 +1074,9 @@ def halaman_pengajuan_noo():
 
             produk_terupdate = []
             for i, r in df_edit.reset_index(drop=True).iterrows():
-                c_cc, c_cn, c_skuname, c_desk, c_produk, c_kode, c_namaprod = st.columns(LEBAR_SKU_UPLOAD)
+                c_sel, c_cc, c_cn, c_skuname, c_desk, c_produk, c_kode, c_namaprod = st.columns(LEBAR_SKU_UPLOAD)
+                c_sel.checkbox("", key=_sel_keys[i], label_visibility="collapsed",
+                               on_change=_sinkron_pilih_semua)
                 c_cc.markdown(
                     f'<span style="{CELL_STYLE}">{r["Customer Code"]}</span>',
                     unsafe_allow_html=True)
@@ -1092,11 +1123,20 @@ def halaman_pengajuan_noo():
                 # Product bisa berubah setelah auto-match / dropdown, jadi prefix harus dihitung ulang
                 # terhadap Product FINAL (sebelumnya hanya terhadap Product mentah dari file)
                 data_sku = perbaiki_cc(data_sku)
+            # Hanya baris yang dicentang yang divalidasi & di-submit
+            _mask_pilih = [bool(ss.get(_k, True)) for _k in _sel_keys]
+            n_dipilih = sum(_mask_pilih)
+            ada_pilihan = n_dipilih > 0
+            st.caption(f"{n_dipilih} of {_n_baris} rows selected for submission")
+            data_sku = data_sku[_mask_pilih].reset_index(drop=True)
+            produk_terupdate = [p for p, s in zip(produk_terupdate, _mask_pilih) if s]
+            if not ada_pilihan:
+                st.warning("No rows selected. Tick at least one row to submit.")
             produk_kosong = any(not _sku_str(p) for p in produk_terupdate)
             if produk_kosong:
                 n_kosong = sum(not _sku_str(p) for p in produk_terupdate)
-                st.warning(f"{n_kosong} row(s) have no Product yet. Pick the Product Description or Product, "
-                           f"Submit is locked until every row has a Product.")
+                st.warning(f"{n_kosong} selected row(s) have no Product yet. Pick the Product Description or Product, "
+                           f"Submit is locked until every selected row has a Product.")
             salah_cc = cc_salah(data_sku)
             if salah_cc:
                 contoh = ", ".join(f"{p}: {cc}→{b}…" for _, p, cc, b in salah_cc[:5])
@@ -1110,7 +1150,7 @@ def halaman_pengajuan_noo():
             st.markdown('<div class="preview-kosong">No data yet, please upload a file first</div>',
                         unsafe_allow_html=True)
 
-    if st.button(":material/send: Submit SKU Mapping", disabled=not file_siap or bool(salah_cc) or produk_kosong,
+    if st.button(":material/send: Submit SKU Mapping", disabled=not file_siap or bool(salah_cc) or produk_kosong or not ada_pilihan,
                  type="primary", width="stretch", key="submit_sku"):
         if cc_salah(data_sku):          
             st.error("Submit cancelled: some Customer Codes still have an invalid prefix.")
@@ -1142,7 +1182,8 @@ def halaman_pengajuan_noo():
         if isinstance(result, dict) and "_error" in result:
             st.error(f"Failed to save: {result['_error']}")
         else:
-            catat_riwayat("Submit SKU Mapping", f"{len(payload)} rows (skipped: {len(rows)-len(baru)})")
+            catat_riwayat("Submit SKU Mapping", f"{len(payload)} rows (skipped: {len(rows)-len(baru)})",
+                          distributor=next((_sku_str(r["Customer Name"]) for r in baru if _sku_str(r["Customer Name"])), None))
             ss.pesan_toast = (f"SKU Mapping saved — {len(payload)} rows"
                               + (f", {len(rows)-len(baru)} duplicates skipped" if len(baru) < len(rows) else ""))
             ss.pesan_toast_icon = ":material/warning:" if len(baru) < len(rows) else ":material/check_circle:"
@@ -1277,7 +1318,8 @@ def halaman_pengajuan_noo():
                                     ss.bulk_data = [b for b in ss.bulk_data
                                                     if str(b["Customer Store Code"]).strip() in sisa] or None
                                     catat_riwayat("Submit Manual NOO",
-                                                  f"{len(data_bersih)} rows (skipped: {len(data_dilewati)})")
+                                                  f"{len(data_bersih)} rows (skipped: {len(data_dilewati)})",
+                                                  distributor=_distri_dari_noo(data_bersih))
                                     if data_dilewati.empty:
                                         set_keterangan_noo("success",f"Submitted — {len(data_bersih)} rows")
                                     else:
@@ -1414,7 +1456,8 @@ def halaman_pengajuan_noo():
                     else:
                         ss.noo_batch_terkirim = tanda_batch
                         ambil_raw_noo.clear()
-                        catat_riwayat("Submit NOO", f"{len(data_bersih)} rows (skipped: {len(data_dilewati)})")
+                        catat_riwayat("Submit NOO", f"{len(data_bersih)} rows (skipped: {len(data_dilewati)})",
+                                      distributor=_distri_dari_noo(data_bersih))
                         if data_dilewati.empty:
                             set_keterangan_noo("success",f"NOO submitted — {len(data_bersih)} rows")
                         else:
@@ -1653,7 +1696,7 @@ def halaman_konfirmasi_spv():
     if c_draft.button(":material/save: Save as Draft", key="spv_draft", disabled=not semua, width="stretch"):
         with st.spinner("Saving draft..."):
             time.sleep(0.7)
-        catat_riwayat("SPV - Save as Draft", f"{len(semua)} rows")
+        catat_riwayat("SPV - Save as Draft", f"{len(semua)} rows", distributor=distributor)
         ss.pesan_toast = "SPV Confirmation draft saved"
         st.rerun()
     if c_submit.button(":material/send: Submit Confirmation", type="primary", key="spv_submit", disabled=not baris_tampil, width="stretch"):
@@ -1669,7 +1712,8 @@ def halaman_konfirmasi_spv():
         n_exi_kirim = sum(b["jenis_outlet"] == "Existing" for b in baris_tampil)
         catat_riwayat("SPV - Submit Confirmation",
                       f"{berhasil} rows (NOO {n_noo_kirim}, Existing {n_exi_kirim})"
-                      + (f", failed: {len(gagal)}" if gagal else ""))
+                      + (f", failed: {len(gagal)}" if gagal else ""),
+                      distributor=distributor)
         if gagal:
             ss.pesan_toast      = f"Submitted {berhasil} rows. Failed: {', '.join(gagal)}"
             ss.pesan_toast_icon = ":material/warning:"
