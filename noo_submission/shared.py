@@ -11,7 +11,6 @@ import requests
 import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from distributor_overrides import company_code_efektif, lengkapi_prefix   # override SEMENTARA, lihat file itu
 
 # ─────────────────────────────── ZONA & PENGGUNA ──────────────────────────────
 ZONA_WAKTU = ZoneInfo("Asia/Jakarta")
@@ -698,11 +697,7 @@ def muat_prefix_per_distributor() -> dict:
     df_cov = df_cov.drop_duplicates("_key")
     gabung = df_distri.merge(df_cov[["_key","Combine"]], on="_key", how="left")
     gabung = gabung[gabung["Combine"].notna() & gabung["Combine"].str.strip().ne("")]
-    hasil = dict(zip(gabung["Distributor Name"].str.strip(), gabung["Combine"].str.strip()))
-    try:    # isi prefix distributor yang belum punya (sheet menang); gagal -> kembali ke perilaku semula
-        return lengkapi_prefix(hasil, {k: v["distributor"] for k, v in muat_distri_code_map().items()})
-    except Exception:
-        return hasil
+    return dict(zip(gabung["Distributor Name"].str.strip(), gabung["Combine"].str.strip()))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -754,7 +749,6 @@ def muat_distri_code_map() -> dict:
         if not h:
             continue
         g = r.iloc[6].strip()
-        g = company_code_efektif(h, g)      # sheet menang; override hanya kalau kosong
         if g[:2] in ("12","17"):
             g = g[2:]
         hasil[h] = {"distributor": nama, "company_code": g}
@@ -801,7 +795,6 @@ def muat_distri_customer_code_raw() -> dict:
         if kol_status is not None and str(r[kol_status]).strip().lower() != "active":
             continue
         g = r.iloc[6].strip()
-        g = company_code_efektif(r.iloc[7] if len(r) > 7 else "", g)   # sheet menang; override hanya kalau kosong
         if nama not in hasil or (not hasil[nama] and g):
             hasil[nama] = g
     return hasil
@@ -1012,11 +1005,36 @@ def nama_pengguna_sesi() -> str:
         return f"Admin - {uname.upper()}"
     return uname
 
-def catat_riwayat(aksi: str, detail: str = "", pengguna: str = None):
+# Region distributor -> RSA yang meng-handle (nama region harus sama persis dengan sheet)
+REGION_TO_RSA = {
+    "East Kalimantan": "erlin", "South Kalimantan": "erlin", "West Kalimantan": "erlin",
+    "Maluku Papua": "shaltsa", "Northern Sulawesi": "shaltsa", "Southern Sulawesi": "shaltsa",
+    "Bali Nusa Tenggara": "geirda", "Northern East Java": "geirda", "Southern East Java": "geirda",
+    "Central Java 1": "furqan", "Central Java 2": "furqan", "Central Java 3": "furqan",
+    "Jabodetabek": "furqan",
+    "West Java": "kayla", "Central Sumatera": "kayla",
+    "Southern Sumatera 1": "aqil", "Southern Sumatera 2": "aqil", "Northern Sumatera": "aqil",
+}
+
+def rsa_identifier(nama_distributor: str, fallback: str = "rsa") -> str:
+    """'rsa_<nama>' berdasarkan Region distributor; fallback bila distributor/region tidak ditemukan."""
+    try:
+        for rg in region_distributor(str(nama_distributor or "")):
+            rsa = REGION_TO_RSA.get(rg.strip())
+            if rsa:
+                return f"rsa_{rsa}"
+    except Exception:
+        pass
+    return fallback
+
+def catat_riwayat(aksi: str, detail: str = "", pengguna: str = None, distributor: str = None):
     ss    = st.session_state
     df    = ss.get("df_toko", pd.DataFrame())
     total = len(df)
     pengguna = pengguna or nama_pengguna_sesi()
+    # user RSA: jejak submit dicatat spesifik per RSA sesuai region distributor yang disubmit
+    if distributor and (ss.get("user") or {}).get("tagging") == "RSA":
+        pengguna = rsa_identifier(distributor, fallback=pengguna)
     ss.setdefault("riwayat", []).insert(0, {
         "Waktu": waktu_sekarang(), "Pengguna": pengguna,
         "Aksi": aksi, "Detail": detail, "Total": total,
