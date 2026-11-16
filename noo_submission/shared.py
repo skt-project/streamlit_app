@@ -1014,17 +1014,31 @@ REGION_TO_RSA = {
     "Jabodetabek": "furqan",
     "West Java": "kayla", "Central Sumatera": "kayla",
     "Southern Sumatera 1": "aqil", "Southern Sumatera 2": "aqil", "Northern Sumatera": "aqil",
+    # Penulisan region lain yang benar-benar ada di sheet Distributor Mapping (kolom F).
+    # Dipetakan ke RSA dari grup region yang sejenis — mohon dicek.
+    "Sulawesi 1": "shaltsa", "Sulawesi 2": "shaltsa", "Papua Maluku": "shaltsa",
+    "East Java": "geirda",
+    "Central Java": "furqan", "South Central Java": "furqan", "North Central Java": "furqan",
+    "Jakarta (Csa)": "furqan",
+    "West Java (Sd)": "kayla",
+    "Southern Sumatera": "aqil",
 }
 
 def rsa_identifier(nama_distributor: str, fallback: str = "rsa") -> str:
     """'rsa_<nama>' berdasarkan Region distributor; fallback bila distributor/region tidak ditemukan."""
+    nama = " ".join(str(nama_distributor or "").split()).lower()
+    if not nama:
+        return fallback
     try:
-        for rg in region_distributor(str(nama_distributor or "")):
-            rsa = REGION_TO_RSA.get(rg.strip())
-            if rsa:
-                return f"rsa_{rsa}"
+        df = muat_distributor_dari_sheet()
     except Exception:
-        pass
+        return fallback
+    peta = {" ".join(k.split()).lower(): v for k, v in REGION_TO_RSA.items()}   # abaikan beda huruf/spasi
+    cocok = df[df["Distributor Name"].map(lambda s: " ".join(str(s).split()).lower()) == nama]
+    for rg in cocok["Region"]:
+        rsa = peta.get(" ".join(str(rg).split()).lower())
+        if rsa:
+            return f"rsa_{rsa}"
     return fallback
 
 def catat_riwayat(aksi: str, detail: str = "", pengguna: str = None, distributor: str = None):
