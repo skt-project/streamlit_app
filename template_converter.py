@@ -1034,12 +1034,38 @@ def intelligent_mapping(
 # =========================
 # Utilities
 # =========================
-def read_any_table(uploaded_file) -> pd.DataFrame:
+def list_sheet_names(uploaded_file) -> List[str]:
+    """Sheet names of a workbook (xlsx/xlsm/xls/ods). Empty for CSV/HTML/unreadable files."""
+    kind = sniff_file_kind(uploaded_file)
+    try:
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        if kind == "xlsx":
+            from openpyxl import load_workbook
+
+            wb = load_workbook(uploaded_file, read_only=True)
+            try:
+                return [str(n) for n in wb.sheetnames]
+            finally:
+                wb.close()
+        if kind in ("xls", "ods"):
+            xl = pd.ExcelFile(uploaded_file, engine="odf" if kind == "ods" else None)
+            return [str(n) for n in xl.sheet_names]
+    except Exception:
+        return []
+    finally:
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+    return []
+
+
+def read_any_table(uploaded_file, sheet_name=0) -> pd.DataFrame:
     """Read CSV/Excel with every column as text so leading zeros are not inferred away.
 
     The format is detected from the file content, so a file with the wrong
     extension (xlsx named .xls, xls named .xlsx, HTML table named .xls, a CSV
-    named .xlsx) still loads.
+    named .xlsx) still loads. ``sheet_name`` (name or index) picks the sheet of
+    a multi-sheet workbook; it is ignored for CSV/HTML.
     """
     name = uploaded_file.name.lower()
     kind = sniff_file_kind(uploaded_file)
@@ -1076,9 +1102,10 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
             dtype=str,
             keep_default_na=False,
             engine="odf",
+            sheet_name=sheet_name,
         )
     else:  # xlsx / xls / html
-        df = _read_excel_as_text(uploaded_file, header=0)
+        df = _read_excel_as_text(uploaded_file, sheet_name=sheet_name, header=0)
 
     # Sanitize every column: preserve leading-zero strings, turn NaN into "".
     df.columns = uniquify_column_names(df.columns)
@@ -1279,84 +1306,86 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
 # =========================
 # UI – Standard pipeline
 # =========================
-def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
-    """Handles upload + conversion for standard distributor formats."""
-    uploaded = st.file_uploader(
-        "Upload Distributor File (.xlsx/.csv)", type=["xlsx", "xlsm", "xls", "csv", "ods"]
-    )
-    if not uploaded:
-        return
+_NOT_MAPPED = "— not mapped —"
+_SKIP_SHEET = "— skip —"
 
-    st.write("Preview of uploaded data:")
-    try:
-        df = read_any_table(uploaded)
-        df.columns = uniquify_column_names([col.lower() for col in df.columns])
-        st.dataframe(df.head())
-    except Exception as e:
-        st.error(f"Error reading the uploaded file: {e}")
-        return
 
-    cfg = get_config(dist)
-    if not cfg:
-        st.error(
-            "Configuration for the selected distributor was not found. "
-            "Please contact an administrator."
-        )
-        return
+def _default_sheet_for_brand(brand: str, sheets: List[str], selected_brand: str) -> Optional[str]:
+    """Pre-select a sheet for a brand: a sheet named after the brand, else the first
+    sheet for the brand chosen in 'Select Brand' (the old single-sheet behaviour)."""
+    b = re.sub(r"[^A-Z0-9]", "", brand.upper())
+    for sheet in sheets:
+        n = re.sub(r"[^A-Z0-9]", "", sheet.upper())
+        if len(n) >= 3 and (b in n or n in b):
+            return sheet
+    return sheets[0] if brand == selected_brand else None
+
+
+def _load_sheet_df(uploaded, file_key: str, sheet: Optional[str]) -> pd.DataFrame:
+    """Read one sheet (lower-cased headers), cached per uploaded file across reruns."""
+    cache = st.session_state.get("_sheet_df_cache")
+    if not cache or cache.get("file_key") != file_key:
+        cache = {"file_key": file_key, "dfs": {}}
+        st.session_state["_sheet_df_cache"] = cache
+    if sheet not in cache["dfs"]:
+        df = read_any_table(uploaded, sheet_name=sheet if sheet is not None else 0)
+        df.columns = uniquify_column_names([str(col).lower() for col in df.columns])
+        cache["dfs"][sheet] = df
+    return cache["dfs"][sheet].copy()
+
+
+def _compute_standard_job(
+    dist: str, brand: str, brand_prefix: str, sheet: Optional[str],
+    df: pd.DataFrame, cfg: Dict, file_key: str,
+) -> Dict:
+    """Map one brand's sheet to the master schema (no UI)."""
+    job_key = f"{file_key}|{brand}|{sheet or ''}"
 
     # First pass: config only. Tells us which target columns could not be matched.
-    try:
-        _, _, base_failed = intelligent_mapping(
-            df,
-            cfg["static_fields"],
-            cfg["mapping"],
-            brand_prefix,
-            distributor=dist,
-        )
-    except Exception as e:
-        st.error(f"Error during data mapping: {e}")
-        return
+    _, _, base_failed = intelligent_mapping(
+        df, cfg["static_fields"], cfg["mapping"], brand_prefix, distributor=dist,
+    )
 
     # Manual picks come from the selectboxes rendered at the bottom of the page.
     # Streamlit stores a widget's value in session_state before the rerun, so the
     # choice is already available here even though the widget is drawn later.
-    NOT_MAPPED = "— not mapped —"
-    manual_options = [NOT_MAPPED] + list(df.columns)
-    file_key = f"{dist}|{getattr(uploaded, 'name', '')}|{getattr(uploaded, 'size', '')}"
     manual_mapping: Dict[str, str] = {}
     for target in base_failed:
-        choice = st.session_state.get(f"manual_map|{file_key}|{target}", NOT_MAPPED)
-        if choice != NOT_MAPPED and choice in df.columns:
+        choice = st.session_state.get(f"manual_map|{job_key}|{target}", _NOT_MAPPED)
+        if choice != _NOT_MAPPED and choice in df.columns:
             manual_mapping[target] = choice
 
     date_fixes: List[Dict] = []
-    try:
-        mapped, effective_map, failed_columns = intelligent_mapping(
-            df,
-            cfg["static_fields"],
-            cfg["mapping"],
-            brand_prefix,
-            distributor=dist,
-            date_fix_log=date_fixes,
-            manual_mapping=manual_mapping,
-        )
-    except Exception as e:
-        st.error(f"Error during data mapping: {e}")
-        return
+    mapped, effective_map, failed_columns = intelligent_mapping(
+        df, cfg["static_fields"], cfg["mapping"], brand_prefix, distributor=dist,
+        date_fix_log=date_fixes, manual_mapping=manual_mapping,
+    )
 
-    # ── Deduplicate rows and sum Qty ──────────────────────────────────────────
     rows_before = len(mapped)
     mapped = deduplicate_and_sum_qty(mapped)
     mapped = force_text_columns(mapped)
-    rows_after = len(mapped)
-    rows_merged = rows_before - rows_after
+
+    return {
+        "brand": brand, "sheet": sheet, "job_key": job_key, "df": df,
+        "base_failed": base_failed, "manual_mapping": manual_mapping,
+        "mapped": mapped, "effective_map": effective_map,
+        "failed_columns": failed_columns, "date_fixes": date_fixes,
+        "rows_before": rows_before, "rows_after": len(mapped),
+    }
+
+
+def _render_standard_job(job: Dict, cfg: Dict) -> None:
+    """Show preview, result sample and mapping log for one computed job."""
+    mapped = job["mapped"]
+    rows_merged = job["rows_before"] - job["rows_after"]
     if rows_merged > 0:
         st.info(
             f"ℹ️ **{rows_merged} duplicate row(s)** were merged and their Qty summed "
-            f"({rows_before} → {rows_after} rows)."
+            f"({job['rows_before']} → {job['rows_after']} rows)."
         )
 
     st.success("Mapped to master schema.")
+    date_fixes = job["date_fixes"]
     if date_fixes:
         fixes_df = pd.DataFrame(date_fixes).value_counts().reset_index(name="Rows")
         st.warning(
@@ -1370,7 +1399,7 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
 
     st.subheader("Mapping Log")
 
-    if effective_map:
+    if job["effective_map"]:
         st.write("✅ **Successful Mappings:**")
         successful_log = [
             {
@@ -1378,27 +1407,136 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
                 "Source Column": source,
                 "Status": (
                     "Manual"
-                    if target in manual_mapping
+                    if target in job["manual_mapping"]
                     else "Mapped" if target in cfg["mapping"] else "Fuzzy Match"
                 ),
             }
-            for target, source in effective_map.items()
+            for target, source in job["effective_map"].items()
         ]
         st.table(pd.DataFrame(successful_log))
 
-    if failed_columns:
+    if job["failed_columns"]:
         st.write("❌ **Failed Mappings (Columns not found in the uploaded file):**")
         failed_log = [
             {
                 "Target Column": target,
                 "Expected Source Column (from config)": cfg["mapping"].get(target, "N/A"),
             }
-            for target in failed_columns
+            for target in job["failed_columns"]
         ]
         st.table(pd.DataFrame(failed_log))
 
+
+def _render_manual_picker(job: Dict, cfg: Dict) -> None:
+    """Selectboxes to pick the source column for each target the config missed."""
+    options = [_NOT_MAPPED] + list(job["df"].columns)
+    cols_ui = st.columns(2)
+    for i, target in enumerate(job["base_failed"]):
+        expected = cfg["mapping"].get(target, "N/A")
+        cols_ui[i % 2].selectbox(
+            f"{target}  (config expects: {expected})",
+            options,
+            key=f"manual_map|{job['job_key']}|{target}",
+        )
+
+
+def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
+    """Handles upload + conversion for standard distributor formats.
+
+    A workbook with several sheets lets the user choose, per brand, which sheet
+    holds that brand's data; every chosen brand is converted with its own brand
+    prefix and the results are combined into one download.
+    """
+    uploaded = st.file_uploader(
+        "Upload Distributor File (.xlsx/.csv)", type=["xlsx", "xlsm", "xls", "csv", "ods"]
+    )
+    if not uploaded:
+        return
+
+    file_key = (
+        f"{dist}|{getattr(uploaded, 'name', '')}|{getattr(uploaded, 'size', '')}"
+        f"|{getattr(uploaded, 'file_id', '')}"
+    )
+
+    # ── Which sheet belongs to which brand? ───────────────────────────────────
+    sheets = list_sheet_names(uploaded)
+    assignments: List[Tuple[str, Optional[str]]] = []
+    if len(sheets) > 1:
+        st.subheader("Sheet per Brand")
+        st.caption(
+            f"This file has {len(sheets)} sheets. Choose which sheet holds the data of "
+            "each brand (leave a brand on *skip* to ignore it)."
+        )
+        options = [_SKIP_SHEET] + sheets
+        cols_sheet = st.columns(3)
+        for i, b in enumerate(BRAND_OPTIONS):
+            default = _default_sheet_for_brand(b, sheets, brand)
+            choice = cols_sheet[i % 3].selectbox(
+                b,
+                options,
+                index=options.index(default) if default in options else 0,
+                key=f"sheet_for|{file_key}|{brand}|{b}",
+            )
+            if choice != _SKIP_SHEET:
+                assignments.append((b, choice))
+        if not assignments:
+            st.info("Pick a sheet for at least one brand to continue.")
+            return
+    else:
+        assignments = [(brand, None)]
+
+    cfg = get_config(dist)
+    if not cfg:
+        st.error(
+            "Configuration for the selected distributor was not found. "
+            "Please contact an administrator."
+        )
+        return
+
+    # ── Convert every (brand, sheet) pair ─────────────────────────────────────
+    multi = len(assignments) > 1
+    if multi:
+        panes = st.tabs([f"{b} ← {sh}" for b, sh in assignments])
+    else:
+        panes = [st.container()]
+
+    jobs: List[Dict] = []
+    for (b, sheet), pane in zip(assignments, panes):
+        with pane:
+            st.write("Preview of uploaded data:")
+            try:
+                df = _load_sheet_df(uploaded, file_key, sheet)
+            except Exception as e:
+                st.error(f"Error reading the uploaded file: {e}")
+                continue
+            if df.empty:
+                st.warning("No data found in this sheet.")
+                continue
+            st.dataframe(df.head())
+
+            try:
+                job = _compute_standard_job(
+                    dist, b, BRAND_PREFIXES.get(b, ""), sheet, df, cfg, file_key
+                )
+            except Exception as e:
+                st.error(f"Error during data mapping: {e}")
+                continue
+            _render_standard_job(job, cfg)
+            jobs.append(job)
+
+    if not jobs:
+        return
+
+    # ── One combined download ─────────────────────────────────────────────────
+    combined = pd.concat([j["mapped"] for j in jobs], ignore_index=True)
+    combined = force_text_columns(combined[MASTER_SCHEMA])
+    if multi:
+        st.info(
+            f"ℹ️ Combined **{len(combined)} rows** from {len(jobs)} brand(s): "
+            + ", ".join(f"{j['brand']} ({len(j['mapped'])})" for j in jobs)
+        )
     try:
-        xlsx = to_excel_bytes(mapped, "MappedData")
+        xlsx = to_excel_bytes(combined, "MappedData")
         st.download_button(
             "📥 Download Converted Excel",
             data=xlsx,
@@ -1409,7 +1547,8 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
         st.error(f"Error generating download file: {e}")
 
     # ── Manual column picker (bottom of page) ─────────────────────────────────
-    if base_failed:
+    needs_picker = [j for j in jobs if j["base_failed"]]
+    if needs_picker:
         st.divider()
         st.subheader("Manual Column Mapping")
         st.warning(
@@ -1417,14 +1556,10 @@ def render_standard_pipeline(dist: str, brand: str, brand_prefix: str):
             "Pick the matching column from the uploaded file below "
             "(leave as *not mapped* to keep it empty). The result above updates automatically."
         )
-        cols_ui = st.columns(2)
-        for i, target in enumerate(base_failed):
-            expected = cfg["mapping"].get(target, "N/A")
-            cols_ui[i % 2].selectbox(
-                f"{target}  (config expects: {expected})",
-                manual_options,
-                key=f"manual_map|{file_key}|{target}",
-            )
+        for j in needs_picker:
+            if multi:
+                st.markdown(f"**{j['brand']}** ← sheet `{j['sheet']}`")
+            _render_manual_picker(j, cfg)
 
 
 # =========================
