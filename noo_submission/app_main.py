@@ -841,7 +841,24 @@ def _refresh_sku():
             ss.sku_pesan = ("ok", "SKU Mapping refreshed from Supabase")
         except Exception as e:
             ss.sku_pesan = ("error", f"Refresh failed: {e}")
-    st.rerun()
+
+def _klik_refresh_sku():
+    """on_click Refresh: callback jalan SEBELUM script dirender ulang, jadi tidak perlu st.rerun()
+    di tengah render (penyebab toolbar ganda/hantu)."""
+    ss = st.session_state
+    if ss.get("sku_pending"):
+        ss.sku_konfirmasi = True
+    else:
+        _refresh_sku()
+
+def _aksi_simpan_sku(df, kc_pk, tag, rk):
+    ss = st.session_state
+    with st.spinner("Saving changes..."):
+        ok, gagal = _simpan_sku(df, kc_pk, tag, rk)
+        if not gagal:
+            ss.sku_df = ambil_sku_mapping()   # tarik ulang dari Supabase
+    ss.sku_pesan = (("ok", f"{ok} record(s) saved") if not gagal else
+                    ("error", f"{ok} saved, {len(gagal)} failed (kept as pending): " + "; ".join(gagal[:5])))
 
 def _simpan_sku(df, kc_pk, tag, rk):
     ss, ok, gagal = st.session_state, 0, []
@@ -893,8 +910,8 @@ def _tab_sku():
             (st.success if msg[0] == "ok" else st.error)(msg[1])
         with st.container(key="sku_toolbar"):
             b1, b2, b3, b4, info = st.columns([1, 1.2, 1.5, 1.1, 5], vertical_alignment="center")
-            if b1.button(":material/refresh: Refresh", type="primary", key="sku_refresh_empty", width="stretch"):
-                _refresh_sku()
+            b1.button(":material/refresh: Refresh", type="primary", key="sku_refresh_empty", width="stretch",
+                      on_click=_refresh_sku)
             b2.button(":material/download: Download", type="primary", disabled=True, key="sku_dl_x", width="stretch")
             b3.button(":material/save: Save changes", type="primary", disabled=True, key="sku_save_x", width="stretch")
             b4.button(":material/delete: Delete", type="primary", disabled=True, key="sku_hapus_x", width="stretch")
@@ -975,7 +992,8 @@ def _tab_sku():
     data_dl = _bangun_download_sku(df_unduh)
     with st.container(key="sku_toolbar"):
         b1, b2, b3, info = st.columns([1, 1.2, 1.5, 6], vertical_alignment="center")
-        refresh = b1.button(":material/refresh: Refresh", type="primary", key="sku_refresh", width="stretch")
+        b1.button(":material/refresh: Refresh", type="primary", key="sku_refresh", width="stretch",
+                  on_click=_klik_refresh_sku)
         b2.download_button(
             f":material/download: Download{f' ({n_pilih_sku})' if n_pilih_sku else ''}",
             _excel_cache(data_dl, startrow=0) if not df_f.empty else b"",   # header di baris 1
@@ -986,31 +1004,19 @@ def _tab_sku():
             key="unduh_sku",
             width="stretch",
 )
-        simpan = b3.button(":material/save: Save changes", type="primary", key="sku_simpan",
-                           disabled=not ss.sku_pending, width="stretch")
+        b3.button(":material/save: Save changes", type="primary", key="sku_simpan",
+                  disabled=not ss.sku_pending, width="stretch",
+                  on_click=_aksi_simpan_sku, args=(df, kc_pk, tag, rk))
         belum = (f' <span class="teks-belumsimpan">● {len(ss.sku_pending)} unsaved</span>'
                  if ss.sku_pending else "")
         info.markdown(f'<div class="teks-showing">Showing {len(df_f):,} of {len(df):,} records{belum}</div>',
                       unsafe_allow_html=True)
 
-    if refresh:
-        if ss.sku_pending: ss.sku_konfirmasi = True
-        else: _refresh_sku()
     if ss.get("sku_konfirmasi"):
         st.warning(f"{len(ss.sku_pending)} unsaved change(s) will be lost if you refresh.")
         a, b, _ = st.columns([1.6, 1, 6])
-        if a.button("Discard & refresh", key="sku_discard"): _refresh_sku()
-        if b.button("Cancel", key="sku_cancel"):
-            ss.sku_konfirmasi = False; st.rerun()
-
-    if simpan:
-        with st.spinner("Saving changes..."):
-            ok, gagal = _simpan_sku(df, kc_pk, tag, rk)
-            if not gagal:
-                ss.sku_df = ambil_sku_mapping()   # tarik ulang dari Supabase
-        ss.sku_pesan = (("ok", f"{ok} record(s) saved") if not gagal else
-                        ("error", f"{ok} saved, {len(gagal)} failed (kept as pending): " + "; ".join(gagal[:5])))
-        st.rerun()
+        a.button("Discard & refresh", key="sku_discard", on_click=_refresh_sku)
+        b.button("Cancel", key="sku_cancel", on_click=lambda: ss.update(sku_konfirmasi=False))
 
     # ── Table ──
     if df_f.empty:
@@ -1102,14 +1108,10 @@ def halaman_validasi_toko():
               on_click=_pilih_tab, args=("sku",),
               type="primary" if ss.tab_validasi == "sku" else "secondary")
 
-    # st.empty() membungkus seluruh isi tab: setiap run, elemen lama dibuang sekaligus
-    # (bukan dicocokkan per posisi) -> tidak ada toolbar "hantu" / ganda saat refresh,
-    # walau posisi elemen bergeser karena pesan sukses/error muncul.
-    with st.empty().container():
-        if ss.tab_validasi == "noo":
-            tab_noo()
-        else:
-            _tab_sku()
+    if ss.tab_validasi == "noo":
+        tab_noo()
+    else:
+        _tab_sku()
 # ═══════════════════════════════════════
 # HALAMAN: DASHBOARD
 # ═══════════════════════════════════════
