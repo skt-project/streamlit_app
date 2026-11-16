@@ -221,7 +221,9 @@ def refresh_data_toko():
     ss.tanda_tangan     = None
     ss.snapshot         = None
     ss.terakhir_update  = waktu_sekarang()
-    catat_riwayat("Refresh data","Manual reload from Supabase")
+    f_distri = ss.get("f_distri") or ""
+    catat_riwayat("Refresh data","Manual reload from Supabase",
+                  distributor="" if f_distri.startswith("All") else f_distri)
     ss.pesan_toast = "Data successfully refreshed from Supabase"
 
 # Kolom grid yang boleh diedit user dan harus ikut tersimpan ke INPUT_NOO.
@@ -337,7 +339,8 @@ def selesai_impor(df, nama_file):
     ss.reset_filter    = True
     ss.halaman_aktif   = "validasi"
     ss.terakhir_update = waktu_sekarang()
-    catat_riwayat("Import file", f"{nama_file} ({len(df):,} rows)")
+    catat_riwayat("Import file", f"{nama_file} ({len(df):,} rows)",
+                  distributor=_distri_pertama(df, df.index[:1]))
     ss.pesan_toast = f"Successfully imported {len(df):,} rows from {nama_file}"
 
 def normalisasi_impor(mentah: pd.DataFrame) -> pd.DataFrame:
