@@ -97,7 +97,7 @@ CUSTOMER_CODE_OVERRIDES = {
 }
 
 STORE_CODE_FROM_NAME_DIST = "CV SUKSES SEHATI SELARAS - BAU BAU"  
-STORE_CODE_FROM_NAME_PREFIX = "DST356-"  
+STORE_CODE_FROM_NAME_PREFIX = "DST363-"  
 # Master distributor table for BQ lookups
 BQ_MASTER_DISTRIBUTOR_TABLE = "skintific-data-warehouse.gt_schema.master_distributor"
 
@@ -967,6 +967,16 @@ def intelligent_mapping(
     for col in FIXED_FIRST_5:
         out[col] = [static_fields.get(col, "")] * len(df)
 
+    # Customer Address is OPTIONAL to map: when a source column is configured (or
+    # picked manually) it overrides the static address row by row; blank cells
+    # and unmapped files keep the static address.
+    address_static = static_fields.get("Customer Address", "")
+    address_src = mapping_lower.get("Customer Address", "")
+    if address_src and address_src in df.columns:
+        address = series_as_text(df[address_src])
+        out["Customer Address"] = address.where(address != "", address_static).astype(object)
+        effective_mapping["Customer Address"] = address_src
+
     customer_code_static = static_fields.get("Customer Code", "")
     override = CUSTOMER_CODE_OVERRIDES.get((distributor.strip().upper(), brand_prefix))
     if override:
@@ -1402,6 +1412,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
 # =========================
 _NOT_MAPPED = "— not mapped —"
 _SKIP_SHEET = "— skip —"
+_ADDRESS_COL = "Customer Address"  # optional mapping; falls back to the static address
 
 
 def _default_sheet_for_brand(brand: str, sheets: List[str], selected_brand: str) -> Optional[str]:
@@ -1448,6 +1459,10 @@ def _compute_standard_job(
         choice = st.session_state.get(f"manual_map|{job_key}|{target}", _NOT_MAPPED)
         if choice != _NOT_MAPPED and choice in df.columns:
             manual_mapping[target] = choice
+
+    addr_choice = st.session_state.get(f"manual_map|{job_key}|{_ADDRESS_COL}", _NOT_MAPPED)
+    if addr_choice != _NOT_MAPPED and addr_choice in df.columns:
+        manual_mapping[_ADDRESS_COL] = addr_choice
 
     date_fixes: List[Dict] = []
     mapped, effective_map, failed_columns = intelligent_mapping(
@@ -1538,6 +1553,19 @@ def _render_manual_picker(job: Dict, cfg: Dict) -> None:
             options,
             key=f"manual_map|{job['job_key']}|{target}",
         )
+
+
+def _render_address_picker(job: Dict, cfg: Dict) -> None:
+    """Optional selectbox: map Customer Address from a column instead of the static value."""
+    options = [_NOT_MAPPED] + list(job["df"].columns)
+    configured = cfg["mapping"].get(_ADDRESS_COL, "")
+    st.selectbox(
+        f"{_ADDRESS_COL} (optional)"
+        + (f"  (config expects: {configured})" if configured else ""),
+        options,
+        key=f"manual_map|{job['job_key']}|{_ADDRESS_COL}",
+        help="Leave as 'not mapped' to use the static address from the config.",
+    )
 
 
 def render_standard_pipeline(dist: str):
@@ -1722,10 +1750,14 @@ def _render_manual_pickers(
 ) -> None:
     """Manual column picker section (bottom of page)."""
     needs_picker = [j for j in jobs if j["base_failed"]]
-    if not needs_picker:
-        return
     st.divider()
     st.subheader("Manual Column Mapping")
+    for j in jobs:
+        if multi:
+            st.markdown(f"**{j['brand']}** ← sheet `{j['sheet']}`")
+        _render_address_picker(j, cfg)
+    if not needs_picker:
+        return
     hint = (
         "The preview updates automatically; press Generate again to refresh the download."
         if regenerate_hint
