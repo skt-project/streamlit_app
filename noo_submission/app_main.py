@@ -249,6 +249,17 @@ def _patch_kolom_edit(baris: pd.Series) -> dict:
         patch[nama_sb] = v
     return patch
 
+def _distri_pertama(df, idx_list) -> str:
+    """Distributor pertama yang terisi dari baris idx_list (untuk identifier rsa_<nama> di history)."""
+    if "Distributor" not in df.columns:
+        return ""
+    for i in idx_list:
+        if i in df.index:
+            v = str(df.loc[i, "Distributor"]).strip()
+            if v and v.lower() != "nan":
+                return v
+    return ""
+
 def simpan_perubahan():
     ss = st.session_state
     df = ss.df_toko
@@ -306,7 +317,8 @@ def simpan_perubahan():
             gagal_kunci.append(f"{kode}/{nama}")
 
     jumlah = len(baris_target) - len(gagal_kunci)
-    catat_riwayat("Save changes", f"{jumlah} rows updated")
+    catat_riwayat("Save changes", f"{jumlah} rows updated",
+                  distributor=_distri_pertama(df, sorted(baris_target)))
     ss.tanda_tangan    = None
     ss.terakhir_update = waktu_sekarang()
     if gagal_kunci:
@@ -540,11 +552,12 @@ def tab_noo():
                         if not err:
                             ditolak_policy = True
                 if terhapus:
+                    distri_hapus = _distri_pertama(df, terhapus)     # ambil SEBELUM baris di-drop
                     ss.df_toko = df.drop(index=terhapus)
                     ss.baris_kotor -= set(terhapus)
                     ss.baris_perlu_push -= set(terhapus)
                     ambil_raw_noo.clear()
-                    catat_riwayat("Delete NOO", f"{len(terhapus)} rows")
+                    catat_riwayat("Delete NOO", f"{len(terhapus)} rows", distributor=distri_hapus)
                 ss.noo_hapus_antri = None
                 ss.tanda_tangan = None; ss.snapshot = None
                 ss.terakhir_update = waktu_sekarang()
@@ -1045,6 +1058,9 @@ def _tab_sku():
                 else:
                     gagal.append(err or "Supabase deleted 0 rows: no DELETE policy for this API key (RLS) on sku_mapping")
             if terhapus:
+                distri_hapus = (next((str(v).strip() for v in df.loc[rk.isin(terhapus), kc_nama]
+                                      if str(v).strip() and str(v).lower() != "nan"), "")
+                                if kc_nama else "")           # ambil SEBELUM baris di-drop
                 ss.sku_df = df[~rk.isin(terhapus)].reset_index(drop=True)
                 ss.sku_pilih -= terhapus
                 for k in terhapus:
@@ -1052,7 +1068,7 @@ def _tab_sku():
                 ambil_sku_mapping.clear()
                 ss["_reset_sku_select_all"] = True             # dieksekusi di run berikutnya, sebelum checkbox dibuat
                 ss.sku_ver += 1
-                catat_riwayat("Delete SKU Mapping", f"{len(terhapus)} rows")
+                catat_riwayat("Delete SKU Mapping", f"{len(terhapus)} rows", distributor=distri_hapus)
             ss.sku_hapus_antri = None
             ss.sku_pesan = (("ok", f"{len(terhapus)} record(s) deleted") if not gagal else
                             ("error", f"{len(terhapus)} deleted, {len(gagal)} failed: " + "; ".join(gagal[:3])))
@@ -1086,10 +1102,14 @@ def halaman_validasi_toko():
               on_click=_pilih_tab, args=("sku",),
               type="primary" if ss.tab_validasi == "sku" else "secondary")
 
-    if ss.tab_validasi == "noo":
-        tab_noo()
-    else:
-        _tab_sku()
+    # st.empty() membungkus seluruh isi tab: setiap run, elemen lama dibuang sekaligus
+    # (bukan dicocokkan per posisi) -> tidak ada toolbar "hantu" / ganda saat refresh,
+    # walau posisi elemen bergeser karena pesan sukses/error muncul.
+    with st.empty().container():
+        if ss.tab_validasi == "noo":
+            tab_noo()
+        else:
+            _tab_sku()
 # ═══════════════════════════════════════
 # HALAMAN: DASHBOARD
 # ═══════════════════════════════════════
