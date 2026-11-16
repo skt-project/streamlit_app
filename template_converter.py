@@ -83,6 +83,8 @@ BRAND_PREFIXES = {
     "NEXTPRIME": "17"
 }
 BRAND_OPTIONS = list(BRAND_PREFIXES.keys())
+# Brands whose generated rows are merged into a single file when both are converted.
+_MERGED_BRANDS = ("NEXTPRIME", "BODIBREZE")
 
 # Distributors whose raw files require the 3M cleaning pipeline
 # (matched via case-insensitive prefix)
@@ -771,7 +773,7 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
     for _, row in df.iterrows():
         cell0 = as_text(row[0])
 
-        # ── Transaction header ────────────────────────────────────────────────
+        # Transaction header
         # Pattern: "No. Trans : JL/M3-26020183 [ 09-02-2026 ] - ONE MART"
         if "No. Trans :" in cell0:
             match = re.match(
@@ -790,7 +792,7 @@ def clean_3m_daily_st(uploaded_file) -> pd.DataFrame:
             # Leave blank for unregistered stores
             current_store_id = "" if col7 in ("Not Registered", "") else col7
 
-        # ── Product row (col 0 is a numeric barcode ≥ 10 digits) ─────────────
+        # Product row (col 0 is a numeric barcode ≥ 10 digits)
         elif cell0.isdigit() and len(cell0) >= 10:
             records.append(
                 {
@@ -836,14 +838,14 @@ def map_3m_to_master(
     """
     out = pd.DataFrame(index=cleaned.index)
 
-    # ── Fixed columns from static_fields (overridden below where BQ lookup wins)
+    # Fixed columns from static_fields (overridden below where BQ lookup wins)
     for col in FIXED_FIRST_5:
         out[col] = static_fields.get(col, "")
 
     # Apply brand prefix to Customer Code
     out["Customer Code"] = brand_prefix + static_fields.get("Customer Code", "")
 
-    # ── Dynamic columns ───────────────────────────────────────────────────────
+    # Dynamic columns
     out["PO Date"] = cleaned["PO Date"]
     out["PO Number"] = series_as_text(cleaned["No. TRANSAKSI"])
     out["Customer Store Code"] = series_as_text(cleaned["ID CUST DISTRIBUTOR"])
@@ -852,7 +854,7 @@ def map_3m_to_master(
     out["Customer SKU Name"] = series_as_text(cleaned["Product Name"])
     out["Qty"] = cleaned["Kuantitas"]
 
-    # ── BQ lookup: Customer Name & Customer Branch Code per store prefix ───────
+    # BQ lookup: Customer Name & Customer Branch Code per store prefix
     bq_lookup_misses: List[str] = []
 
     def enrich_from_bq(store_code: str) -> pd.Series:
@@ -888,7 +890,7 @@ def map_3m_to_master(
     # Deduplicate miss list
     bq_lookup_misses = list(dict.fromkeys(bq_lookup_misses))
 
-    # ── Collect unregistered stores ───────────────────────────────────────────
+    # Collect unregistered stores
     unregistered = (
         cleaned.loc[cleaned["ID CUST DISTRIBUTOR"] == "", "Customer Store Name"]
         .unique()
@@ -902,6 +904,16 @@ def map_3m_to_master(
 # =========================
 # Deduplication / Qty Sum
 # =========================
+def drop_null_qty(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """Drop rows whose Qty is empty/non-numeric. A Qty of 0 is kept.
+
+    Returns (filtered_df, number_of_rows_dropped).
+    """
+    qty = pd.to_numeric(df["Qty"], errors="coerce")
+    keep = qty.notna()
+    return df[keep].reset_index(drop=True), int((~keep).sum())
+
+
 def deduplicate_and_sum_qty(df: pd.DataFrame) -> pd.DataFrame:
     """
     Groups by all MASTER_SCHEMA columns except Qty and sums Qty for
@@ -1159,7 +1171,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     if not uploaded:
         return
 
-    # ── Fetch distributor config ──────────────────────────────────────────────
+    # Fetch distributor config
     cfg = get_config(dist)
     if not cfg:
         st.error(
@@ -1168,7 +1180,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         )
         return
 
-    # ── Parse raw report layout ───────────────────────────────────────────────
+    # Parse raw report layout
     with st.spinner("Parsing 3M report layout…"):
         try:
             cleaned = clean_3m_daily_st(uploaded)
@@ -1180,7 +1192,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         st.warning("No product rows were found in the uploaded file.")
         return
 
-    # ── Map to MASTER_SCHEMA (includes BQ lookup for Name & Branch Code) ──────
+    # Map to MASTER_SCHEMA (includes BQ lookup for Name & Branch Code)
     with st.spinner("Looking up Customer Name & Branch Code from master_distributor…"):
         try:
             mapped, unregistered, bq_misses = map_3m_to_master(
@@ -1190,7 +1202,10 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
             st.error(f"Error mapping to master schema: {e}")
             return
 
-    # ── Deduplicate rows and sum Qty ──────────────────────────────────────────
+    # Deduplicate rows and sum Qty
+    mapped, qty_dropped = drop_null_qty(mapped)
+    if qty_dropped:
+        st.info(f"ℹ️ **{qty_dropped} row(s)** with an empty Qty were removed (Qty 0 is kept).")
     rows_before = len(mapped)
     mapped = deduplicate_and_sum_qty(mapped)
     mapped = force_text_columns(mapped)
@@ -1206,7 +1221,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     st.write("Converted sample:")
     st.dataframe(mapped.head())
 
-    # ── Mapping log ───────────────────────────────────────────────────────────
+    # Mapping log
     st.subheader("Mapping Log")
     st.write("✅ **Successful Mappings:**")
     mapping_log = [
@@ -1273,7 +1288,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
     ]
     st.table(pd.DataFrame(mapping_log))
 
-    # ── BQ lookup miss warning ────────────────────────────────────────────────
+    # BQ lookup miss warning
     if bq_misses:
         st.warning(
             f"⚠️ **{len(bq_misses)} store prefix(es)** were not found in "
@@ -1282,7 +1297,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         )
         st.write(", ".join(sorted(bq_misses)))
 
-    # ── Unregistered stores warning ───────────────────────────────────────────
+    # Unregistered stores warning
     if unregistered:
         st.warning(
             f"⚠️ **{len(unregistered)} store(s)** are marked *Not Registered* "
@@ -1290,7 +1305,7 @@ def render_3m_pipeline(dist: str, brand: str, brand_prefix: str):
         )
         st.write(", ".join(sorted(unregistered)))
 
-    # ── Download ──────────────────────────────────────────────────────────────
+    # Download
     try:
         xlsx = to_excel_bytes(mapped, "MappedData")
         st.download_button(
@@ -1361,11 +1376,13 @@ def _compute_standard_job(
         date_fix_log=date_fixes, manual_mapping=manual_mapping,
     )
 
+    mapped, qty_dropped = drop_null_qty(mapped)
     rows_before = len(mapped)
     mapped = deduplicate_and_sum_qty(mapped)
     mapped = force_text_columns(mapped)
 
     return {
+        "qty_dropped": qty_dropped,
         "brand": brand, "sheet": sheet, "job_key": job_key, "df": df,
         "base_failed": base_failed, "manual_mapping": manual_mapping,
         "mapped": mapped, "effective_map": effective_map,
@@ -1377,6 +1394,10 @@ def _compute_standard_job(
 def _render_standard_job(job: Dict, cfg: Dict) -> None:
     """Show preview, result sample and mapping log for one computed job."""
     mapped = job["mapped"]
+    if job.get("qty_dropped"):
+        st.info(
+            f"ℹ️ **{job['qty_dropped']} row(s)** with an empty Qty were removed (Qty 0 is kept)."
+        )
     rows_merged = job["rows_before"] - job["rows_after"]
     if rows_merged > 0:
         st.info(
@@ -1458,7 +1479,7 @@ def render_standard_pipeline(dist: str):
         f"|{getattr(uploaded, 'file_id', '')}"
     )
 
-    # ── Which sheet belongs to which brand? ───────────────────────────────────
+    # Which sheet belongs to which brand?
     sheets = list_sheet_names(uploaded)
 
     # Converter state lives in session_state so it survives reruns; reset per file.
@@ -1523,7 +1544,7 @@ def render_standard_pipeline(dist: str):
         )
         return
 
-    # ── Convert every (brand, sheet) pair ─────────────────────────────────────
+    # Convert every (brand, sheet) pair
     multi = len(assignments) > 1
     if multi:
         panes = st.tabs([f"{b} ← {sh}" for b, sh in assignments])
@@ -1557,7 +1578,7 @@ def render_standard_pipeline(dist: str):
     if not jobs:
         return
 
-    # ── Single-sheet file: original behaviour, one direct download ────────────
+    # Single-sheet file: original behaviour, one direct download
     if len(sheets) <= 1:
         try:
             st.download_button(
@@ -1571,17 +1592,36 @@ def render_standard_pipeline(dist: str):
         _render_manual_pickers(jobs, cfg, multi)
         return
 
-    # ── Generate: one file per brand, named with brand + generate time ────────
+    # Generate: one file per brand, named with brand + generate time
     st.divider()
     if st.button("⚙️ Generate", type="primary"):
         # Timestamp is taken here, at click time, so every file name is stable.
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base = re.sub(r"[^A-Za-z0-9]+", "_", dist).strip("_") or "converted"
         try:
-            for j in jobs:
-                ss["_generated"][j["brand"]] = {
-                    "data": to_excel_bytes(j["mapped"], "MappedData"),
-                    "name": f"{base}_{j['brand']}_{stamp}.xlsx",
+            # Brands in a merge group are written into ONE file (rows combined).
+            by_brand = {j["brand"]: j for j in jobs}
+            merged = [b for b in _MERGED_BRANDS if b in by_brand]
+            outputs: Dict[str, pd.DataFrame] = {
+                b: j["mapped"] for b, j in by_brand.items() if b not in merged
+            }
+            if len(merged) > 1:
+                label = " + ".join(merged)
+                outputs[label] = force_text_columns(
+                    pd.concat([by_brand[b]["mapped"] for b in merged], ignore_index=True)
+                )
+            else:
+                for b in merged:
+                    outputs[b] = by_brand[b]["mapped"]
+            # Drop stale entries that this generate supersedes (e.g. separate
+            # NEXTPRIME / BODIBREZE files from before they were merged).
+            for b in [*by_brand, " + ".join(_MERGED_BRANDS)]:
+                ss["_generated"].pop(b, None)
+            for label, frame in outputs.items():
+                fname = label.replace(" + ", "_")
+                ss["_generated"][label] = {
+                    "data": to_excel_bytes(frame, "MappedData"),
+                    "name": f"{base}_{fname}_{stamp}.xlsx",
                 }
         except Exception as e:
             st.error(f"Error generating download file: {e}")
@@ -1654,7 +1694,7 @@ def main():
         return
 
     dist = st.selectbox("Select Distributor", distributors)
-    # ── Route to the correct pipeline ────────────────────────────────────────
+    # Route to the correct pipeline
     if is_3m_distributor(dist):
         brand = st.selectbox("Select Brand", BRAND_OPTIONS)
         render_3m_pipeline(dist, brand, BRAND_PREFIXES.get(brand, ""))
