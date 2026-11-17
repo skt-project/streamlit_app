@@ -1235,6 +1235,7 @@ def fetch_pi_anomaly() -> pd.DataFrame:
         SELECT
             UPPER(distributor_name)                                          AS distributor_name,
             file_name,
+            MAX(DATE(record_time))                                           AS record_date,
             COUNT(DISTINCT reference_cust_order_no)                          AS cnt_ref,
             STRING_AGG(DISTINCT CAST(reference_cust_order_no AS STRING), '|'
                        ORDER BY CAST(reference_cust_order_no AS STRING))     AS ref_list,
@@ -1361,7 +1362,7 @@ def _render_pi_validation():
         anomaly_df = anomaly_df[anomaly_df["distributor_name"].astype(str).str.strip().str.upper().isin(_dist_filter)]
         st.caption(f"Menampilkan {len(anomaly_df)} dari {len(_all_anomaly_df)} file. "
                    "Save hanya menyimpan baris yang sedang tampil.")
-    _headers = ["Distributor", "File", "Jumlah Ref", "PI yang di-map ✏️",
+    _headers = ["Distributor", "File", "Date", "Jumlah Ref", "PI yang di-map ✏️",
                 "Validation by RSA ✏️", "Catatan (jika Others)"]
     _CH = 6.6  # perkiraan px per karakter (font 0.62rem; teks panjang otomatis wrap)
     def _fit(hdr, vals, minpx=0, maxpx=320):
@@ -1370,10 +1371,11 @@ def _render_pi_validation():
     _col_widths = [
         _fit(_headers[0], anomaly_df["distributor_name"].astype(str).str.strip().str.upper()),
         _fit(_headers[1], anomaly_df["file_name"].astype(str).str.strip()),
-        _fit(_headers[2], []),
-        _fit(_headers[3], [r for rl in anomaly_df["ref_list"].astype(str) for r in rl.split("|")], 200, 420) + 30,
-        _fit(_headers[4], ["Mapping PI by RSA"], 170),
-        _fit(_headers[5], [], 200),
+        _fit(_headers[2], ["0000-00-00"]),
+        _fit(_headers[3], []),
+        _fit(_headers[4], [r for rl in anomaly_df["ref_list"].astype(str) for r in rl.split("|")], 200, 420) + 30,
+        _fit(_headers[5], ["Mapping PI by RSA"], 170),
+        _fit(_headers[6], [], 200),
     ]
     st.markdown(
         f"<style>.st-key-pi_table div[data-testid='stHorizontalBlock']"
@@ -1416,11 +1418,16 @@ def _render_pi_validation():
             else:
                 _default_choice, _default_manual = "Others", _existing_note
 
-            c1, c2, c3, c4, c6, c7 = st.columns(_col_widths, gap="small")
+            _rec_date = anom_row.get("record_date")
+            _rec_date = "-" if pd.isna(_rec_date) else str(_rec_date)[:10]
+
+            c1, c2, c_date, c3, c4, c6, c7 = st.columns(_col_widths, gap="small")
             with c1:
                 st.markdown(f"<p class='pi-row-text'>{_dist}</p>", unsafe_allow_html=True)
             with c2:
                 st.markdown(f"<p class='pi-row-text'>{_file}</p>", unsafe_allow_html=True)
+            with c_date:
+                st.markdown(f"<p class='pi-row-text'>{_rec_date}</p>", unsafe_allow_html=True)
             with c3:
                 st.markdown(f"<p class='pi-row-text'>{int(anom_row.get('cnt_ref', 0))}</p>", unsafe_allow_html=True)
             with c4:
