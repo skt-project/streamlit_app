@@ -1,0 +1,6 @@
+streamlit==1.66.1
+gspread>=6.0
+google-auth
+google-cloud-storage
+pandas
+pillow

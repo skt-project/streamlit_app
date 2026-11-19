@@ -1,0 +1,19 @@
+[theme]
+base = "light"
+primaryColor = "#E6656F"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f6f6"
+textColor = "#1f1f1f"
+
+[server]
+# Batas 10 MB per foto, sama dengan Google Form (aplikasi juga memvalidasi ulang di server).
+maxUploadSize = 10
+
+[client]
+# Stack trace tidak ditampilkan ke pengguna; detail error masuk ke log server.
+showErrorDetails = "none"
+toolbarMode = "minimal"
+showSidebarNavigation = false
+
+[browser]
+gatherUsageStats = false

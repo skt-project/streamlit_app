@@ -1,0 +1,6 @@
+.streamlit/secrets.toml
+__pycache__/
+.pytest_cache/
+.venv/
+*service-account*.json
+client_secret*.json
