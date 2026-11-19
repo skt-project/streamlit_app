@@ -298,7 +298,7 @@ SELECT UPPER(region) AS region, UPPER(distributor) AS distributor,
     distributor_code, sku,
     assortment, supply_control_status_gt, total_stock,
     buffer_plan_by_lm_qty_adj, avg_weekly_st_lm_qty,
-    buffer_plan_by_lm_val_adj, remaining_allocation_qty_region, woi_end_of_month_by_lm
+    buffer_plan_by_lm_val_adj, remaining_allocation_qty_region, woi_end_of_month_by_lm, woi_standard
     FROM `{table_id}`
     WHERE UPPER(distributor) = '{distributor_name}'
     AND (UPPER(sku) IN ({sku_list_str}) OR buffer_plan_by_lm_qty_adj > 0)
@@ -432,6 +432,75 @@ def get_brand_list() -> list:
 
 def calculate_woi(stock, po_qty, avg_weekly_sales):
     return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_max_monthly_st_ytd() -> pd.DataFrame:
+    """Qty ST bulanan tertinggi YTD per distributor + SKU (bulan dengan ST terbesar tahun ini)."""
+    query = """
+        WITH bulan AS (
+            SELECT EXTRACT(MONTH FROM order_date) AS month, distributor, sku, SUM(qty) AS total_qty
+            FROM `skintific-data-warehouse.dms.gt_st_all_mv`
+            WHERE EXTRACT(YEAR FROM order_date) = EXTRACT(YEAR FROM CURRENT_DATE())
+              AND order_date <= CURRENT_DATE()
+              AND brand IN ('NEXTPRIME', 'G2G', 'BODIBREZE')
+            GROUP BY ALL
+        )
+        SELECT UPPER(TRIM(distributor)) AS distributor, UPPER(TRIM(sku)) AS sku,
+               MAX(total_qty) AS max_qty_ytd
+        FROM bulan
+        GROUP BY ALL
+    """
+    try:
+        return get_bq_client().query(query).to_dataframe()
+    except Exception as e:
+        st.warning(f"⚠️ Gagal memuat ST bulanan tertinggi YTD (WOI Threshold dilewati): {e}")
+        return pd.DataFrame(columns=["distributor", "sku", "max_qty_ytd"])
+
+
+def add_national_alloc_status(res_df: pd.DataFrame) -> pd.DataFrame:
+    """% = PO Qty / Remaining Allocation (By Region). >= 75% -> '> 75% National Alloc', selain itu '< 75% National Alloc'.
+    Kosong kalau tidak ada PO Qty atau alokasi region tidak tersedia / <= 0."""
+    po = pd.to_numeric(res_df["PO Qty"], errors="coerce").astype("float64").fillna(0)
+    alloc = pd.to_numeric(res_df["Remaining Allocation (By Region)"], errors="coerce").astype("float64")
+    pct = po / alloc.where(alloc > 0)
+    res_df["National Alloc %"] = pct
+    pct_np = pct.to_numpy(dtype="float64", na_value=np.nan)
+    po_np = po.to_numpy(dtype="float64")
+    res_df["National Alloc Status"] = np.select(
+        [(po_np <= 0) | np.isnan(pct_np), pct_np >= 0.75],
+        ["", "> 75% National Alloc"],
+        default="< 75% National Alloc",
+    )
+    return res_df
+
+
+def add_woi_threshold_status(res_df: pd.DataFrame, dist_name: str, max_st_df: pd.DataFrame) -> pd.DataFrame:
+    """WOI Threshold = (Total Stock + PO Qty) / (max ST bulanan YTD / 30 * 7) * 80%.
+    Status: '> Highest WOI Threshold' bila woi_standard (stock_analysis) > threshold, selain itu '< Highest WOI Threshold'."""
+    res_df["WOI Threshold"] = np.nan
+    res_df["WOI Threshold Status"] = ""
+    if max_st_df.empty:
+        return res_df
+    m = max_st_df[max_st_df["distributor"] == str(dist_name).strip().upper()]
+    max_map = m.set_index("sku")["max_qty_ytd"].to_dict()
+    max_qty = pd.to_numeric(res_df["SKU"].astype(str).str.strip().str.upper().map(max_map), errors="coerce")
+    weekly_max = max_qty / 30 * 7
+    stock_po = (pd.to_numeric(res_df["Total Stock (Qty)"], errors="coerce").fillna(0)
+                + pd.to_numeric(res_df["PO Qty"], errors="coerce").fillna(0))
+    threshold = (stock_po / weekly_max.where(weekly_max > 0)) * 0.8
+    if "woi_standard" in res_df.columns:
+        woi_po = pd.to_numeric(res_df["woi_standard"], errors="coerce").astype("float64")
+    else:
+        woi_po = pd.Series(np.nan, index=res_df.index, dtype="float64")
+    res_df["WOI Threshold"] = threshold
+    res_df["WOI Threshold Status"] = np.select(
+        [np.isnan(threshold.to_numpy(dtype="float64", na_value=np.nan)) | np.isnan(woi_po.to_numpy()),
+         woi_po.to_numpy() > threshold.to_numpy(dtype="float64", na_value=np.nan)],
+        ["", "> Highest WOI Threshold"],
+        default="< Highest WOI Threshold",
+    )
+    return res_df
 
 
 def apply_sku_rejection_rules(sku_list, df, regions, is_in):
@@ -617,7 +686,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     currency_cols = ["PO Value", "Suggested PO Value", "Suggested Value Final"]
     integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)",
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final"]
-    decimal_cols = ["WOI (Stock + PO Ori)", "Current WOI",
+    decimal_cols = ["WOI (Stock + PO Ori)", "WOI Threshold", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)"]
     moq_safe_font = Font(bold=True, color="54CE54")
@@ -637,6 +706,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
                 if col_name in currency_cols: cell.number_format = "#,##0.00"
                 elif col_name in integer_cols: cell.number_format = "#,##0"
                 elif col_name in decimal_cols: cell.number_format = "0.00"
+                elif col_name == "National Alloc %": cell.number_format = "0.0%"
 
 #LOGIC : WARNA ROW
                 if col_name == "Remark":
@@ -644,6 +714,14 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
                     if "Proceed" in val: cell.font = proceed_font
                     elif "Reject" in val: cell.font = reject_font
                     elif "Additional" in val: cell.font = suggest_font
+                elif col_name == "National Alloc Status":
+                    val = str(cell.value or "")
+                    if val.startswith(">"): cell.font = reject_font
+                    elif val.startswith("<"): cell.font = proceed_font
+                elif col_name == "WOI Threshold Status":
+                    val = str(cell.value or "")
+                    if val.startswith(">"): cell.font = reject_font
+                    elif val.startswith("<"): cell.font = proceed_font
                 elif col_name == "Check MOQ":
                     val = str(cell.value or "")
                     if val == "SAFE MOQ": cell.font = moq_safe_font
@@ -1024,8 +1102,15 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             if fc in res_df.columns:
                 res_df[fc] = pd.to_numeric(res_df[fc], errors="coerce").fillna(0)
 
+        # SKU tanpa supply control di offline stock / product master -> UNAVAILABLE
+        if "supply_control_status_gt" not in res_df.columns:
+            res_df["supply_control_status_gt"] = np.nan
+        _sc_blank = (res_df["supply_control_status_gt"].isna()
+                     | res_df["supply_control_status_gt"].astype(str).str.strip().str.lower().isin(["", "nan", "none", "null", "<na>"]))
+        res_df.loc[_sc_blank, "supply_control_status_gt"] = "UNAVAILABLE"
+
         res_df["SIP"] = pd.to_numeric(res_df["SIP"], errors="coerce").fillna(0)
-        zv = (res_df["buffer_plan_by_lm_val_adj"] == 0) & (res_df["buffer_plan_by_lm_qty_adj"] > 0) & (res_df["SIP"] > 0)
+        zv =(res_df["buffer_plan_by_lm_val_adj"] == 0) & (res_df["buffer_plan_by_lm_qty_adj"] > 0) & (res_df["SIP"] > 0)
         res_df.loc[zv, "buffer_plan_by_lm_val_adj"] = res_df.loc[zv, "SIP"] * res_df.loc[zv, "buffer_plan_by_lm_qty_adj"]
 
         # --- OOS Sell Out logic ---
@@ -1143,6 +1228,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         if __REJECTED_SKUS_2:
             res_df = apply_sku_rejection_rules(__REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
         
+        res_df = add_woi_threshold_status(res_df, dist_name, get_max_monthly_st_ytd())
+        res_df = add_national_alloc_status(res_df)
+
         res_df["RSA Notes"] = ""
         res_df["Suggested Value Final"] = (
             pd.to_numeric(res_df["SIP"], errors="coerce").fillna(0)
@@ -1187,12 +1275,12 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 #----------------PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
-                    "PO Qty","PO Value","WOI (Stock + PO Ori)","Remark",
+                    "PO Qty","PO Value","WOI (Stock + PO Ori)","WOI Threshold","WOI Threshold Status","Remark",
                     "Suggested PO buffer","Suggested PO Value",
                     "Target SO","Suggested QTY SO","Suggested QTY Final","Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
+                    "Remaining Allocation (By Region)","National Alloc %","National Alloc Status","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
 
         # brand ditangkap terpisah (tidak masuk output PO Simulator), khusus untuk Section 8
         if "brand" in res_df.columns:
@@ -1254,6 +1342,11 @@ def fetch_pi_anomaly() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def fetch_existing_maps(*_a, **_k) -> dict:
+    """File yang sudah di-map hanya punya 1 ref, jadi tidak muncul di tabel anomaly -> tidak ada yang dimuat."""
+    return {}
+
+
 def _update_pi_validation(
     distributor_name: str,
     file_name: str,
@@ -1262,40 +1355,45 @@ def _update_pi_validation(
     primary_ref: str,
     candidate_refs: list[str],
 ) -> bool:
-    """Simpan many PI ke tabel link; primary ditulis ke reference_cust_order_no."""
-    try:
-        from po_pi_map import apply_pi_mapping, plan_pi_mapping
-    except ImportError:
-        st.error("Save belum bisa: modul `po_pi_map.py` tidak ditemukan di folder app.")
-        return False
-
-    plan = plan_pi_mapping(
-        distributor_name=distributor_name,
-        file_name=file_name,
-        candidate_refs=candidate_refs,
-        selected_refs=selected_refs,
-        primary_ref=primary_ref,
-        validation_by_rsa=validation_text,
-    )
-    if not plan.ok:
-        for message in plan.errors:
-            st.error(message)
+    """Replace reference_cust_order_no semua baris file ke primary_ref.
+    Nilai lama disalin dulu ke order_no_mapped_from (tidak menimpa salinan yang sudah ada); order_no_mapped_at = waktu user mengubah kategori/validation_by_rsa."""
+    if not primary_ref or primary_ref not in candidate_refs:
+        st.error(f"PI '{primary_ref}' tidak valid untuk {distributor_name} / {file_name}.")
         return False
     try:
-        apply_pi_mapping(get_bq_client(), plan.selection)
+        client = get_bq_client()
+        col_type = next(f.field_type for f in client.get_table(TEST_TABLE).schema
+                        if f.name == "reference_cust_order_no")
+        _num = col_type in ("INTEGER", "INT64")
+        _ptype = "INT64" if _num else "STRING"
+        _pval = int(primary_ref) if _num else str(primary_ref)
+        client.query(
+            f"""
+            UPDATE `{TEST_TABLE}`
+            SET order_no_mapped_from = IF(order_no_mapped_from IS NULL AND reference_cust_order_no != @primary,
+                                        CAST(reference_cust_order_no AS STRING), order_no_mapped_from),
+                order_no_mapped_at = IF(IFNULL(validation_by_rsa, '') != @note OR reference_cust_order_no != @primary,
+                                        CURRENT_TIMESTAMP(), order_no_mapped_at),
+                reference_cust_order_no = @primary,
+                validation_by_rsa = @note
+            WHERE UPPER(distributor_name) = UPPER(@dist)
+              AND file_name = @file
+              AND reference_cust_order_no IS NOT NULL
+            """,
+            job_config=bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ScalarQueryParameter("dist", "STRING", distributor_name),
+                bigquery.ScalarQueryParameter("file", "STRING", file_name),
+                bigquery.ScalarQueryParameter("primary", _ptype, _pval),
+                bigquery.ScalarQueryParameter("note", "STRING", validation_text),
+            ]),
+        ).result()
         return True
     except Exception as e:
         st.error(f"Gagal update PI Validation ({distributor_name} / {file_name}): {e}")
         return False
 
-    
+
 def _render_pi_validation():
-    try:
-        from po_pi_map import fetch_existing_maps
-    except ImportError:
-        def fetch_existing_maps(*_a, **_k):
-            return {}
-        st.info("ℹ️ Modul `po_pi_map.py` tidak ditemukan: mapping tersimpan tidak dimuat dan tombol Save belum aktif.")
 
     st.markdown(
         """<div class="pipeline-step active">
@@ -1352,7 +1450,7 @@ def _render_pi_validation():
     </style>
     """, unsafe_allow_html=True)
 
-    _NOTE_OPTIONS = ["Mapping PI by RSA", "Others"]
+    _NOTE_OPTIONS = ["Not mapped", "Mapping PI by RSA", "Others"]
 
     _dist_opts = sorted(anomaly_df["distributor_name"].astype(str).str.strip().str.upper().unique())
     _dist_filter = st.multiselect("🔎 Filter Distributor", options=_dist_opts, key="pi_filter_dist",
@@ -1413,7 +1511,9 @@ def _render_pi_validation():
             if _saved.get("note"):
                 _existing_note = _saved["note"]
 
-            if _existing_note == "Mapping PI by RSA" or not _existing_note:
+            if not _existing_note or _existing_note == "Not mapped":
+                _default_choice, _default_manual = "Not mapped", ""
+            elif _existing_note == "Mapping PI by RSA":
                 _default_choice, _default_manual = "Mapping PI by RSA", ""
             else:
                 _default_choice, _default_manual = "Others", _existing_note
@@ -1466,6 +1566,8 @@ def _render_pi_validation():
         for row in _pending_rows:
             _refs_sel = row["Selected Refs"]
             _note = row["Validation by RSA"].strip()
+            if _note == "Not mapped":  # user tidak mengubah -> tidak di-replace, tetap punya 2 ref
+                continue
             if not _refs_sel:
                 _skipped += 1
                 continue
@@ -2966,7 +3068,9 @@ if st.session_state.get('page') == 'po_changer':
             if sku_col_sim and qty_col_sim and dist_col_sim:
                 st.divider()
                 _cached = st.session_state.get("sim_result_rsa")
-                _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final"}
+                _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
+                              "WOI Threshold", "WOI Threshold Status",
+                              "National Alloc %", "National Alloc Status"}
                 if _cached and _cached.get("dfs"):
                     _first_df = next(iter(_cached["dfs"].values()))
                     if not _need_cols.issubset(_first_df.columns):
@@ -3136,7 +3240,9 @@ if st.session_state.get('page') == 'po_spv':
                 # Hasil di-cache per file supaya ganti format output / rerun tidak simulasi ulang.
                 import hashlib as _hashlib
                 _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
-                _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final"}
+                _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
+                              "WOI Threshold", "WOI Threshold Status",
+                              "National Alloc %", "National Alloc Status"}
                 _spv_cache = st.session_state.get("sim_result_spv")
                 if _spv_cache and _spv_cache.get("dfs"):
                     _first = next(iter(_spv_cache["dfs"].values()))
@@ -3193,12 +3299,12 @@ if st.session_state.get('page') == 'po_spv':
                 final_cols = [
                     "Distributor", "SKU", "Product Name", "Assortment", "Supply Control",
                     "Avg Weekly Sales LM (Qty)", "Total Stock (Qty)", "Current WOI",
-                    "PO Qty", "PO Value", "WOI (Stock + PO Ori)", "Remark",
+                    "PO Qty", "PO Value", "WOI (Stock + PO Ori)", "WOI Threshold", "WOI Threshold Status", "Remark",
                     "Suggested PO buffer", "Suggested PO Value",
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final", "Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)",
+                    "Remaining Allocation (By Region)", "National Alloc %", "National Alloc Status",
                 ]
                 st.dataframe(final_display_df.reindex(columns=final_cols).reset_index(drop=True))
 
