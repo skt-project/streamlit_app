@@ -1,25 +1,33 @@
 """
 PO Suggestion Tool - Production Release
 ========================================
-Version: 2.0.0
-Last Updated: 2024-02-06
+Version: 2.1.0
+Last Updated: 2026-11-19
 
 A production-ready Streamlit application for generating Purchase Order suggestions
 based on inventory buffer analysis from BigQuery.
 
 Features:
 - Automated inventory refresh (2-hour intervals)
-- Multi-store PDF generation
+- Per-store PDF download and bulk download (one ZIP, one PDF per store)
 - Advanced filtering and selection
 - Real-time data synchronization
+- Download tracking per store + admin dashboard (login required)
 - Comprehensive error handling and logging
+
+Supporting modules (pure logic, unit-tested without Streamlit):
+- po_buffer_downloads.py  file naming, bulk plan and ZIP assembly
+- po_buffer_tracking.py   persistent download tracking + dashboard aggregation
+- po_buffer_admin.py      admin credentials and login state
 """
 
 import streamlit as st
 import pandas as pd
 import pytz
 import logging
+import os
 import sys
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 from google.oauth2 import service_account
@@ -27,11 +35,23 @@ from google.cloud import bigquery
 from google.api_core import exceptions as google_exceptions
 import io
 from reportlab.lib.pagesizes import A4, portrait
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
+import po_buffer_admin as admin_auth
+import po_buffer_tracking as tracking
+from po_buffer_downloads import (
+    build_bulk_zip,
+    build_pdf_filename,
+    build_store_info,
+    build_unique_filenames,
+    get_store_detail,
+    jakarta_date_str,
+    plan_bulk_download,
+)
 
 # ============================================================================
 # CONFIGURATION
@@ -41,7 +61,7 @@ class Config:
     """Application configuration constants"""
     APP_TITLE = "PO Suggestion Tool"
     APP_ICON = "📦"
-    VERSION = "2.0.0"
+    VERSION = "2.1.0"
     BRAND_NAME = "Glad2Glow"
     
     # BigQuery Configuration
@@ -427,7 +447,7 @@ def _generate_store_page_elements(
     [f"Region: {safe_str(store_data.get('region'))}",
      f"Distributor: {safe_str(store_data.get('distributor_g2g'))}"],
 
-    [f"Tgl: {datetime.now().strftime('%d/%b/%Y')}",
+    [f"Tgl: {get_jkt_now().strftime('%d/%b/%Y')}",
      "Sales: _________________"]
     ]
 
@@ -572,73 +592,20 @@ def _generate_store_page_elements(
     ))
     elements.append(Spacer(1, 10))
     elements.append(Paragraph(
-        f"<i>* System Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}</i>",
+        f"<i>* System Generated: {get_jkt_now().strftime('%d %b %Y, %H:%M')}</i>",
         styles['Italic']
     ))
     
     return elements
 
-def generate_multi_store_pdf(
-    stores_data: pd.DataFrame,
-    df_inventory_buffer: pd.DataFrame,
-    brand_name: str = Config.BRAND_NAME
-) -> io.BytesIO:
+def generate_store_pdf(store_info: Dict, store_detail: pd.DataFrame) -> bytes:
     """
-    Generate combined PDF for multiple stores
-    
-    Args:
-        stores_data: DataFrame with store summary data
-        df_inventory_buffer: DataFrame with inventory details
-        brand_name: Brand name for PDF header
-        
-    Returns:
-        BytesIO: Combined PDF file buffer
+    Generate the PO PDF of exactly one store, as bytes.
+
+    Thin wrapper over generate_po_pdf (unchanged) used by both the individual
+    download button and the bulk ZIP, so a store gets the same PDF either way.
     """
-    try:
-        logger.info(f"Generating multi-store PDF for {len(stores_data)} stores")
-        
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=portrait(A4),
-            rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25
-        )
-        elements = []
-        styles = getSampleStyleSheet()
-        
-        stores_included = 0
-        for idx, (_, store_row) in enumerate(stores_data.iterrows()):
-            store_detail = df_inventory_buffer[
-                df_inventory_buffer['store_code'] == store_row['store_code']
-            ].copy()
-            
-            if not store_detail['buffer_plan'].notna().any():
-                continue
-            
-            store_info = {
-                'store_code': store_row['store_code'],
-                'store_name': store_row['store_name'],
-                'distributor_g2g': store_row.get('distributor', '-'),
-                'region': store_row.get('region', '-'),
-            }
-            
-            store_elements = _generate_store_page_elements(store_info, store_detail, styles, brand_name)
-            elements.extend(store_elements)
-            
-            if stores_included < len(stores_data) - 1:
-                elements.append(PageBreak())
-            
-            stores_included += 1
-        
-        doc.build(elements)
-        buffer.seek(0)
-        
-        logger.info(f"✓ Multi-store PDF generated successfully ({stores_included} stores)")
-        return buffer
-        
-    except Exception as e:
-        logger.error(f"Failed to generate multi-store PDF: {str(e)}")
-        raise
+    return generate_po_pdf(store_info, store_detail, brand_name=Config.BRAND_NAME).getvalue()
 
 # ============================================================================
 # DATA LOADING FUNCTIONS
@@ -1011,6 +978,52 @@ def load_inventory_buffer_data() -> pd.DataFrame:
         raise
 
 # ============================================================================
+# DOWNLOAD TRACKING
+# ============================================================================
+
+@st.cache_resource
+def get_tracking_store() -> tracking.TrackingStore:
+    """Process-wide tracking store (BigQuery table, local-file fallback)."""
+    return tracking.TrackingStore(client_factory=get_bigquery_client)
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_tracking_data() -> Tuple[pd.DataFrame, str, Optional[str]]:
+    """All tracking events as (events, source, warning); cleared by Refresh/record."""
+    result = tracking.fetch_tracking_data(get_tracking_store())
+    return result.events, result.source, result.warning
+
+def record_download(download_type: str, stores: List[Dict], event_id: str) -> None:
+    """
+    on_click handler of every PO download button - the ONLY place a download
+    is counted.
+
+    Streamlit calls an on_click callback exactly once per click, before the
+    script reruns, so building/rendering a PDF (which happens on every rerun)
+    never counts. event_id is created when the button is rendered; recording
+    the same id twice is a no-op in the session and in BigQuery, which makes
+    a replayed click harmless. Tracking problems never block the download:
+    the user already has the file, so failures are only logged and toasted.
+    """
+    try:
+        result = tracking.record_download_event(
+            get_tracking_store(),
+            download_type,
+            stores,
+            event_id,
+            seen_event_ids=st.session_state.po_recorded_event_ids,
+        )
+        if not result.duplicate:
+            load_tracking_data.clear()
+        if result.warning:
+            st.toast(f"⚠️ {result.warning}", icon="⚠️")
+    except Exception:
+        logger.exception("Failed to record %s download %s", download_type, event_id)
+        st.toast("⚠️ File terunduh, tetapi pencatatan tracking gagal.", icon="⚠️")
+
+def _admin_credentials() -> admin_auth.AdminCredentials:
+    return admin_auth.get_admin_credentials(secrets=st.secrets, environ=os.environ)
+
+# ============================================================================
 # SESSION STATE INITIALIZATION
 # ============================================================================
 
@@ -1023,6 +1036,8 @@ def init_session_state():
         "distributor_select": "All",
         "store_select": [],
         "sp_checked": False,
+        "po_recorded_event_ids": set(),
+        "po_bulk_prepared": None,
     }
     
     for key, default_value in defaults.items():
@@ -1036,6 +1051,12 @@ init_session_state()
 # ============================================================================
 
 def main():
+    # The admin page needs neither the inventory data nor the stored procedure,
+    # so it is handled before any BigQuery inventory work starts.
+    if render_page_switcher() == PAGE_ADMIN:
+        render_admin_page()
+        return
+
     # Check and execute stored procedure if needed
     if not st.session_state.sp_checked:
         last_exec_time = check_and_execute_sp()
@@ -1078,8 +1099,8 @@ def main():
         selected_stores
     )
 
-    # Bulk download
-    if len(filtered_stores) > 1:
+    # Bulk download (one ZIP, one PDF per store - also for a single-store filter)
+    if not filtered_stores.empty:
         render_bulk_download(filtered_stores, df_inventory_buffer, last_exec_time)
 
     render_active_filters(selected_distributor, selected_stores)
@@ -1277,57 +1298,139 @@ def render_bulk_download(
     df_inventory_buffer: pd.DataFrame,
     last_exec_time: Optional[datetime]
 ):
-    """Render bulk download section for multiple stores"""
+    """
+    Bulk download: ONE ZIP holding exactly ONE PDF per store of the current filter.
+
+    Every store of the filter is accounted for - either it gets a PDF, or it is
+    listed with the reason it was left out. Nothing is dropped silently.
+    """
     st.markdown("---")
-    
+
+    date_str = jakarta_date_str()
+    plan = plan_bulk_download(filtered_stores, df_inventory_buffer, date_str)
+    eligible = [item for item in plan if item.will_generate]
+    skipped = [item for item in plan if not item.will_generate]
+
     st.markdown(f"""
     <div style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-        padding: 1.5rem; 
-        border-radius: 12px; 
-        text-align: center; 
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 12px;
+        text-align: center;
         margin-bottom: 1rem;
         box-shadow: 0 4px 15px rgba(102, 126, 234, 0.25);
     ">
         <h2 style="color: white; margin: 0; font-size: 1.5rem;">📋 Bulk Download Order Suggestion</h2>
         <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0; font-size: 1rem;">
-            Otomatis membuat satu dokumen PDF berisi <b>{len(filtered_stores)} toko</b> yang terpilih.
+            Satu file ZIP berisi <b>satu PDF untuk setiap toko</b> hasil filter.
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
+
+    # Shown BEFORE anything is generated, so the user knows what to expect.
+    st.info(
+        f"🏪 **{len(plan)} toko** hasil filter  →  📄 **{len(eligible)} file PDF** "
+        f"akan dibuat dalam 1 file ZIP."
+    )
+    if skipped:
+        st.warning(
+            f"{len(skipped)} toko tidak akan dibuatkan PDF karena data tidak valid. "
+            "Detailnya ada di bawah."
+        )
+        with st.expander(f"Lihat {len(skipped)} toko yang dilewati", expanded=False):
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {"Kode Toko": i.store_code or "-", "Nama Toko": i.store_name,
+                         "Alasan": i.skip_reason}
+                        for i in skipped
+                    ]
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    if not eligible:
+        st.error("Tidak ada toko dengan data valid untuk dibuatkan PDF.")
+        st.markdown("---")
+        return
+
+    signature = (date_str, tuple(sorted(i.store_code for i in plan)), str(last_exec_time))
+
     if st.button(
-        "📄 Generate Combined PDF for All Selected Stores",
-        key="multi_pdf_btn",
+        f"📦 Generate ZIP ({len(eligible)} PDF, 1 file per toko)",
+        key="bulk_zip_btn",
         use_container_width=True,
         type="primary"
     ):
-        with st.spinner(f"Sedang memproses PDF untuk {len(filtered_stores)} toko..."):
+        with st.spinner(f"Sedang memproses {len(eligible)} PDF..."):
             try:
-                pdf_buffer = generate_multi_store_pdf(
-                    filtered_stores,
+                result = build_bulk_zip(
+                    plan,
                     df_inventory_buffer,
-                    brand_name=Config.BRAND_NAME
+                    generate_store_pdf,
+                    date_str,
+                    store_rows={
+                        str(row["store_code"]): row
+                        for row in filtered_stores.to_dict("records")
+                    },
                 )
-                
-                timestamp = format_jkt_time(last_exec_time or get_jkt_now(), "%Y-%m-%d_%H%M_WIB")
-                filename = f"PO_Bulk_{len(filtered_stores)}_Stores_{timestamp}.pdf"
-                
-                st.download_button(
-                    label=f"📥 Klik di Sini untuk Mengunduh PDF ({len(filtered_stores)} Toko)",
-                    data=pdf_buffer,
-                    file_name=filename,
-                    mime="application/pdf",
-                    key="dl_multi_pdf",
-                    use_container_width=True
+                st.session_state.po_bulk_prepared = {
+                    "signature": signature,
+                    "result": result,
+                }
+                logger.info(
+                    f"Bulk ZIP generated: {result.zip_name} "
+                    f"({result.file_count} PDFs, {len(result.excluded)} excluded)"
                 )
-                
-                logger.info(f"Bulk PDF generated: {filename}")
-                
             except Exception as e:
-                st.error(f"❌ Failed to generate bulk PDF: {str(e)}")
-                logger.error(f"Bulk PDF generation failed: {str(e)}")
-    
+                st.session_state.po_bulk_prepared = None
+                st.error(f"❌ Failed to generate bulk ZIP: {str(e)}")
+                logger.error(f"Bulk ZIP generation failed: {str(e)}")
+
+    prepared = st.session_state.po_bulk_prepared
+    if prepared and prepared["signature"] != signature:
+        # Filter or data changed since the ZIP was built: do not offer a stale file.
+        st.session_state.po_bulk_prepared = prepared = None
+
+    if prepared:
+        result = prepared["result"]
+        if result.excluded:
+            st.warning(
+                f"ZIP berisi {result.file_count} dari {len(plan)} toko. "
+                f"{len(result.excluded)} toko dilewati:"
+            )
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {"Kode Toko": i.store_code or "-", "Nama Toko": i.store_name,
+                         "Alasan": i.skip_reason}
+                        for i in result.excluded
+                    ]
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+        if result.zip_bytes is None:
+            st.error("Tidak ada PDF yang berhasil dibuat.")
+        else:
+            st.success(f"ZIP siap: {result.file_count} file PDF - {result.zip_name}")
+            # Counted on click only (see record_download), never on generation.
+            st.download_button(
+                label=f"📥 Klik di Sini untuk Mengunduh ZIP ({result.file_count} PDF)",
+                data=result.zip_bytes,
+                file_name=result.zip_name,
+                mime="application/zip",
+                key="dl_bulk_zip",
+                use_container_width=True,
+                on_click=record_download,
+                args=(
+                    tracking.DOWNLOAD_BULK,
+                    [item.as_store_record() for item in result.included],
+                    uuid.uuid4().hex,
+                ),
+            )
+
     st.markdown("---")
 
 def render_active_filters(selected_distributor: str, selected_stores: List[str]):
@@ -1371,9 +1474,13 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
         """, unsafe_allow_html=True)
         return
     
+    # Same naming (and same duplicate-name handling) as the files inside the bulk ZIP.
+    date_str = jakarta_date_str()
+    file_names = build_unique_filenames(filtered_stores.to_dict("records"), date_str)
+
     for _, row in filtered_stores.iterrows():
         unique_key = row["store_code"]
-        
+
         # ✅ FIX: Get stock_date_str for THIS store
         stock_date_val = row.get('stock_date')
         stock_date_str = (
@@ -1438,30 +1545,37 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
             st.markdown('<div style="padding-top: 0.5rem;"></div>', unsafe_allow_html=True)
             
             try:
-                store_detail = df_inventory_buffer[
-                    df_inventory_buffer['store_code'] == row['store_code']
-                ].copy()
-                
-                store_info = {
-                    'store_code': row['store_code'],
-                    'store_name': row['store_name'],
-                    'distributor_g2g': row['distributor'],
-                    'region': row['region'],
-                    'est_order_value': row['est_order_value'],
-                    'address': '-'
-                }
-                
-                pdf_buffer = generate_po_pdf(store_info, store_detail, brand_name=Config.BRAND_NAME)
-                
+                store_detail = get_store_detail(df_inventory_buffer, row['store_code'])
+                store_info = build_store_info(row)
+
+                pdf_bytes = generate_store_pdf(store_info, store_detail)
+                file_name = (
+                    file_names.get(str(row['store_code']).strip())
+                    or build_pdf_filename(row['store_name'], date_str)
+                )
+
+                # Counted on click only (see record_download), never on generation.
                 st.download_button(
                     label="📄 Download PDF",
-                    data=pdf_buffer,
-                    file_name=f"PO_{row['store_code']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    data=pdf_bytes,
+                    file_name=file_name,
                     mime="application/pdf",
                     key=f"dl_pdf_{unique_key}",
-                    use_container_width=True
+                    use_container_width=True,
+                    on_click=record_download,
+                    args=(
+                        tracking.DOWNLOAD_INDIVIDUAL,
+                        [{
+                            'store_code': row['store_code'],
+                            'store_name': row['store_name'],
+                            'region': row['region'],
+                            'distributor': row['distributor'],
+                            'file_name': file_name,
+                        }],
+                        uuid.uuid4().hex,
+                    ),
                 )
-                
+
             except Exception as e:
                 st.error(f"Error generating PDF: {str(e)}")
                 logger.error(f"PDF generation failed for {unique_key}: {str(e)}")
@@ -1478,6 +1592,240 @@ def render_footer():
         <span style="font-size: 0.75rem; opacity: 0.7;">Version {Config.VERSION} | {Config.BRAND_NAME}</span>
     </div>
     """, unsafe_allow_html=True)
+
+# ============================================================================
+# ADMIN: LOGIN + DOWNLOAD TRACKING DASHBOARD
+# ============================================================================
+
+PAGE_PO = "📦 PO Suggestion"
+PAGE_ADMIN = "🔐 Admin Tracking"
+
+
+def render_page_switcher() -> str:
+    """Top navigation between the PO tool and the admin tracking page."""
+    nav_col, logout_col = st.columns([5, 1])
+    with nav_col:
+        page = st.radio(
+            "Halaman",
+            [PAGE_PO, PAGE_ADMIN],
+            horizontal=True,
+            key="page_view",
+            label_visibility="collapsed",
+        )
+    with logout_col:
+        if admin_auth.is_admin_authenticated(st.session_state):
+            if st.button("🚪 Logout", key="admin_logout_nav_btn", use_container_width=True):
+                admin_auth.logout_admin(st.session_state)
+                st.rerun()
+    return page
+
+
+def render_admin_login() -> None:
+    """Username/password form. The tracking page is not rendered before success."""
+    st.markdown("### 🔐 Login Admin")
+    st.caption("Halaman tracking download hanya dapat dibuka oleh admin.")
+
+    with st.form("admin_login_form", clear_on_submit=True):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login", use_container_width=True)
+
+    if submitted:
+        result = admin_auth.attempt_admin_login(
+            st.session_state, username, password, _admin_credentials()
+        )
+        if result.ok:
+            st.rerun()
+        else:
+            st.error(result.message)
+
+
+def render_admin_page() -> None:
+    """Gate: login form until authenticated, then the dashboard."""
+    if not admin_auth.is_admin_authenticated(st.session_state):
+        render_admin_login()
+        return
+    render_admin_dashboard()
+
+
+def _format_jkt(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, utc=True).dt.tz_convert(
+        pytz.timezone(Config.TIMEZONE)
+    ).dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def render_admin_dashboard() -> None:
+    """Download-tracking dashboard. Refuses to render without an admin session."""
+    if not admin_auth.is_admin_authenticated(st.session_state):
+        st.error("Akses ditolak. Silakan login sebagai admin.")
+        return
+
+    st.markdown("## 📊 Tracking Download PO")
+    user = st.session_state.get(admin_auth.SESSION_USER_KEY, "admin")
+    st.caption(f"Login sebagai **{user}** · waktu ditampilkan dalam {Config.TIMEZONE}")
+
+    if _admin_credentials().is_default:
+        st.warning(
+            "Kredensial admin default masih dipakai. Repository ini publik, jadi "
+            "atur `[po_buffer_admin]` di Streamlit secrets atau variabel environment "
+            "`PO_BUFFER_ADMIN_USERNAME` / `PO_BUFFER_ADMIN_PASSWORD_HASH`."
+        )
+
+    if st.button("🔄 Refresh Data", key="admin_refresh_btn"):
+        load_tracking_data.clear()
+        st.rerun()
+
+    events, source, warning = load_tracking_data()
+    if warning:
+        st.warning(warning)
+
+    if events.empty:
+        st.info(
+            "Belum ada download yang tercatat. Hitungan bertambah hanya saat tombol "
+            "download ditekan, bukan saat PDF dibuat."
+        )
+        return
+
+    # --- Filters -----------------------------------------------------------
+    f1, f2 = st.columns([1, 2])
+    with f1:
+        all_dates = st.checkbox("Semua tanggal", value=True, key="admin_all_dates")
+        start_date = end_date = None
+        if not all_dates:
+            today = get_jkt_now().date()
+            picked = st.date_input(
+                "Rentang tanggal",
+                value=(today - timedelta(days=30), today),
+                key="admin_date_range",
+            )
+            if isinstance(picked, (tuple, list)):
+                if len(picked) == 2:
+                    start_date, end_date = picked
+                elif len(picked) == 1:
+                    start_date = end_date = picked[0]
+            else:
+                start_date = end_date = picked
+    with f2:
+        store_labels = (
+            events[["store_code", "store_name"]]
+            .drop_duplicates("store_code")
+            .assign(label=lambda d: d["store_code"] + " - " + d["store_name"].fillna(""))
+            .set_index("store_code")["label"]
+            .sort_values()
+        )
+        store_codes = st.multiselect(
+            "Toko",
+            options=store_labels.index.tolist(),
+            format_func=lambda code: store_labels[code],
+            key="admin_store_filter",
+        )
+    f3, f4 = st.columns(2)
+    with f3:
+        regions = st.multiselect(
+            "Region",
+            sorted(events["region"].dropna().unique()),
+            key="admin_region_filter",
+        )
+    with f4:
+        distributors = st.multiselect(
+            "Distributor",
+            sorted(events["distributor"].dropna().unique()),
+            key="admin_distributor_filter",
+        )
+
+    filtered = tracking.filter_events(
+        events,
+        start_date=start_date,
+        end_date=end_date,
+        store_codes=store_codes,
+        regions=regions,
+        distributors=distributors,
+    )
+
+    # --- Totals ------------------------------------------------------------
+    totals = tracking.summarize_totals(filtered)
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Total Download", f"{totals['total_downloads']:,}")
+    m2.metric("Individual", f"{totals['individual_downloads']:,}")
+    m3.metric("Via Bulk (per toko)", f"{totals['bulk_downloads']:,}")
+    m4.metric("Aksi Bulk", f"{totals['bulk_actions']:,}")
+    m5.metric("Toko Diunduh", f"{totals['stores_downloaded']:,}")
+    st.caption(
+        "Total download dihitung per toko: bulk ZIP berisi 5 toko menambah 5, "
+        "masing-masing +1."
+    )
+
+    if filtered.empty:
+        st.info("Tidak ada data untuk filter yang dipilih.")
+        return
+
+    # --- Per-store table ---------------------------------------------------
+    st.markdown("### Download per Toko")
+    per_store = tracking.aggregate_by_store(filtered)
+    shown = per_store.assign(last_download_at=_format_jkt(per_store["last_download_at"]))
+    st.dataframe(
+        shown.rename(columns={
+            "store_code": "Store Code",
+            "store_name": "Nama Toko",
+            "region": "Region",
+            "distributor": "Distributor",
+            "individual_downloads": "Individual",
+            "bulk_downloads": "Bulk",
+            "total_downloads": "Total",
+            "last_download_at": "Download Terakhir (WIB)",
+        }),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    stamp = jakarta_date_str()
+    e1, e2 = st.columns(2)
+    with e1:
+        st.download_button(
+            "⬇️ Export ringkasan per toko (CSV)",
+            data=tracking.to_csv_bytes(per_store),
+            file_name=f"PO_Tracking_Per_Toko_{stamp}.csv",
+            mime="text/csv",
+            key="admin_export_summary",
+            on_click="ignore",
+            use_container_width=True,
+        )
+    with e2:
+        st.download_button(
+            "⬇️ Export log download (CSV)",
+            data=tracking.to_csv_bytes(filtered),
+            file_name=f"PO_Tracking_Log_{stamp}.csv",
+            mime="text/csv",
+            key="admin_export_events",
+            on_click="ignore",
+            use_container_width=True,
+        )
+
+    # --- Bulk membership + raw log ----------------------------------------
+    bulk = tracking.bulk_event_details(filtered)
+    with st.expander(f"Detail aksi bulk ({len(bulk)})"):
+        if bulk.empty:
+            st.caption("Belum ada bulk download pada filter ini.")
+        else:
+            st.dataframe(
+                bulk.assign(downloaded_at=_format_jkt(bulk["downloaded_at"])).rename(columns={
+                    "event_id": "Event ID",
+                    "downloaded_at": "Waktu (WIB)",
+                    "store_count": "Jumlah Toko",
+                    "stores": "Toko dalam ZIP",
+                    "files": "File",
+                }),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    with st.expander("Log download terbaru (200 baris)"):
+        log = filtered.sort_values("downloaded_at", ascending=False).head(200)
+        st.dataframe(
+            log.assign(downloaded_at=_format_jkt(log["downloaded_at"])),
+            hide_index=True,
+            use_container_width=True,
+        )
 
 # ============================================================================
 # APPLICATION ENTRY POINT
