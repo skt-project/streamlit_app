@@ -216,13 +216,43 @@ div[data-baseweb="select"] input {
 .stButton > button[kind="primary"]:disabled { background:#e9edf2 !important; border-color:#d9e0e9 !important; color:#9ca7b6 !important; box-shadow:none; }
 .stButton > button[kind="primary"]:disabled p { color:#9ca7b6 !important; }
 
+/* Tombol aksi di atas tabel Store Validation (Generate ID / DMS Done / DMS & Basis Done / Delete): lebih kecil */
+.st-key-tombol_generate_bulk button[kind="primary"], .st-key-tombol_dms_done button[kind="primary"],
+.st-key-tombol_basis_done button[kind="primary"], .st-key-tombol_hapus_noo button[kind="primary"] {
+  height: 30px !important; min-height: 30px !important; padding: 0 10px !important; border-radius: 7px !important;
+  box-shadow: 0 2px 6px rgba(37,99,235,.18) !important;
+}
+.st-key-tombol_generate_bulk button[kind="primary"] p, .st-key-tombol_dms_done button[kind="primary"] p,
+.st-key-tombol_basis_done button[kind="primary"] p, .st-key-tombol_hapus_noo button[kind="primary"] p {
+  font-size: 11.5px !important; white-space: nowrap !important;      /* satu baris, tidak terpotong jadi dua baris */
+}
+
+/* Warna tombol status = warna conditional formatting dropdown Validation (WARNA_VALIDASI di shared.py) */
+html body .st-key-tombol_generate_bulk button[kind="primary"] { background:#d3f9d8 !important; border:1px solid #a9e7b3 !important; box-shadow:none !important; }
+html body .st-key-tombol_review_bulk   button[kind="primary"] { background:#ffd6e0 !important; border:1px solid #f5aebf !important; box-shadow:none !important; }
+html body .st-key-tombol_dms_done      button[kind="primary"] { background:#cfe8ff !important; border:1px solid #a3cdf5 !important; box-shadow:none !important; }
+html body .st-key-tombol_basis_done    button[kind="primary"] { background:#e6d9ff !important; border:1px solid #c9b3f5 !important; box-shadow:none !important; }
+html body .st-key-tombol_generate_bulk button[kind="primary"] p { color:#1b5e20 !important; }
+html body .st-key-tombol_review_bulk   button[kind="primary"] p { color:#9c1c4a !important; }
+html body .st-key-tombol_dms_done      button[kind="primary"] p { color:#0b4a8f !important; }
+html body .st-key-tombol_basis_done    button[kind="primary"] p { color:#5b21b6 !important; }
+html body .st-key-tombol_generate_bulk button[kind="primary"]:hover { background:#bff0c7 !important; }
+html body .st-key-tombol_review_bulk   button[kind="primary"]:hover { background:#ffc2d1 !important; }
+html body .st-key-tombol_dms_done      button[kind="primary"]:hover { background:#b8dcff !important; }
+html body .st-key-tombol_basis_done    button[kind="primary"]:hover { background:#d8c6ff !important; }
+/* nonaktif: warna yang sama tapi pudar */
+html body .st-key-tombol_dms_done   button[kind="primary"]:disabled { background:#cfe8ff !important; border-color:#a3cdf5 !important; opacity:.45 !important; cursor:not-allowed; }
+html body .st-key-tombol_basis_done button[kind="primary"]:disabled { background:#e6d9ff !important; border-color:#c9b3f5 !important; opacity:.45 !important; cursor:not-allowed; }
+html body .st-key-tombol_dms_done   button[kind="primary"]:disabled p { color:#0b4a8f !important; }
+html body .st-key-tombol_basis_done button[kind="primary"]:disabled p { color:#5b21b6 !important; }
+
 .stButton > button[kind="secondary"] { height: 38px; padding: 0 16px; border-radius:8px; font-weight:500; border-color:#ccd7e5; color:#3d4e67; }
 .stButton > button[kind="secondary"]:hover { border-color:#adbbcc; background:#f7f9fc; }
 
 /* ---------- PAGINATION ---------- */
 [class*="st-key-halaktif"] button { background:#2563eb !important; color:#fff !important; border-color:#2563eb !important; box-shadow:0 2px 5px rgba(37,99,235,.18); }
 .teks-showing { color:#7d899b; font-size:9.5px; padding-top:8px; }
-.teks-belumsimpan { color:#9b650e; font-size:9.5px; margin-left:10px; }
+.teks-belumsimpan { color:#d92d20; font-size:12px; font-weight:700; margin-left:10px; }   /* "N rows unsaved": merah, tebal */
 
 /* ---------- UPLOAD / DROPZONE (NOO Submission) ---------- */
 .kotak-unggah [data-testid="stFileUploaderDropzone"] {

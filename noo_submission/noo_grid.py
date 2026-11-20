@@ -48,7 +48,7 @@ export default function (component) {
     S.tok = data.sel_token;
   }
 
-  const cols = data.cols, rows = data.rows, warna = data.warna || {};
+  const cols = data.cols, rows = data.rows, warna = data.warna || {}, kunci = data.terkunci || [];
   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const val = (i, c) => (S.edits[i] && S.edits[i][c] !== undefined) ? S.edits[i][c] : rows[i][c];
 
@@ -76,6 +76,8 @@ export default function (component) {
     rows.forEach((r, i) => {
       const status = val(i, 'Validasi');
       const picked = !!val(i, 'Pilih');
+      const lock = kunci.includes(status);      // status final (mis. DMS Uploaded): kolom data tidak bisa diedit
+      const LOCK_TIP = 'Locked: status is final';
       h += `<tr class="${picked ? 'picked' : ''}">`;
       cols.forEach(c => {
         const v = val(i, c.name);
@@ -86,17 +88,17 @@ export default function (component) {
                c.options.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('') + '</select></td>';
         } else if (c.kind === 'select') {
           const opts = c.options.includes(v) || v == null ? c.options : [v, ...c.options];
-          h += `<td><select class="cell" data-i="${i}" data-c="${c.name}">` +
+          h += `<td class="${lock ? 'sid-off' : ''}"><select class="cell" data-i="${i}" data-c="${c.name}" ${lock ? 'disabled title="' + LOCK_TIP + '"' : ''}>` +
                opts.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('') + '</select></td>';
         } else if (c.kind === 'storeid') {
           const on = status === 'Existing';
           const shown = on && v === '-' ? '' : v;
           h += `<td class="${on ? 'sid-on' : 'sid-off'}"><input class="cell" data-i="${i}" data-c="${c.name}" value="${esc(shown)}" ` +
-               (on ? 'placeholder="Type Store ID"' : 'disabled title="Editable only when Validation = Existing"') + '></td>';
+               (on ? 'placeholder="Type Store ID"' : 'disabled title="' + (lock ? LOCK_TIP : 'Editable only when Validation = Existing') + '"') + '></td>';
         } else if (c.kind === 'number') {
-          h += `<td><input class="cell" type="number" step="0.0001" data-i="${i}" data-c="${c.name}" value="${esc(v)}" style="text-align:right"></td>`;
+          h += `<td class="${lock ? 'sid-off' : ''}"><input class="cell" type="number" step="0.0001" data-i="${i}" data-c="${c.name}" value="${esc(v)}" style="text-align:right" ${lock ? 'disabled title="' + LOCK_TIP + '"' : ''}></td>`;
         } else if (c.kind === 'text') {
-          h += `<td><input class="cell" data-i="${i}" data-c="${c.name}" value="${esc(v)}"></td>`;
+          h += `<td class="${lock ? 'sid-off' : ''}"><input class="cell" data-i="${i}" data-c="${c.name}" value="${esc(v)}" ${lock ? 'disabled title="' + LOCK_TIP + '"' : ''}></td>`;
         } else {
           h += `<td class="ro">${esc(v)}</td>`;
         }
@@ -134,7 +136,7 @@ def _js(v):
     return str(v) if not isinstance(v, (int, float, str)) else v
 
 
-def noo_grid(df: pd.DataFrame, cols: list, *, key: str, select_all=False, warna=None) -> pd.DataFrame:
+def noo_grid(df: pd.DataFrame, cols: list, *, key: str, select_all=False, warna=None, terkunci=()) -> pd.DataFrame:
     """Render tabel; kembalikan df + edit user (indeks sama dengan df).
 
     cols: list dict {name, label, kind, width, options?, help?};
@@ -149,7 +151,8 @@ def noo_grid(df: pd.DataFrame, cols: list, *, key: str, select_all=False, warna=
                 r[c["name"]] = ""
     hasil = _komponen(
         key=key,
-        data={"cols": cols, "rows": rows, "warna": warna or {}, "sel_token": bool(select_all)},
+        data={"cols": cols, "rows": rows, "warna": warna or {}, "sel_token": bool(select_all),
+              "terkunci": list(terkunci)},
         default={"edits": {}},
         on_edits_change=lambda: None,
     )
