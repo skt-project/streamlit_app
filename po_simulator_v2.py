@@ -458,11 +458,56 @@ def get_max_monthly_st_ytd() -> pd.DataFrame:
         return pd.DataFrame(columns=["distributor", "sku", "max_qty_ytd"])
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_national_alloc_total() -> pd.DataFrame:
+    """Total alokasi nasional per SKU NPD bulan berjalan = SUM seluruh region.
+    Alokasi bersifat per region (berulang di tiap distributor), jadi di-dedupe dulu per (region, sku) sebelum dijumlah."""
+    query = f"""
+        WITH npd AS (
+            SELECT DISTINCT UPPER(sku) AS sku
+            FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation`
+            WHERE calendar_date = DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH)
+        ),
+        per_region AS (
+            SELECT UPPER(region) AS region, UPPER(sku) AS sku,
+                   MAX(remaining_allocation_qty_region) AS alloc
+            FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}`
+            WHERE UPPER(sku) IN (SELECT sku FROM npd)
+            GROUP BY ALL
+        )
+        SELECT sku, SUM(alloc) AS national_alloc_sku, COUNT(DISTINCT region) AS n_region
+        FROM per_region
+        GROUP BY sku
+    """
+    try:
+        return get_bq_client().query(query).to_dataframe()
+    except Exception as e:
+        st.warning(f"⚠️ Gagal memuat total alokasi nasional: {e}")
+        return pd.DataFrame(columns=["sku", "national_alloc_sku", "n_region"])
+
+
+def add_national_alloc_total(res_df: pd.DataFrame) -> pd.DataFrame:
+    """Kolom bantu untuk pengecekan: total alokasi nasional per SKU NPD, dan total semua SKU NPD bulan ini."""
+    nat = get_national_alloc_total()
+    res_df["National Alloc Total (SKU)"] = np.nan
+    res_df["National Alloc Total (All NPD)"] = np.nan
+    if nat.empty:
+        return res_df
+    nat_map = nat.set_index("sku")["national_alloc_sku"].to_dict()
+    res_df["National Alloc Total (SKU)"] = pd.to_numeric(
+        res_df["SKU"].astype(str).str.strip().str.upper().map(nat_map), errors="coerce")
+    res_df["National Alloc Total (All NPD)"] = float(nat["national_alloc_sku"].sum())
+    res_df.loc[res_df["National Alloc Total (SKU)"].isna(), "National Alloc Total (All NPD)"] = np.nan
+    return res_df
+
+
 def add_national_alloc_status(res_df: pd.DataFrame) -> pd.DataFrame:
-    """% = PO Qty / Remaining Allocation (By Region). >= 75% -> '> 75% National Alloc', selain itu '< 75% National Alloc'.
-    Kosong kalau tidak ada PO Qty atau alokasi region tidak tersedia / <= 0."""
+    """% = PO Qty / sisa alokasi NASIONAL SKU itu (jumlah remaining allocation semua region/distributor, kolom 'National Alloc Total (SKU)').
+    >= 75% -> '> 75% National Alloc', selain itu '< 75% National Alloc'.
+    Kosong kalau tidak ada PO Qty atau total alokasi nasional tidak tersedia / <= 0 (mis. bukan SKU NPD).
+    Harus dipanggil SETELAH add_national_alloc_total."""
     po = pd.to_numeric(res_df["PO Qty"], errors="coerce").astype("float64").fillna(0)
-    alloc = pd.to_numeric(res_df["Remaining Allocation (By Region)"], errors="coerce").astype("float64")
+    alloc = pd.to_numeric(res_df["National Alloc Total (SKU)"], errors="coerce").astype("float64")
     pct = po / alloc.where(alloc > 0)
     res_df["National Alloc %"] = pct
     pct_np = pct.to_numpy(dtype="float64", na_value=np.nan)
@@ -686,7 +731,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     reject_font = Font(bold=True, color="D73E3E")
     suggest_font = Font(bold=True, color="F3C94C")
     currency_cols = ["PO Value", "Suggested PO Value", "Suggested Value Final"]
-    integer_cols = ["Remaining Allocation (By Region)", "Avg Weekly Sales LM (Qty)",
+    integer_cols = ["Remaining Allocation (By Region)", "National Alloc Total (SKU)", "National Alloc Total (All NPD)", "Avg Weekly Sales LM (Qty)",
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final"]
     decimal_cols = ["WOI (Stock + PO Ori)", "woi_standard", "WOI Threshold", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
@@ -1231,6 +1276,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df = apply_sku_rejection_rules(__REJECTED_SKUS_2, res_df, region_list_2, is_in=False)
         
         res_df = add_woi_threshold_status(res_df, dist_name, get_max_monthly_st_ytd())
+        res_df = add_national_alloc_total(res_df)
         res_df = add_national_alloc_status(res_df)
 
         res_df["RSA Notes"] = ""
@@ -1282,7 +1328,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                     "Target SO","Suggested QTY SO","Suggested QTY Final","Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)","National Alloc %","National Alloc Status","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
+                    "Remaining Allocation (By Region)","National Alloc Total (SKU)","National Alloc Total (All NPD)","National Alloc %","National Alloc Status","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
 
         # brand ditangkap terpisah (tidak masuk output PO Simulator), khusus untuk Section 8
         if "brand" in res_df.columns:
@@ -1642,10 +1688,12 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         & _final_num["Remark"].str.contains("Reject", case=False, na=False)
        &  ~_final_num["Remark"].str.contains("Reject (Sulawesi Only)", case=False, na=False, regex=False)
         & (_final_num[_woi_ori] > 17 )
+        & (_final_num["WOI Threshold Status"].fillna("").astype(str).str.strip() == "> Highest WOI Threshold")
+        & (_final_num["National Alloc Status"].fillna("").astype(str).str.strip() != "> 75% National Alloc")
     ].copy()
 
-   
-    top10 = prev_df.sort_values(_woi_ori, ascending=False)[PO_IMG_COLS].reset_index(drop=True)
+    _top10_cols = PO_IMG_COLS + ["WOI Threshold Status", "National Alloc Status"]
+    top10 = prev_df.sort_values(_woi_ori, ascending=False)[_top10_cols].reset_index(drop=True)
     num_cols_top10 = top10.select_dtypes(include=['number']).columns
     if top10.empty:
         st.info("Tidak ada SKU Reject dengan stock > 0 dan WOI (Stock + PO Ori) > 15.")
@@ -3075,7 +3123,7 @@ if st.session_state.get('page') == 'po_changer':
                 _cached = st.session_state.get("sim_result_rsa")
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
                               "WOI Threshold", "WOI Threshold Status", "woi_standard", "Max ST Monthly YTD",
-                              "National Alloc %", "National Alloc Status"}
+                              "National Alloc %", "National Alloc Status", "National Alloc Total (SKU)"}
                 if _cached and _cached.get("dfs"):
                     _first_df = next(iter(_cached["dfs"].values()))
                     if not _need_cols.issubset(_first_df.columns):
@@ -3247,8 +3295,8 @@ if st.session_state.get('page') == 'po_spv':
                 _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
                               "WOI Threshold", "WOI Threshold Status", "woi_standard", "Max ST Monthly YTD",
-                              "National Alloc %", "National Alloc Status"}
-                _spv_cache = st.session_state.get("sim_result_spv")
+                              "National Alloc %", "National Alloc Status", "National Alloc Total (SKU)"}
+                _spv_cache =st.session_state.get("sim_result_spv")
                 if _spv_cache and _spv_cache.get("dfs"):
                     _first = next(iter(_spv_cache["dfs"].values()))
                     if not _need_cols.issubset(_first.columns):
@@ -3311,7 +3359,8 @@ if st.session_state.get('page') == 'po_spv':
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final", "Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)", "National Alloc %", "National Alloc Status",
+                    "Remaining Allocation (By Region)", "National Alloc Total (SKU)", "National Alloc Total (All NPD)",
+                    "National Alloc %", "National Alloc Status",
                 ]
                 st.dataframe(final_display_df.reindex(columns=final_cols).reset_index(drop=True))
 
