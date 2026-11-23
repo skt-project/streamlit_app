@@ -73,6 +73,9 @@ class Config:
     BQ_MASTER_TABLE = "master_distributor"
     BQ_STORED_PROC = f"`{BQ_PROJECT}.{BQ_DATASET}.inventory_buffer_sp`"
     
+    # Store list paging: every visible store gets its own PDF built per render
+    STORES_PER_PAGE = 25
+
     # Timing Configuration
     CACHE_TTL_SECONDS = 600  # 10 minutes
     REFRESH_INTERVAL_SECONDS = 7200  # 2 hours
@@ -598,12 +601,18 @@ def _generate_store_page_elements(
     
     return elements
 
+@st.cache_data(ttl=Config.CACHE_TTL_SECONDS, max_entries=2000, show_spinner=False)
 def generate_store_pdf(store_info: Dict, store_detail: pd.DataFrame) -> bytes:
     """
     Generate the PO PDF of exactly one store, as bytes.
 
     Thin wrapper over generate_po_pdf (unchanged) used by both the individual
     download button and the bulk ZIP, so a store gets the same PDF either way.
+
+    Cached per (store info, store rows) for the same time as the data itself:
+    building a PDF costs ~0.2 s, and the page and the bulk ZIP would otherwise
+    rebuild the same PDFs on every rerun. The "generated at" stamp inside a
+    cached PDF can therefore be up to CACHE_TTL_SECONDS old.
     """
     return generate_po_pdf(store_info, store_detail, brand_name=Config.BRAND_NAME).getvalue()
 
@@ -1260,38 +1269,6 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
     
     return selected_region, selected_distributor, selected_stores
 
-    
-    # Store selection header with buttons
-    title_col, btn_col1, btn_col2 = st.columns([6, 1.2, 1], gap="small")
-    
-    with title_col:
-        st.markdown(
-            '<div style="padding-top: 5px;"><span style="font-size:0.95rem; font-weight:600;">🏪 Store Selection</span></div>',
-            unsafe_allow_html=True
-        )
-    
-    with btn_col1:
-        if st.button("Select All", key="all_btn", use_container_width=True):
-            st.session_state.store_select = store_options
-            st.rerun()
-    
-    with btn_col2:
-        if st.button("Clear", key="clr_btn", use_container_width=True):
-            st.session_state.store_select = []
-            st.rerun()
-    
-    # Store multiselect
-    selected_stores = st.multiselect(
-        "Store Selection",
-        options=store_options,
-        default=st.session_state.store_select,
-        placeholder="Select one or more stores…",
-        label_visibility="collapsed",
-        key="store_select"
-    )
-    
-    return selected_region, selected_distributor, selected_stores
-
 def apply_filters(
     df_store_summary: pd.DataFrame,
     selected_region: str,
@@ -1478,6 +1455,39 @@ def render_active_filters(selected_distributor: str, selected_stores: List[str])
         </div>
         """, unsafe_allow_html=True)
 
+def paginate_stores(filtered_stores: pd.DataFrame) -> pd.DataFrame:
+    """
+    The stores to draw on the current page (at most Config.STORES_PER_PAGE).
+
+    Each drawn store builds its own PDF on every render, so drawing hundreds at
+    once made the page take minutes. The bulk ZIP above is not affected: it always
+    covers ALL stores of the filter. The page goes back to 1 whenever the set of
+    stores changes.
+    """
+    total = len(filtered_stores)
+    per_page = Config.STORES_PER_PAGE
+    pages = max(1, -(-total // per_page))
+    if pages == 1:
+        return filtered_stores
+
+    signature = tuple(filtered_stores["store_code"])
+    if st.session_state.get("store_page_signature") != signature:
+        st.session_state["store_page_signature"] = signature
+        st.session_state["store_page"] = 1
+    st.session_state["store_page"] = min(max(int(st.session_state.get("store_page", 1)), 1), pages)
+
+    page = st.number_input(
+        f"Halaman (1-{pages})", min_value=1, max_value=pages, step=1, key="store_page"
+    )
+    start = (page - 1) * per_page
+    end = min(start + per_page, total)
+    st.caption(
+        f"Menampilkan toko {start + 1}-{end} dari {total}. "
+        "Untuk semua toko sekaligus gunakan Bulk Download (ZIP) di atas."
+    )
+    return filtered_stores.iloc[start:end]
+
+
 def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.DataFrame):
     """Render list of stores with download buttons"""
     st.markdown(f"### Store List ({len(filtered_stores)} stores)")
@@ -1504,7 +1514,7 @@ def render_store_list(filtered_stores: pd.DataFrame, df_inventory_buffer: pd.Dat
     date_str = jakarta_date_str()
     file_names = build_unique_filenames(filtered_stores.to_dict("records"), date_str)
 
-    for _, row in filtered_stores.iterrows():
+    for _, row in paginate_stores(filtered_stores).iterrows():
         unique_key = row["store_code"]
 
         # ✅ FIX: Get stock_date_str for THIS store

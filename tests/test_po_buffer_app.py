@@ -136,6 +136,7 @@ class App:
         parts = [m.value for m in self.at.markdown]
         parts += [i.value for i in self.at.info] + [w.value for w in self.at.warning]
         parts += [e.value for e in self.at.error] + [s.value for s in self.at.success]
+        parts += [c.value for c in self.at.caption]
         return "\n".join(parts)
 
 
@@ -245,6 +246,113 @@ def test_the_store_list_still_renders_when_hundreds_of_stores_have_no_store_code
         assert "Store List (6 stores)" in driver.text()               # the page got past the filters
         options = driver.at.multiselect(key="store_select").options
         assert len(options) == 6 and not any("STAGING STORE" in o for o in options)
+
+
+# ---------------------------------------------------------------------------
+# Paging: only one page of stores builds PDFs; the bulk ZIP still covers everyone
+# ---------------------------------------------------------------------------
+
+PER_PAGE = 25
+
+
+def visible_individual_codes(driver):
+    marker = "-dl_pdf_"
+    return sorted(e.proto.id.split(marker)[1] for e in driver.at.get("download_button") if marker in e.proto.id)
+
+
+@pytest.fixture
+def big_app(tmp_path):
+    from po_buffer_fakes import build_inventory_fixture
+
+    with launch(FakePoBufferBigQuery(inventory=build_inventory_fixture(extra_stores=54)),
+                tmp_path / "spool.jsonl") as driver:
+        yield driver                                           # 60 stores in total
+
+
+def test_a_short_list_has_no_pager(app):
+    assert len(app.at.number_input) == 0
+    assert len(visible_individual_codes(app)) == 6
+
+
+def test_a_long_list_builds_and_shows_only_one_page_of_pdfs(big_app):
+    assert "Store List (60 stores)" in big_app.text()
+    assert len(visible_individual_codes(big_app)) == PER_PAGE
+    assert "Menampilkan toko 1-25 dari 60" in big_app.text()
+    assert big_app.at.number_input(key="store_page").value == 1
+
+
+def test_the_pager_walks_through_every_store_exactly_once(big_app):
+    seen = []
+    for page in (1, 2, 3):
+        big_app.at.number_input(key="store_page").set_value(page)
+        big_app.run()
+        codes = visible_individual_codes(big_app)
+        assert len(codes) == (PER_PAGE if page < 3 else 10)
+        seen += codes
+    assert len(seen) == 60 and len(set(seen)) == 60
+
+
+def test_the_bulk_zip_covers_all_stores_not_just_the_visible_page(big_app):
+    big_app.select_region("JAWA BARAT")                        # 59 stores, 25 shown
+    assert len(visible_individual_codes(big_app)) == PER_PAGE
+    assert "59 toko" in big_app.text() and "59 file PDF" in big_app.text()
+    big_app.click_button("bulk_zip_btn")
+    assert big_app.bulk_result.file_count == 59 and len(big_app.zip_entries()) == 59
+
+
+def test_changing_the_filter_sends_the_pager_back_to_page_one(big_app):
+    big_app.at.number_input(key="store_page").set_value(3)
+    big_app.run()
+    assert big_app.at.number_input(key="store_page").value == 3
+    big_app.select_region("SUMATERA")                          # 1 store -> no pager at all
+    assert len(big_app.at.number_input) == 0
+    assert visible_individual_codes(big_app) == ["ST006"]
+    big_app.select_region("All")
+    assert big_app.at.number_input(key="store_page").value == 1
+
+
+def test_a_store_on_page_two_downloads_and_is_tracked(big_app):
+    big_app.at.number_input(key="store_page").set_value(2)
+    big_app.run()
+    code = visible_individual_codes(big_app)[0]
+    big_app.click_download(f"dl_pdf_{code}")
+    assert big_app.tracked() == {code: 1}
+
+
+def test_the_pdf_of_a_store_is_built_once_per_data_version():
+    """generate_store_pdf is cached: reruns and the bulk ZIP do not rebuild identical PDFs."""
+    import logging
+
+    logging.disable(logging.CRITICAL)
+    try:
+        import po_buffer
+    finally:
+        logging.disable(logging.NOTSET)
+    from po_buffer_fakes import build_inventory_fixture
+
+    calls = []
+    real = po_buffer.generate_po_pdf
+
+    def counting(info, detail, brand_name=po_buffer.Config.BRAND_NAME):
+        calls.append(info["store_code"])
+        return real(info, detail, brand_name)
+
+    inventory = build_inventory_fixture()
+    info = lambda code: D.build_store_info({"store_code": code, "store_name": code, "region": "R", "distributor": "D"})
+    detail = lambda code: inventory[inventory["store_code"] == code]
+    po_buffer.generate_po_pdf = counting
+    try:
+        po_buffer.generate_store_pdf.clear()
+        first = po_buffer.generate_store_pdf(info("ST001"), detail("ST001"))
+        again = po_buffer.generate_store_pdf(info("ST001"), detail("ST001"))
+        other = po_buffer.generate_store_pdf(info("ST002"), detail("ST002"))
+        assert calls == ["ST001", "ST002"] and first == again and first != other
+        changed = detail("ST001").assign(buffer_plan=99.0)       # new data -> a new PDF
+        po_buffer.generate_store_pdf(info("ST001"), changed)
+        assert calls == ["ST001", "ST002", "ST001"]
+    finally:
+        po_buffer.generate_po_pdf = real
+        po_buffer.generate_store_pdf.clear()
 
 
 def test_filter_with_one_store_gives_a_zip_with_one_pdf(app):

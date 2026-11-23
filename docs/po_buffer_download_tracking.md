@@ -35,6 +35,19 @@ dan tabel toko yang dilewati. Alasan yang mungkin:
 
 Toko yang dilewati tidak dicatat sebagai download.
 
+## Daftar toko per halaman dan cache PDF
+
+Setiap toko yang tampil membuat PDF-nya sendiri di setiap render (~0,2 detik per toko). Dengan 758 toko
+(filter "All") itu memakan lebih dari 2 menit, jadi daftar toko ditampilkan **25 toko per halaman**
+(`Config.STORES_PER_PAGE`) dengan pemilih halaman; halaman kembali ke 1 saat filter berubah. Tombol
+**Download PDF** per toko tetap satu klik. **Bulk Download (ZIP) selalu mencakup semua toko hasil filter**,
+bukan hanya halaman yang tampil.
+
+`generate_store_pdf` di-cache per (info toko, baris data toko) selama `CACHE_TTL_SECONDS` (10 menit), sehingga
+berpindah halaman, rerun, dan pembuatan ZIP tidak membuat ulang PDF yang sama. Konsekuensinya: cap waktu
+"System Generated" di dalam PDF bisa tertinggal sampai 10 menit. Uji pada data asli (758 toko): halaman terbuka
+dalam ±7 detik di luar query BigQuery; ZIP semua toko ±100 detik sekali jalan.
+
 ## Penyimpanan tracking
 
 Tabel BigQuery `skintific-data-warehouse.gt_schema.po_buffer_download_log` — satu baris **per toko per klik**.

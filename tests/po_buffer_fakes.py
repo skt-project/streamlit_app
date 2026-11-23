@@ -93,8 +93,11 @@ class FakeTrackingBigQuery:
 # Whole-app fake: inventory + master + store summary + tracking
 # ---------------------------------------------------------------------------
 
-def build_inventory_fixture():
-    """Six stores in two regions. Two share a name; one has an illegal character."""
+def build_inventory_fixture(extra_stores=0):
+    """Six stores in two regions. Two share a name; one has an illegal character.
+
+    ``extra_stores`` appends that many more JAWA BARAT / DIST A stores (STX01, STX02, ...)
+    so tests can exercise paging."""
     stores = [
         # code,   name,                 region,       distributor
         ("ST001", "Toko Maju",          "JAWA BARAT", "DIST A"),
@@ -104,6 +107,8 @@ def build_inventory_fixture():
         ("ST005", "Toko Lima",          "JAWA BARAT", "DIST B"),
         ("ST006", "Toko Sumatera",      "SUMATERA",   "DIST C"),
     ]
+    stores += [(f"STX{n:02d}", f"Toko Extra {n:02d}", "JAWA BARAT", "DIST A")
+               for n in range(1, extra_stores + 1)]
     rows = []
     for code, name, region, distributor in stores:
         for n in range(1, 4):
