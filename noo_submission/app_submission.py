@@ -32,7 +32,7 @@ from shared import (
     hasil_ke_excel, catat_riwayat, waktu_sekarang,
     set_keterangan_noo, tampilkan_keterangan_noo,
     bangun_customer_code, cari_nama_produk, _kunci_produk, _sku_str, _sku_kunci,
-    input_spv_sales, judul_opsi,
+    input_spv_sales, peta_spv_sales, judul_opsi,
     ke_wib_naive,
     SHEET_PRODUCT,
 )
@@ -525,6 +525,54 @@ def _sku_peringatan(teks: str):
 def _sku_tutup_hasil():
     st.session_state.sku_last_batch = None
 
+def tampilkan_helper_apply_all(prefix: str, lebar: list, posisi: dict, peta_row: list):
+    """Baris helper 'Apply to all' di atas header kolom tabel input per-outlet.
+    prefix: 'bulk' (manual) / 'noo' (upload). posisi: {jenis: indeks kolom}.
+    peta_row: [{SPV: [sales]}] per baris (urutan sama dengan baris tabel)."""
+    ss = st.session_state
+    n  = len(peta_row)
+    semua_spv   = sorted({s for p in peta_row for s in p})
+    semua_sales = sorted({x for p in peta_row for lst in p.values() for x in lst})
+
+    def _spv_baris(i):
+        p = peta_row[i]
+        return next(iter(p)) if len(p) == 1 else ss.get(f"{prefix}_{i}_spv", "")
+
+    def _kunci_spv(i, v):
+        p = peta_row[i]
+        return f"{prefix}_{i}_spv" if (len(p) > 1 and v in p) else None
+
+    def _kunci_sales(i, v):
+        s   = _spv_baris(i)
+        lst = peta_row[i].get(s, [])
+        return f"{prefix}_{i}_sales_{s}" if (s and len(lst) > 1 and v in lst) else None
+
+    def _terapkan(hk, fn):
+        v = ss.get(hk)
+        if v:
+            for i in range(n):
+                k = fn(i, v)
+                if k:
+                    ss[k] = v
+        ss[hk] = None
+
+    spesifikasi = {
+        "prefix": (["NXP","G2G"],                lambda i, v: f"{prefix}_prefix_{i}"),
+        "city":   (list(CITY),                   lambda i, v: f"{prefix}_city_{i}"),
+        "spv":    (semua_spv,                    _kunci_spv),
+        "sales":  (semua_sales,                  _kunci_sales),
+        "tipe":   (list(JENIS_TOKO_DEFAULT),     lambda i, v: f"{prefix}_tipe_{i}"),
+    }
+    st.markdown('<div style="font-size:11px;font-weight:700;color:#ef4f58;margin-bottom:2px">*helper (Apply to all..)</div>',
+                unsafe_allow_html=True)
+    kolom = st.columns(lebar)
+    for jenis, idx_kol in posisi.items():
+        opsi, fn = spesifikasi[jenis]
+        hk = f"{prefix}_all_{jenis}"
+        kolom[idx_kol].selectbox("​", opsi, index=None, placeholder="Apply to all…",
+                                 label_visibility="collapsed", key=hk,
+                                 on_change=_terapkan, args=(hk, fn))
+
 def _sku_tambah_baris(map_raw: dict, map_produk: dict):
     ss = st.session_state
     ss.sku_last_batch = None
@@ -562,11 +610,14 @@ def _sku_tambah_baris(map_raw: dict, map_produk: dict):
         **{k:"" for k in KOLOM_SKU_OPSIONAL},
     })
     ss.sku_editor_key += 1
-    ss.sku_in_kode = ""
+    ss.sku_in_kode = produk if ss.get("sku_same_kode") else ""
     ss.sku_msg     = None
 
+@st.fragment   # interaksi di form ini hanya me-render ulang fragment ini, bukan seluruh halaman (halaman tidak memudar/lambat)
 def render_manual_sku():
     ss = st.session_state
+    if ss.get("pesan_toast"):      # toast dari callback (mis. duplikat) baru tampil lewat render penuh
+        st.rerun()
     ss.setdefault("sku_staged",[])
     ss.setdefault("sku_editor_key",0)
     ss.setdefault("sku_last_batch",None)
@@ -606,8 +657,13 @@ def render_manual_sku():
         c3.text_input("Customer Code", value=preview_cc, disabled=True)
 
         c4,c5,c6,c7 = st.columns([2.0,1.4,2.2,0.9])
-        produk = c4.selectbox("Product",[""] + sorted(map_produk), key="sku_in_produk")
-        c5.text_input("Customer Product Code", key="sku_in_kode", placeholder="Product code...")
+        def _sku_sinkron_kode():
+            if st.session_state.get("sku_same_kode"):
+                st.session_state["sku_in_kode"] = _sku_str(st.session_state.get("sku_in_produk",""))
+        produk = c4.selectbox("Product",[""] + sorted(map_produk), key="sku_in_produk", on_change=_sku_sinkron_kode)
+        c5.text_input("Customer Product Code", key="sku_in_kode", placeholder="Product code...",
+                      disabled=bool(ss.get("sku_same_kode")))
+        c5.checkbox("Same as Product", key="sku_same_kode", on_change=_sku_sinkron_kode)
         c6.text_input("Customer Product Name", value=cari_nama_produk(produk,map_produk), disabled=True)
         with c7:
             st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
@@ -738,6 +794,12 @@ def _distri_dari_noo(df) -> str:
             return str(v).strip()
     return ""
 
+# Submit NOO TIDAK lagi menulis ke Google Sheet. Sheet hanya diisi lewat "Save changes" di Store Validation
+# (app_main.simpan_perubahan), supaya yang masuk sheet hanya data yang sudah tersimpan di Supabase.
+def _tampilkan_err_sheet():
+    if st.session_state.get("noo_sheet_err"):
+        st.error(st.session_state.noo_sheet_err)
+
 def _set_produk_dari_deskripsi(produk_key: str, desc_key: str, desc_map: dict):
     deskripsi = st.session_state.get(desc_key, "")
     if deskripsi and deskripsi in desc_map:
@@ -779,18 +841,23 @@ def render_bulk_sku():
         return
     opsi_produk = sorted(map_produk)
 
-    with st.expander(":material/content_paste: Paste All SKU", expanded=bool(ss.sku_bulk_rows)):
+    # expander dibuka sejak user mulai mengisi (bukan hanya setelah Apply Paste) dan tetap terbuka:
+    # nilai `expanded` yang berubah antar-rerun membuat Streamlit mereset (menutup) expander.
+    if ss.sku_bulk_rows or ss.get("sku_bulk_produk") or ss.get("sku_bulk_kode") or ss.get("sku_bulk_distri"):
+        ss["sku_bulk_buka"] = True
+    with st.expander(":material/content_paste: Paste All SKU", expanded=bool(ss.get("sku_bulk_buka"))):
         st.caption("Step 1 — Select distributor, paste Product and Customer Product Code (one per line)")
         distri = st.selectbox("Distributor", [""] + sorted(map_raw), key="sku_bulk_distri")
         c_p, c_k = st.columns(2)
         t_produk = c_p.text_area("Product", height=120, key="sku_bulk_produk",
                                  placeholder="G2G-XXX\nNXP-YYY\n...")
         t_kode   = c_k.text_area("Customer Product Code", height=120, key="sku_bulk_kode",
-                                 placeholder="SKU001\nSKU002\n...")
+                                 placeholder="SKU001\nSKU002\n...", disabled=bool(ss.get("sku_bulk_same")))
+        sama_bulk = c_k.checkbox("Same as Product", key="sku_bulk_same")
 
         if st.button("Apply Paste", key="sku_bulk_apply"):
             l_produk = [x.strip() for x in t_produk.splitlines() if x.strip()]
-            l_kode   = [x.strip() for x in t_kode.splitlines() if x.strip()]
+            l_kode   = list(l_produk) if sama_bulk else [x.strip() for x in t_kode.splitlines() if x.strip()]
             if not l_produk:
                 st.warning("Product is required.")
             elif len(l_produk) != len(l_kode):
@@ -799,8 +866,8 @@ def render_bulk_sku():
                 rows = []
                 for p, kd in zip(l_produk, l_kode):
                     hasil_p, status = _bulk_sku_cocokkan(p, map_produk)
-                    rows.append({"Pasted": p, "Match": status,
-                                 "Product": hasil_p, "Customer Product Code": kd})
+                    rows.append({"Pasted": p, "Match": status, "Product": hasil_p,
+                                 "Customer Product Code": (_sku_str(hasil_p) or kd) if sama_bulk else kd})
                 ss.sku_bulk_rows = rows
                 ss.sku_bulk_ver += 1
                 st.rerun()
@@ -1002,7 +1069,6 @@ def halaman_pengajuan_noo():
             except Exception as e:
                 st.warning(f"Failed to load Product Description list: {e}")
                 map_deskripsi_upload = {}
-            st.caption(f"DEBUG: {len(map_deskripsi_upload)} descriptions loaded")
             ss.setdefault("sku_upload_editor_key", 0)
             tanda_upload = tuple(zip(
                 data_sku["Product"].tolist(), data_sku["Customer Product Name"].tolist()
@@ -1234,11 +1300,18 @@ def halaman_pengajuan_noo():
                 spv_sales_lookup = muat_spv_sales_lookup()
                 tabel_manual = st.container(key="tabel_manual_scroll")
                 tabel_manual.__enter__()
+
+                _peta_row = [peta_spv_sales(
+                                (distri_map.get(str(b["Customer Store Code"]).strip().upper()[:6]) or {}).get("distributor", ""),
+                                spv_sales_lookup) for b in ss.bulk_data]
+                tampilkan_helper_apply_all("bulk", LEBAR_MANUAL,
+                                           {"prefix":3, "city":6, "spv":8, "sales":9, "tipe":10}, _peta_row)
+
                 h = st.columns(LEBAR_MANUAL)
                 for col, (teks, wajib) in zip(h,[
                     ("Store Code",False),("Store Name",False),("Distributor",False),
                     ("NXP/G2G",True),("Customer Code",False),("Branch Code",False),
-                    ("City",False),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True)]):
+                    ("City",True),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True)]):
                     tanda = ' <b style="color:#ef4f58">*</b>' if wajib else ""
                     col.markdown(f"<b>{teks}</b>{tanda}", unsafe_allow_html=True)
 
@@ -1277,7 +1350,7 @@ def halaman_pengajuan_noo():
                         "SE/KAE":sales,
                         "Store Type":tipe,
                     })
-                    if not (info and prefix_pilih and alamat.strip() and spv.strip() and sales.strip() and tipe):
+                    if not (info and prefix_pilih and kota_pilih and alamat.strip() and spv.strip() and sales.strip() and tipe):
                         bulk_semua_terisi = False
                 tabel_manual.__exit__(None, None, None)
 
@@ -1320,7 +1393,7 @@ def halaman_pengajuan_noo():
                                 else:
                                     ss.noo_batch_terkirim = tanda_batch
                                     ambil_raw_noo.clear()
-                                    sisa = set(data_dilewati["Customer Store Code"].astype(str).str.strip())
+                                    sisa =set(data_dilewati["Customer Store Code"].astype(str).str.strip())
                                     ss.bulk_data = [b for b in ss.bulk_data
                                                     if str(b["Customer Store Code"]).strip() in sisa] or None
                                     catat_riwayat("Submit Manual NOO",
@@ -1333,7 +1406,7 @@ def halaman_pengajuan_noo():
                                         set_keterangan_noo("warning",
                                                            f"Sent {len(data_bersih)} rows. Skipped: {kode_skip}")
                                     st.rerun()
-            tampilkan_keterangan_noo()
+            tampilkan_keterangan_noo(); _tampilkan_err_sheet()
 
         st.markdown('<hr class="pemisah-opsi">', unsafe_allow_html=True)
 
@@ -1352,10 +1425,20 @@ def halaman_pengajuan_noo():
                 LEBAR_NOO = [1.7,1.6,1.6,1.0,1.5,1.5,2.0,2.0,1.3,0.8]
                 tabel_noo = st.container(key="tabel_noo_scroll")
                 tabel_noo.__enter__()
+                _distri_kode_helper = muat_distri_code_map()
+                _lookup_helper      = muat_spv_sales_lookup()
+                _peta_noo = []
+                for _, _b in data_noo_in.reset_index(drop=True).iterrows():
+                    _csn = str(_b.get("Group Name","") or _b.get("Customer Store Name","")).strip().upper()
+                    _inf = _distri_kode_helper.get(str(_b.get("Customer Store Code","")).strip()[:6].upper())
+                    if _inf:
+                        _csn = _inf["distributor"].strip().upper()
+                    _peta_noo.append(peta_spv_sales(_csn, _lookup_helper))
+                tampilkan_helper_apply_all("noo", LEBAR_NOO, {"city":4, "spv":6, "sales":7, "tipe":8}, _peta_noo)
                 header = st.columns(LEBAR_NOO)
                 for kolom, (teks, wajib) in zip(header,[
                     ("Customer Store Code",True),("Store Name",False),("Customer Store Name",True),
-                    ("Brand",False),("City",False),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True),
+                    ("Brand",False),("City",True),("Store Address",True),("SPV",True),("Sales Name",True),("Store Type",True),
                     ("Channel",True)]):
                     tanda = ' <b style="color:#ef4f58">*</b>' if wajib else ""
                     kolom.markdown(
@@ -1421,7 +1504,7 @@ def halaman_pengajuan_noo():
                     data_noo.loc[i,"SPV"]        = spv_noo
                     data_noo.loc[i,"Store Type"] = tipe_noo
                     data_noo.loc[i,"Channel"] = channel_noo
-                    if not (kode_val.strip() and csn_noo and alamat_noo.strip() and tipe_noo and spv_noo.strip() and sales_noo.strip()):
+                    if not (kode_val.strip() and csn_noo and city_noo and alamat_noo.strip() and tipe_noo and spv_noo.strip() and sales_noo.strip()):
                         semua_terisi = False
                 tabel_noo.__exit__(None, None, None)
                 # status tombol Submit NOO ada di luar fragment: kalau berubah, segarkan seluruh halaman sekali
@@ -1470,7 +1553,7 @@ def halaman_pengajuan_noo():
                             kode_skip = ", ".join(sorted(data_dilewati["Customer Store Code"].astype(str)))
                             set_keterangan_noo("warning",f"Sent {len(data_bersih)} rows. Skipped: {kode_skip}")
                         st.rerun()
-    tampilkan_keterangan_noo()
+    tampilkan_keterangan_noo(); _tampilkan_err_sheet()
 
 # ═════════════════════════════════════════════════════════════════════════════
 # HALAMAN: SPV CONFIRMATION
@@ -1505,17 +1588,45 @@ def _css_status_spv(baris_tampil, tampil_error: bool) -> str:
         else:
             aturan.append(f"{sel}{{border:1.5px dashed #cbd5e1;background:#ffffff}}")
         if tampil_error and m["store_id"]:
-            aturan.append(f'.st-key-spv_sid_{k} [data-baseweb="input"]'
+            aturan.append(f'.st-key-spv_sid_{k} [data-baseweb="input"], .st-key-spv_sidtxt_{k} [data-baseweb="input"], '
+                          f'.st-key-spv_sid_{k} [data-baseweb="select"] > div'
                           f'{{border:1.5px solid #ef4f58;background:#fef2f2}}')
     return "<style>" + "".join(aturan) + "</style>"
 
+PEMISAH_LABEL_SID = " - "   # label dropdown Store ID = "<Store ID> - <Store Name>"
+
+def _id_dari_label(label) -> str:
+    """Ambil Store ID saja dari label dropdown ("IESM07799 - TOKO ABC" -> "IESM07799").
+    Yang disimpan ke Supabase hanya Store ID; nama toko di dropdown cuma bantuan untuk user."""
+    return str(label or "").split(PEMISAH_LABEL_SID, 1)[0].strip()
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _opsi_store_id(distributor: str, region: tuple) -> tuple:
+    """Daftar label "Store ID - Store Name" dari master BigQuery untuk dropdown Store ID (Existing).
+    Dibatasi KETAT ke region distributor baris itu: region master harus sama persis (setelah dinormalisasi),
+    jadi "Sulawesi 2" tidak ikut membawa toko "Sulawesi 1". (Beda dengan _batasi_region untuk Similarity yang longgar.)
+    Region tidak ada -> hanya toko milik distributor itu."""
+    master = _master_ternormalisasi()
+    region_n = {r for r in (normalisasi_wilayah(x) for x in region) if r}
+    if region_n:
+        sub = master[master["_region"].isin(region_n)]
+    else:
+        kunci_d = re.sub(r"[^A-Z0-9]", "", str(distributor or "").upper())
+        sub = master[master["_dist"].map(lambda d: bool(kunci_d) and kunci_d in d)]
+    label = {f'{cid.strip()}{PEMISAH_LABEL_SID}{nama.strip()}'
+             for cid, nama in zip(sub["Cust ID"], sub["Store Name"]) if cid.strip()}
+    return tuple(sorted(label))
+
 def _isi_store_id_otomatis(pasangan):
-    """Callback tombol bulk: salin kode dari kolom Similarity (Code) ke Store ID (Validation).
-    Hanya baris yang dipilih Existing dan Store ID-nya masih kosong (ketikan user tidak ditimpa)."""
+    """Callback tombol bulk: pilih Store ID dari kolom Similarity (Code) di dropdown Store ID (Validation).
+    Hanya baris yang dipilih Existing dan Store ID-nya masih kosong (pilihan user tidak ditimpa)."""
     ss = st.session_state
     for k, kode in pasangan:
         if ss.get(f"spv_jenis_{k}") == "Existing" and not str(ss.get(f"spv_sid_{k}", "") or "").strip():
-            ss[f"spv_sid_{k}"] = kode
+            for label in ss.get(f"spv_opsi_{k}", ()):
+                if _id_dari_label(label).upper() == str(kode).strip().upper():
+                    ss[f"spv_sid_{k}"] = label
+                    break
 
 def _tagging_dari_jenis(jenis: str) -> str:
     """Pemetaan hasil SPV Confirmation -> kolom 'tagging' di Supabase.
@@ -1552,6 +1663,7 @@ def simpan_konfirmasi_spv(baris: list) -> tuple[int, list]:
             gagal.append(f"{kode} / {nama}")
     return berhasil, gagal
 
+@st.fragment   # ubah NOO/Existing, Store ID, Remarks hanya me-render ulang fragment ini, bukan seluruh halaman/app
 def halaman_konfirmasi_spv():
     ss = st.session_state
     ss.setdefault("spv_tampil_error", False)
@@ -1621,7 +1733,9 @@ def halaman_konfirmasi_spv():
           siap_isi = [(_kid(b), str(b.get("similarity_kode", "")).strip()) for b in baris_tampil
                       if ss.get(f"spv_jenis_{_kid(b)}") == "Existing"
                       and str(b.get("similarity_kode", "")).strip()
-                      and not str(ss.get(f"spv_sid_{_kid(b)}", "") or "").strip()]
+                      and not str(ss.get(f"spv_sid_{_kid(b)}", "") or "").strip()
+                      and any(_id_dari_label(o).upper() == str(b["similarity_kode"]).strip().upper()
+                              for o in ss.get(f"spv_opsi_{_kid(b)}", ()))]
           if siap_isi:
               st.button(f":material/auto_fix_high: Auto-fill Store ID from Similarity ({len(siap_isi)})",
                         key="spv_isi_otomatis", on_click=_isi_store_id_otomatis, args=(siap_isi,))
@@ -1639,7 +1753,6 @@ def halaman_konfirmasi_spv():
                 k = _kid(b)
                 kunci_jenis, kunci_sid, kunci_ket = f"spv_jenis_{k}",f"spv_sid_{k}",f"spv_ket_{k}"
                 ss.setdefault(kunci_jenis, b["jenis_outlet"])
-                ss.setdefault(kunci_sid, b["store_id_validasi"])
                 ss.setdefault(kunci_ket, b["keterangan"])
                 with st.container(key=f"baris_spv_{k}"):
                     c_no,c_kode,c_distri,c_region_asli,c_brand,c_nama,c_alamat,c_kota,c_sim_nama,c_sim_distri,c_sim_kode,c_sim_alamat,c_sim_kota,c_sim_region,c_jenis,c_sid,c_ket = \
@@ -1662,8 +1775,25 @@ def halaman_konfirmasi_spv():
                         sel.markdown(komponen.html_sel_teks(b.get(kunci_sim,""),"sel-baca sel-sim"), unsafe_allow_html=True)
                     jenis    = c_jenis.selectbox(LABEL_KOSONG, OPSI_JENIS_SPV, index=None,
                                                  placeholder="Pilih", label_visibility="collapsed", key=kunci_jenis)
-                    store_id = c_sid.text_input(LABEL_KOSONG, label_visibility="collapsed",
-                                                key=kunci_sid, placeholder="Isi jika Existing")
+                    # Store ID (Validation): kalau Existing -> dropdown "Store ID - Store Name" dari master (per region
+                    # distributor baris ini). Yang dipakai/disimpan hanya Store ID-nya (lewat _id_dari_label).
+                    if jenis == "Existing":
+                        try:
+                            opsi_sid = _opsi_store_id(b["distributor"], tuple(b.get("region_noo") or ()))
+                        except Exception:
+                            opsi_sid = ()
+                        ss[f"spv_opsi_{k}"] = opsi_sid
+                        if opsi_sid:
+                            store_id = _id_dari_label(c_sid.selectbox(
+                                LABEL_KOSONG, opsi_sid, index=None, placeholder="Pilih Store ID",
+                                label_visibility="collapsed", key=kunci_sid))
+                        else:      # master tidak terbaca / kosong -> tetap bisa ketik manual seperti sebelumnya
+                            store_id = c_sid.text_input(LABEL_KOSONG, label_visibility="collapsed",
+                                                        key=f"spv_sidtxt_{k}", placeholder="Isi Store ID").strip()
+                    else:
+                        c_sid.text_input(LABEL_KOSONG, label_visibility="collapsed", key=f"spv_sidoff_{k}",
+                                         placeholder="Isi jika Existing", disabled=True)
+                        store_id = ""
                     ket      = c_ket.text_input(LABEL_KOSONG, label_visibility="collapsed",
                                                 key=kunci_ket, placeholder="Add remark...")
                     b["jenis_outlet"] = jenis
@@ -1706,16 +1836,20 @@ def halaman_konfirmasi_spv():
         ss.pesan_toast = "SPV Confirmation draft saved"
         st.rerun()
     if c_submit.button(":material/send: Submit Confirmation", type="primary", key="spv_submit", disabled=not baris_tampil, width="stretch"):
-        if n_bermasalah:
+        # Submit SEBAGIAN: hanya baris yang sudah lengkap (NOO, atau Existing + Store ID) yang dikirim dan hilang dari
+        # daftar (masuk ke Store Validation). Baris yang belum dipilih / Existing tanpa Store ID tetap tinggal.
+        baris_siap = [b for b in baris_tampil if not any(_masalah_baris_spv(b).values())]
+        if not baris_siap:
             ss.spv_tampil_error = True; st.rerun()
+        n_tertinggal = len(baris_tampil) - len(baris_siap)
         with st.spinner("Sending confirmation..."):
-            berhasil, gagal = simpan_konfirmasi_spv(baris_tampil)
+            berhasil, gagal = simpan_konfirmasi_spv(baris_siap)
             if berhasil:
                 ambil_raw_noo.clear()          # paksa reload supaya Store Validation lihat data terbaru
                 ss.sim_tanda = None; ss.sim_hasil = {}
         ss.spv_tampil_error = False
-        n_noo_kirim = sum(b["jenis_outlet"] == "NOO" for b in baris_tampil)
-        n_exi_kirim = sum(b["jenis_outlet"] == "Existing" for b in baris_tampil)
+        n_noo_kirim = sum(b["jenis_outlet"] == "NOO" for b in baris_siap)
+        n_exi_kirim = sum(b["jenis_outlet"] == "Existing" for b in baris_siap)
         catat_riwayat("SPV - Submit Confirmation",
                       f"{berhasil} rows (NOO {n_noo_kirim}, Existing {n_exi_kirim})"
                       + (f", failed: {len(gagal)}" if gagal else ""),
@@ -1724,7 +1858,8 @@ def halaman_konfirmasi_spv():
             ss.pesan_toast      = f"Submitted {berhasil} rows. Failed: {', '.join(gagal)}"
             ss.pesan_toast_icon = ":material/warning:"
         else:
-            ss.pesan_toast = f"SPV Confirmation submitted — {berhasil} rows"
+            ss.pesan_toast = (f"SPV Confirmation submitted — {berhasil} rows"
+                              + (f" | {n_tertinggal} row(s) not filled yet, still in the list" if n_tertinggal else ""))
         st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1895,12 +2030,8 @@ def _history_noo():
     if tampil.empty:
         st.info("No records match the filters."); return
     # label status ramah-pengguna + conditional formatting
-    label_status = {"Need Review": "In Progress", "Existing": "Done", "Generate ID": "Success"}
-    warna_status = {
-        "In Progress": "background-color: #fff3cd; color: #8a5a00; font-weight: 600",   # kuning
-        "Done":        "background-color: #d3f9d8; color: #1b5e20; font-weight: 600",   # hijau
-        "Success":     "background-color: #dbeafe; color: #1e40af; font-weight: 600",   # biru
-    }
+    label_status = _shared.LABEL_HISTORY      # pemetaan status -> label ada di shared.py (LABEL_HISTORY)
+    warna_status = _shared.WARNA_HISTORY
     tabel = tampil.drop(columns=["Month"]).copy()
     tabel["Status"] = tabel["Status"].map(lambda s: label_status.get(s.strip(), s))
     st.dataframe(tabel.style.map(lambda v: warna_status.get(v, ""), subset=["Status"]),
@@ -1932,7 +2063,7 @@ def main():
     except FileNotFoundError:
         st.error(f"CSS tidak ketemu di: {CSS_PATH}")
     if ss.get("pesan_toast"):
-        st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon",":material/check_circle:"))
+        _shared.tampilkan_toast_warna(ss.pop("pesan_toast"), ss.pop("pesan_toast_icon", ":material/check_circle:"))
 
     with st.sidebar:
         st.markdown('<div class="brand"><span class="mi">inventory_2</span> NOO & SKU Submission</div>'

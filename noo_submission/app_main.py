@@ -1,4 +1,6 @@
+import contextlib
 import datetime
+import time
 import json
 import math
 import re
@@ -48,24 +50,29 @@ def nama_pengguna() -> str:
 # GENERATOR ID
 def resequence_prefix(df: pd.DataFrame, prefix: str) -> list:
     """Susun ulang nomor Store ID utk 1 prefix biar rapat tanpa gap.
-    Urutan berdasar Generated At (yang paling lama dapat nomor terkecil).
+    Urutan berdasar posisi baris di tabel (baris paling atas dapat nomor terkecil).
+    Hanya ID yang BELUM di-save (ss.baris_perlu_push) yang dirapikan; ID yang sudah tersimpan di Supabase tidak digeser.
     Return list index yang ID-nya berubah (perlu ditandai dirty)."""
-    if not prefix:
+    if not prefix or _shared.PAKAI_COUNTER_PUSAT:
+        # Dengan counter pusat nomor TIDAK boleh digeser/dirapatkan: nomor di antaranya bisa sudah diambil Apps Script.
         return []
     floor = max(
         max_angka_per_prefix().get(prefix, 0),
         sb_max_angka_store_id().get(prefix, 0),
+        _shared.max_angka_data_merge().get(prefix, 0),     # ID yang sudah dipakai di sheet (data merge)
     )
     mask = (
         df["Validasi"].eq(STATUS_VALID) &
+        df.index.isin(list(st.session_state.get("baris_perlu_push", ()))) &      # hanya yang belum di-save
         df["Store ID"].fillna("").astype(str).str.strip().str.startswith(prefix) &
         ~df["Store ID"].fillna("").astype(str).str.strip().isin(["", "-"])
     )
     aktif = df[mask].copy()
     if aktif.empty:
         return []
-    aktif["_urut"] = pd.to_datetime(aktif["Generated At"], errors="coerce")
-    aktif = aktif.sort_values("_urut", kind="stable")
+    # Urutan nomor = urutan BARIS di tabel (bukan waktu generate), supaya bolak-balik Generate ID <-> Need Review
+    # selalu kembali ke nomor yang sama: baris yang lebih atas selalu dapat nomor lebih kecil.
+    aktif = aktif.sort_index(kind="stable")
 
     berubah = []
     for n, idx in enumerate(aktif.index, start=1):
@@ -76,25 +83,123 @@ def resequence_prefix(df: pd.DataFrame, prefix: str) -> list:
     return berubah
 
 def generate_store_ids(df: pd.DataFrame, semua: pd.DataFrame = None, kolom_target: str = "Store ID") -> pd.Series:
-    prefix_per_distri = muat_prefix_per_distributor()
-    counter = dict(max_angka_per_prefix())
-    for p, a in sb_max_angka_store_id().items():
+    # TIMER loading (sementara): waktu tiap langkah dicatat -> ditampilkan di tab NOO (ss.waktu_generate)
+    wkt, t_awal = {}, time.perf_counter()
+    @contextlib.contextmanager
+    def ukur(nama):
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            wkt[nama] = wkt.get(nama, 0) + time.perf_counter() - t0
+    with ukur("Distributor mapping (Sheets)"):
+        prefix_per_distri = muat_prefix_per_distributor()
+    with ukur("BigQuery max/prefix"):
+        counter = dict(max_angka_per_prefix())
+    with ukur("Supabase max/prefix"):
+        for p, a in sb_max_angka_store_id().items():
+            counter[p] = max(counter.get(p, 0), a)
+    # DATA MERGE: ID yang sudah dipakai di sheet (DATA GENERATOR, id dms) tapi mungkin belum masuk BigQuery.
+    # Max efektif per prefix = MAX(BigQuery, Supabase, data merge) -- selalu dipakai, bukan hanya saat bentrok.
+    _shared.muat_id_data_merge.clear()      # baca ulang sheet tanpa cache: ID terbaru dari Apps Script harus terlihat
+    _shared.muat_max_pivot.clear()
+    with ukur("Sheet id dms + NEW Generator"):
+        id_merge, err_merge = _shared.muat_id_data_merge()
+    if err_merge:
+        st.session_state.id_merge_err = err_merge
+    with ukur("Sheet pivot DATA GENERATOR"):
+        pivot_max = _shared.muat_max_pivot()
+    for p, a in _shared.max_angka_data_merge().items():
         counter[p] = max(counter.get(p, 0), a)
+    # Basis check (jaring pengaman): semua ID yang sudah pernah ada. ID hasil generate yang ternyata ada di sini dilompati.
+    with ukur("BigQuery get_id (basis)"):
+        basis = set(id_merge) | {str(s).strip().upper() for s in _shared.get_id()}
     if semua is not None:
         for sid in semua[kolom_target].fillna("").astype(str).str.strip():
             p, a = sid[:PANJANG_PREFIX], sid[PANJANG_PREFIX:]
             if a.isdigit():
                 counter[p] = max(counter.get(p, 0), int(a))
+            if sid and sid != "-":
+                basis.add(sid.upper())
     hasil = []
+    sisa = {}                       # sisa baris yang butuh ID per prefix (untuk minta jatah ke counter pusat)
+    for _, row in df.iterrows():
+        p_ = prefix_per_distri.get(str(row.get("Distributor","")).strip(), "")
+        if p_:
+            sisa[p_] = sisa.get(p_, 0) + 1
+    antrian, pusat_gagal = {}, set()
+    st.session_state.kunci_err = ""
+
+    def nomor_berikut(prefix):
+        """Nomor dari counter pusat (atomik, dipakai juga Apps Script). Gagal -> hitungan lokal max+1."""
+        while True:
+            if antrian.get(prefix):
+                n = antrian[prefix].pop(0)
+            else:
+                with ukur("Supabase counter pusat (sb_ambil_nomor)"):
+                    rentang = None if prefix in pusat_gagal else _shared.sb_ambil_nomor(prefix, sisa.get(prefix, 1), counter.get(prefix, 0))
+                if rentang is not None:
+                    antrian[prefix] = list(range(rentang[0], rentang[1] + 1))
+                    counter[prefix] = max(counter.get(prefix, 0), rentang[1])
+                    continue
+                pusat_gagal.add(prefix)
+                n = counter.get(prefix, 0) + 1
+                counter[prefix] = n
+            if f"{prefix}{n:0{PANJANG_ANGKA}d}".upper() not in basis:       # sudah ada di basis -> lompat
+                return n
+
     for _, row in df.iterrows():
         distri = str(row.get("Distributor","")).strip()
         prefix = prefix_per_distri.get(distri,"")
         if not prefix:
             hasil.append("-"); continue
-        angka_baru = counter.get(prefix,0) + 1
-        counter[prefix] = angka_baru
-        hasil.append(f"{prefix}{angka_baru:0{PANJANG_ANGKA}d}")
+        angka_baru = nomor_berikut(prefix)
+        sisa[prefix] = max(sisa.get(prefix, 1) - 1, 1)
+        id_baru = f"{prefix}{angka_baru:0{PANJANG_ANGKA}d}"
+        basis.add(id_baru.upper())                  # ID dalam satu batch tidak boleh kembar
+        hasil.append(id_baru)
+    if pusat_gagal:
+        st.session_state.kunci_err = "Central ID counter unavailable, used local count"
+    if pusat_gagal and any(h != "-" for h in hasil):
+        # Counter pusat tidak terjangkau -> pakai kunci sheet (cadangan). Beritahu Apps Script: ada ID yang belum tersimpan -> script menunggu sampai Save changes / Refresh
+        ok_kunci, err_kunci = _shared.kunci_generate_pasang(nama_pengguna())
+        if not ok_kunci:
+            st.session_state.kunci_err += f" | Sheet lock not set: {err_kunci[:100]}"
+    wkt["TOTAL generate_store_ids"] = time.perf_counter() - t_awal
+    st.session_state.waktu_generate = wkt
+    _lama = max((k for k in wkt if not k.startswith("TOTAL")), key=wkt.get, default="-")
+    st.toast(f"⏱ Generate ID {wkt['TOTAL generate_store_ids']:.1f}s — slowest: {_lama} ({wkt.get(_lama, 0):.1f}s)")
     return pd.Series(hasil, index=df.index)
+
+def periksa_ulang_id(df: pd.DataFrame) -> list:
+    """Dipanggil saat Save changes: ID yang BELUM tersimpan dicek lagi ke sheet (tanpa cache) dan Supabase. Kalau sudah
+    dipakai toko lain (mis. Apps Script keburu mengeluarkan nomor yang sama), ID dibuat ulang. Return [(lama, baru), ...]."""
+    ss = st.session_state
+    idx_baru = [i for i in ss.baris_perlu_push if i in df.index and df.loc[i, "Validasi"] == STATUS_VALID
+                and not _id_kosong(df.loc[i, "Store ID"])]
+    if not idx_baru:
+        return []
+    _shared.muat_id_data_merge.clear()
+    _shared.muat_max_pivot.clear()
+    id_sheet =_shared.muat_id_data_merge()[0]
+    id_sb = _shared.sb_id_terpakai() or {}          # gagal baca Supabase: cek sheet saja, jangan menggagalkan Save
+    bentrok = []
+    for i in idx_baru:
+        sid = str(df.loc[i, "Store ID"]).strip().upper()
+        kunci = (str(df.loc[i, "Customer Store Code"]).strip(), str(df.loc[i, "Customer Store Name"]).strip())
+        pemilik = id_sb.get(sid)
+        if sid in id_sheet or (pemilik is not None and pemilik != kunci):
+            bentrok.append(i)
+    if not bentrok:
+        return []
+    lama = {i: str(df.loc[i, "Store ID"]).strip() for i in bentrok}
+    df.loc[bentrok, "Store ID"] = "-"
+    df.loc[bentrok, "Store ID"] = generate_store_ids(df.loc[bentrok], df)
+    df.loc[bentrok, "Generated At"] = datetime.datetime.now(ZONA_WAKTU).replace(tzinfo=None)
+    for prefix in {str(df.loc[i, "Store ID"]).strip()[:PANJANG_PREFIX] for i in bentrok}:
+        ss.baris_kotor.update(resequence_prefix(df, prefix))
+    ss.baris_kotor.update(bentrok); ss.baris_perlu_push.update(bentrok)
+    return [(lama[i], str(df.loc[i, "Store ID"]).strip()) for i in bentrok]
 
 # ═════════════════════════════════════════════════════════════════════════════
 # LOAD DATA DARI SUPABASE → df_toko
@@ -122,6 +227,7 @@ def muat_data_noo_dari_supabase() -> pd.DataFrame:
     kolom_tagging_asli = peta.get("tagging")
     tagging_raw = (df_raw[kolom_tagging_asli].astype(str).str.strip()
                    if kolom_tagging_asli else pd.Series("",index=df_raw.index)).reset_index(drop=True)
+    tagging_raw = tagging_raw.replace(_shared.ALIAS_STATUS)      # nama status lama -> nama sekarang
     valid_tagging = tagging_raw.isin(KOLOM_VALIDASI)
     # tagging kosong/tidak dikenal -> Need Review (Generate ID hanya lewat aksi user, tidak otomatis)
     df["Validasi"] = np.where(valid_tagging, tagging_raw, STATUS_REVIEW)
@@ -169,7 +275,10 @@ def bangun_download_noo(df_view: pd.DataFrame) -> pd.DataFrame:
     for k in KOLOM_NOO_OUTPUT:
         asli = peta.get(norm(k))
         out[k] = raw[asli] if asli else ""
-    out["Store ID"] = raw["_kunci"].map(store_id_app).replace("-","")
+    # Store ID di file download = yang SUDAH TERSIMPAN di Supabase (hasil Save changes), bukan yang baru di layar.
+    kolom_id = peta.get(norm("Store ID"))
+    out["Store ID"] = (raw[kolom_id].map(lambda v: "" if v is None or pd.isna(v) else bersih(v)).replace("-","")
+                       if kolom_id else "")
     return out.fillna("").reset_index(drop=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -217,13 +326,11 @@ def refresh_data_toko():
     ss.halaman_data     = 1
     ss.baris_kotor      = set()
     ss.baris_perlu_push = set()
+    _shared.kunci_generate_lepas()        # ID belum tersimpan dibuang saat Refresh -> lepas kunci Apps Script
     ss.versi_impor     += 1
     ss.tanda_tangan     = None
     ss.snapshot         = None
     ss.terakhir_update  = waktu_sekarang()
-    f_distri = ss.get("f_distri") or ""
-    catat_riwayat("Refresh data","Manual reload from Supabase",
-                  distributor="" if f_distri.startswith("All") else f_distri)
     ss.pesan_toast = "Data successfully refreshed from Supabase"
 
 # Kolom grid yang boleh diedit user dan harus ikut tersimpan ke INPUT_NOO.
@@ -262,65 +369,174 @@ def _distri_pertama(df, idx_list) -> str:
                 return v
     return ""
 
+def _id_kosong(v) -> bool:
+    return str(v).strip() in ("", "-", "nan", "None", "NaT")
+
+def _iso_wib(ts) -> str:
+    wt = pd.Timestamp(ts)
+    if wt.tzinfo is None:
+        wt = wt.tz_localize(ZONA_WAKTU)
+    return wt.isoformat()
+
+def _status_normal(v) -> str:
+    """Nama status dari Supabase -> nama sekarang; kosong / tidak dikenal dianggap Need Review (sama seperti saat load)."""
+    v = _shared.ALIAS_STATUS.get(str(v or "").strip(), str(v or "").strip())
+    return v if v in KOLOM_VALIDASI else STATUS_REVIEW
+
+def _remark_perubahan(status_lama, id_lama, status_baru, id_baru) -> dict:
+    """Jejak perubahan untuk kolom Remark_status / Remark_ID / Remark_at di sheet. Kosong kalau tidak ada yang berubah
+    (kolom Remark di sheet dibiarkan, jadi tetap menyimpan perubahan terakhir)."""
+    sl, sb = _status_normal(status_lama), _status_normal(status_baru)
+    il = "" if _id_kosong(id_lama) else str(id_lama).strip()
+    ib = "" if _id_kosong(id_baru) else str(id_baru).strip()
+    hasil = {}
+    if sl != sb:
+        hasil["Remark_status"] = f"{sl} > {sb}"
+    if il != ib:
+        hasil["Remark_ID"] = f"{il or 'null'} > {ib or 'null'}"
+    if hasil:
+        hasil["Remark_at"] = datetime.datetime.now(ZONA_WAKTU).strftime("%Y-%m-%d %H:%M:%S")
+    return hasil
+
+def _item_sheet(df, idx, kode, nama, remark=None) -> dict:
+    """Data satu baris untuk update/tambah di Google Sheet (kolom Generate ID + generated_at + jejak perubahan)."""
+    r = df.loc[idx]
+    dibuat = r.get("Created At")
+    kolom_sheet = {                       # kolom yang bisa diedit di Store Validation -> ikut disinkronkan ke sheet
+        "Store Name": r.get("Store Name", ""), "City": r.get("City", ""), "Store Address": r.get("Store Address", ""),
+        "Longitude": "" if pd.isna(r.get("Longitude")) else r.get("Longitude"),
+        "Latitude": "" if pd.isna(r.get("Latitude")) else r.get("Latitude"),
+        "Store Type": r.get("Store Type", ""),
+    }
+    kolom_sheet.update(remark or {})
+    # Kalau barisnya belum ada di sheet, ditambahkan LENGKAP dari data Supabase (bukan cuma kolom yang bisa diedit)
+    lengkap = {}
+    try:
+        for b in _shared.ambil_raw_noo():
+            if str(b.get("Customer Store Code") or "").strip() == kode and str(b.get("Customer Store Name") or "").strip() == nama:
+                lengkap = {k: ("" if v is None else v) for k, v in b.items() if k in _shared.NOO_SHEET_KOLOM}
+                lengkap["Submitted At"] = str(b.get("created_at") or "")[:19].replace("T", " ")
+                lengkap["Source"] = "NOO Submission"
+                lengkap.pop("Store ID", None)
+                break
+    except Exception:
+        pass
+    return {
+        "kode": kode, "nama": nama, "store_id": "" if _id_kosong(r["Store ID"]) else str(r["Store ID"]).strip(),
+        "nilai": kolom_sheet,
+        "generated_at": pd.Timestamp(r["Generated At"]).strftime("%Y-%m-%d %H:%M:%S") if pd.notna(r["Generated At"]) else "",
+        # data untuk baris baru di sheet kalau barisnya belum ada (kunci = nama kolom di NOO_SHEET_KOLOM)
+        "data": {
+            **lengkap,
+            "Submitted At": lengkap.get("Submitted At") or (pd.Timestamp(dibuat).strftime("%Y-%m-%d %H:%M:%S") if pd.notna(dibuat) else ""),
+            "Source": lengkap.get("Source", "Store Validation"), "Submitted By": r.get("Distributor", ""),
+            "Store Name": r.get("Store Name", ""), "Customer Code": r.get("Customer Code", ""),
+            "City": r.get("City", ""), "Store Address": r.get("Store Address", ""),
+            "Longitude": "" if pd.isna(r.get("Longitude")) else r.get("Longitude"),
+            "Latitude": "" if pd.isna(r.get("Latitude")) else r.get("Latitude"),
+            "Store Type": r.get("Store Type", ""),
+        }}
+
+def ubah_status_dan_simpan(df, idx_list, status_lama) -> list:
+    """Dipakai tombol DMS Done / DMS & Basis Done: ubah status lalu SIMPAN ke Supabase dulu (hanya kolom tagging, Store ID tidak
+    disentuh). df sudah berisi status baru; kalau simpan gagal, status dikembalikan ke status_lama.
+    Yang berhasil dicatat ke sheet di Remark_status / Remark_at ("Generate ID > DMS Done").
+    Return (list pesan masalah, pesan sheet)."""
+    masalah, item_sheet = [], []
+    for i in idx_list:
+        kode = str(df.loc[i, "Customer Store Code"]).strip()
+        nama = str(df.loc[i, "Customer Store Name"]).strip()
+        if kode and nama and sb_patch_by_kode_nama(TABLE_SUBMIT_NOO, kode, nama, {"tagging": df.loc[i, "Validasi"]}):
+            remark = _remark_perubahan(status_lama.get(i), df.loc[i, "Store ID"], df.loc[i, "Validasi"], df.loc[i, "Store ID"])
+            item_sheet.append(_item_sheet(df, i, kode, nama, remark))
+            continue
+        df.loc[i, "Validasi"] = status_lama.get(i, STATUS_REVIEW)
+        masalah.append(f"{kode or '(empty code)'}: {st.session_state.get('err_tagging', 'save failed')}")
+    ok_sheet, err_sheet = _shared.update_generate_id_di_sheet(item_sheet)
+    return masalah, ("" if ok_sheet else f"Google Sheet not updated: {err_sheet[:100]}")
+
+@contextlib.contextmanager
+def _ukur_ke(kamus, nama):
+    """TIMER loading (sementara): catat durasi blok ke kamus[nama]."""
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        kamus[nama] = kamus.get(nama, 0) + time.perf_counter() - t0
+
 def simpan_perubahan():
     ss = st.session_state
     df = ss.df_toko
+    wsave, t_save = {}, time.perf_counter()
     kosong  = df["Store ID"].fillna("").astype(str).str.strip().isin(["","-"])
     butuh   = df["Validasi"].eq(STATUS_VALID) & kosong
     if butuh.any():
-        df.loc[butuh,"Store ID"]      = generate_store_ids(df[butuh], df)
+        with _ukur_ke(wsave, "Generate ID (saat Save)"):
+            df.loc[butuh,"Store ID"]      = generate_store_ids(df[butuh], df)
         baru_tergenerate              = [i for i in df.index[butuh] if df.loc[i,"Store ID"] != "-"]
         df.loc[baru_tergenerate,"Generated At"] = datetime.datetime.now(ZONA_WAKTU).replace(tzinfo=None)
         ss.baris_perlu_push.update(baru_tergenerate)
+    with _ukur_ke(wsave, "periksa_ulang_id (baca ulang sheet + Supabase)"):
+        ganti_id = periksa_ulang_id(df)       # ID yang ternyata sudah dipakai di sheet / Supabase -> dibuat ulang
 
-    sudah        = {}
     baris_target = set(ss.baris_kotor) | set(ss.baris_perlu_push)
     gagal_kunci  = []
+    untuk_sheet  = []     # baris yang Store ID-nya di-generate -> disalin ke Google Sheet (kolom Generate ID + generated_at)
+    # Kondisi SEBELUM Save (dibaca dari Supabase, bukan layar) -> dasar jejak perubahan Remark_status / Remark_ID / Remark_at.
+    # Bolak-balik sebelum Save tidak dianggap perubahan. Kalau gagal membaca, jejak dilewati (data tetap tersimpan).
+    with _ukur_ke(wsave, "Supabase baca status sebelum (sb_baca_status_id)"):
+        sebelum = _shared.sb_baca_status_id([(str(df.loc[i,"Customer Store Code"]).strip(), str(df.loc[i,"Customer Store Name"]).strip())
+                                             for i in baris_target]) or {}
+    t_loop = time.perf_counter()
     for idx in baris_target:
         kode  = str(df.loc[idx,"Customer Store Code"]).strip()
         nama  = str(df.loc[idx,"Customer Store Name"]).strip()
         if not kode or not nama:
             continue
-        kunci   = (kode, nama)
         tagging = str(df.loc[idx,"Validasi"]).strip()
         patch   = {"tagging": tagging}
         patch.update(_patch_kolom_edit(df.loc[idx]))     # City, Address, Long/Lat, Store Type, Store Name
         if tagging == "Existing" and pd.isna(df.loc[idx,"Generated At"]):
-            # Existing dari SPV Confirmation: Store ID diisi SPV -> simpan apa adanya, jangan dikosongkan
+            # Existing dari SPV Confirmation / diketik manual: Store ID diisi user -> simpan apa adanya, jangan dikosongkan
             sid_ada = str(df.loc[idx,"Store ID"]).strip()
-            if sid_ada and sid_ada != "-":
+            if not _id_kosong(sid_ada):
                 patch["Store ID"] = sid_ada
             patch["generated_at"] = None
-        elif tagging != STATUS_VALID:
+        elif tagging != STATUS_VALID and tagging not in _shared.STATUS_TERKUNCI:
+            # Need Review / Existing hasil generate: tidak punya ID -> dikosongkan
             patch["generated_at"] = None; patch["Store ID"] = ""
             df.loc[idx,"Store ID"] = "-"; df.loc[idx,"Generated At"] = pd.NaT
         else:
-            if kunci in sudah:
-                df.loc[idx,"Store ID"] = sudah[kunci]["store_id"]
-                if sudah[kunci]["generated_at"]:
-                    df.loc[idx,"Generated At"] = pd.Timestamp(sudah[kunci]["generated_at"])
+            # Generate ID, DMS Done, Basis Done: ID dikirim apa adanya (kalau kosong, kolom Store ID tidak disentuh)
             gid = str(df.loc[idx,"Store ID"]).strip()
-            if gid and gid != "-":
+            if not _id_kosong(gid):
                 patch["Store ID"] = gid
-                gen_at = df.loc[idx,"Generated At"]
-                gen_at_iso = None
-                if pd.notna(gen_at):
-                    wt = pd.Timestamp(gen_at)
-                    if wt.tzinfo is None:
-                        wt = wt.tz_localize(ZONA_WAKTU)
-                    gen_at_iso = wt.isoformat()
-                    patch["generated_at"] = gen_at_iso
-                sudah[kunci] = {"store_id":gid,"generated_at":gen_at_iso}
+                if pd.notna(df.loc[idx,"Generated At"]):
+                    patch["generated_at"] = _iso_wib(df.loc[idx,"Generated At"])
 
         if sb_patch_by_kode_nama(TABLE_SUBMIT_NOO, kode, nama, patch):
             ss.baris_kotor.discard(idx)
             ss.baris_perlu_push.discard(idx)
+            lama = sebelum.get((kode, nama))
+            remark = (_remark_perubahan(lama[0], lama[1], df.loc[idx,"Validasi"], df.loc[idx,"Store ID"])
+                      if lama is not None else {})
+            untuk_sheet.append(_item_sheet(df, idx, kode, nama, remark))   # semua yang di-Save ikut ke sheet (edit + Generate ID + jejak)
         else:
             gagal_kunci.append(f"{kode}/{nama}")
 
+    wsave["Supabase patch per baris"] = time.perf_counter() - t_loop
+    with _ukur_ke(wsave, "Tulis ke Google Sheet (update_generate_id_di_sheet)"):
+        ok_sheet, err_sheet = _shared.update_generate_id_di_sheet(untuk_sheet)   # gagal sheet tidak membatalkan simpan Supabase
+    ambil_raw_noo.clear()     # download NOO membaca Store ID tersimpan dari Supabase -> segarkan setelah Save
+    if not ss.baris_perlu_push:
+        _shared.kunci_generate_lepas()     # semua ID sudah tersimpan -> Apps Script boleh jalan lagi
+
     jumlah = len(baris_target) - len(gagal_kunci)
-    catat_riwayat("Save changes", f"{jumlah} rows updated",
-                  distributor=_distri_pertama(df, sorted(baris_target)))
+    with _ukur_ke(wsave, "Catat riwayat (Supabase)"):
+        catat_riwayat("Save changes", f"{jumlah} rows updated",
+                      distributor=_distri_pertama(df, sorted(baris_target)))
+    wsave["TOTAL Save changes"] = time.perf_counter() - t_save
+    ss.waktu_save = wsave
     ss.tanda_tangan    = None
     ss.terakhir_update = waktu_sekarang()
     if gagal_kunci:
@@ -328,6 +544,10 @@ def simpan_perubahan():
         ss.pesan_toast = f"Saved {jumlah} rows. FAILED {len(gagal_kunci)}: {', '.join(gagal_kunci)} — {detail}"
     else:
         ss.pesan_toast = f"Saved — {jumlah} rows updated" if jumlah else "No changes to save"
+    if ganti_id:
+        ss.pesan_toast += " | ID already used, regenerated: " + ", ".join(f"{a} → {b}" for a, b in ganti_id[:5])
+    if not ok_sheet:
+        ss.pesan_toast += f" | Google Sheet not updated: {err_sheet[:120]}"
 
 def selesai_impor(df, nama_file):
     ss = st.session_state
@@ -407,6 +627,14 @@ def tab_noo():
 
     if ss.get("err_tagging"):
         st.error(ss.pop("err_tagging"))
+    if ss.get("id_merge_err"):          # sumber ID tambahan (DATA GENERATOR / id dms) gagal dibaca
+        st.warning(ss.pop("id_merge_err"))
+    for _kunci, _judul, _tot in (("waktu_generate", "Generate ID", "TOTAL generate_store_ids"),
+                                 ("waktu_save", "Save changes", "TOTAL Save changes")):
+        if ss.get(_kunci):              # TIMER loading (sementara): rincian waktu langkah terakhir
+            w = ss[_kunci]
+            with st.expander(f"⏱ {_judul} timing — total {w.get(_tot, 0):.2f}s (from last run)"):
+                st.table(pd.DataFrame({"Step": list(w), "Seconds": [round(v, 2) for v in w.values()]}).set_index("Step"))
     if ss.pop("reset_filter", False):
         ss.f_status = "All statuses"; ss.f_distri = "All distributors"; ss.f_brand = "All brands"
         ss.pop("f_tgl_awal",None); ss.pop("f_tgl_akhir",None)
@@ -471,13 +699,18 @@ def tab_noo():
         ss.tanda_tangan    = tanda
         ss.kunci_editor   += 1
 
-    c_select_all, c_generate, c_hapus, _ = st.columns([1.3,1.2,1.1,6], gap="small", vertical_alignment="center")
+    c_select_all, c_generate, c_review, c_dms, c_basis, c_hapus, _ = st.columns([1.3,0.95,1.05,0.85,1.1,0.8,4.25], gap="small", vertical_alignment="center")
     with c_select_all:
         select_all = st.checkbox("Select All", key=f"select_all_{ss.kunci_editor}")
         ss.snapshot["Pilih"] = select_all
         ss.tampilan_kunci    = None
     with c_generate:
         tombol_generate = st.button("Generate ID", type="primary", key="tombol_generate_bulk", width="stretch")
+    with c_review:
+        tombol_review = st.button("Need Review", type="primary", key="tombol_review_bulk", width="stretch")
+    # Tombol DMS Done / DMS & Basis Done: aktif/nonaktifnya bergantung pada baris yang dicentang (hasil grid, dihitung di bawah),
+    # jadi tempatnya disiapkan dulu dan tombolnya digambar setelah grid.
+    tempat_dms, tempat_basis = c_dms.empty(), c_basis.empty()
     with c_hapus:
         tombol_hapus = st.button(":material/delete: Delete", type="primary", key="tombol_hapus_noo", width="stretch")
 
@@ -509,8 +742,51 @@ def tab_noo():
     tampil_grid = ss.snapshot.copy()
     tampil_grid["Customer Store Name"] = tampil_grid["Store Name"]
     hasil_edit = noo_grid(tampil_grid, kolom_grid, key=f"noo_grid_{ss.kunci_editor}",
-                          select_all=select_all, warna=warna_css)
+                          select_all=select_all, warna=warna_css, terkunci=_shared.STATUS_TERKUNCI)
     hasil_edit["Customer Store Name"] = ss.snapshot["Customer Store Name"]
+
+    # ── Tombol DMS Done / DMS & Basis Done ─────────────────────────────────────────────
+    # NONAKTIF secara default. Aktif HANYA jika semua baris yang dicentang, menurut data yang DIBACA ULANG dari Supabase
+    # (bukan session_state), sudah berstatus Generate ID DAN sudah punya Store ID. Artinya: sudah ter-generate + sudah tersimpan.
+    # Klik -> hanya status yang berubah (Store ID tidak disentuh), langsung disimpan ke Supabase, lalu tabel di-refresh.
+    pilih_idx = hasil_edit.index[hasil_edit["Pilih"] == True].tolist()
+    pasangan_pilih = tuple((str(ss.df_toko.loc[i, "Customer Store Code"]).strip(),
+                            str(ss.df_toko.loc[i, "Customer Store Name"]).strip()) for i in pilih_idx)
+    tombol_aktif, tombol_info = False, "Tick rows that are already Generate ID and saved."
+    if pasangan_pilih:
+        status_sb = _shared.sb_baca_status_id_singkat(pasangan_pilih)
+        if status_sb is None:
+            tombol_info = "Could not read Supabase to verify. Try again."
+        else:
+            tombol_aktif = all(status_sb.get(p, ("", ""))[0] == STATUS_VALID and not _id_kosong(status_sb.get(p, ("", ""))[1])
+                               for p in pasangan_pilih)
+            tombol_info = "" if tombol_aktif else "Only rows saved as Generate ID with a Store ID in Supabase can be marked."
+    klik_dms   = tempat_dms.button("DMS Done", type="primary", key="tombol_dms_done", width="stretch",
+                                   disabled=not tombol_aktif, help=tombol_info or None)
+    klik_basis = tempat_basis.button("DMS & Basis Done", type="primary", key="tombol_basis_done", width="stretch",
+                                     disabled=not tombol_aktif, help=tombol_info or None)
+    if klik_dms or klik_basis:
+        status_baru = _shared.STATUS_DMS if klik_dms else _shared.STATUS_BASIS
+        segar = _shared.sb_baca_status_id(pasangan_pilih)         # verifikasi ULANG saat klik, tanpa cache
+        if segar is None:
+            ss.pesan_toast = "Could not verify with Supabase — status not changed."
+            ss.pesan_toast_icon = ":material/warning:"
+        else:
+            df = ss.df_toko
+            siap_idx = [i for i, p in zip(pilih_idx, pasangan_pilih)
+                        if segar.get(p, ("", ""))[0] == STATUS_VALID and not _id_kosong(segar.get(p, ("", ""))[1])]
+            status_lama = {i: df.loc[i, "Validasi"] for i in siap_idx}
+            for i in siap_idx:
+                df.loc[i, "Validasi"] = status_baru
+            masalah, _info_sheet = ubah_status_dan_simpan(df, siap_idx, status_lama)
+            n_lewat = len(pilih_idx) - len(siap_idx)
+            ss.pesan_toast = (f"{len(siap_idx) - len(masalah)} row(s) set to {status_baru}"
+                              + (f" | {n_lewat} skipped (not Generate ID in Supabase)" if n_lewat else "")
+                              + (f" | {len(masalah)} NOT saved, reverted: {'; '.join(masalah[:2])}" if masalah else ""))
+            ss.pesan_toast_icon = ":material/warning:" if (n_lewat or masalah) else ":material/check_circle:"
+            ambil_raw_noo.clear()
+        ss.snapshot = ss.df_toko.loc[ss.snapshot.index, KOLOM_TAMPIL].copy(); ss.kunci_editor += 1
+        st.rerun()
 
     # Download: baris yang dicentang (kolom Select) saja; kalau tidak ada yang dicentang -> semua hasil filter
     dipilih_unduh = hasil_edit.index[hasil_edit["Pilih"] == True]
@@ -543,7 +819,7 @@ def tab_noo():
                 st.rerun()
             if k_ya.button("Yes, delete", type="primary", key="noo_hapus_ya", width="stretch"):
                 df = ss.df_toko
-                terhapus, gagal, ditolak_policy = [], [], False
+                terhapus, gagal, ditolak_policy, nol_baris = [], [], False, []
                 for i in antri:
                     kode = str(df.loc[i, "Customer Store Code"]).strip()
                     nama = str(df.loc[i, "Customer Store Name"]).strip()
@@ -554,7 +830,28 @@ def tab_noo():
                         gagal.append(err or "denied")
                         if not err:
                             ditolak_policy = True
+                            nol_baris.append((kode, nama))
+                # 0 baris terhapus tanpa error HTTP: bisa karena policy RLS menolak, atau barisnya memang tidak ada
+                # (kode/nama beda). Cek ulang (baca saja) supaya pesan error-nya menunjuk penyebab yang benar.
+                detail_nol = ""
+                if nol_baris:
+                    ada = _shared.sb_baca_status_id(nol_baris)
+                    if ada is None:
+                        detail_nol = " (could not re-check the rows)"
+                    else:
+                        ketemu = {f"{k} [status: {ada[(k, n)][0] or '-'}]" for k, n in nol_baris if (k, n) in ada}
+                        hilang = [k for k, n in nol_baris if (k, n) not in ada]
+                        if ketemu:
+                            detail_nol += " Rows exist but were NOT deleted (blocked by Supabase): " + ", ".join(sorted(ketemu)[:5]) + "."
+                        if hilang:
+                            detail_nol += " Not found in Supabase (code/name differ): " + ", ".join(hilang[:5]) + "."
+                    ditolak_policy = bool(nol_baris) and (ada is None or any((k, n) in ada for k, n in nol_baris))
+                err_sheet = ""
                 if terhapus:
+                    # ikut hapus baris yang sama di Google Sheet (gagal sheet tidak membatalkan delete Supabase)
+                    ok_sheet, err_sheet = _shared.hapus_noo_di_sheet([
+                        {"kode": str(df.loc[i, "Customer Store Code"]).strip(),
+                         "nama": str(df.loc[i, "Customer Store Name"]).strip()} for i in terhapus])
                     distri_hapus = _distri_pertama(df, terhapus)     # ambil SEBELUM baris di-drop
                     ss.df_toko = df.drop(index=terhapus)
                     ss.baris_kotor -= set(terhapus)
@@ -565,10 +862,13 @@ def tab_noo():
                 ss.tanda_tangan = None; ss.snapshot = None
                 ss.terakhir_update = waktu_sekarang()
                 ss.pesan_toast = (f"{len(terhapus)} row(s) deleted"
-                                  + (f" | {len(gagal)} failed" if gagal else ""))
+                                  + (f" | {len(gagal)} failed" if gagal else "")
+                                  + (f" | Google Sheet not updated: {err_sheet[:400]}" if err_sheet else ""))
                 if ditolak_policy:
-                    ss.noo_hapus_error = ("Supabase accepted the request but deleted 0 rows: the table has no DELETE policy "
-                                          "for this API key (RLS). Add a DELETE policy on INPUT_NOO in Supabase.")
+                    ss.noo_hapus_error = ("Supabase accepted the request but deleted 0 rows: the DELETE policy (RLS) on INPUT_NOO "
+                                          "does not allow deleting these rows with this API key." + detail_nol)
+                elif nol_baris:
+                    ss.noo_hapus_error = "Delete failed:" + detail_nol
                 elif gagal:
                     ss.noo_hapus_error = "Delete failed: " + "; ".join(gagal[:3])
                 st.rerun()
@@ -576,8 +876,14 @@ def tab_noo():
     # Bulk Generate ID
     if tombol_generate:
         baris_dipilih = hasil_edit[hasil_edit["Pilih"] == True].index.tolist()
+        # baris berstatus final (DMS Done / DMS & Basis Done) terkunci -> dilewati
+        baris_final = [i for i in baris_dipilih if ss.df_toko.loc[i, "Validasi"] in _shared.STATUS_TERKUNCI]
+        if baris_final:
+            baris_dipilih = [i for i in baris_dipilih if i not in baris_final]
+            st.warning(f"{len(baris_final)} locked row(s) skipped (status already DMS Done / DMS & Basis Done).")
         if not baris_dipilih:
-            st.warning("No rows selected.")
+            if not baris_final:
+                st.warning("No rows selected.")
         else:
             df = ss.df_toko
             for idx in baris_dipilih:
@@ -605,16 +911,22 @@ def tab_noo():
                 df.loc[baru_generate,"Store ID"]     = generate_store_ids(df.loc[baru_generate], df, kolom_target="Store ID")
                 df.loc[baru_generate,"Generated At"] = datetime.datetime.now(ZONA_WAKTU).replace(tzinfo=None)
             gagal_prefix = [i for i in baris_dipilih if df.loc[i,"Store ID"] in ("","-",None)]
-            # Tidak langsung push ke Supabase: hanya ditandai belum tersimpan.
+            # Tidak langsung push ke Supabase: hanya ditandai belum tersimpan (ID sementara, berurutan).
             # Baru tersimpan lewat "Save changes"; kalau tidak, hilang saat Refresh / reload.
             berhasil_idx = [i for i in baris_dipilih if i not in gagal_prefix]
             ss.baris_kotor.update(berhasil_idx)
             ss.baris_perlu_push.update(berhasil_idx)
+            # rapikan nomor ID sementara per prefix sesuai urutan baris di tabel
+            for prefix in {str(df.loc[i,"Store ID"]).strip()[:PANJANG_PREFIX] for i in berhasil_idx}:
+                id_geser = resequence_prefix(df, prefix)
+                ss.baris_kotor.update(id_geser); ss.baris_perlu_push.update(id_geser)
             for i in gagal_prefix:                      # gagal generate -> kembalikan status semula
                 df.loc[i,"Validasi"] = STATUS_REVIEW
                 ss.baris_kotor.discard(i); ss.baris_perlu_push.discard(i)
             berhasil = len(berhasil_idx)
             pesan = f"{berhasil} rows generated — click Save changes to save to Supabase"
+            if ss.get("kunci_err"):
+                pesan += f" | {ss.kunci_err}"
             if gagal_prefix:
                 distri_gagal = sorted({str(df.loc[i,"Distributor"]) or "(empty)" for i in gagal_prefix})
                 pesan += f" | {len(gagal_prefix)} failed (prefix not found: {', '.join(distri_gagal)})"
@@ -639,6 +951,32 @@ def tab_noo():
         st.toast("Store ID can only be edited when Validation = Existing.", icon=":material/warning:")
 
     validasi_lama = ss.df_toko["Validasi"].copy()      # sebelum edit diterapkan, untuk deteksi Existing -> Generate ID
+
+    # Bulk Need Review: baris yang dicentang diubah ke Need Review lewat jalur edit biasa di bawah (Store ID dibuang +
+    # nomor ID lain di-resequence). Baris terkunci (DMS Done / DMS & Basis Done) dilewati.
+    if tombol_review:
+        baris_dipilih = hasil_edit.index[hasil_edit["Pilih"] == True].tolist()
+        baris_final = [i for i in baris_dipilih if validasi_lama.get(i) in _shared.STATUS_TERKUNCI]
+        baris_ubah = [i for i in baris_dipilih if i not in baris_final]
+        if baris_final:
+            st.warning(f"{len(baris_final)} locked row(s) skipped (status already DMS Done / DMS & Basis Done).")
+        if not baris_dipilih:
+            st.warning("No rows selected.")
+        elif baris_ubah:
+            hasil_edit.loc[baris_ubah, "Validasi"] = STATUS_REVIEW
+
+    # Baris berstatus final (DMS Done / DMS & Basis Done) DIKUNCI: semua kolom selain Validation dikembalikan ke nilai
+    # semula (pengaman server, selain input yang sudah dinonaktifkan di grid).
+    baris_kunci = [i for i in hasil_edit.index if validasi_lama.get(i) in _shared.STATUS_TERKUNCI]
+    if baris_kunci:
+        for c in [c for c in KOLOM_EDIT if c in hasil_edit.columns and c != "Validasi"]:
+            hasil_edit.loc[baris_kunci, c] = ss.df_toko.loc[baris_kunci, c]
+    # Baris yang sudah DMS Done / DMS & Basis Done tidak boleh turun ke Need Review / Existing (ID-nya sudah dipakai di DMS).
+    ditolak_status = []
+    for i in hasil_edit.index[hasil_edit["Validasi"] != validasi_lama.loc[hasil_edit.index]]:
+        if validasi_lama.get(i) in _shared.STATUS_TERKUNCI and hasil_edit.loc[i, "Validasi"] in (STATUS_REVIEW, "Existing"):
+            hasil_edit.loc[i, "Validasi"] = validasi_lama.get(i)
+            ditolak_status.append(f"#{ss.df_toko.loc[i, '#']}")
     id_berubah = terapkan_edit(ss.df_toko, hasil_edit)
     if id_berubah:
         ss.baris_kotor.update(id_berubah)
@@ -656,7 +994,10 @@ def tab_noo():
         pilih = validasi_skrg.eq(STATUS_VALID)
         # Existing yang Store ID-nya dari SPV (tanpa Generated At) tidak boleh dikosongkan saat baris diedit
         existing_spv = validasi_skrg.eq("Existing") & df.loc[id_berubah,"Generated At"].isna()
-        batal = [i for i in id_berubah if not pilih.loc[i] and not existing_spv.loc[i]]
+        final_ = validasi_skrg.isin(_shared.STATUS_TERKUNCI)       # DMS Done / DMS & Basis Done: Store ID dipertahankan (tidak digenerate)
+        batal = [i for i in id_berubah if not pilih.loc[i] and not existing_spv.loc[i] and not final_.loc[i]]
+        # Baris yang salah satu prefix-nya diubah ke Need Review / Existing: ID-nya dibuang, lalu nomor ID lain dengan
+        # prefix sama yang BELUM di-save dirapikan lagi supaya tetap berurutan (resequence_prefix).
         prefix_terdampak = set()
         for i in batal:
             sid_lama = str(df.loc[i,"Store ID"]).strip()
@@ -693,12 +1034,21 @@ def tab_noo():
             gagal_id  = [i for i in baru if df.loc[i,"Store ID"] == "-"]
             berhasil_id = [i for i in baru if df.loc[i,"Store ID"] != "-"]
             ss.baris_perlu_push.update(berhasil_id)
+            # rapikan nomor ID sementara per prefix sesuai urutan baris di tabel
+            for prefix in {str(df.loc[i,"Store ID"]).strip()[:PANJANG_PREFIX] for i in berhasil_id}:
+                id_geser = resequence_prefix(df, prefix)
+                ss.baris_kotor.update(id_geser); ss.baris_perlu_push.update(id_geser)
             if gagal_id:
                 st.warning("Prefix not found: "
                            + ", ".join(sorted({str(df.loc[i,"Distributor"]) or "(empty)" for i in gagal_id})))
         snapshot_baru = ss.df_toko.loc[ss.snapshot.index, KOLOM_TAMPIL].copy()
         if not snapshot_baru["Validasi"].equals(ss.snapshot["Validasi"]):
             ss.snapshot = snapshot_baru; ss.kunci_editor += 1; st.rerun()
+    if ditolak_status:          # turun dari DMS Done / DMS & Basis Done ditolak: gambar ulang grid + beri tahu user
+        ss.pesan_toast = f"Status not changed for {', '.join(ditolak_status[:5])} — already DMS Done / DMS & Basis Done, cannot go back."
+        ss.pesan_toast_icon = ":material/warning:"
+        ss.kunci_editor += 1
+        st.rerun()
 
     tempat_kpi.markdown(komponen.html_kpi_validasi(ss.df_toko), unsafe_allow_html=True)
     awal_nomor    = max(1, min(ss.halaman_data-2, total_halaman-4))

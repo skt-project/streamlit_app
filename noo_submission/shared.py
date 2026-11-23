@@ -26,11 +26,35 @@ SHEET_PRODUCT     = "Product Mapping!A2:B"
 SHEET_SALES       = "Sales Mapping"
 
 # ─────────────────────────────── SUPABASE ─────────────────────────────────────
-# SUPABASE_URL = st.secrets["SUPABASE_URL"]
-# SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+# URL & key dibaca dari .streamlit/secrets.toml (lokal, sudah di-gitignore) atau Secrets di hosting. Jangan ditulis di kode.
+def _baca_kredensial_supabase() -> tuple:
+    try:
+        return st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]
+    except Exception:
+        pass
+    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
+        return os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"]
+    try:
+        import tomllib
+        folder = os.path.dirname(os.path.abspath(__file__))
+        for _ in range(4):
+            f = os.path.join(folder, ".streamlit", "secrets.toml")
+            if os.path.exists(f):
+                with open(f, "rb") as fh:
+                    d = tomllib.load(fh)
+                if d.get("SUPABASE_URL") and d.get("SUPABASE_KEY"):
+                    return d["SUPABASE_URL"], d["SUPABASE_KEY"]
+            folder = os.path.dirname(folder)
+    except Exception:
+        pass
+    return None, None
 
-SUPABASE_URL = "https://iarwfviiulnmseirfhlq.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhcndmdmlpdWxubXNlaXJmaGxxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0NjEyMTIsImV4cCI6MjEwODAzNzIxMn0.-LSVYGBxtUV2LWKkWddOBlqMBA60H1C15qsko0LFgFE"
+SUPABASE_URL, SUPABASE_KEY = _baca_kredensial_supabase()
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("SUPABASE_URL / SUPABASE_KEY not found. Add them to .streamlit/secrets.toml (local) or the hosting Secrets (production).")
+    st.stop()
+SUPABASE_URL = SUPABASE_URL.strip().rstrip("/")
+SUPABASE_KEY = SUPABASE_KEY.strip()
 
 
 _SB_HEADERS = {
@@ -49,14 +73,45 @@ BQ_MASTER_STORE    = "gt_schema.master_store_database_basis"
 BQ_KOLOM_KODE_TOKO = "dst_id_g2g"   # = Customer Store Code (kode toko dari distributor)
 
 # ─────────────────────────────── VALIDASI ─────────────────────────────────────
-KOLOM_VALIDASI = ["Generate ID", "Need Review", "Existing"]
+# >>> DAFTAR STATUS DROPDOWN "Validation" (Store Validation) <<<
+# Urutan 0 dan 1 JANGAN diubah (dipakai sebagai STATUS_VALID / STATUS_REVIEW). Status baru ditambah di belakang.
+KOLOM_VALIDASI = ["Generate ID", "Need Review", "Existing", "DMS Done", "DMS & Basis Done"]   # HANYA 5 status, jangan tambah
 STATUS_VALID   = KOLOM_VALIDASI[0]
 STATUS_REVIEW  = KOLOM_VALIDASI[1]
+STATUS_DMS     = "DMS Done"
+STATUS_BASIS   = "DMS & Basis Done"
+# Status "final": kalau dipilih, baris DIKUNCI (Store ID dkk tidak bisa diedit lagi di Store Validation).
+STATUS_TERKUNCI = (STATUS_DMS, STATUS_BASIS)
+# Nama lama status (versi sebelumnya) -> nama sekarang, supaya data yang sudah tersimpan tetap terbaca.
+ALIAS_STATUS = {"DMS Uploaded": STATUS_DMS, "Basis Updated": STATUS_BASIS, "Basis Done": STATUS_BASIS}
 
 WARNA_VALIDASI = {
-    "Generate ID": "background-color: #d3f9d8; color: #1b5e20",
-    "Need Review": "background-color: #ffd6e0; color: #9c1c4a",
-    "Existing":    "background-color: #fff3b0; color: #7a5b00",
+    "Generate ID": "background-color: #d3f9d8; color: #1b5e20",   # hijau
+    "Need Review": "background-color: #ffd6e0; color: #9c1c4a",   # merah muda
+    "Existing":    "background-color: #fff3b0; color: #7a5b00",   # kuning
+    "DMS Done":    "background-color: #cfe8ff; color: #0b4a8f",   # biru
+    "DMS & Basis Done": "background-color: #e6d9ff; color: #5b21b6",   # ungu
+}
+
+# >>> LABEL STATUS DI HALAMAN HISTORY (app_submission) <<<
+# Kiri = nilai status asli di Supabase (kolom tagging), kanan = teks yang dilihat user/distributor di History.
+# Mau ganti istilahnya? Ubah sisi kanan saja (dan warnanya di WARNA_HISTORY di bawah).
+LABEL_HISTORY = {
+    "Need Review":   "Under Review",         # NOO baru masuk, masih dicek
+    "Existing":      "Existing Store",       # bukan NOO: toko sudah ada
+    "Generate ID":   "Awaiting DMS Upload",  # Store ID sudah dibuat, menunggu di-upload ke DMS
+    "DMS Done":      "Ready in DMS",         # sudah di-upload ke DMS
+    "DMS & Basis Done": "Fully Processed",   # sudah masuk DMS dan basis, semua tahap selesai
+    "Basis Done":    "Fully Processed",      # nama lama status (kompatibilitas)
+    "DMS Uploaded":  "Ready in DMS",         # nama lama status (kompatibilitas)
+    "Basis Updated": "Fully Processed",      # nama lama status (kompatibilitas)
+}
+WARNA_HISTORY = {
+    "Under Review":        "background-color: #fff3cd; color: #8a5a00; font-weight: 600",   # kuning
+    "Existing Store":      "background-color: #e5e7eb; color: #374151; font-weight: 600",   # abu
+    "Awaiting DMS Upload": "background-color: #d3f9d8; color: #1b5e20; font-weight: 600",   # hijau (sama dgn Generate ID)
+    "Ready in DMS":        "background-color: #cfe8ff; color: #0b4a8f; font-weight: 600",   # biru (sama dgn DMS Done)
+    "Fully Processed":     "background-color: #e6d9ff; color: #5b21b6; font-weight: 600",   # ungu (sama dgn Basis Done)
 }
 
 #--------------------BIGQUERY---------------------
@@ -417,6 +472,39 @@ def sb_patch_by_kode_nama(table: str, kode: str, nama: str, patch: dict) -> bool
         st.session_state.err_tagging = f"EXCEPTION {table} ({kode}/{nama}): {e}"
         return False
 
+def sb_baca_status_id(pasangan) -> dict:
+    """BACA ULANG dari Supabase (bukan session_state): status (tagging) dan Store ID baris INPUT_NOO.
+    pasangan = iterable (Customer Store Code, Customer Store Name). Return {(kode, nama): (tagging, store_id)}
+    atau None kalau gagal membaca (pemanggil harus menganggap 'tidak terverifikasi')."""
+    pasangan = {(str(k).strip(), str(n).strip()) for k, n in pasangan if str(k).strip()}
+    if not pasangan:
+        return {}
+    kode_list = sorted({k for k, _ in pasangan})
+    hasil = {}
+    try:
+        for i in range(0, len(kode_list), 100):
+            daftar = ",".join('"' + k.replace('"', '') + '"' for k in kode_list[i:i + 100])
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/{TABLE_SUBMIT_NOO}",
+                headers={**_SB_HEADERS, "Prefer": ""},
+                params={"select": '"Customer Store Code","Customer Store Name",tagging,"Store ID"',
+                        "Customer Store Code": f"in.({daftar})"},
+                timeout=15)
+            r.raise_for_status()
+            for row in r.json():
+                kunci = (str(row.get("Customer Store Code") or "").strip(), str(row.get("Customer Store Name") or "").strip())
+                if kunci in pasangan:
+                    hasil[kunci] = (str(row.get("tagging") or "").strip(), str(row.get("Store ID") or "").strip())
+        return hasil
+    except Exception:
+        return None
+
+@st.cache_data(ttl=5, show_spinner=False)
+def sb_baca_status_id_singkat(pasangan: tuple):
+    """sb_baca_status_id dengan cache 5 detik, khusus untuk menentukan tombol aktif/nonaktif tiap rerun
+    (supaya tidak menembak Supabase di setiap interaksi). Verifikasi saat tombol DIKLIK memakai versi tanpa cache."""
+    return sb_baca_status_id(pasangan)
+
 def sb_delete(table: str, filters: dict):
     """DELETE baris yang cocok PERSIS dengan semua filters (kolom -> nilai).
     Return (jumlah_terhapus, pesan_error). Tanpa filter -> ditolak, supaya tidak pernah menghapus seluruh tabel."""
@@ -709,6 +797,73 @@ def max_angka_per_prefix() -> dict:
             hasil[prefix] = max(hasil.get(prefix, 0), int(angka_str))
     return hasil
 
+# ─────────────────────────────── DATA MERGE (ID yang sudah pernah dipakai) ────
+# >>> SUMBER TAMBAHAN Store ID existing (selain BigQuery & Supabase) <<<
+# Tiap baris = (link/ID spreadsheet, nama tab, nama kolom header berisi Store ID). Mau tambah/kurangi sumber: edit daftar ini.
+# Spreadsheet harus bisa dibaca lewat link (sama seperti Distributor Mapping yang sudah dipakai app).
+DATA_MERGE_SUMBER = [
+    # "DATA GENERATOR" tidak lagi dibaca per-ID (33rb baris, lambat) -> pakai pivot max per prefix, lihat DATA_MERGE_PIVOT.
+    (HISTORY_GENERATOR, "id dms",         "store_code"),                    # ID yang sudah ada di DMS
+    # Kolom berupa ANGKA = dibaca per nomor kolom (tanpa header). ID hasil Apps Script di tab NEW Generator (kolom G).
+    (HISTORY_GENERATOR, "NEW Generator",  7),
+]
+# Pola ID valid: 4 huruf + angka (mis. IESP01256). ID lain (kosong, 5 huruf, teks bebas) diabaikan.
+POLA_STORE_ID = re.compile(r"^[A-Z]{%d}\d+$" % PANJANG_PREFIX)
+
+@st.cache_data(ttl=120, show_spinner=False)
+def muat_id_data_merge() -> tuple:
+    """Gabungan semua Store ID dari DATA_MERGE_SUMBER, sudah dibersihkan (TRIM, UPPER, buang kosong & format salah).
+    Return (frozenset_id, pesan_error). Sumber yang gagal dibaca dilaporkan di pesan_error, sumber lain tetap dipakai."""
+    hasil, galat = set(), []
+    for url_sheet, tab, kolom in DATA_MERGE_SUMBER:
+        try:
+            if isinstance(kolom, int):      # per nomor kolom; baris non-ID (header/teks) dibuang oleh POLA_STORE_ID
+                url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(url_sheet)}/gviz/tq"
+                       f"?tqx=out:csv&sheet={quote(tab)}&headers=0")
+                df = pd.read_csv(url, dtype=str, header=None, usecols=[kolom - 1])
+            else:
+                url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(url_sheet)}/gviz/tq"
+                       f"?tqx=out:csv&sheet={quote(tab)}&headers=1")
+                df = pd.read_csv(url, dtype=str, usecols=lambda c: str(c).strip() == kolom)
+            for v in df.iloc[:, 0].dropna():
+                v = str(v).strip().upper()
+                if POLA_STORE_ID.match(v):
+                    hasil.add(v)
+        except Exception as e:
+            galat.append(f"{tab}: {type(e).__name__}")
+    return frozenset(hasil), ("Could not read ID source " + ", ".join(galat)
+                              + " — new IDs may duplicate existing ones.") if galat else ""
+
+# Pivot max per prefix yang sudah dihitung di sheet (tab DATA GENERATOR, kolom L = PREFIX, M = NUMBER).
+# Cuma 2 kolom & beberapa ratus baris, jadi jauh lebih ringan daripada baca 33rb Store ID.
+DATA_MERGE_PIVOT = (HISTORY_GENERATOR, "DATA GENERATOR", "L", "M")
+
+@st.cache_data(ttl=120, show_spinner=False)
+def muat_max_pivot() -> dict:
+    """{prefix: max nomor} dari pivot di sheet. Prefix selain 4 huruf (mis. 'I') & nomor non-angka dibuang. Gagal baca -> {}."""
+    url_sheet, tab, kol_prefix, kol_angka = DATA_MERGE_PIVOT
+    url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(url_sheet)}/gviz/tq"
+           f"?tqx=out:csv&sheet={quote(tab)}&tq={quote(f'select {kol_prefix}, {kol_angka} where {kol_prefix} is not null')}")
+    hasil = {}
+    try:
+        df = pd.read_csv(url, dtype=str)
+        for p, a in zip(df.iloc[:, 0].fillna(""), df.iloc[:, 1].fillna("")):
+            p = str(p).strip().upper()
+            a = str(a).strip().replace(",", "")
+            if re.fullmatch(r"[A-Z]{%d}" % PANJANG_PREFIX, p) and a.isdigit():
+                hasil[p] = max(hasil.get(p, 0), int(a))
+    except Exception:
+        return {}
+    return hasil
+
+def max_angka_data_merge() -> dict:
+    """Max nomor per prefix dari data merge (tab id dms / NEW Generator per-ID + pivot DATA GENERATOR)."""
+    hasil = dict(muat_max_pivot())
+    for sid in muat_id_data_merge()[0]:
+        p, a = sid[:PANJANG_PREFIX], sid[PANJANG_PREFIX:]
+        hasil[p] = max(hasil.get(p, 0), int(a))
+    return hasil
+
 
     # sheet_name = SHEET_HISTORY.split("!")[0]
     # url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_NOO)}/gviz/tq"
@@ -932,8 +1087,8 @@ def _cocokkan_distributor_spv(distri: str, lookup: dict) -> dict:
         pass
     return {}
 
-def input_spv_sales(distri: str, kunci: str, c_spv, c_sales, lookup: dict) -> tuple:
-    lbl  = "\u200b"
+def peta_spv_sales(distri: str, lookup: dict) -> dict:
+    """{SPV: [sales,...]} untuk satu distributor (fallback: gabungan semua distributor)."""
     peta = lookup.get(str(distri).strip().upper(), {})
     if not peta:
         peta = _cocokkan_distributor_spv(distri, lookup)
@@ -945,6 +1100,11 @@ def input_spv_sales(distri: str, kunci: str, c_spv, c_sales, lookup: dict) -> tu
                 nama_spv, daftar = gab.setdefault(ks, (_rapikan_nama(s), []))
                 daftar.extend(lst)
         peta = {nama_spv: _gabung_unik(daftar) for nama_spv, daftar in gab.values()}
+    return peta
+
+def input_spv_sales(distri: str, kunci: str, c_spv, c_sales, lookup: dict) -> tuple:
+    lbl  = "​"
+    peta = peta_spv_sales(distri, lookup)
     daftar_spv = sorted(peta)
     if len(daftar_spv) == 1:
         spv = daftar_spv[0]
@@ -1061,6 +1221,21 @@ def catat_riwayat(aksi: str, detail: str = "", pengguna: str = None, distributor
         "total":    total,
     })
 
+def tampilkan_toast_warna(teks: str, icon: str = ":material/check_circle:"):
+    """Pop-up pojok kanan atas: hijau muda = berhasil, merah muda = gagal/peringatan. Hilang sendiri (CSS)."""
+    import html as _html
+    gagal = ("warning" in icon) or ("error" in icon)
+    bg, bd, fg, simbol = (("#fde2e4","#f5a3ab","#8a1c27","warning") if gagal
+                          else ("#dcf5e3","#9fd8b0","#17612f","check_circle"))
+    st.markdown(
+        f'<style>@keyframes toastWarna{{0%{{opacity:0;transform:translateY(-8px)}}6%{{opacity:1;transform:none}}'
+        f'90%{{opacity:1}}100%{{opacity:0;visibility:hidden}}}}</style>'
+        f'<div style="position:fixed;top:64px;right:24px;z-index:999999;max-width:360px;padding:12px 16px;'
+        f'border-radius:10px;background:{bg};border:1px solid {bd};color:{fg};font-size:14px;'
+        f'box-shadow:0 4px 14px rgba(0,0,0,.12);animation:toastWarna 5s ease forwards;pointer-events:none">'
+        f'<b>{"&#9888;" if gagal else "&#10003;"}</b>&nbsp; {_html.escape(str(teks))}</div>',
+        unsafe_allow_html=True)
+
 def set_keterangan_noo(jenis: str, teks: str):
     ss = st.session_state
     ss.noo_keterangan     = f"{jenis}:{teks}"
@@ -1088,6 +1263,259 @@ def noo_row_ke_supabase(row: pd.Series, waktu_submit: str) -> dict:
     data["tagging"]      = STATUS_REVIEW
     data["generated_at"] = None
     return data
+
+# ─────────────────────────────── KIRIM NOO KE GOOGLE SHEET ────────────────────
+# Spreadsheet tujuan salinan data NOO Submission (sheet "test"). Spreadsheet harus di-share (Editor) ke
+# noo-spreadsheet@project-noo-515103.iam.gserviceaccount.com.
+# >>> GANTI LINK SPREADSHEET DI SINI <<<
+# NOO_SHEET_ID  = potongan URL di antara "/d/" dan "/edit", contoh:
+#   https://docs.google.com/spreadsheets/d/<<< INI ID-NYA >>>/edit?gid=123
+# Spreadsheet baru juga harus di-share (Editor) ke no-spreadsheet@skintific-data-warehouse.iam.gserviceaccount.com
+NOO_SHEET_ID   = "1EMgQSe9V15HtOg8qyjT-pjfWw1vEjiDd9D0aRz5IKhc"
+# NOO_SHEET_TAB = nama tab (sheet) tujuan di spreadsheet tersebut, harus sama persis dengan nama tab-nya
+NOO_SHEET_TAB  = "RAW"
+# fallback lokal kalau st.secrets["noo_sheet"] tidak terbaca (mis. app dijalankan dari folder lain); jangan di-commit
+NOO_SHEET_KEY_FILES = [os.path.join(os.path.dirname(__file__), "noo-spreadsheet.json"),
+                       os.path.join(os.path.dirname(os.path.dirname(__file__)), "noo-spreadsheet.json")]
+# >>> TAMBAH / KURANGI KOLOM DI SINI YAAA -SHALTSA<<<
+# Daftar ini = urutan kolom di sheet (kiri ke kanan) sekaligus header baris 1. Header otomatis ditulis ulang
+# kalau daftar ini berubah. Untuk mengurangi: hapus namanya. Untuk menambah: tulis namanya, persis sama (huruf besar/kecil).
+# Nama yang tersedia:
+#   - "Submitted At", "Source", "Submitted By"   (diisi otomatis oleh kirim_noo_ke_sheet)
+#   - kolom NOO: "Store ID","Store Name","Channel","Customer Code","Customer Branch Code","Customer Store Code",
+#     "Customer Store Name","City","Store Address","Longitude","Latitude","Store Type","Visibility Rating",
+#     "Location Rating","ASM/KAM","SPV","SE/KAE","AOM","TL","PM","MD/SMD","BA1 Name","BA2 Name","BA3 Name",
+#     "BA4 Name","Group/Branch/Blank","Group Name","NIK","NPWP","Remark"  (sama dengan KOLOM_NOO_OUTPUT)
+#   - "created_at", "tagging"
+# Catatan: kalau kolom diubah setelah sheet berisi data, baris lama tidak ikut bergeser: bersihkan sheet-nya dulu.
+NOO_SHEET_KOLOM = [
+    "Submitted At", "Source", "Submitted By", "Store ID", "Store Name", "Channel", "Customer Code",
+    "Customer Branch Code", "Customer Store Code", "Customer Store Name", "City", "Store Address",
+    "Longitude", "Latitude", "Store Type", "Visibility Rating", "Location Rating", "ASM/KAM", "SPV", "SE/KAE",
+    "Generate ID", "generated_at",   # dua kolom ini kosong saat submit, diisi setelah Generate ID + Save changes (update_generate_id_di_sheet)
+    # Jejak perubahan terakhir (diisi hanya kalau status / Store ID BENAR-BENAR berubah dibanding data tersimpan di Supabase):
+    "Remark_status",   # contoh: "Need Review > Generate ID"
+    "Remark_ID",       # contoh: "null > IESM07800", "IESM07800 > null", "IESM07800 > IESM07801"
+    "Remark_at",       # waktu (WIB) perubahan terakhir
+]
+
+def _noo_sheet_credentials():
+    """Service account noo-spreadsheet: dari st.secrets["noo_sheet"] (disarankan) atau file JSON lokal."""
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    try:
+        info = dict(st.secrets["noo_sheet"])
+        info["private_key"] = info["private_key"].replace("\\n", "\n")
+        return service_account.Credentials.from_service_account_info(info, scopes=scopes)
+    except Exception:
+        for f in NOO_SHEET_KEY_FILES:
+            if os.path.exists(f):
+                return service_account.Credentials.from_service_account_file(f, scopes=scopes)
+        raise FileNotFoundError("Service account key not found: add [noo_sheet] to secrets.toml or put "
+                                "noo-spreadsheet.json in the project folder")
+
+@st.cache_resource(show_spinner=False)
+def _noo_worksheet():
+    import gspread
+    return gspread.authorize(_noo_sheet_credentials()).open_by_key(NOO_SHEET_ID).worksheet(NOO_SHEET_TAB)
+
+def kirim_noo_ke_sheet(rows: list, sumber: str = "", pengguna: str = "") -> tuple:
+    """Tambahkan baris NOO yang BARU disubmit (dict hasil noo_row_ke_supabase) ke sheet 'test'.
+    Return (ok, pesan). Tidak pernah raise: kegagalan sheet tidak boleh menggagalkan submit ke Supabase."""
+    if not rows:
+        return True, ""
+    try:
+        ws = _noo_worksheet()
+        if ws.row_values(1) != NOO_SHEET_KOLOM:            # header belum ada / beda -> tulis di baris 1
+            ws.update(range_name="A1", values=[NOO_SHEET_KOLOM])
+        waktu = datetime.datetime.now(ZONA_WAKTU).strftime("%Y-%m-%d %H:%M:%S")
+        data = []
+        for r in rows:
+            r = {**r, "Submitted At": waktu, "Source": sumber, "Submitted By": pengguna}
+            data.append(["" if r.get(k) is None else str(r.get(k)) for k in NOO_SHEET_KOLOM])
+        ws.append_rows(data, value_input_option="USER_ENTERED", table_range="A1")
+        return True, ""
+    except Exception as e:
+        _noo_worksheet.clear()
+        return False, f"{type(e).__name__}: {e}"
+
+def update_generate_id_di_sheet(items: list) -> tuple:
+    """Isi kolom 'Generate ID' dan 'generated_at' di sheet untuk baris NOO yang sudah di-generate.
+    items = [{"kode": Customer Store Code, "nama": Customer Store Name, "store_id": ..., "generated_at": "YYYY-MM-DD HH:MM:SS"}]
+    Baris dicari lewat Customer Store Code + Customer Store Name. Return (ok, pesan); tidak pernah raise."""
+    if not items:
+        return True, ""
+    try:
+        import gspread
+        ws = _noo_worksheet()
+        if ws.row_values(1) != NOO_SHEET_KOLOM:
+            ws.update(range_name="A1", values=[NOO_SHEET_KOLOM])
+        c_kode, c_nama = NOO_SHEET_KOLOM.index("Customer Store Code"), NOO_SHEET_KOLOM.index("Customer Store Name")
+        c_id, c_waktu = NOO_SHEET_KOLOM.index("Generate ID") + 1, NOO_SHEET_KOLOM.index("generated_at") + 1
+        semua = ws.get_all_values()
+        norm = lambda v: str(v or "").strip().upper()
+        posisi = {}
+        for n, baris in enumerate(semua[1:], start=2):
+            if len(baris) > max(c_kode, c_nama):
+                posisi.setdefault((norm(baris[c_kode]), norm(baris[c_nama])), []).append(n)
+        update, tambah = [], []
+        for it in items:
+            baris_sheet = posisi.get((norm(it["kode"]), norm(it["nama"])))
+            if not baris_sheet:
+                # baris belum ada di sheet (mis. NOO masuk sebelum integrasi sheet, atau barisnya terhapus):
+                # TAMBAHKAN sebagai baris baru lengkap dengan Generate ID + generated_at (bukan error)
+                data = {**it.get("data", {}), **it.get("nilai", {}), "Customer Store Code": it["kode"],
+                        "Customer Store Name": it["nama"], "Generate ID": it["store_id"], "generated_at": it["generated_at"]}
+                tambah.append(["" if data.get(k) is None else str(data.get(k)) for k in NOO_SHEET_KOLOM])
+                continue
+            for n in baris_sheet:
+                update.append({"range": gspread.utils.rowcol_to_a1(n, c_id), "values": [[it["store_id"]]]})
+                update.append({"range": gspread.utils.rowcol_to_a1(n, c_waktu), "values": [[it["generated_at"]]]})
+                # kolom lain yang ikut diedit (Store Name, City, Store Address, Longitude, Latitude, Store Type, ...)
+                for kol, nilai in it.get("nilai", {}).items():
+                    if kol in NOO_SHEET_KOLOM:
+                        update.append({"range": gspread.utils.rowcol_to_a1(n, NOO_SHEET_KOLOM.index(kol) + 1),
+                                       "values": [["" if nilai is None else str(nilai)]]})
+        if update:
+            ws.batch_update(update, value_input_option="USER_ENTERED")
+        if tambah:
+            ws.append_rows(tambah, value_input_option="USER_ENTERED", table_range="A1")
+        return True, ""
+    except Exception as e:
+        _noo_worksheet.clear()
+        return False, f"{type(e).__name__}: {e}"
+
+# ─────────────────────────────── KUNCI GENERATE ID (Streamlit <-> Apps Script) ─
+# Tab "LOCK" di spreadsheet NOO: tiap sesi Streamlit yang punya ID BELUM tersimpan menulis 1 baris (owner, waktu UTC, user).
+# Apps Script harus berhenti (return) selama ada baris yang umurnya < NOO_LOCK_MENIT menit. Baris dihapus setelah Save /
+# Refresh; baris yang lebih tua dari batas dianggap basi (supaya script tidak macet selamanya kalau browser ditutup).
+NOO_LOCK_TAB   = "LOCK"
+NOO_LOCK_MENIT = 10
+NOO_LOCK_HEADER = ["owner", "locked_at_utc", "user"]
+
+def _pemilik_kunci() -> str:
+    ss = st.session_state
+    if "_pemilik_kunci" not in ss:
+        ss["_pemilik_kunci"] = os.urandom(4).hex()
+    return ss["_pemilik_kunci"]
+
+@st.cache_resource(show_spinner=False)
+def _noo_lock_worksheet():
+    import gspread
+    book = gspread.authorize(_noo_sheet_credentials()).open_by_key(NOO_SHEET_ID)
+    try:
+        return book.worksheet(NOO_LOCK_TAB)
+    except gspread.WorksheetNotFound:
+        ws = book.add_worksheet(NOO_LOCK_TAB, rows=50, cols=3)
+        ws.update(range_name="A1", values=[NOO_LOCK_HEADER])
+        return ws
+
+def kunci_generate_pasang(pengguna: str = "") -> tuple:
+    """Tandai 'sesi ini punya ID yang belum disimpan' supaya Apps Script menunggu. Return (ok, pesan); tidak pernah raise."""
+    try:
+        ws = _noo_lock_worksheet()
+        owner = _pemilik_kunci()
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        kol = ws.col_values(1)
+        if kol[:1] != ["owner"]:
+            ws.insert_row(NOO_LOCK_HEADER, 1)
+            kol = ws.col_values(1)
+        if owner in kol:
+            n = kol.index(owner) + 1
+            ws.update(range_name=f"B{n}:C{n}", values=[[ts, pengguna]])
+        else:
+            ws.append_row([owner, ts, pengguna], value_input_option="RAW")
+        st.session_state["_kunci_aktif"] = True
+        return True, ""
+    except Exception as e:
+        _noo_lock_worksheet.clear()
+        return False, f"{type(e).__name__}: {e}"
+
+def kunci_generate_lepas() -> tuple:
+    """Hapus baris kunci milik sesi ini (dipanggil setelah semua ID tersimpan / data di-refresh)."""
+    if not st.session_state.get("_kunci_aktif"):
+        return True, ""          # sesi ini tidak pernah memasang kunci -> tidak perlu menyentuh Google Sheet
+    try:
+        ws = _noo_lock_worksheet()
+        kol = ws.col_values(1)
+        owner = _pemilik_kunci()
+        if owner in kol:
+            ws.delete_rows(kol.index(owner) + 1)
+        st.session_state["_kunci_aktif"] = False
+        return True, ""
+    except Exception as e:
+        _noo_lock_worksheet.clear()
+        return False, f"{type(e).__name__}: {e}"
+
+# ─────────────────────────────── COUNTER PUSAT STORE ID (Supabase RPC) ────────
+# Streamlit dan Apps Script sama-sama mengambil nomor lewat fungsi ambil_nomor di Supabase (atomik), jadi tidak bisa kembar.
+# Kalau fungsinya belum dibuat / gagal dipanggil, generate_store_ids otomatis kembali ke hitungan lokal (max+1).
+PAKAI_COUNTER_PUSAT = True
+
+def sb_ambil_nomor(prefix: str, jumlah: int, floor: int):
+    """Ambil `jumlah` nomor berurutan untuk prefix. floor = nomor tertinggi yang sudah diketahui dari semua sumber
+    (counter otomatis naik ke atas floor). Return (dari, sampai) atau None kalau gagal."""
+    if not PAKAI_COUNTER_PUSAT or jumlah < 1:
+        return None
+    try:
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/rpc/ambil_nomor", headers={**_SB_HEADERS, "Prefer": ""},
+                          json={"p_prefix": prefix, "p_jumlah": int(jumlah), "p_floor": int(floor)}, timeout=15)
+        r.raise_for_status()
+        d = r.json()
+        d = d[0] if isinstance(d, list) else d
+        return int(d["dari"]), int(d["sampai"])
+    except Exception:
+        return None
+
+def sb_id_terpakai() -> dict:
+    """Semua Store ID di INPUT_NOO (tanpa cache, tanpa batas 500): {ID: (Customer Store Code, Customer Store Name)}.
+    Return None kalau gagal membaca."""
+    hasil, start, step = {}, 0, 1000
+    try:
+        while True:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/{TABLE_SUBMIT_NOO}",
+                headers={**_SB_HEADERS, "Prefer": "", "Range-Unit": "items", "Range": f"{start}-{start+step-1}"},
+                params={"select": '"Store ID","Customer Store Code","Customer Store Name"'}, timeout=15)
+            if r.status_code == 416:
+                break
+            r.raise_for_status()
+            batch = r.json()
+            for row in batch:
+                sid = str(row.get("Store ID") or "").strip().upper()
+                if sid:
+                    hasil[sid] = (str(row.get("Customer Store Code") or "").strip(), str(row.get("Customer Store Name") or "").strip())
+            if len(batch) < step:
+                break
+            start += step
+        return hasil
+    except Exception:
+        return None
+
+def hapus_noo_di_sheet(items: list) -> tuple:
+    """Hapus baris di sheet untuk NOO yang di-Delete di Store Validation.
+    items = [{"kode": Customer Store Code, "nama": Customer Store Name}]. Baris dicari lewat kode + nama.
+    Return (ok, pesan); tidak pernah raise (gagal sheet tidak membatalkan delete di Supabase)."""
+    if not items:
+        return True, ""
+    try:
+        ws = _noo_worksheet()
+        c_kode, c_nama = NOO_SHEET_KOLOM.index("Customer Store Code"), NOO_SHEET_KOLOM.index("Customer Store Name")
+        norm = lambda v: str(v or "").strip().upper()
+        target = {(norm(it["kode"]), norm(it["nama"])) for it in items}
+        baris_hapus = []
+        for n, baris in enumerate(ws.get_all_values()[1:], start=2):      # baris 1 = header
+            if len(baris) > max(c_kode, c_nama) and (norm(baris[c_kode]), norm(baris[c_nama])) in target:
+                baris_hapus.append(n)
+        if baris_hapus:
+            # hapus dari baris paling bawah dulu supaya nomor baris di atasnya tidak bergeser
+            ws.spreadsheet.batch_update({"requests": [
+                {"deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS",
+                                               "startIndex": n - 1, "endIndex": n}}}
+                for n in sorted(baris_hapus, reverse=True)]})
+        return True, ""
+    except Exception as e:
+        _noo_worksheet.clear()
+        return False, f"{type(e).__name__}: {e}"
 
 def judul_opsi(nomor: int, judul: str, sub: str = "") -> str:
     sub_html = f'<span class="sub-opsi">· {sub}</span>' if sub else ""
