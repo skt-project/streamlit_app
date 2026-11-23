@@ -86,7 +86,6 @@ DATA_COLS = ["region", "distributor_name", "brand", "sku", "product_name",
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_distributor_region_map(distributor_names: tuple) -> dict:
-    """Mapping distributor -> region langsung dari tabel (tanpa filter buffer plan / SKU)."""
     names = [d for d in distributor_names if d]
     if not names:
         return {}
@@ -119,7 +118,6 @@ def _insert_supply_control(df: pd.DataFrame):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_actual_so(distributor_code: str) -> pd.DataFrame:
-    """Fetch MTD actual SO per SKU untuk distributor tertentu di bulan berjalan."""
     client = get_bq_client()
     query = f"""
         SELECT
@@ -139,8 +137,6 @@ def get_actual_so(distributor_code: str) -> pd.DataFrame:
 
     
 def _filter_already_saved(df: pd.DataFrame) -> pd.DataFrame:
-    """Buang baris yang kombinasi file_name+sku+po_qty+calendar_date-nya sudah pernah ter-insert di BigQuery.
-    Tanggal ikut jadi kunci: file/SKU/qty yang sama di tanggal berbeda dianggap PO baru dan tetap masuk."""
     if df.empty:
         return df
     client = get_bq_client()
@@ -319,7 +315,6 @@ TARGET_SO_DATA_TYPE = "SO"   # CEK nilai data_type di sheet
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_target_so_raw() -> pd.DataFrame:
-    """Load seluruh sheet Target SO sekali, lalu di-cache. Filtering dilakukan belakangan di pandas."""
     csv_url, _ = gsheet_to_csv_url(TARGET_SO_SHEET_URL)
     if csv_url is None:
         st.error("Link Target SO tidak valid.")
@@ -436,7 +431,6 @@ def calculate_woi(stock, po_qty, avg_weekly_sales):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_max_monthly_st_ytd() -> pd.DataFrame:
-    """Qty ST bulanan tertinggi YTD per distributor + SKU (bulan dengan ST terbesar tahun ini)."""
     query = """
         WITH bulan AS (
             SELECT EXTRACT(MONTH FROM order_date) AS month, distributor, sku, SUM(qty) AS total_qty
@@ -460,8 +454,6 @@ def get_max_monthly_st_ytd() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_national_alloc_total() -> pd.DataFrame:
-    """Total alokasi nasional per SKU NPD bulan berjalan = SUM seluruh region.
-    Alokasi bersifat per region (berulang di tiap distributor), jadi di-dedupe dulu per (region, sku) sebelum dijumlah."""
     query = f"""
         WITH npd AS (
             SELECT DISTINCT UPPER(sku) AS sku
@@ -487,8 +479,7 @@ def get_national_alloc_total() -> pd.DataFrame:
 
 
 def add_national_alloc_total(res_df: pd.DataFrame) -> pd.DataFrame:
-    """Kolom bantu untuk pengecekan: total alokasi nasional per SKU NPD, dan total semua SKU NPD bulan ini."""
-    nat = get_national_alloc_total()
+    nat =get_national_alloc_total()
     res_df["National Alloc Total (SKU)"] = np.nan
     res_df["National Alloc Total (All NPD)"] = np.nan
     if nat.empty:
@@ -502,27 +493,44 @@ def add_national_alloc_total(res_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_national_alloc_status(res_df: pd.DataFrame) -> pd.DataFrame:
-    """% = PO Qty / sisa alokasi NASIONAL SKU itu (jumlah remaining allocation semua region/distributor, kolom 'National Alloc Total (SKU)').
-    >= 75% -> '> 75% National Alloc', selain itu '< 75% National Alloc'.
-    Kosong kalau tidak ada PO Qty atau total alokasi nasional tidak tersedia / <= 0 (mis. bukan SKU NPD).
-    Harus dipanggil SETELAH add_national_alloc_total."""
     po = pd.to_numeric(res_df["PO Qty"], errors="coerce").astype("float64").fillna(0)
     alloc = pd.to_numeric(res_df["National Alloc Total (SKU)"], errors="coerce").astype("float64")
     pct = po / alloc.where(alloc > 0)
+    res_df["National Alloc Qty (Basis)"] = po
     res_df["National Alloc %"] = pct
     pct_np = pct.to_numpy(dtype="float64", na_value=np.nan)
     po_np = po.to_numpy(dtype="float64")
+    alloc_np = alloc.to_numpy(dtype="float64", na_value=np.nan)
+    neg_alloc = (alloc_np < 0) & (po_np > 0)  # alokasi nasional SKU minus -> otomatis > 75%
     res_df["National Alloc Status"] = np.select(
-        [(po_np <= 0) | np.isnan(pct_np), pct_np >= 0.75],
-        ["", "> 75% National Alloc"],
+        [neg_alloc, (po_np <= 0) | np.isnan(pct_np), pct_np >= 0.75],
+        ["> 75% National Alloc", "", "> 75% National Alloc"],
         default="< 75% National Alloc",
     )
     return res_df
 
+def additional_suggestion(res_df: pd.DataFrame) -> pd.DataFrame:
+    is_add =res_df["Remark"].astype(str).str.strip().str.lower().eq("additional suggestion")
+    if not is_add.any():
+        return res_df
+    qty = pd.to_numeric(res_df["Suggested QTY Final"], errors="coerce").astype("float64").fillna(0)
+    alloc = pd.to_numeric(res_df["National Alloc Total (SKU)"], errors="coerce").astype("float64")
+    pct = qty / alloc.where(alloc > 0)
+    pct_np = pct.to_numpy(dtype="float64", na_value=np.nan)
+    qty_np = qty.to_numpy(dtype="float64")
+    alloc_np = alloc.to_numpy(dtype="float64", na_value=np.nan)
+    status = np.select(
+        [(alloc_np < 0) & (qty_np > 0), (qty_np <= 0) | np.isnan(pct_np), pct_np >= 0.75],
+        ["> 75% National Alloc", "", "> 75% National Alloc"],
+        default="< 75% National Alloc",
+    )
+    res_df.loc[is_add, "National Alloc Qty (Basis)"] = qty[is_add]
+    res_df.loc[is_add, "National Alloc %"] = pct[is_add]
+    res_df.loc[is_add, "National Alloc Status"] = status[is_add.to_numpy()]
+    return res_df
+
 
 def add_woi_threshold_status(res_df: pd.DataFrame, dist_name: str, max_st_df: pd.DataFrame) -> pd.DataFrame:
-    """WOI Threshold = (Total Stock + PO Qty) / (max ST bulanan YTD / 30 * 7) * 80%.
-    Status: '> Highest WOI Threshold' bila WOI Threshold > woi_standard (stock_analysis), selain itu '< Highest WOI Threshold'."""
     res_df["Max ST Monthly YTD"] = np.nan
     res_df["WOI Threshold"] = np.nan
     res_df["WOI Threshold Status"] = ""
@@ -598,9 +606,6 @@ LOGO_URL = _logo_src()
 
 @st.cache_data(show_spinner=False)
 def create_po_template_excel() -> bytes:
-    """
-    Creates a blank Excel template file with the required headers.
-    """
     output = io.BytesIO()
     wb = Workbook()
     ws = wb.active
@@ -731,7 +736,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     reject_font = Font(bold=True, color="D73E3E")
     suggest_font = Font(bold=True, color="F3C94C")
     currency_cols = ["PO Value", "Suggested PO Value", "Suggested Value Final"]
-    integer_cols = ["Remaining Allocation (By Region)", "National Alloc Total (SKU)", "National Alloc Total (All NPD)", "Avg Weekly Sales LM (Qty)",
+    integer_cols = ["Remaining Allocation (By Region)", "National Alloc Qty (Basis)", "Avg Weekly Sales LM (Qty)",
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final"]
     decimal_cols = ["WOI (Stock + PO Ori)", "woi_standard", "WOI Threshold", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
@@ -859,7 +864,6 @@ def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
 
 @st.cache_data(show_spinner=False, max_entries=16)
 def pivot_to_png_bytes(df: pd.DataFrame, kinds: list, title: str = "") -> bytes:
-    """Render tabel pivot (df sudah berisi string terformat) jadi PNG. kinds: item/sub/dist/grand per baris."""
     if not MATPLOTLIB_OK:
         raise RuntimeError("matplotlib tidak tersedia.")
     n_rows, n_cols = df.shape
@@ -1278,6 +1282,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         res_df = add_woi_threshold_status(res_df, dist_name, get_max_monthly_st_ytd())
         res_df = add_national_alloc_total(res_df)
         res_df = add_national_alloc_status(res_df)
+        res_df = additional_suggestion(res_df)
 
         res_df["RSA Notes"] = ""
         res_df["Suggested Value Final"] = (
@@ -1328,7 +1333,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                     "Target SO","Suggested QTY SO","Suggested QTY Final","Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)","National Alloc Total (SKU)","National Alloc Total (All NPD)","National Alloc %","National Alloc Status","is_po_sku","RSA Notes", "MOQ", "Check MOQ", "Suggested Min Order Qty"]
+                    "Remaining Allocation (By Region)","National Alloc Qty (Basis)","National Alloc %","National Alloc Status","is_po_sku","RSA Notes", "MOQ", "Check MOQ"]
 
         # brand ditangkap terpisah (tidak masuk output PO Simulator), khusus untuk Section 8
         if "brand" in res_df.columns:
@@ -1391,7 +1396,6 @@ def fetch_pi_anomaly() -> pd.DataFrame:
 
 
 def fetch_existing_maps(*_a, **_k) -> dict:
-    """File yang sudah di-map hanya punya 1 ref, jadi tidak muncul di tabel anomaly -> tidak ada yang dimuat."""
     return {}
 
 
@@ -1403,8 +1407,6 @@ def _update_pi_validation(
     primary_ref: str,
     candidate_refs: list[str],
 ) -> bool:
-    """Replace reference_cust_order_no semua baris file ke primary_ref.
-    Nilai lama disalin dulu ke order_no_mapped_from (tidak menimpa salinan yang sudah ada); order_no_mapped_at = waktu user mengubah kategori/validation_by_rsa."""
     if not primary_ref or primary_ref not in candidate_refs:
         st.error(f"PI '{primary_ref}' tidak valid untuk {distributor_name} / {file_name}.")
         return False
@@ -2104,8 +2106,6 @@ def _file_upload_section(page_key: str):
         return start, (end+1) if end is not None else None
     
     def _resolve_header_row(row_rng_str, fbytes, fname, sheet_sel):
-        """Row Range's leading integer = header row override (1-indexed).
-         Kosong / invalid → auto-detect."""
         if row_rng_str and row_rng_str.strip():
             start_str = row_rng_str.strip().split(":", 1)[0].strip()
             if start_str:
@@ -2265,7 +2265,6 @@ def _file_upload_section(page_key: str):
         st.session_state[prev_submode_key] = cur_submode
 
     def _force_kalbar_default(row_key, col_key):
-        """default row=7:, col=18:22"""
         marker = f"_kalbar_defaulted_{row_key}"
         if mode_just_changed or not st.session_state.get(marker):
             st.session_state[row_key] = "7:"
@@ -2273,7 +2272,6 @@ def _file_upload_section(page_key: str):
             st.session_state[marker] = True
 
     def _force_kalbar_row_default(row_key):
-        """default row=7:"""
         marker = f"_kalbar_defaulted_{row_key}"
         if mode_just_changed or not st.session_state.get(marker):
             st.session_state[row_key] = "2:"
@@ -3123,7 +3121,7 @@ if st.session_state.get('page') == 'po_changer':
                 _cached = st.session_state.get("sim_result_rsa")
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
                               "WOI Threshold", "WOI Threshold Status", "woi_standard", "Max ST Monthly YTD",
-                              "National Alloc %", "National Alloc Status", "National Alloc Total (SKU)"}
+                              "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
                 if _cached and _cached.get("dfs"):
                     _first_df = next(iter(_cached["dfs"].values()))
                     if not _need_cols.issubset(_first_df.columns):
@@ -3295,7 +3293,7 @@ if st.session_state.get('page') == 'po_spv':
                 _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
                               "WOI Threshold", "WOI Threshold Status", "woi_standard", "Max ST Monthly YTD",
-                              "National Alloc %", "National Alloc Status", "National Alloc Total (SKU)"}
+                              "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
                 _spv_cache =st.session_state.get("sim_result_spv")
                 if _spv_cache and _spv_cache.get("dfs"):
                     _first = next(iter(_spv_cache["dfs"].values()))
@@ -3359,8 +3357,8 @@ if st.session_state.get('page') == 'po_spv':
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final", "Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
-                    "Remaining Allocation (By Region)", "National Alloc Total (SKU)", "National Alloc Total (All NPD)",
-                    "National Alloc %", "National Alloc Status",
+                    "Remaining Allocation (By Region)",
+                    "National Alloc Qty (Basis)", "National Alloc %", "National Alloc Status",
                 ]
                 st.dataframe(final_display_df.reindex(columns=final_cols).reset_index(drop=True))
 
