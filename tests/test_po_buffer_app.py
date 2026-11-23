@@ -228,6 +228,25 @@ def test_every_pdf_in_the_zip_contains_its_own_store_and_no_other(app):
         assert not any(f"Kode: {o}" in text or f"Produk {o} " in text for o in others)
 
 
+def test_the_store_list_still_renders_when_hundreds_of_stores_have_no_store_code(tmp_path):
+    """Regression (2026-11-23): 401 staging stores with store_code NULL crashed the multiselect
+    ("unhashable type: 'Series'") and the page stopped before the store list."""
+    import pandas as pd
+    from po_buffer_fakes import build_inventory_fixture
+
+    inventory = build_inventory_fixture()
+    unmapped = inventory.iloc[:1].copy()
+    unmapped = pd.concat([unmapped] * 400, ignore_index=True)
+    unmapped["store_code"] = None
+    unmapped["store_name"] = [f"STAGING STORE {n}" for n in range(400)]
+    unmapped["distributor_g2g"] = "DIST A"
+    with launch(FakePoBufferBigQuery(detail_inventory=pd.concat([inventory, unmapped], ignore_index=True)),
+                tmp_path / "spool.jsonl") as driver:
+        assert "Store List (6 stores)" in driver.text()               # the page got past the filters
+        options = driver.at.multiselect(key="store_select").options
+        assert len(options) == 6 and not any("STAGING STORE" in o for o in options)
+
+
 def test_filter_with_one_store_gives_a_zip_with_one_pdf(app):
     app.select_stores("ST005")
     app.click_button("bulk_zip_btn")
