@@ -249,6 +249,39 @@ def test_the_store_list_still_renders_when_hundreds_of_stores_have_no_store_code
 
 
 # ---------------------------------------------------------------------------
+# Region / distributor dropdowns only offer choices that have stores
+# ---------------------------------------------------------------------------
+
+def test_regions_without_any_store_data_are_not_offered(app):
+    assert app.at.selectbox(key="region_select").options == ["All", "JAWA BARAT", "SUMATERA"]
+    assert "JAWA TENGAH" not in app.at.selectbox(key="region_select").options     # in the master, no stores
+    assert "DIST Z" not in app.at.selectbox(key="distributor_select").options
+
+
+def test_every_region_and_distributor_that_is_offered_shows_stores(app):
+    for region in [r for r in app.at.selectbox(key="region_select").options if r != "All"]:
+        app.select_region(region)
+        assert "Store List (0 stores)" not in app.text() and "No stores found" not in app.text(), region
+        for distributor in [d for d in app.at.selectbox(key="distributor_select").options if d != "All"]:
+            app.select_distributor(distributor)
+            assert "Store List (0 stores)" not in app.text(), (region, distributor)
+            assert "No stores found" not in app.text(), (region, distributor)
+        app.select_distributor("All")
+
+
+def test_a_selected_region_that_disappears_from_the_data_falls_back_to_all(app):
+    """The data is refreshed while a region is selected and that region no longer has stores."""
+    app.select_region("SUMATERA")
+    assert "Store List (1 stores)" in app.text()
+    app.fake.inventory = app.fake.inventory[app.fake.inventory["region"] != "SUMATERA"]
+    st.cache_data.clear()
+    app.run()
+    assert app.at.selectbox(key="region_select").options == ["All", "JAWA BARAT"]
+    assert app.at.selectbox(key="region_select").value == "All"
+    assert "Store List (5 stores)" in app.text()
+
+
+# ---------------------------------------------------------------------------
 # Paging: only one page of stores builds PDFs; the bulk ZIP still covers everyone
 # ---------------------------------------------------------------------------
 

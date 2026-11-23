@@ -1190,6 +1190,17 @@ def build_store_options(df_stores: pd.DataFrame) -> Tuple[List[str], Dict[str, s
     return stores["store_code"].tolist(), dict(zip(stores["store_code"], stores["label"]))
 
 
+def restrict_master_to_inventory(master: pd.DataFrame, df_inventory: pd.DataFrame) -> pd.DataFrame:
+    """
+    Active master distributors that have rows in the inventory data.
+
+    The master lists every region (18 today) but the PO inventory only holds some
+    of them, so a region taken straight from the master can have no stores at all.
+    """
+    present = set(df_inventory["distributor_g2g"].fillna("").astype(str).str.strip())
+    return master[master["distributor"].isin(present)]
+
+
 def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[str]]:
     """
     Render filter controls and return selections
@@ -1208,7 +1219,9 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
             '<div class="selection-title" style="font-size:0.9rem;">📍 Region</div>',
             unsafe_allow_html=True
         )
-        master = load_active_distributors()
+        # Offer only regions/distributors that actually have stores in the inventory data;
+        # otherwise picking e.g. a Java region just shows an empty list.
+        master = restrict_master_to_inventory(load_active_distributors(), df_inventory_buffer)
         regions = ["All"] + sorted(master["region_g2g"].unique())
         selected_region = st.selectbox(
             "Region",
@@ -1231,7 +1244,9 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
             label_visibility="collapsed",
             key="distributor_select"
         )
-    
+
+    st.caption("Hanya region dan distributor yang punya data toko yang ditampilkan.")
+
     # Reset store selection when upper filters change
     if (st.session_state.prev_region != selected_region or
         st.session_state.prev_distributor != selected_distributor):

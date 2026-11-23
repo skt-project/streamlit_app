@@ -95,6 +95,26 @@ def test_empty_or_all_unmapped_input_gives_no_options():
 
 
 # ---------------------------------------------------------------------------
+# Region / distributor options: only those that have stores
+# ---------------------------------------------------------------------------
+
+def test_master_is_restricted_to_distributors_present_in_the_inventory():
+    master = pd.DataFrame({
+        "region_g2g": ["East Kalimantan", "West Java", "West Java", "Southern Sulawesi"],
+        "distributor": ["PT A", "PT B", "PT C", "PT D"],
+    })
+    inventory = pd.DataFrame({"distributor_g2g": [" PT A", "PT D ", "PT A", None, "PT NOT IN MASTER"]})
+    kept = po_buffer.restrict_master_to_inventory(master, inventory)
+    assert sorted(kept["region_g2g"].unique()) == ["East Kalimantan", "Southern Sulawesi"]
+    assert sorted(kept["distributor"]) == ["PT A", "PT D"]       # whitespace in the data is ignored
+
+
+def test_an_empty_inventory_offers_no_region_at_all():
+    master = pd.DataFrame({"region_g2g": ["West Java"], "distributor": ["PT B"]})
+    assert po_buffer.restrict_master_to_inventory(master, pd.DataFrame({"distributor_g2g": []})).empty
+
+
+# ---------------------------------------------------------------------------
 # SQL guards (the data-level fix is verified against BigQuery separately)
 # ---------------------------------------------------------------------------
 

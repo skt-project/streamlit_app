@@ -138,6 +138,8 @@ def build_master_fixture():
             {"region_g2g": "JAWA BARAT", "distributor": "DIST A"},
             {"region_g2g": "JAWA BARAT", "distributor": "DIST B"},
             {"region_g2g": "SUMATERA", "distributor": "DIST C"},
+            # in the master but with no stores in the PO inventory (like the Java regions)
+            {"region_g2g": "JAWA TENGAH", "distributor": "DIST Z"},
         ]
     )
 
