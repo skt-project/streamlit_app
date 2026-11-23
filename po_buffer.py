@@ -614,13 +614,18 @@ def generate_store_pdf(store_info: Dict, store_detail: pd.DataFrame) -> bytes:
 def combined_inventory_sql() -> str:
     """
     Inventory buffer unioned with the current-month store suggestion staging
-    table, collapsed to one row per store_code + id_st + product_code.
+    table, collapsed to one row per store_code + product_code.
 
     Numeric, qty, value, and date columns use MAX. Text and bool columns use
     ANY_VALUE. Only rows with buffer_plan IS NOT NULL are returned.
     Staging rows are limited to Kalimantan and Sulawesi. Their store_code is
     taken from inventory for the same id_st, preferring the code equal to
     id_st, so a plan is not copied across store codes that share an id_st.
+    A staging store whose id_st is not in inventory at all keeps its id_st as
+    its store_code: without any code, hundreds of such stores would collapse
+    into one NULL-code "store" that the store filter cannot represent.
+    Grouping on store_code + product_code (id_st is only carried along) also
+    stops a store that appears in both sources from listing a SKU twice.
     """
     inventory_table = f"`{Config.BQ_PROJECT}.{Config.BQ_DATASET}.{Config.BQ_TABLE}`"
     staging_table = (
@@ -630,7 +635,7 @@ def combined_inventory_sql() -> str:
     SELECT *
     FROM (
     SELECT
-        id_st,
+        MAX(id_st) AS id_st,
         product_code,
         MAX(inner_pcs) AS inner_pcs,
         MAX(price_for_store) AS price_for_store,
@@ -699,7 +704,7 @@ def combined_inventory_sql() -> str:
         FROM {inventory_table}
         UNION ALL
         SELECT
-            map.store_code AS store_code,
+            COALESCE(map.store_code, staging.id_st) AS store_code,
             staging.product_code,
             CAST(NULL AS STRING) AS product_life_cycle,
             CAST(NULL AS STRING) AS Stok_Principal,
@@ -750,7 +755,6 @@ def combined_inventory_sql() -> str:
     ) AS combined_data
     GROUP BY
         store_code,
-        id_st,
         product_code
     ) AS grouped_inventory
     WHERE buffer_plan IS NOT NULL
@@ -908,6 +912,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
         COALESCE(SUM(CASE WHEN ib.buffer_plan IS NOT NULL THEN ib.buffer_plan_value ELSE 0 END), 0) AS est_order_value
     FROM combined_data ib
     WHERE TRIM(ib.distributor_g2g) IN UNNEST(@distributors)
+      AND ib.store_code IS NOT NULL
     GROUP BY ib.store_code
     HAVING total_skus > 0
     ORDER BY est_order_value DESC
@@ -940,7 +945,7 @@ def load_store_summary_filtered(selected_region="All", selected_distributor="All
 def load_inventory_buffer_data() -> pd.DataFrame:
     """
     Load inventory rows from rsa.inventory_buffer unioned with the current
-    month of gt_schema.po_store_suggestion_stagging, one row per store_code + id_st + product_code.
+    month of gt_schema.po_store_suggestion_stagging, one row per store_code + product_code.
     
     Returns:
         pd.DataFrame: Combined inventory buffer data
@@ -1149,6 +1154,33 @@ def render_header(last_exec_time: Optional[datetime]):
     </div>
     """, unsafe_allow_html=True)
 
+def build_store_options(df_stores: pd.DataFrame) -> Tuple[List[str], Dict[str, str]]:
+    """
+    Selectable stores for the store multiselect: (codes, {code: label}).
+
+    Exactly one option per store_code. Rows without a store_code cannot be
+    selected and are skipped. A code that carries several names (or a blank
+    one) still gives a single option, preferring a real name, so the
+    multiselect never receives duplicate or unhashable values.
+    """
+    stores = df_stores[["store_code", "store_name"]].dropna(subset=["store_code"]).copy()
+    if stores.empty:
+        return [], {}
+    stores["store_code"] = stores["store_code"].astype(str)
+    stores["store_name"] = stores["store_name"].fillna("").astype(str).str.strip()
+    stores = (
+        stores.assign(_blank=stores["store_name"].eq(""))
+        .sort_values(["store_code", "_blank", "store_name"])
+        .drop_duplicates("store_code")
+    )
+    stores["label"] = [
+        f"{code} - {name}" if name else f"{code} - (tanpa nama)"
+        for code, name in zip(stores["store_code"], stores["store_name"])
+    ]
+    stores = stores.sort_values("label")
+    return stores["store_code"].tolist(), dict(zip(stores["store_code"], stores["label"]))
+
+
 def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[str]]:
     """
     Render filter controls and return selections
@@ -1206,15 +1238,9 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
     dist_key = df_inventory_buffer["distributor_g2g"].fillna("").astype(str).str.strip()
     df_filtered_stores = df_inventory_buffer.loc[dist_key.isin(allowed_distributors)].copy()
     
-    store_options = (
-    df_filtered_stores[["store_code", "store_name"]]
-    .drop_duplicates()
-    .assign(label=lambda x: x["store_code"] + " - " + x["store_name"])
-    .sort_values("label")
-    )
-    
+    valid_store_codes, store_labels = build_store_options(df_filtered_stores)
+
     # ✅ Filter out invalid store codes from session state
-    valid_store_codes = store_options["store_code"].tolist()
     
     # Update session state directly if needed
     if st.session_state.store_select:
@@ -1226,7 +1252,7 @@ def render_filters(df_inventory_buffer: pd.DataFrame) -> Tuple[str, str, List[st
     selected_stores = st.multiselect(
         "Store Selection",
         options=valid_store_codes,
-        format_func=lambda x: store_options.set_index("store_code").loc[x, "label"],
+        format_func=lambda code: store_labels.get(code, str(code)),
         placeholder="Select one or more stores…",
         label_visibility="collapsed",
         key="store_select"
