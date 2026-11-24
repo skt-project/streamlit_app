@@ -531,7 +531,7 @@ def additional_suggestion(res_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_woi_threshold_status(res_df: pd.DataFrame, dist_name: str, max_st_df: pd.DataFrame) -> pd.DataFrame:
-    res_df["Max ST Monthly YTD"] = np.nan
+    res_df["80% Max ST YTD"] = np.nan
     res_df["WOI Threshold"] = np.nan
     res_df["WOI Threshold Status"] = ""
     if max_st_df.empty:
@@ -539,7 +539,7 @@ def add_woi_threshold_status(res_df: pd.DataFrame, dist_name: str, max_st_df: pd
     m = max_st_df[max_st_df["distributor"] == str(dist_name).strip().upper()]
     max_map = m.set_index("sku")["max_qty_ytd"].to_dict()
     max_qty = pd.to_numeric(res_df["SKU"].astype(str).str.strip().str.upper().map(max_map), errors="coerce")
-    res_df["Max ST Monthly YTD"] = max_qty
+    res_df["80% Max ST YTD"] = max_qty
     weekly_max = max_qty / 30 * 7
     stock_po = (pd.to_numeric(res_df["Total Stock (Qty)"], errors="coerce").fillna(0)
                 + pd.to_numeric(res_df["PO Qty"], errors="coerce").fillna(0))
@@ -1328,7 +1328,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 #----------------PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
-                    "PO Qty","PO Value","WOI (Stock + PO Ori)","woi_standard","Max ST Monthly YTD","WOI Threshold","WOI Threshold Status","Remark",
+                    "PO Qty","PO Value","WOI (Stock + PO Ori)","woi_standard","80% Max ST YTD","WOI Threshold","WOI Threshold Status","Remark",
                     "Suggested PO buffer","Suggested PO Value",
                     "Target SO","Suggested QTY SO","Suggested QTY Final","Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
@@ -1727,7 +1727,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     # kolom bantu (tidak ditampilkan di file download PO Result)
     # + semua kolom bawaan file upload (DESCRIPTION, DPP, TOTAL PRICE, _source_file, dst.) yang digabung ke hasil
-    _hide_dl = ["woi_standard", "Max ST Monthly YTD", "WOI Threshold"] + list(extra_cols)
+    # _source_file tetap ditampilkan di Excel (nama file sumber PO)
+    _hide_dl = ["WOI Threshold"] +[c for c in extra_cols if c != "_source_file"]
     dl_data = to_excel_single_sheet(final_disp.drop(columns=_hide_dl, errors="ignore"), e_npd)
     st.download_button(label=f"Download PO Result.xlsx ({len(final_disp)} baris)", data=dl_data,
                         file_name=f"PO Result {datetime.now().strftime('%Y%m%d')}.xlsx",
@@ -3120,7 +3121,7 @@ if st.session_state.get('page') == 'po_changer':
                 st.divider()
                 _cached = st.session_state.get("sim_result_rsa")
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
-                              "WOI Threshold", "WOI Threshold Status", "woi_standard", "Max ST Monthly YTD",
+                              "WOI Threshold", "WOI Threshold Status", "woi_standard", "80% Max ST YTD",
                               "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
                 if _cached and _cached.get("dfs"):
                     _first_df = next(iter(_cached["dfs"].values()))
@@ -3292,7 +3293,7 @@ if st.session_state.get('page') == 'po_spv':
                 import hashlib as _hashlib
                 _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
-                              "WOI Threshold", "WOI Threshold Status", "woi_standard", "Max ST Monthly YTD",
+                              "WOI Threshold", "WOI Threshold Status", "woi_standard", "80% Max ST YTD",
                               "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
                 _spv_cache =st.session_state.get("sim_result_spv")
                 if _spv_cache and _spv_cache.get("dfs"):
@@ -3319,9 +3320,9 @@ if st.session_state.get('page') == 'po_spv':
                 st.success(f"Simulasi selesai — {len(excel_dfs)} distributor")
 
                 # SPV: output sama persis dengan RSA, KECUALI kolom MOQ tidak ikut di Excel
-                # + kolom bantu woi_standard / Max ST Monthly YTD / WOI Threshold juga tidak ikut (sama dengan PO Result RSA)
+                # + kolom bantu WOI Threshold tidak ikut; woi_standard & 80% Max ST YTD tampil (sama dengan PO Result RSA)
                 _MOQ_COLS = ["MOQ", "Check MOQ", "Suggested Min Order Qty",
-                             "woi_standard", "Max ST Monthly YTD", "WOI Threshold"]
+                             "WOI Threshold"]
                 spv_dfs = {k: v.drop(columns=_MOQ_COLS, errors="ignore") for k, v in excel_dfs.items()}
 
                 st.subheader("4. Select Output Format and Download")
