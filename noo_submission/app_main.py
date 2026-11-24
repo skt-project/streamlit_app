@@ -1706,6 +1706,21 @@ _HASIL_FB_CSS = """<style>
 .rf-tut .ct{font-size:11px;color:#7d7690}
 .rf-tut .pc{font-size:26px;font-weight:300;color:#e8508a;white-space:nowrap}
 .rf-tut .pc small{font-size:11px;color:#9a93ad;margin-left:4px}
+.rf-tut2{background:#fff;border:1px solid #f3dfe8;border-radius:14px;padding:14px 18px;margin:0 0 12px;box-shadow:0 6px 18px rgba(255,79,139,.07)}
+.rf-tut2 .tt{font-size:14px;font-weight:700;color:#1c1633;margin-bottom:10px}
+.rf-tut2 .tt span{font-weight:500;color:#9a93ad;font-size:11px;margin-left:6px}
+.rf-tut2 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px}
+.rf-tut2 .tile{border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:12px}
+.rf-tut2 .tile.ya{background:#eefaf4}.rf-tut2 .tile.bl{background:#fff4ea}
+.rf-tut2 .tile .em{line-height:0;display:flex}
+.rf-tut2 .tp .nb span{display:inline-flex;align-items:center;gap:4px}
+.rf-tut2 .tile .no{font-size:30px;font-weight:700;line-height:1}
+.rf-tut2 .tile.ya .no{color:#2fae78}.rf-tut2 .tile.bl .no{color:#d9822b}
+.rf-tut2 .tile .lb{font-size:11px;color:#7d7690}
+.rf-tut2 .tp{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 2px;border-top:1px solid #f7eef2}
+.rf-tut2 .tp .nm{font-size:12.5px;color:#1c1633;font-weight:600}
+.rf-tut2 .tp .nb{display:flex;gap:14px;font-size:13px;font-weight:700;white-space:nowrap}
+.rf-tut2 .tp .ya{color:#2fae78}.rf-tut2 .tp .bl{color:#d9822b}
 .rf-tc{border-left:3px solid #ffb3c9;background:#fffafb;border-radius:0 8px 8px 0;padding:6px 10px;margin-bottom:6px;font-size:12px;color:#4a4560}
 .rf-tc b{color:#1c1633}.rf-tc .ya{color:#2fae78;font-weight:700}.rf-tc .bl{color:#d9822b;font-weight:700}.rf-tc .tg{color:#9a93ad;font-size:10.5px;margin-left:6px}
 .rf-kosong{text-align:center;color:#9a93ad;padding:34px 0}
@@ -1860,31 +1875,93 @@ def _ambil_hasil_feedback():
     return r.json()
 
 
-def _kartu_tutorial(tut_rows):
-    # feedback tentang tutorial (kategori = "Tutorial") ditampilkan terpisah dari penilaian aplikasi
+@st.cache_data(ttl=30, show_spinner=False)
+def _ambil_tutorial_feedback():
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/tutorial_feedback",
+                     headers={**_SB_HEADERS, "Prefer": ""},
+                     params={"select": "*", "order": "created_at.desc", "limit": 2000}, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
+@st.dialog("Delete tutorial feedback", width="small")
+def _konfirmasi_hapus_tutorial_fb(tid, nama):
+    st.markdown(f"Are you sure you want to delete the tutorial feedback from **{nama}**?")
+    st.warning("This feedback will be permanently removed. This cannot be undone.")
+    c_ya, c_batal = st.columns(2)
+    if c_batal.button("Cancel", key="dlg_tf_batal", width="stretch"):
+        st.rerun()
+    if c_ya.button("Yes, delete", type="primary", key="dlg_tf_ya", width="stretch"):
+        n, err = _sb_tabel_hapus("tutorial_feedback", {"id": f"eq.{tid}"})
+        if err:
+            st.error(f"Delete failed: {err}")
+            return
+        if n == 0:
+            st.error("Supabase accepted the request but deleted 0 rows: tutorial_feedback has no DELETE policy for this API key (RLS).")
+            return
+        _ambil_tutorial_feedback.clear()
+        st.session_state.pesan_toast = "Tutorial feedback deleted."
+        st.rerun()
+
+
+def _kartu_tutorial():
+    # feedback tutorial (tabel tutorial_feedback) ditampilkan terpisah dari penilaian aplikasi
     import html as _h
-    if not tut_rows:
+    try:
+        rows = _ambil_tutorial_feedback()
+    except Exception as e:
+        st.caption(f"Tutorial feedback belum bisa dimuat: {e}")
         return
-    n = len(tut_rows)
-    ya = sum(1 for x in tut_rows if "belum" not in str(x.get("interpretasi") or "").lower())
-    pct = ya / n * 100
+    if not rows:
+        st.markdown('<div class="rf-tut2"><div class="tt">Tutorial feedback <span>0 jawaban</span></div>'
+                    '<div class="ct">Belum ada jawaban. Muncul setelah user menyelesaikan tutorial dan mengirim feedback.</div></div>',
+                    unsafe_allow_html=True)
+        return
+    n = len(rows)
+    ya = sum(1 for x in rows if x.get("membantu"))
+    bl = n - ya
+    from tutorial import _wajah_kawaii      # wajah kawaii yang sama dengan pilihan di popup feedback tutorial
+    f_ya, f_bl = _wajah_kawaii("ya", 44), _wajah_kawaii("belum", 44)
+    k_ya, k_bl = _wajah_kawaii("ya", 22), _wajah_kawaii("belum", 22)
+
+    # ringkasan per tutorial (judul diambil dari baris terbaru supaya ikut kalau judulnya diganti)
+    per = {}
+    for x in rows:
+        k = str(x.get("tutorial_key") or "-")
+        d = per.setdefault(k, {"judul": x.get("tutorial_judul") or k, "ya": 0, "bl": 0})
+        d["ya" if x.get("membantu") else "bl"] += 1
+    baris_html = ""
+    for k, d in sorted(per.items(), key=lambda kv: -(kv[1]["ya"] + kv[1]["bl"])):
+        baris_html += (f'<div class="tp"><div class="nm">{_h.escape(str(d["judul"]))}</div>'
+                       f'<div class="nb"><span class="ya">{k_ya}{d["ya"]}</span><span class="bl">{k_bl}{d["bl"]}</span></div></div>')
     st.markdown(
-        '<div class="rf-tut"><div class="ik"><svg width="30" height="30" viewBox="0 0 80 80"><circle cx="40" cy="42" r="30" fill="#ffb3c9"/>'
-        '<path d="M25 36q5-6 10 0M45 36q5-6 10 0" stroke="#5a2a3c" stroke-width="3.5" fill="none" stroke-linecap="round"/>'
-        '<path d="M32 46q8 9 16 0z" fill="#5a2a3c"/></svg></div>'
-        f'<div class="bd"><div class="tt">Tutorial feedback <span>Apakah tutorial ini membantumu?</span></div>'
-        f'<div class="tr"><i style="width:{pct:.0f}%"></i></div>'
-        f'<div class="ct">{ya} membantu &middot; {n - ya} belum membantu &middot; {n} jawaban</div></div>'
-        f'<div class="pc">{pct:.0f}%<small>helpful</small></div></div>', unsafe_allow_html=True)
-    komentar = [x for x in tut_rows if str(x.get("keterangan") or "").strip()]
+        f'<div class="rf-tut2"><div class="tt">Tutorial feedback <span>{n} jawaban</span></div>'
+        f'<div class="tiles"><div class="tile ya"><div class="em">{f_ya}</div><div class="no">{ya}</div><div class="lb">Membantu</div></div>'
+        f'<div class="tile bl"><div class="em">{f_bl}</div><div class="no">{bl}</div><div class="lb">Belum membantu</div></div></div>'
+        f'{baris_html}</div>', unsafe_allow_html=True)
+
+    komentar = [x for x in rows if str(x.get("komentar") or "").strip()]
     if komentar:
         with st.expander(f"Tutorial comments ({len(komentar)})", expanded=False):
-            for x in komentar[:30]:
-                bl = "belum" in str(x.get("interpretasi") or "").lower()
-                teks = _h.escape(str(x.get("keterangan") or ""))
-                st.markdown(f'<div class="rf-tc"><b>{_h.escape(str(x.get(KOLOM_FB_USER) or "-"))}</b> '
-                            f'<span class="{"bl" if bl else "ya"}">{"Belum membantu" if bl else "Membantu"}</span>'
-                            f'<div>{teks}</div></div>', unsafe_allow_html=True)
+            hanya_bl = st.toggle("Belum membantu saja", key="tf_hanya_bl")
+            tampil = [x for x in komentar if not (hanya_bl and x.get("membantu"))]
+            bisa_hapus = (st.session_state.get("user") or {}).get("tagging") in ("RSA", "BD SUPPORT", "BD_SUPPORT")   # sama dengan hapus feedback aplikasi
+            for x in tampil[:30]:
+                ok = bool(x.get("membantu"))
+                kartu = (f'<div class="rf-tc"><b>{_h.escape(str(x.get("user") or "-"))}</b> '
+                         f'<span class="{"ya" if ok else "bl"}">{"Membantu" if ok else "Belum membantu"}</span>'
+                         f'<span class="tg">{_h.escape(str(x.get("tutorial_judul") or x.get("tutorial_key") or ""))}</span>'
+                         f'<div>{_h.escape(str(x.get("komentar") or ""))}</div></div>')
+                tid = x.get("id")
+                if bisa_hapus and tid is not None:
+                    c_k, c_h = st.columns([20, 1], vertical_alignment="center", gap="small")
+                    c_k.markdown(kartu, unsafe_allow_html=True)
+                    if c_h.button(":material/delete:", key=f"tf_del_{tid}", help="Delete this comment"):
+                        _konfirmasi_hapus_tutorial_fb(tid, str(x.get("user") or "-"))
+                else:
+                    st.markdown(kartu, unsafe_allow_html=True)
+            if not tampil:
+                st.caption("Tidak ada komentar.")
 
 
 def tab_hasil_feedback():
@@ -1900,12 +1977,13 @@ def tab_hasil_feedback():
     except Exception as e:
         st.error(f"Failed to load feedback: {e}")
         return
-    tut_rows = [x for x in data if str(x.get("kategori") or "").strip() == "Tutorial"]
+    # baris lama kategori "Tutorial" (sebelum ada tabel tutorial_feedback) tidak ikut statistik/rating aplikasi,
+    # tapi tetap ditampilkan di daftar di bawah supaya bisa dihapus dari sini.
+    lama_tutorial = [x for x in data if str(x.get("kategori") or "").strip() == "Tutorial"]
     data = [x for x in data if str(x.get("kategori") or "").strip() != "Tutorial"]
     if not data:
-        _kartu_tutorial(tut_rows)
-        if not tut_rows:
-            st.markdown('<div class="rf-kosong">No feedback yet.</div>', unsafe_allow_html=True)
+        _kartu_tutorial()
+        st.markdown('<div class="rf-kosong">No app feedback yet.</div>', unsafe_allow_html=True)
         return
     try:
         peta = muat_distri_code_map()
@@ -1965,7 +2043,7 @@ def tab_hasil_feedback():
         f'<div class="rf-grafik"><div class="rf-gt">Last 14 days</div>{_garis_harian_svg(harian)}'
         f'<div class="rf-gx"><span>{tgl_awal}</span><span>{tgl_akhir}</span></div></div></div></div>', unsafe_allow_html=True)
 
-    _kartu_tutorial(tut_rows)
+    _kartu_tutorial()
     opsi = ["All", "5★", "4★", "3★", "2★", "1★"]
     c_f, c_c = st.columns([3, 2], vertical_alignment="center")
     pilih = c_f.segmented_control("Rating", opsi, key="hf_filter", label_visibility="collapsed",
@@ -1983,7 +2061,8 @@ def tab_hasil_feedback():
             return kata.lower() in gab.lower()
         return True
 
-    tampil = [x for x in data if _cocok(x)]
+    semua_daftar = sorted(data + lama_tutorial, key=lambda x: str(x.get("created_at") or ""), reverse=True)
+    tampil = [x for x in semua_daftar if _cocok(x)]
     bisa_hapus = (ss.get("user") or {}).get("tagging") in ("RSA", "BD SUPPORT", "BD_SUPPORT")
     n_hal = max(1, math.ceil(len(tampil) / _HASIL_FB_PER_HAL))
     ss.hf_halaman = min(max(1, ss.hf_halaman), n_hal)
@@ -2051,12 +2130,17 @@ def halaman_dashboard_tabs():
         with st.container(key="dash_view"):
             st.segmented_control("View", opsi, key="dash_view_pilih", label_visibility="collapsed")
         ss["_dash_view_terakhir"] = ss["dash_view_pilih"]
-        if ss["dash_view_pilih"] == opsi[1]:
-            tab_feedback()
-        elif ss["dash_view_pilih"] == opsi[2]:
-            tab_hasil_feedback()
-        else:
-            halaman_dashboard()
+        idx = opsi.index(ss["dash_view_pilih"])
+        # Anti "jejak" tampilan tab lain: st.empty() langsung mengosongkan isi tab sebelumnya (tidak menunggu skrip selesai),
+        # dan container ber-key per tab membuat tiap tab punya elemen sendiri, jadi tidak ada elemen lama yang tercampur/pudar.
+        slot = st.empty()
+        with slot.container(key=f"dash_isi_{idx}"):
+            if idx == 1:
+                tab_feedback()
+            elif idx == 2:
+                tab_hasil_feedback()
+            else:
+                halaman_dashboard()
 
 
 def halaman_dashboard():

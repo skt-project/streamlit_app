@@ -39,18 +39,32 @@ Catatan: akun distributor memakai **kode distributor** sebagai username."""),
 3. Penilaian Anda membantu kami membuat aplikasi ini lebih mudah dipakai."""),
     ]),
     "pengajuan": ("NOO & SKU Submission", [
-        ("upload", "1. Upload Failure List",
-         """1. Upload Failure List (**.xlsx / .xls**, maks 10 MB per file). Boleh beberapa file sekaligus.
+        ("toast", "FYI: Arti notifikasi (toast) di pojok kanan atas",
+         """Setelah Anda menyimpan atau mengirim data, notifikasi kecil muncul di **kanan atas** dan hilang sendiri sekitar 5 detik.
+
+1. :green[**Hijau &#10003;**] = :green[**berhasil**]. Contoh: *SKU Mapping saved - 12 rows*.
+2. :red[**Merah &#9888;**] = :red[**gagal atau ada yang tidak tersimpan**]. Contoh: *Duplicate found. Nothing saved.*, *All rows already exist in sku_mapping*, atau *Cancelled - could not check duplicates*.
+3. Kalau tertulis **"N duplicates skipped"**, sebagian baris sudah ada di database dan dilewati. Sisanya tetap tersimpan.
+4. Terlewat membacanya? Cek **History** untuk memastikan data sudah masuk."""),
+        ("pesan_form", "FYI: Pesan peringatan di bawah form",
+         """Selain toast, ada kotak pesan yang muncul **di bawah form** saat ada yang perlu dibenahi:
+
+1. :red[**Merah**] = **ditolak, tidak ada yang tersimpan**. Contoh: *Save cancelled - already in sku_mapping: ...* artinya kombinasi **Customer Code + Product** itu **sudah ada** di database. Hapus atau ubah barisnya, lalu simpan lagi.
+2. :orange[**Kuning**] = **ada yang kurang**. Contoh: *Customer Product Code is required* (isi kodenya atau centang **Same as Product**), atau *rows have no Product yet* (pilih Product dulu).
+3. :blue[**Biru**] = **info**. Contoh: baris bertanda **Suggested** dicocokkan otomatis, jadi cek ulang sebelum disimpan.
+4. Tombol submit **terkunci** selama masih ada pesan merah atau kuning yang belum dibereskan. Setelah semuanya beres, tombol aktif lagi."""),
+        ("upload", "Upload Failure List",
+         """1. Klik **Browse files** atau seret file ke area upload (**.xlsx / .xls**, maks 10 MB per file). Boleh beberapa file sekaligus.
 2. Tabel NOO dan SKU Mapping otomatis dibuat dari isi file.
 3. Hasilnya muncul di bagian **Upload Option**."""),
-        ("sku_manual", "2. SKU Mapping: Manual",
+        ("sku_manual", "SKU Mapping: Manual",
          """1. Pilih **Distributor** dan **Product**.
 2. Isi **Customer Product Code** (wajib).
 3. Klik **Add Row**.
 4. Setelah semua baris siap, klik **Save All to Supabase**.
 
 Banyak baris? Pakai **Paste All SKU**."""),
-        ("sku_same", "Fitur Same as Product > Jika Sama Product ID nya",
+        ("sku_same", "Fitur Same as Product <span style='color:#e5484d'>&rarr; Jika Sama Product ID nya</span>",
          """**Customer Product Code** = kode produk menurut distributor.
 
 1. Kalau kodenya **sama persis** dengan Product, centang **Same as Product**: kolom Customer Product Code terisi otomatis dari Product dan dikunci.
@@ -67,19 +81,36 @@ Banyak baris? Pakai **Paste All SKU**."""),
 1. Cek kolom **Match**.
 2. Perbaiki Product yang salah lewat dropdown *Product (fix here)*.
 3. Klik **Add to Staged**, lalu simpan dengan **Save All to Supabase**."""),
-        ("sku_upload", "3. SKU Mapping: Upload Option",
+        ("sku_upload", "SKU Mapping: Upload Option",
          """Baris hasil ekstraksi file muncul di tabel. Yang perlu Anda isi atau cek:
 
 1. **Select**: centang baris yang mau dikirim (**All** untuk semua).
 2. **Product**: otomatis terisi kalau cocok. Kalau kosong, pilih dari **Product Description** atau **Product**.
 3. Kalau muncul peringatan prefix **Customer Code** (G2G- harus 12, lainnya 17), klik **Fix Customer Code**.
 4. Klik **Submit SKU Mapping**. Tombol terkunci sampai semua baris terpilih punya Product."""),
-        ("noo", "4. NOO: Manual",
+        ("fix_cc", "Fitur Fix Customer Code (12 atau 17)",
+         """Awalan (**2 angka pertama**) **Customer Code** harus sesuai merek Product:
+
+1. Product berawalan **G2G-** wajib memakai awalan **12**.
+2. Product lainnya wajib memakai awalan **17**.
+3. Kalau tidak sesuai, muncul pesan :red[**merah**] *invalid Customer Code prefix* dan tombol **Submit SKU Mapping** terkunci.
+4. Klik **Fix Customer Code**: 2 angka pertama diganti otomatis (**17**XXXXX menjadi **12**XXXXX, XXXXX = sisa kodenya), sisanya tidak berubah.
+5. Kalau Product diganti setelah itu, awalan dicek ulang mengikuti Product yang baru."""),
+        ("sku_ref", "Kolom Product Description (Reference)",
+         """Kolom ini membantu mengisi **Product** kalau kodenya tidak cocok otomatis.
+
+1. **Customer SKU Name** (abu-abu) = nama produk apa adanya dari file distributor. Hanya untuk dibaca, tidak ikut tersimpan.
+2. Buka dropdown **Product Description (Reference)** dan pilih deskripsi produk yang sesuai dengan nama di atas.
+3. Kolom **Product** langsung terisi dengan kode produk dari deskripsi itu.
+4. Salah pilih? Kosongkan dropdown-nya, maka Product kembali ke hasil pencocokan awal dari file.
+
+Product tetap bisa dipilih langsung lewat dropdown **Product** kalau Anda sudah tahu kodenya."""),
+        ("noo", "NOO: Manual",
          """1. Paste **Customer Store Code** dan **Store Name** (satu per baris).
 2. Klik **Apply Paste**.
 3. Pilih distributor dan lengkapi detail tiap outlet.
 4. Klik **Submit Manual NOO**."""),
-        ("noo_upload", "5. NOO: Upload Option",
+        ("noo_upload", "NOO: Upload Option",
          """Outlet dari file muncul di tabel. Kolom bertanda bintang (*) wajib diisi:
 
 1. **Customer Store Name**: otomatis dari Store Name, boleh diedit.
@@ -91,7 +122,7 @@ Banyak baris? Pakai **Paste All SKU**."""),
 1. Pilih satu nilai (misalnya **City**, **SPV**, **Sales Name**, atau **Store Type**).
 2. Nilai itu langsung diisikan ke **semua baris** yang punya pilihan tersebut. Hemat waktu kalau banyak outlet dengan isian sama.
 3. Setelah itu tiap baris tetap bisa diubah satu per satu."""),
-        ("kirim", "6. Submit",
+        ("kirim", "Submit",
          """1. Tombol submit aktif kalau data sudah lengkap.
 2. Setelah submit, hasilnya bisa dipantau di **History**."""),
     ]),
@@ -99,18 +130,18 @@ Banyak baris? Pakai **Paste All SKU**."""),
         ("spv", "Untuk apa halaman ini?",
          """1. Mengonfirmasi **tipe outlet** setiap outlet NOO.
 2. Memvalidasi datanya sebelum dikirim."""),
-        ("distri", "1. Pilih distributor",
+        ("distri", "Pilih distributor",
          """1. Pilih distributor di bagian atas.
 2. Akun yang terhubung ke satu distributor sudah otomatis terkunci ke distributornya."""),
-        ("tinjau", "2. Periksa tiap outlet",
+        ("tinjau", "Periksa tiap outlet",
          """1. Bandingkan data outlet dengan kolom **Similarity** (Name, Distributor, Code, Address, City, Region): ini outlet mirip yang sudah ada di master.
 2. Pilih **NOO / Existing** untuk tiap outlet.
 3. Klik **Refresh** untuk memuat data terbaru."""),
-        ("spv_sim", "3. Existing dan rekomendasi Store ID",
+        ("spv_sim", "Existing dan rekomendasi Store ID",
          """1. Kalau outlet **Existing** dan kolom **Similarity (Code)** terisi, tombol **Auto-fill Store ID from Similarity** muncul di atas tabel.
 2. Klik sekali untuk mengisi **Store ID** semua baris Existing dengan kode rekomendasinya.
 3. Store ID tetap bisa diganti manual lewat dropdown *Store ID - Store Name*."""),
-        ("konfirmasi", "4. Submit Confirmation",
+        ("konfirmasi", "Submit Confirmation",
          """1. Klik **Submit Confirmation**.
 2. Outlet yang sudah dikonfirmasi hilang dari daftar."""),
     ]),
@@ -193,6 +224,14 @@ CSS_ILUSTRASI = """
 .mk .lg .dim2{opacity:.35}
 .mk .dlg{border:1px solid #ece0e3;border-radius:14px;padding:16px 20px;background:#fff;box-shadow:0 10px 30px rgba(0,0,0,.12);max-width:340px;margin:0 auto;position:relative}
 .mk .dlg .dt{font-size:16px;font-weight:800;color:#45343b;display:flex;justify-content:space-between}
+@keyframes mk-toast{0%{opacity:0;transform:translateY(-8px)}12%,100%{opacity:1;transform:none}}
+.mk .tst{border-radius:9px;padding:8px 12px;font-size:11px;font-weight:600;margin:0 0 8px auto;max-width:300px;animation:mk-toast 1s ease-out both}
+.mk .tst.ok2{background:#dcf5e3;border:1px solid #9fd8b0;color:#17612f}
+.mk .al{border-radius:8px;padding:7px 11px;font-size:10.5px;margin-bottom:6px;font-weight:600}
+.mk .al.e{background:#fde2e4;border:1px solid #f5a3ab;color:#8a1c27}
+.mk .al.w{background:#fff6dc;border:1px solid #f0d58a;color:#7a5a05}
+.mk .al.i{background:#e8f0fe;border:1px solid #c5d5f5;color:#1f4fa0}
+.mk .tst.er{background:#fde2e4;border:1px solid #f5a3ab;color:#8a1c27;animation-delay:.8s}
 """
 
 # ------------------------------------------------------------------ komponen mini (mengikuti label asli di aplikasi)
@@ -262,6 +301,24 @@ ILUSTRASI = {
         '<div class="ttl">NOO &amp; SKU Submission</div>'
         '<div style="display:flex;gap:8px"><div class="pill a">Tutorial</div><div class="pill b hl">Help &amp; Support</div></div></div>'
         '<div class="cap" style="margin:8px 0 0">Upload Failure List file to process data.</div>'),
+    "toast": _mk(
+        '<div class="tst ok2"><b>&#10003;</b>&nbsp; SKU Mapping saved &mdash; 12 rows</div>'
+        '<div class="tst er"><b>&#9888;</b>&nbsp; Duplicate found. Nothing saved.</div>'
+        '<div class="cap" style="text-align:right;margin:0">Muncul di kanan atas, hilang sendiri</div>'),
+    "sku_ref": _mk(
+        '<table class="tb"><tr><th>Customer SKU Name</th><th>Product Description (Reference)</th><th>Product</th></tr>'
+        '<tr><td style="color:#64748b;font-size:9.5px">SKIN SERUM 30ML</td>'
+        '<td><div class="sel-sm hl"><span>Hydra Serum 30ml</span><span>&#9662;</span></div></td>'
+        '<td><div class="sel-sm fillv"><span>G2G-123</span><span>&#9662;</span></div></td></tr></table>'),
+    "pesan_form": _mk(
+        '<div class="al e">Save cancelled &mdash; already in sku_mapping: 1712345/G2G-123</div>'
+        '<div class="al w">Customer Product Code is required. Fill it in, or tick &#39;Same as Product&#39;.</div>'
+        '<div class="al i">Rows marked Suggested were auto-matched. Please double-check them.</div>'),
+    "fix_cc": _mk(
+        '<table class="tb"><tr><th>Customer Code</th><th>Product</th></tr>'
+        '<tr><td><span style="color:#8a1c27;font-weight:700">17</span>XXXXX &rarr; <span class="fillv" style="font-weight:700;padding:1px 3px;border-radius:4px">12</span>XXXXX</td><td>G2G-123</td></tr></table>'
+        '<div class="al e" style="margin-top:8px">1 row(s) have an invalid Customer Code prefix (G2G- products must use 12, all others must use 17).</div>'
+        + _bt("Fix Customer Code", hl=True, cur=True, flex=0).replace('style="flex:0"', 'style="width:170px"')),
     "menu": _mk(
         '<div style="display:flex;gap:10px"><div class="side">'
         '<div style="font-weight:800;font-size:11px;margin-bottom:8px">NOO &amp; SKU Submission</div>'

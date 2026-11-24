@@ -6,10 +6,10 @@ import requests
 import streamlit as st
 
 import shared as _shared
-from feedback import TABLE_FEEDBACK, KOLOM_USER
 from shared import sb_insert
 
 TABLE_USER = "users"
+TABLE_TUT_FB = "tutorial_feedback"
 ZONA = ZoneInfo("Asia/Jakarta")
 HARI_AKUN_BARU = 3                                      # akun baru: popup otomatis dari hari daftar (H) sampai H+3
 PERAN_TANPA_TUTORIAL = ("BD_SUPPORT", "BD SUPPORT")     # tidak pernah dapat popup otomatis
@@ -20,25 +20,25 @@ PELUNCURAN_AKHIR = datetime.date(2026, 11, 27)
 
 from tutorial_isi import TUTORIAL, ILUSTRASI, CSS_ILUSTRASI      # teks & ilustrasi tutorial (bahasa Indonesia)
 
+TINGGI_ISI = 420          # tinggi area isi tutorial (px), sama untuk semua langkah; isi lebih panjang di-scroll
 _HALAMAN_KE_TUTORIAL = {"pengajuan": "pengajuan", "spv": "spv", "history": "intro"}
 
 
 # ===================================================================== STATUS (Supabase)
 def _muat_seen(username: str, tagging: str = ""):
-    # tutorial yang sudah dijawab feedback-nya (baris tabel feedback, kategori "Tutorial") dianggap sudah dilihat dan sudah ditanya.
-    # Tidak butuh kolom tambahan. Gagal baca = set kosong (tutorial tampil sekali per sesi).
+    # tutorial yang sudah dijawab feedback-nya (baris tabel tutorial_feedback) dianggap sudah dilihat dan sudah ditanya.
+    # Gagal baca = set kosong (tutorial tampil sekali per sesi).
     try:
         filt = f"(user.eq.{username},user.like.RSA - *)" if str(tagging).strip().upper() == "RSA" else f"(user.eq.{username})"
-        r = requests.get(f"{_shared.SUPABASE_URL}/rest/v1/{TABLE_FEEDBACK}",
+        r = requests.get(f"{_shared.SUPABASE_URL}/rest/v1/{TABLE_TUT_FB}",
                          headers={**_shared._SB_HEADERS, "Prefer": ""},
-                         params={"select": "keterangan", "kategori": "eq.Tutorial", "or": filt, "limit": 300}, timeout=10)
+                         params={"select": "tutorial_key", "or": filt, "limit": 300}, timeout=10)
         r.raise_for_status()
         seen = set()
         for x in r.json():
-            ket = str(x.get("keterangan") or "")
-            for kunci, (judul, _langkah) in TUTORIAL.items():
-                if ket.startswith(f"[Tutorial: {judul}]"):
-                    seen.update({kunci, f"{kunci}_fb"})
+            kunci = str(x.get("tutorial_key") or "")
+            if kunci in TUTORIAL:
+                seen.update({kunci, f"{kunci}_fb"})
         return seen
     except Exception:
         return set()
@@ -81,10 +81,11 @@ def _username() -> str:
 def _seen_user():
     ss = st.session_state
     u = _username()
-    if ss.get("_tut_user") != u:
-        ss["_tut_user"] = u
-        ss["_tut_info"] = _muat_info(u) if u else (None, "")
-        ss["_tut_seen"] = _muat_seen(u, ss["_tut_info"][1]) if u else None      # None hanya kalau belum login
+    # muat ulang kalau user berganti ATAU salah satu kunci hilang (mis. skrip terhenti di tengah, atau state sisa versi kode lama)
+    if ss.get("_tut_user") != u or "_tut_seen" not in ss or "_tut_info" not in ss:
+        info = _muat_info(u) if u else (None, "")
+        seen = _muat_seen(u, info[1]) if u else None      # None hanya kalau belum login
+        ss["_tut_info"], ss["_tut_seen"], ss["_tut_user"] = info, seen, u     # _tut_user terakhir: ditulis hanya kalau semuanya sudah siap
     return ss["_tut_seen"]
 
 
@@ -236,19 +237,17 @@ def _isi_fb_tutorial():
             _tutup_fb()
             st.rerun()
         if c_kirim.button("Kirim", key="tut_fb_kirim", type="primary", width="stretch", disabled=not pilih):
-            judul_tut = TUTORIAL.get(ss.get("tut_fb"), ("Tutorial",))[0]
-            teks = f"[Tutorial: {judul_tut}] {komentar.strip()}".strip()
+            kunci_tut = ss.get("tut_fb")
             nama = ss.get("fb_nama_rsa") or _username()      # akun RSA: pakai nama "RSA - <nama>" kalau sudah pernah diisi di feedback
             baris = {
-                "rating": 5 if pilih == "ya" else 1,
-                "kategori": "Tutorial",
-                "interpretasi": "Tutorial membantu" if pilih == "ya" else "Tutorial belum membantu",
-                "keterangan": teks,
-                "other_feedback": None,
-                KOLOM_USER: nama,
+                "tutorial_key": kunci_tut,
+                "tutorial_judul": TUTORIAL.get(kunci_tut, ("Tutorial",))[0],
+                "membantu": pilih == "ya",
+                "komentar": komentar.strip()[:1000] or None,
+                "user": nama,
             }
             with st.spinner("Mengirim..."):
-                hasil = sb_insert(TABLE_FEEDBACK, [baris])
+                hasil = sb_insert(TABLE_TUT_FB, [baris])
             if isinstance(hasil, dict) and "_error" in hasil:
                 st.error(f"Gagal mengirim: {hasil['_error']}")
             else:
@@ -280,9 +279,11 @@ def _isi_tutorial_inner():
         + CSS_ILUSTRASI + '</style>'
         f'<div class="tut-no">Langkah {i + 1} dari {n}</div><div class="tut-bar"><i style="width:{(i + 1) / n * 100:.0f}%"></i></div>',
         unsafe_allow_html=True)
-    st.markdown(ILUSTRASI.get(nama_ilustrasi, ""), unsafe_allow_html=True)
-    st.markdown(f'<div class="tut-j">{judul}</div>', unsafe_allow_html=True)
-    st.markdown(isi)
+    # area isi berukuran tetap di semua langkah (dialog tidak naik-turun); kalau lebih panjang, bisa di-scroll ke bawah
+    with st.container(height=TINGGI_ISI, border=False):
+        st.markdown(ILUSTRASI.get(nama_ilustrasi, ""), unsafe_allow_html=True)
+        st.markdown(f'<div class="tut-j">{judul}</div>', unsafe_allow_html=True)
+        st.markdown(isi)
 
     c_skip, c_back, c_next = st.columns([1, 1, 1.3])
     if c_skip.button("Lewati", key="tut_skip", width="stretch"):
