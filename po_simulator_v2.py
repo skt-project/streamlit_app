@@ -387,6 +387,39 @@ def get_target_so(distributor_code: str, month: int, data_type: str = None, out_
     return result
 
 
+NEW_TARGET_SO_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Eht-JBLumyloyfd1geyEt3IWwzuY6IV9iiuLiganiP8/edit?gid=2081208609#gid=2081208609"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_new_target_so_raw() -> pd.DataFrame:
+    # Header di row 2; kolom B = distributor, C = sku, H = target qty (posisi kolom)
+    csv_url, _ = gsheet_to_csv_url(NEW_TARGET_SO_SHEET_URL)
+    try:
+        req = urllib.request.Request(csv_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+        df = pd.read_csv(io.BytesIO(raw), header=1, dtype=str)
+        df = df.iloc[:, [1, 2, 7]].copy()
+        df.columns = ["distributor_name", "sku", "qty_target"]
+        df["distributor_name"] = df["distributor_name"].astype(str).str.replace("​", "", regex=False).str.strip().str.upper()
+        df["sku"] = df["sku"].astype(str).str.replace("​", "", regex=False).str.strip().str.upper()
+        df["qty_target"] = pd.to_numeric(df["qty_target"].astype(str).str.replace(",", "", regex=False), errors="coerce").fillna(0)
+        return df
+    except Exception as e:
+        st.error(f"Error fetching Target SO sheet (baru): {e}")
+        return pd.DataFrame(columns=["distributor_name", "sku", "qty_target"])
+
+
+def get_target_so_new(distributor_name: str) -> pd.DataFrame:
+    df = _load_new_target_so_raw()
+    f = df[df["distributor_name"] == str(distributor_name).strip().upper()]
+    if f.empty:
+        return pd.DataFrame(columns=["distributor_code", "sku", "target_so"])
+    r = f.groupby("sku", as_index=False)["qty_target"].sum().rename(columns={"qty_target": "target_so"})
+    r["distributor_code"] = ""
+    return r
+
+
 def get_target_si(distributor_code: str, month: int) -> pd.DataFrame:
     return get_target_so(distributor_code, month, data_type=TARGET_SI_DATA_TYPE, out_col="target_si")
 
@@ -1223,7 +1256,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         if not _dist_code:
             st.warning(f"⚠️ distributor_code tidak ditemukan untuk {dist_name}, target SO dilewati.")
 
-        _target_df    = get_target_so(_dist_code, datetime.now().month) if _dist_code else pd.DataFrame()
+        _target_df    = get_target_so_new(dist_name)
         _actual_so_df = get_actual_so(_dist_code) if _dist_code else pd.DataFrame()
         _target_si_df = get_target_si(_dist_code, datetime.now().month) if _dist_code else pd.DataFrame()
         _actual_si_df = get_actual_si(_dist_code) if _dist_code else pd.DataFrame()
