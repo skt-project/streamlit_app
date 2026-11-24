@@ -6,6 +6,7 @@ from shared import sb_insert
 
 TABLE_FEEDBACK = "feedback"
 KOLOM_USER = "user"
+DAFTAR_RSA = ["Aqil", "Geirda", "Kayla", "Erliana", "Shaltsa", "Furqan", "Miftah", "Others"]
 # akun yang TIDAK diminta feedback (RSA sekarang ikut diminta)
 PERAN_TANPA_FEEDBACK = ("BD_SUPPORT", "BD SUPPORT")
 
@@ -31,13 +32,19 @@ def _username() -> str:
 
 def _sudah_kasih_feedback(username: str):
     ss = st.session_state
+    if str((ss.get("user") or {}).get("tagging") or "").strip().upper() == "RSA":
+        username = ss.get("fb_nama_rsa") or ""             # di tabel, user RSA tersimpan sebagai nama RSA
+        if not username:
+            ss["_fb_rows"] = 0
+            return False
     # SELALU cek langsung ke tabel Supabase (tanpa cache session): kalau baris feedback user ini sudah dihapus,
     # statusnya otomatis kembali "belum pernah" dan popup wajib muncul lagi.
     try:
         r = requests.get(
             f"{_shared.SUPABASE_URL}/rest/v1/{TABLE_FEEDBACK}",
             headers={**_shared._SB_HEADERS, "Prefer": ""},
-            params={"select": "rating", KOLOM_USER: f"eq.{username}", "limit": 1}, timeout=10)
+            params={"select": "rating", KOLOM_USER: f"eq.{username}", "limit": 1,
+                    "or": "(kategori.is.null,kategori.neq.Tutorial)"}, timeout=10)   # feedback Tutorial tidak dihitung
         r.raise_for_status()
         rows = r.json()
         ada = bool(rows)
@@ -59,7 +66,8 @@ def minta_feedback():
     user = ss.get("user") or {}
     username = _username()
     if not username or user.get("tagging") in PERAN_TANPA_FEEDBACK:
-        _debug(f"skip: user='{username}', tagging='{user.get('tagging')}' dikecualikan / username kosong")
+        # ===== DEBUG TOAST (dimatikan): alasan popup tidak muncul - akun dikecualikan / username kosong =====
+        # _debug(f"skip: user='{username}', tagging='{user.get('tagging')}' dikecualikan / username kosong")
         return
     sudah = _sudah_kasih_feedback(username)
     if sudah is None:                                      # gagal cek ke Supabase -> jangan menghalangi user
@@ -67,21 +75,23 @@ def minta_feedback():
     # sudah pernah kasih feedback: popup (boleh di-skip) cukup MUNCUL SEKALI per sesi login, di submit mana pun yang
     # lebih dulu (NOO / SKU Mapping / SPV Confirmation). Submit berikutnya di sesi yang sama tidak memunculkannya lagi.
     if sudah and ss.get("fb_sudah_ditawari"):
-        _debug(f"skip: user '{username}' sudah pernah isi feedback & popup sudah ditawarkan di sesi ini")
+        # ===== DEBUG TOAST (dimatikan): alasan popup tidak muncul - sudah pernah isi & sudah ditawarkan di sesi ini =====
+        # _debug(f"skip: user '{username}' sudah pernah isi feedback & popup sudah ditawarkan di sesi ini")
         return
     if sudah:
         ss["fb_sudah_ditawari"] = True
     # belum pernah kasih feedback -> wajib (tanpa silang/skip), muncul di setiap submit sampai diisi
-    _debug(f"user='{username}' | project={_shared.SUPABASE_URL.split('//')[-1].split('.')[0]} | "
-           f"baris feedback user ini: {ss.get('_fb_rows')} -> {'boleh skip' if sudah else 'WAJIB'}")
+    # ===== DEBUG TOAST (dimatikan): info user, project Supabase, jumlah baris feedback, WAJIB / boleh skip =====
+    # _debug(f"user='{username}' | project={_shared.SUPABASE_URL.split('//')[-1].split('.')[0]} | "
+    #     f"baris feedback user ini: {ss.get('_fb_rows')} -> {'boleh skip' if sudah else 'WAJIB'}")
     ss["fb_wajib"] = True
     ss["fb_boleh_skip"] = bool(sudah)
     ss.pop("fb_selesai", None)
-    for k in ("fb_bintang", "fb_kategori", "fb_lainnya", "fb_keterangan"):
+    for k in ("fb_bintang", "fb_kategori", "fb_lainnya", "fb_keterangan", "fb_rsa", "fb_rsa_lain"):
         ss.pop(k, None)
 
 
-DEBUG_FEEDBACK = True      # set False kalau sudah beres: menampilkan alasan popup tidak muncul
+DEBUG_FEEDBACK = False     # ===== DEBUG TOAST: True = tampilkan toast [feedback] ...; juga hapus tanda # pada baris _debug(...) di atas =====
 
 
 def _debug(teks: str):
@@ -96,9 +106,9 @@ def tampilkan_feedback_jika_diminta():
 
 
 def _tutup_feedback():
-    """Dipakai tombol Skip dan tombol silang (on_dismiss): popup ditutup tanpa menyimpan apa pun."""
+    # Dipakai tombol Skip dan tombol silang (on_dismiss): popup ditutup tanpa menyimpan apa pun.
     ss = st.session_state
-    for k in ("fb_wajib", "fb_selesai", "fb_bintang", "fb_kategori", "fb_lainnya", "fb_keterangan"):
+    for k in ("fb_wajib", "fb_selesai", "fb_bintang", "fb_kategori", "fb_lainnya", "fb_keterangan", "fb_rsa", "fb_rsa_lain"):
         ss.pop(k, None)
 
 
@@ -147,6 +157,17 @@ def _isi_dialog(boleh_skip: bool):
     if st.session_state.get("fb_selesai"):
         _tampilan_terima_kasih()
         return
+    if boleh_skip:
+        st.caption("Anda sudah pernah mengirim feedback, jadi popup ini boleh di-skip.")
+    is_rsa = str((st.session_state.get("user") or {}).get("tagging") or "").strip().upper() == "RSA"
+    nama_rsa = ""
+    if is_rsa:                                              # akun RSA: wajib pilih nama RSA
+        st.markdown("**Nama RSA**")
+        pilih_rsa = st.selectbox("Nama RSA", DAFTAR_RSA, index=None, key="fb_rsa", placeholder="Pilih nama RSA…",
+                                 label_visibility="collapsed")
+        nama_rsa = pilih_rsa or ""
+        if pilih_rsa == "Others":
+            nama_rsa = st.text_input("Nama lainnya", key="fb_rsa_lain", placeholder="Ketik nama Anda…").strip()
     st.markdown("**Bagaimana pengalaman Anda menggunakan sistem ini?**")
     st.caption("Berikan penilaian dari 1–5 bintang")
     idx = st.feedback("stars", key="fb_bintang")           # None atau 0..4
@@ -174,6 +195,8 @@ def _isi_dialog(boleh_skip: bool):
 
     # semua wajib: rating, minimal 1 kategori, "Lainnya" harus dijelaskan, dan cerita pengalaman
     kurang = []
+    if is_rsa and not nama_rsa:
+        kurang.append("nama RSA")
     if rating is None:
         kurang.append("rating bintang")
     else:
@@ -201,12 +224,16 @@ def _isi_dialog(boleh_skip: bool):
             "other_feedback": lainnya.strip() or None,
             KOLOM_USER:       _username(),
         }
+        if is_rsa:                                          # akun RSA: kolom user diganti nama RSA yang dipilih/diketik
+            row[KOLOM_USER] = f"RSA - {nama_rsa}"
         with st.spinner("Sending..."):
             result = sb_insert(TABLE_FEEDBACK, [row])
         if isinstance(result, dict) and "_error" in result:
             st.error(f"Gagal mengirim feedback: {result['_error']}")
         else:
-            for k in ("fb_bintang", "fb_kategori", "fb_lainnya", "fb_keterangan"):
+            for k in ("fb_bintang", "fb_kategori", "fb_lainnya", "fb_keterangan", "fb_rsa", "fb_rsa_lain"):
                 st.session_state.pop(k, None)
+            if is_rsa:
+                st.session_state["fb_nama_rsa"] = f"RSA - {nama_rsa}"  # dipakai untuk cek "sudah pernah kasih feedback"
             st.session_state.fb_selesai = True
             st.rerun(scope="fragment")                      # render ulang dialog saja -> tampil Thank You

@@ -13,6 +13,7 @@ import shared as _shared
 from login_page import require_login, keluar
 from help_support import dialog_help_support
 from feedback import minta_feedback, tampilkan_feedback_jika_diminta
+from tutorial import picu_tutorial_otomatis, buka_tutorial, tampilkan_tutorial_jika_aktif
 from shared import (
     # Constants
     CITY, JENIS_TOKO_DEFAULT, KOLOM_NOO_OUTPUT, KOLOM_SKU_OUTPUT, KOLOM_SKU_STAGED,
@@ -2044,12 +2045,20 @@ def main():
     with st.container(key="help_kanan"):
         if st.button("Help & Support", key="btn_help_support"):
             dialog_help_support()
+    # Tutorial: tombol kecil di sebelah Help & Support (kanan atas); membuka tutorial halaman yang sedang aktif
+    with st.container(key="tutorial_kanan"):
+        if st.button(":material/school: Tutorial", key="btn_tutorial", help="Step-by-step guide for this page"):
+            buka_tutorial(ss.halaman_aktif)
+    picu_tutorial_otomatis(ss.halaman_aktif)      # semua user sekali saja: intro, lalu tutorial halaman yang dibuka (bisa Skip)
   # nama + peran + menu (Log Out ada di dalam menu ini)
 
     {"pengajuan": halaman_pengajuan_noo, "spv": halaman_konfirmasi_spv,
      "history": halaman_history}[ss.halaman_aktif]()
 
-    tampilkan_feedback_jika_diminta()     # popup bintang setelah submit NOO / SKU Mapping sukses
+    if ss.get("fb_wajib"):
+        tampilkan_feedback_jika_diminta()     # popup bintang setelah submit NOO / SKU Mapping sukses
+    else:
+        tampilkan_tutorial_jika_aktif()       # hanya satu dialog per run: feedback didahulukan
 
 if __name__ == "__main__":
     main()

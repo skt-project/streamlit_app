@@ -314,13 +314,14 @@ def do_signup(username, email, password, tagging=None):
         raise ValueError("Username sudah dipakai.")
     if _cari_user(email=email):
         raise ValueError("Email sudah terdaftar.")
-    result = sb_insert(TABLE_USER, {
+    baris = {
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "username":   username,
         "password":   bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
         "tagging":    tagging,
         "email":      email,
-    })
+    }
+    result = sb_insert(TABLE_USER, baris)
     if not result or (isinstance(result, dict) and "_error" in result):
         raise ValueError(result.get("_error") if isinstance(result, dict) else f"Insert failed: {result!r}")
 
@@ -479,10 +480,13 @@ def require_login(app: str = ""):
                             st.error(f"Login gagal: {e}")
 
                 with st.container(key="forgot"):
-                    c_chat, c_forgot = st.columns([1.3, 1], vertical_alignment="center")
+                    c_chat, c_tut, c_forgot = st.columns([1.2, 0.85, 1.1], vertical_alignment="center")
                     if c_chat.button(":material/help: Help & Support", key="login_help"):
                         from help_support import dialog_help_support     # popup tiket (tanpa Google Form)
                         dialog_help_support()
+                    if c_tut.button(":material/school: Tutorial", key="login_tutorial"):
+                        from tutorial import buka_kunci
+                        buka_kunci("login", manual=True)
                     if c_forgot.button("Forgot password?"):
                         st.toast("Hubungi admin untuk reset password.", icon=":material/info:")
 
@@ -492,5 +496,8 @@ def require_login(app: str = ""):
 
                 st.markdown(FINE_PRINT_HTML, unsafe_allow_html=True)
 
+    # tutorial halaman login: TIDAK otomatis (supaya tidak mengganggu), hanya saat user klik tombol Tutorial
+    from tutorial import tampilkan_tutorial_jika_aktif
+    tampilkan_tutorial_jika_aktif()
     st.stop()
 

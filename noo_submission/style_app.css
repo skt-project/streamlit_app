@@ -1102,3 +1102,17 @@ body div[data-baseweb="popover"]:has([role="listbox"]) [role="option"] * {
 
 /* jarak antara kartu KPI dan kartu grafik */
 .st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu { margin-top: 14px; }
+
+
+/* tombol Tutorial: di kiri tombol Help & Support (kanan atas), gaya sama */
+.st-key-tutorial_kanan {
+  position: fixed !important; top: 14px !important; right: 285px !important;
+  width: fit-content !important; z-index: 1000000 !important;
+}
+.st-key-tutorial_kanan button {
+  background: #fff0f5 !important; border: 1px solid #ffd3e2 !important; border-radius: 16px !important;
+  padding: 0 14px !important; height: 30px !important; min-height: 30px !important;
+  box-shadow: 0 2px 6px rgba(232,80,138,.15) !important;
+}
+.st-key-tutorial_kanan button p { color: #d6336c !important; font-weight: 700 !important; font-size: 12px !important; }
+.st-key-tutorial_kanan button:hover { background: #ffe3ed !important; border-color: #ffb3cd !important; text-decoration: none !important; }

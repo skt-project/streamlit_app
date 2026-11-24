@@ -13,7 +13,7 @@ import shared as _shared
 import streamlit as st
 import komponen
 from noo_grid import noo_grid
-from feedback import TABLE_FEEDBACK
+from feedback import TABLE_FEEDBACK, KOLOM_USER as KOLOM_FB_USER
 from shared import (
     # Constants
     KOLOM, KOLOM_EDIT, KOLOM_TAMPIL, WAJIB_ISI, MAPPING_SUPABASE_KE_VALIDASI,
@@ -1522,7 +1522,7 @@ def tab_feedback():
     ss.setdefault("fb_halaman", 1)
     ss.setdefault("fb_filter", "All")
 
-    st.markdown('<div class="fb-judul">Feedback</div>'
+    st.markdown('<div class="fb-judul">Help &amp; Support</div>'
                 '<div class="fb-sub">Tickets submitted from Help &amp; Support </div>',
                 unsafe_allow_html=True)
     try:
@@ -1633,6 +1633,406 @@ def tab_feedback():
                       disabled=ss.fb_halaman >= n_hal, width="stretch")
 
 
+_HASIL_FB_CSS = """<style>
+.rf-hero, .rf-hero *, .rf-item, .rf-item *, .rf-kosong {
+  font-family: "Source Sans", "Source Sans Pro", ui-sans-serif, system-ui, sans-serif; }
+.rf-hero{display:grid;grid-template-columns:260px 1.2fr 0.9fr;gap:12px;margin:4px 0 12px}
+@media (max-width:900px){.rf-hero{grid-template-columns:1fr}}
+.rf-card{background:#fff;border:1px solid #f3dfe8;border-radius:14px;padding:10px 14px;
+  box-shadow:0 6px 18px rgba(255,79,139,.07)}
+.rf-skor{background:linear-gradient(135deg,#ff4f8b,#ff8a5c);color:#fff;border:none;display:flex;flex-direction:column}
+.rf-skor .n{font-size:42px;font-weight:800;line-height:1}
+.rf-skor .n small{font-size:16px;font-weight:600;opacity:.85}
+.rf-skor .s{font-size:18px;letter-spacing:2px;margin:3px 0 1px}
+.rf-skor .t:first-child{font-size:13.5px;font-weight:700;opacity:1}
+.rf-skor .t{font-size:11.5px;opacity:.9}
+.rf-dist{flex:1;display:flex;flex-direction:column;justify-content:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.35)}
+.rf-dist .b{display:flex;align-items:center;gap:7px;font-size:11px;color:#fff;margin:3px 0}
+.rf-dist .b span.l{width:24px;font-weight:700}
+.rf-dist .tr{flex:1;height:7px;background:rgba(255,255,255,.3);border-radius:9px;overflow:hidden}
+.rf-dist .tr i{display:block;height:100%;border-radius:9px;background:#fff}
+.rf-dist .c{width:24px;text-align:right}
+.rf-ct{font-size:13.5px;font-weight:700;color:#1c1633;padding-bottom:6px;border-bottom:1px solid #f1e9ee;margin-bottom:6px}
+.rf-ct span{font-weight:500;color:#b0a9c0;font-size:11px;margin-left:6px}
+.rf-s3{display:grid;grid-template-columns:repeat(3,1fr);align-items:center;height:calc(100% - 32px);min-height:100px}
+.rf-si{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 4px}
+.rf-si + .rf-si{border-left:1px solid #f1e9ee}
+.rf-sn{font-size:20px;font-weight:300;color:#3a3550;display:flex;align-items:baseline;gap:10px;line-height:1}
+.rf-sn span{font-size:12px;font-weight:500}
+.rf-sn .pos{color:#2fae78}.rf-sn .net{color:#d99a00}.rf-sn .neg{color:#e8202a}
+.rf-cap{font-size:10.5px;color:#7d7690;text-align:center}
+.rf-tot{display:flex;flex-direction:column}
+.rf-grafik{margin-top:auto;padding-top:6px}
+.rf-gt{font-size:10.5px;color:#7d7690;font-weight:600;margin-bottom:4px}
+.rf-gx{display:flex;justify-content:space-between;font-size:9.5px;color:#b0a9c0}
+.rf-bigrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.rf-ikon{flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+.rf-gauge{text-align:center;line-height:1}
+.rf-gl{font-size:12px;font-weight:800;margin-top:-2px}
+.rf-gp{font-size:11.5px;font-weight:700;margin-top:4px}
+.rf-gp span{font-size:10px;font-weight:500;opacity:.8}
+.rf-big{font-size:32px;font-weight:300;color:#1c1633;line-height:1.1;margin-top:0}
+.rf-naik{color:#17a34a;font-weight:600;font-size:11.5px;margin-top:2px}
+.rf-naik span{display:block;color:#7d7690;font-weight:400;font-size:10.5px;margin-top:2px}
+.rf-item{display:flex;gap:12px;padding:12px 14px;border:1px solid #f3dfe8;border-radius:16px;margin-bottom:12px;
+  background:#fff;transition:box-shadow .2s,transform .2s}
+.rf-item:hover{box-shadow:0 8px 22px rgba(255,79,139,.12);transform:translateY(-1px)}
+.rf-av{flex:0 0 44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:24px;line-height:1;border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,.15)}
+.rf-body{flex:1;min-width:0}
+.rf-top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
+.rf-nama{font-weight:700;color:#1c1633;font-size:13px}
+.rf-nama span{font-weight:500;color:#7d7690;font-size:11.5px}
+.rf-tgl{font-size:10.5px;color:#9a93ad}
+.rf-bintang{font-size:15px;letter-spacing:2px;margin:3px 0}
+.rf-label{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 10px;border-radius:20px;margin-left:8px;
+  letter-spacing:0;vertical-align:middle}
+.rf-chip{display:inline-block;font-size:10.5px;padding:2px 9px;border-radius:20px;background:#fff0f5;
+  color:#d6336c;border:1px solid #ffd3e2;margin:4px 6px 0 0}
+.rf-quote{margin-top:6px;padding:8px 12px;background:#faf8fc;border-left:3px solid #ff4f8b;border-radius:0 10px 10px 0;
+  font-size:12px;line-height:1.45;color:#4a4560;white-space:pre-wrap;overflow-wrap:anywhere}
+[class*="st-key-hf_row_"]{position:relative}
+[class*="st-key-hf_del_"]{position:absolute;bottom:26px;right:14px;width:auto !important;z-index:2}
+[class*="st-key-hf_del_"] button{min-height:30px;padding:2px 8px;border:1px solid #f3dfe8;background:#fff;color:#c2556f}
+[class*="st-key-hf_del_"] button:hover{background:#fff0f5;border-color:#ff4f8b;color:#e8202a}
+.rf-tut{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid #f3dfe8;border-radius:14px;padding:10px 16px;
+  margin:0 0 12px;box-shadow:0 6px 18px rgba(255,79,139,.07)}
+.rf-tut .ik{flex:0 0 46px;height:46px;border-radius:50%;background:#fff0f5;display:flex;align-items:center;justify-content:center}
+.rf-tut .bd{flex:1;min-width:0}
+.rf-tut .tt{font-size:13px;font-weight:700;color:#1c1633}
+.rf-tut .tt span{font-weight:500;color:#b0a9c0;font-size:11px;margin-left:6px}
+.rf-tut .tr{height:7px;background:#f4eef2;border-radius:7px;overflow:hidden;margin:6px 0 4px}
+.rf-tut .tr i{display:block;height:100%;background:linear-gradient(90deg,#ff7aa2,#ff9f6b);border-radius:7px}
+.rf-tut .ct{font-size:11px;color:#7d7690}
+.rf-tut .pc{font-size:26px;font-weight:300;color:#e8508a;white-space:nowrap}
+.rf-tut .pc small{font-size:11px;color:#9a93ad;margin-left:4px}
+.rf-tc{border-left:3px solid #ffb3c9;background:#fffafb;border-radius:0 8px 8px 0;padding:6px 10px;margin-bottom:6px;font-size:12px;color:#4a4560}
+.rf-tc b{color:#1c1633}.rf-tc .ya{color:#2fae78;font-weight:700}.rf-tc .bl{color:#d9822b;font-weight:700}.rf-tc .tg{color:#9a93ad;font-size:10.5px;margin-left:6px}
+.rf-kosong{text-align:center;color:#9a93ad;padding:34px 0}
+</style>"""
+
+_WARNA_RATING = {1: "#e5484d", 2: "#f76b15", 3: "#f5b400", 4: "#46a758", 5: "#12a594"}
+_HASIL_FB_PER_HAL = 6
+
+
+# Avatar hewan bergaya kawaii (SVG orisinal, digambar sendiri). Satu hewan per user, dipilih dari hash nama.
+_WAJAH = ('<circle cx="24" cy="38" r="2.6" fill="#2b2233"/><circle cx="40" cy="38" r="2.6" fill="#2b2233"/>'
+          '<circle cx="25" cy="37" r="0.9" fill="#fff"/><circle cx="41" cy="37" r="0.9" fill="#fff"/>'
+          '<ellipse cx="19" cy="44" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/>'
+          '<ellipse cx="45" cy="44" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/>'
+          '<path d="M29 44q3 3 6 0" stroke="#2b2233" stroke-width="1.6" fill="none" stroke-linecap="round"/>')
+_HEWAN_SVG = {
+    "cat": '<path d="M13 28L15 8L28 19Z" fill="#ffc98a"/><path d="M51 28L49 8L36 19Z" fill="#ffc98a"/>'
+           '<path d="M16 24L17 14L24 20Z" fill="#ffadc2"/><path d="M48 24L47 14L40 20Z" fill="#ffadc2"/>'
+           '<circle cx="32" cy="38" r="21" fill="#ffd9a8"/>' + _WAJAH +
+           '<path d="M6 40h9M7 46l8-2M58 40h-9M57 46l-8-2" stroke="#b08a6a" stroke-width="1.2" stroke-linecap="round"/>',
+    "bear": '<circle cx="14" cy="21" r="8" fill="#b9825a"/><circle cx="50" cy="21" r="8" fill="#b9825a"/>'
+            '<circle cx="14" cy="21" r="4" fill="#e8b48f"/><circle cx="50" cy="21" r="4" fill="#e8b48f"/>'
+            '<circle cx="32" cy="38" r="21" fill="#c99468"/><ellipse cx="32" cy="45" rx="9" ry="7" fill="#f1d3b3"/>'
+            + _WAJAH.replace('<path d="M29 44q3 3 6 0"', '<ellipse cx="32" cy="42" rx="2.4" ry="1.8" fill="#3b2a2a"/><path d="M29 46q3 3 6 0"'),
+    "rabbit": '<ellipse cx="22" cy="14" rx="6" ry="14" fill="#fff"/><ellipse cx="42" cy="14" rx="6" ry="14" fill="#fff"/>'
+              '<ellipse cx="22" cy="15" rx="3" ry="9" fill="#ffc2d4"/><ellipse cx="42" cy="15" rx="3" ry="9" fill="#ffc2d4"/>'
+              '<circle cx="32" cy="40" r="20" fill="#fff" stroke="#f1e6ee" stroke-width="1"/>' + _WAJAH,
+    "panda": '<circle cx="14" cy="21" r="8" fill="#2b2233"/><circle cx="50" cy="21" r="8" fill="#2b2233"/>'
+             '<circle cx="32" cy="38" r="21" fill="#fff" stroke="#eee" stroke-width="1"/>'
+             '<ellipse cx="23" cy="37" rx="6" ry="7" fill="#2b2233" transform="rotate(-20 23 37)"/>'
+             '<ellipse cx="41" cy="37" rx="6" ry="7" fill="#2b2233" transform="rotate(20 41 37)"/>'
+             '<circle cx="24" cy="37" r="2.4" fill="#fff"/><circle cx="40" cy="37" r="2.4" fill="#fff"/>'
+             '<circle cx="24.4" cy="37.2" r="1.2" fill="#2b2233"/><circle cx="39.6" cy="37.2" r="1.2" fill="#2b2233"/>'
+             '<ellipse cx="32" cy="44" rx="2.4" ry="1.8" fill="#2b2233"/>'
+             '<path d="M29 47q3 3 6 0" stroke="#2b2233" stroke-width="1.6" fill="none" stroke-linecap="round"/>'
+             '<ellipse cx="18" cy="47" rx="3.4" ry="2" fill="#ff9fb8" opacity=".7"/><ellipse cx="46" cy="47" rx="3.4" ry="2" fill="#ff9fb8" opacity=".7"/>',
+    "dog": '<ellipse cx="11" cy="32" rx="7" ry="13" fill="#9a6b45" transform="rotate(15 11 32)"/>'
+           '<ellipse cx="53" cy="32" rx="7" ry="13" fill="#9a6b45" transform="rotate(-15 53 32)"/>'
+           '<circle cx="32" cy="38" r="20" fill="#f3d3a8"/><ellipse cx="32" cy="46" rx="9" ry="7" fill="#fff3e0"/>'
+           + _WAJAH.replace('<path d="M29 44q3 3 6 0"', '<ellipse cx="32" cy="42" rx="3" ry="2.2" fill="#2b2233"/><path d="M29 47q3 3 6 0"'),
+    "frog": '<circle cx="19" cy="20" r="9" fill="#7ed37e"/><circle cx="45" cy="20" r="9" fill="#7ed37e"/>'
+            '<circle cx="19" cy="20" r="5" fill="#fff"/><circle cx="45" cy="20" r="5" fill="#fff"/>'
+            '<circle cx="19" cy="20.5" r="2.6" fill="#2b2233"/><circle cx="45" cy="20.5" r="2.6" fill="#2b2233"/>'
+            '<ellipse cx="32" cy="42" rx="22" ry="17" fill="#8fdc8f"/>'
+            '<ellipse cx="17" cy="45" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/><ellipse cx="47" cy="45" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/>'
+            '<path d="M24 46q8 7 16 0" stroke="#2b2233" stroke-width="1.8" fill="none" stroke-linecap="round"/>'
+            '<circle cx="29" cy="38" r="1" fill="#4a9a4a"/><circle cx="35" cy="38" r="1" fill="#4a9a4a"/>',
+    "penguin": '<circle cx="32" cy="36" r="23" fill="#3a3550"/><ellipse cx="32" cy="42" rx="16" ry="15" fill="#fff"/>'
+               '<circle cx="24" cy="36" r="2.6" fill="#2b2233"/><circle cx="40" cy="36" r="2.6" fill="#2b2233"/>'
+               '<circle cx="25" cy="35" r="0.9" fill="#fff"/><circle cx="41" cy="35" r="0.9" fill="#fff"/>'
+               '<path d="M27 41h10l-5 6Z" fill="#ffb347"/>'
+               '<ellipse cx="19" cy="42" rx="3.4" ry="2" fill="#ff9fb8" opacity=".8"/><ellipse cx="45" cy="42" rx="3.4" ry="2" fill="#ff9fb8" opacity=".8"/>',
+    "chick": '<path d="M32 10q-5 -3 -6 2q4 0 6 4q2 -4 6 -4q-1 -5 -6 -2Z" fill="#ffd23f"/>'
+             '<circle cx="32" cy="38" r="22" fill="#ffe066"/>' + _WAJAH.replace('<path d="M29 44q3 3 6 0" stroke="#2b2233" stroke-width="1.6" fill="none" stroke-linecap="round"/>', '<path d="M28 42h8l-4 5Z" fill="#ff9f43"/>') +
+             '<path d="M9 36q-4 8 3 11M55 36q4 8 -3 11" stroke="#f5c518" stroke-width="3" fill="none" stroke-linecap="round"/>',
+}
+_HEWAN_URUT = list(_HEWAN_SVG)
+
+
+def _hewan_avatar(nama):
+    # hewan kawaii acak tapi KONSISTEN per user (dipilih dari hash nama), jadi user yang sama selalu dapat hewan yang sama
+    import zlib
+    h = _HEWAN_URUT[zlib.crc32(str(nama).encode("utf-8")) % len(_HEWAN_URUT)]
+    return f'<svg width="34" height="34" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">{_HEWAN_SVG[h]}</svg>'
+
+
+def _smiley_svg(persen, jenis):
+    # lingkaran wajah terisi dari bawah sesuai persen: "pos" hijau senyum, "net" kuning datar, "neg" merah cemberut
+    warna, muda, gelap, mulut = {
+        "pos": ("#5fcf9a", "#d6f5e6", "#1f6b4a", "M13 28q7 8 14 0"),
+        "net": ("#f5b400", "#fbe3a0", "#7a5500", "M14 29h12"),
+        "neg": ("#e8202a", "#f9b9bd", "#8f1018", "M13 31q7 -7 14 0"),
+    }[jenis]
+    return (f'<svg width="56" height="56" viewBox="0 0 40 40"><defs><linearGradient id="sm{jenis}" x1="0" y1="0" x2="0" y2="1">'
+            f'<stop offset="{100 - persen:.1f}%" stop-color="{muda}"/><stop offset="{100 - persen:.1f}%" stop-color="{warna}"/></linearGradient></defs>'
+            f'<circle cx="20" cy="20" r="19.4" fill="url(#sm{jenis})" stroke="{warna}" stroke-width="1.2"/>'
+            f'<circle cx="13" cy="15" r="2.2" fill="{gelap}"/><circle cx="27" cy="15" r="2.2" fill="{gelap}"/>'
+            f'<path d="{mulut}" stroke="{gelap}" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>')
+
+
+def _garis_harian_svg(nilai):
+    # line chart kecil (area + garis + titik) jumlah feedback per hari
+    w, h, pad = 220, 62, 6
+    mx = max(max(nilai), 1)
+    n = len(nilai)
+    xs = [pad + i * (w - 2 * pad) / (n - 1) for i in range(n)]
+    ys = [h - pad - (v / mx) * (h - 2 * pad) for v in nilai]
+    # kurva halus (bezier dengan tangen horizontal di tiap titik): tidak ada lonjakan / overshoot di bawah garis dasar
+    d = f"M{xs[0]:.1f} {ys[0]:.1f}"
+    for i in range(1, n):
+        mx_ = (xs[i - 1] + xs[i]) / 2
+        d += f" C{mx_:.1f} {ys[i - 1]:.1f} {mx_:.1f} {ys[i]:.1f} {xs[i]:.1f} {ys[i]:.1f}"
+    area = f"{d} L{xs[-1]:.1f} {h - pad} L{xs[0]:.1f} {h - pad} Z"
+    # titik dibuat dari garis pendek ber-ujung bulat dengan vector-effect non-scaling-stroke: tetap BULAT walau svg diregangkan
+    titik = "".join(f'<path d="M{x:.1f} {y:.1f}h0" stroke="#ff4f8b" stroke-width="9" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+                    f'<path d="M{x:.1f} {y:.1f}h0" stroke="#fff" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+                    for x, y, v in zip(xs, ys, nilai) if v > 0)
+    return (f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}" preserveAspectRatio="none">'
+            '<defs><linearGradient id="gh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4f8b" stop-opacity=".30"/>'
+            '<stop offset="1" stop-color="#ff4f8b" stop-opacity="0"/></linearGradient></defs>'
+            f'<line x1="{pad}" y1="{h - pad}" x2="{w - pad}" y2="{h - pad}" stroke="#f1e9ee"/>'
+            f'<path d="{area}" fill="url(#gh)"/>'
+            f'<path d="{d}" fill="none" stroke="#ff4f8b" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+            f'{titik}</svg>')
+
+
+def _gauge_rating_html(rata):
+    # gauge busur (terisi sesuai rata-rata rating / 5) + wajah di tengah + label di bawah
+    import math as _m
+    if rata >= 4.5:   warna, label, mood = "#17c98f", "Superb!", "senang"
+    elif rata >= 3.5: warna, label, mood = "#46a758", "Great", "senang"
+    elif rata >= 2.5: warna, label, mood = "#f5b400", "Okay", "datar"
+    elif rata >= 1.5: warna, label, mood = "#f76b15", "Poor", "sedih"
+    else:             warna, label, mood = "#e5484d", "Bad", "sedih"
+    cx, cy, r, sapuan = 60, 54, 46, 240
+    frac = max(0.0, min(1.0, rata / 5))
+
+    def titik(f):
+        t = _m.radians(210 - sapuan * f)
+        return cx + r * _m.cos(t), cy - r * _m.sin(t)
+    x0, y0 = titik(0); x1, y1 = titik(1); kx, ky = titik(frac)
+    busur = f"M{x0:.1f} {y0:.1f} A{r} {r} 0 1 1 {x1:.1f} {y1:.1f}"
+    mulut = {"senang": "M50 56q10 11 20 0Z", "datar": "M52 60h16", "sedih": "M52 63q8-8 16 0"}[mood]
+    mulut_el = (f'<path d="{mulut}" fill="#fff"/>' if mood == "senang"
+                else f'<path d="{mulut}" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round"/>')
+    mata = ('<path d="M48 47q4-5 8 0M64 47q4-5 8 0" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round"/>'
+            if mood == "senang" else '<circle cx="52" cy="48" r="2.6" fill="#fff"/><circle cx="68" cy="48" r="2.6" fill="#fff"/>')
+    kilau = "".join(f'<path d="M{x} {y-3}v6M{x-3} {y}h6" stroke="{warna}" stroke-width="1.3" stroke-linecap="round"/>'
+                    for x, y in ((38, 30), (84, 34), (88, 66)))
+    return (f'<div class="rf-gauge"><svg viewBox="0 0 120 100" width="66" height="55">'
+            f'<path d="{busur}" fill="none" stroke="#e7e3ea" stroke-width="5" stroke-linecap="round"/>'
+            f'<path d="{busur}" fill="none" stroke="{warna}" stroke-width="5" stroke-linecap="round" pathLength="100" '
+            f'stroke-dasharray="{frac * 100:.1f} 100"/>'
+            f'<circle cx="{kx:.1f}" cy="{ky:.1f}" r="5" fill="#fff" stroke="{warna}" stroke-width="2.5"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="21" fill="{warna}"/>{mata}{mulut_el}{kilau}</svg>'
+            f'<div class="rf-gl" style="color:{warna}">{label}</div>'
+            f'<div class="rf-gp" style="color:{warna}">{frac * 100:.0f}% <span>of max score</span></div></div>')
+
+
+def _bintang_html(n):
+    n = int(n or 0)
+    return (f'<span style="color:{_WARNA_RATING.get(n, "#ccc")}">' + "★" * n + "</span>"
+            f'<span style="color:#e3dde8">' + "★" * (5 - n) + "</span>")
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _ambil_hasil_feedback():
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/{TABLE_FEEDBACK}",
+                     headers={**_SB_HEADERS, "Prefer": ""},
+                     params={"select": "*", "order": "created_at.desc", "limit": 2000}, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
+def _kartu_tutorial(tut_rows):
+    # feedback tentang tutorial (kategori = "Tutorial") ditampilkan terpisah dari penilaian aplikasi
+    import html as _h
+    if not tut_rows:
+        return
+    n = len(tut_rows)
+    ya = sum(1 for x in tut_rows if "belum" not in str(x.get("interpretasi") or "").lower())
+    pct = ya / n * 100
+    st.markdown(
+        '<div class="rf-tut"><div class="ik"><svg width="30" height="30" viewBox="0 0 80 80"><circle cx="40" cy="42" r="30" fill="#ffb3c9"/>'
+        '<path d="M25 36q5-6 10 0M45 36q5-6 10 0" stroke="#5a2a3c" stroke-width="3.5" fill="none" stroke-linecap="round"/>'
+        '<path d="M32 46q8 9 16 0z" fill="#5a2a3c"/></svg></div>'
+        f'<div class="bd"><div class="tt">Tutorial feedback <span>Apakah tutorial ini membantumu?</span></div>'
+        f'<div class="tr"><i style="width:{pct:.0f}%"></i></div>'
+        f'<div class="ct">{ya} membantu &middot; {n - ya} belum membantu &middot; {n} jawaban</div></div>'
+        f'<div class="pc">{pct:.0f}%<small>helpful</small></div></div>', unsafe_allow_html=True)
+    komentar = [x for x in tut_rows if str(x.get("keterangan") or "").strip()]
+    if komentar:
+        with st.expander(f"Tutorial comments ({len(komentar)})", expanded=False):
+            for x in komentar[:30]:
+                bl = "belum" in str(x.get("interpretasi") or "").lower()
+                teks = _h.escape(str(x.get("keterangan") or ""))
+                st.markdown(f'<div class="rf-tc"><b>{_h.escape(str(x.get(KOLOM_FB_USER) or "-"))}</b> '
+                            f'<span class="{"bl" if bl else "ya"}">{"Belum membantu" if bl else "Membantu"}</span>'
+                            f'<div>{teks}</div></div>', unsafe_allow_html=True)
+
+
+def tab_hasil_feedback():
+    import html as _html
+    ss = st.session_state
+    ss.setdefault("hf_halaman", 1)
+    st.markdown(_HASIL_FB_CSS, unsafe_allow_html=True)
+    st.markdown('<div class="fb-judul">Feedback</div>'
+                '<div class="fb-sub">What users say about the NOO &amp; SKU Mapping submission app</div>',
+                unsafe_allow_html=True)
+    try:
+        data = _ambil_hasil_feedback()
+    except Exception as e:
+        st.error(f"Failed to load feedback: {e}")
+        return
+    tut_rows = [x for x in data if str(x.get("kategori") or "").strip() == "Tutorial"]
+    data = [x for x in data if str(x.get("kategori") or "").strip() != "Tutorial"]
+    if not data:
+        _kartu_tutorial(tut_rows)
+        if not tut_rows:
+            st.markdown('<div class="rf-kosong">No feedback yet.</div>', unsafe_allow_html=True)
+        return
+    try:
+        peta = muat_distri_code_map()
+    except Exception:
+        peta = {}
+
+    def _rating(x):
+        try:
+            return int(x.get("rating") or 0)
+        except Exception:
+            return 0
+
+    total = len(data)
+    rata = sum(_rating(x) for x in data) / total
+    puas = sum(1 for x in data if _rating(x) >= 4) / total * 100
+    jml = {n: sum(1 for x in data if _rating(x) == n) for n in range(1, 6)}
+    bulat = int(round(rata))
+    n_pos = jml[4] + jml[5]
+    n_neg = jml[1] + jml[2]
+    n_net = jml[3]
+    pos_p, neg_p, net_p = n_pos / total * 100, n_neg / total * 100, n_net / total * 100
+    harian, tgl_awal, tgl_akhir = [0] * 14, "", ""
+    try:
+        waktu_fb = pd.to_datetime(pd.Series([x.get("created_at") for x in data]), utc=True, errors="coerce").dt.tz_convert(ZONA_WAKTU)
+        hari_ini = pd.Timestamp.now(tz=ZONA_WAKTU).normalize()
+        selisih = (hari_ini - waktu_fb.dt.normalize()).dt.days
+        harian = [int((selisih == 13 - k).sum()) for k in range(14)]      # 14 hari terakhir, lama -> baru
+        tgl_awal = (hari_ini - pd.Timedelta(days=13)).strftime("%d %b")
+        tgl_akhir = hari_ini.strftime("%d %b")
+    except Exception:
+        pass
+    try:
+        sekarang = pd.Timestamp.now(tz="UTC")
+        minggu = int((pd.to_datetime(pd.Series([x.get("created_at") for x in data]), utc=True, errors="coerce")
+                      >= sekarang - pd.Timedelta(days=7)).sum())
+    except Exception:
+        minggu = 0
+    dist = "".join(
+        f'<div class="b"><span class="l">{n}★</span><div class="tr"><i style="width:{jml[n] / total * 100:.0f}%"></i></div>'
+        f'<span class="c">{jml[n]}</span></div>' for n in (5, 4, 3, 2, 1))
+
+    def _s_item(n, p, jenis, cap):
+        return (f'<div class="rf-si">{_smiley_svg(p, jenis)}<div class="rf-sn">{n}<span class="{jenis}">{p:.0f}%</span></div>'
+                f'<div class="rf-cap">{cap}</div></div>')
+    st.markdown(
+        '<div class="rf-hero">'
+        f'<div class="rf-card rf-skor"><div class="t">Average rating</div><div class="n">{rata:.1f}<small> / 5</small></div>'
+        f'<div class="s">{"★" * bulat}{"☆" * (5 - bulat)}</div><div class="t">from {total} response(s)</div>'
+        f'<div class="rf-dist">{dist}</div></div>'
+        f'<div class="rf-card rf-sent"><div class="rf-ct">Sentiment <span>All time</span></div><div class="rf-s3">'
+        + _s_item(n_pos, pos_p, "pos", "Positive (4–5★)") + _s_item(n_net, net_p, "net", "Neutral (3★)")
+        + _s_item(n_neg, neg_p, "neg", "Negative (1–2★)") +
+        '</div></div>'
+        f'<div class="rf-card rf-tot"><div class="rf-ct">Feedback <span>All time</span></div>'
+        f'<div class="rf-bigrow"><div class="rf-big">{total}</div><div class="rf-ikon">{_gauge_rating_html(rata)}</div></div>'
+        f'<div class="rf-naik">▲ +{minggu} <span>received in the last 7 days</span></div>'
+        f'<div class="rf-grafik"><div class="rf-gt">Last 14 days</div>{_garis_harian_svg(harian)}'
+        f'<div class="rf-gx"><span>{tgl_awal}</span><span>{tgl_akhir}</span></div></div></div></div>', unsafe_allow_html=True)
+
+    _kartu_tutorial(tut_rows)
+    opsi = ["All", "5★", "4★", "3★", "2★", "1★"]
+    c_f, c_c = st.columns([3, 2], vertical_alignment="center")
+    pilih = c_f.segmented_control("Rating", opsi, key="hf_filter", label_visibility="collapsed",
+                                  on_change=lambda: ss.update(hf_halaman=1)) or "All"
+    kata = c_c.text_input("Search", key="hf_cari", placeholder="Search user, category, comment...",
+                          label_visibility="collapsed", on_change=lambda: ss.update(hf_halaman=1))
+
+    def _cocok(x):
+        if pilih != "All" and _rating(x) != int(pilih[0]):
+            return False
+        if kata:
+            u = str(x.get(KOLOM_FB_USER) or "").upper()
+            gab = f'{u} {(peta.get(u) or {}).get("distributor", "")} {x.get("kategori") or ""} ' \
+                  f'{x.get("keterangan") or ""} {x.get("other_feedback") or ""}'
+            return kata.lower() in gab.lower()
+        return True
+
+    tampil = [x for x in data if _cocok(x)]
+    bisa_hapus = (ss.get("user") or {}).get("tagging") in ("RSA", "BD SUPPORT", "BD_SUPPORT")
+    n_hal = max(1, math.ceil(len(tampil) / _HASIL_FB_PER_HAL))
+    ss.hf_halaman = min(max(1, ss.hf_halaman), n_hal)
+    awal = (ss.hf_halaman - 1) * _HASIL_FB_PER_HAL
+    if not tampil:
+        st.markdown('<div class="rf-kosong">No feedback matches.</div>', unsafe_allow_html=True)
+    for x in tampil[awal:awal + _HASIL_FB_PER_HAL]:
+        r = _rating(x)
+        kode = str(x.get(KOLOM_FB_USER) or "-").strip()
+        kode = kode if kode.upper().startswith("RSA - ") else kode.upper()
+        distri = (peta.get(kode) or {}).get("distributor", "")
+        warna = _WARNA_RATING.get(r, "#999")
+        tgl = ""
+        try:
+            w = pd.to_datetime(x.get("created_at"), utc=True).tz_convert(ZONA_WAKTU)
+            tgl = f'{w.strftime("%b")} {w.day}, {w.year} • {w.strftime("%H:%M")}'
+        except Exception:
+            pass
+        chips = "".join(f'<span class="rf-chip">{_html.escape(k.strip())}</span>'
+                        for k in str(x.get("kategori") or "").split(",") if k.strip())
+        if x.get("other_feedback"):
+            chips += f'<span class="rf-chip">Other: {_html.escape(str(x["other_feedback"]))}</span>'
+        fid = x.get("id")
+        with st.container(key=f"hf_row_{fid}" if fid is not None else None):
+          st.markdown(
+            f'<div class="rf-item"><div class="rf-av" style="background:{warna}">{_hewan_avatar(kode)}</div>'
+            f'<div class="rf-body"><div class="rf-top"><div class="rf-nama">{_html.escape(kode)}'
+            + (f' <span>· {_html.escape(distri)}</span>' if distri else '') +
+            f'</div><div class="rf-tgl">{tgl}</div></div>'
+            f'<div class="rf-bintang">{_bintang_html(r)}<span class="rf-label" style="background:{warna}22;color:{warna}">'
+            f'{_html.escape(str(x.get("interpretasi") or ""))}</span></div>'
+            f'{chips}'
+            + (f'<div class="rf-quote">{_html.escape(str(x["keterangan"]))}</div>' if x.get("keterangan") else '') +
+            '</div></div>', unsafe_allow_html=True)
+          if fid is not None and bisa_hapus:
+            if st.button(":material/delete:", key=f"hf_del_{fid}", help="Delete this feedback"):
+                _konfirmasi_hapus_feedback(fid, kode)
+
+    with st.container(key="fb_footer"):              # CSS yang sama dengan pagination Help & Support (1 baris, tombol kecil)
+        b0, b1, b2, b3 = st.columns([10, 1, 1, 1], gap="xxsmall", vertical_alignment="center")
+        b0.markdown(f'<div class="fb-info">Showing {awal + 1 if tampil else 0}-'
+                    f'{min(awal + _HASIL_FB_PER_HAL, len(tampil))} of {len(tampil)} feedback</div>',
+                    unsafe_allow_html=True)
+        b1.button("‹", key="fb_prev", on_click=lambda: ss.update(hf_halaman=ss.hf_halaman - 1),
+                  disabled=ss.hf_halaman <= 1, width="stretch")
+        b2.button(str(ss.hf_halaman), key="fb_cur", disabled=True, width="stretch")
+        b3.button("›", key="fb_next", on_click=lambda: ss.update(hf_halaman=ss.hf_halaman + 1),
+                  disabled=ss.hf_halaman >= n_hal, width="stretch")
+
 
 # ── Grafik native (Vega/Altair, tanpa unduh library dari CDN & tanpa iframe) ──
 @st.cache_data(max_entries=6, show_spinner=False)
@@ -1643,7 +2043,7 @@ def halaman_dashboard_tabs():
     # st.tabs selalu kembali ke tab pertama (Dashboard) setiap halaman dirender ulang penuh (st.rerun, toast, dll.).
     # Pilihan tampilan disimpan di session_state, jadi Feedback tetap di Feedback.
     ss = st.session_state
-    opsi = [":material/trending_up: Dashboard SKU & NOO", ":material/chat: Feedback"]
+    opsi = [":material/trending_up: Dashboard SKU & NOO", ":material/chat: Help & Support", ":material/star: Feedback"]
     # key widget HARUS beda dari key container "dash_view" (yang dipakai CSS), kalau sama -> DuplicateElementKey
     if ss.get("dash_view_pilih") not in opsi:
         ss["dash_view_pilih"] = ss.get("_dash_view_terakhir", opsi[0])      # klik ulang pilihan aktif = None -> pertahankan
@@ -1653,6 +2053,8 @@ def halaman_dashboard_tabs():
         ss["_dash_view_terakhir"] = ss["dash_view_pilih"]
         if ss["dash_view_pilih"] == opsi[1]:
             tab_feedback()
+        elif ss["dash_view_pilih"] == opsi[2]:
+            tab_hasil_feedback()
         else:
             halaman_dashboard()
 
@@ -1966,6 +2368,26 @@ def _sb_user_delete(username: str) -> bool:
         return True
     st.session_state["_err_del"] = f"HTTP {r.status_code}, rows={r.text[:150]}"
     return False
+
+@st.dialog("Delete feedback", width="small")
+def _konfirmasi_hapus_feedback(fid, nama):
+    st.markdown(f"Are you sure you want to delete the feedback from **{nama}**?")
+    st.warning("This feedback will be permanently removed. This cannot be undone.")
+    c_ya, c_batal = st.columns(2)
+    if c_batal.button("Cancel", key="dlg_fb_batal", width="stretch"):
+        st.rerun()
+    if c_ya.button("Yes, delete", type="primary", key="dlg_fb_ya", width="stretch"):
+        n, err = _sb_tabel_hapus(TABLE_FEEDBACK, {"id": f"eq.{fid}"})
+        if err:
+            st.error(f"Delete failed: {err}")
+            return
+        if n == 0:
+            st.error("Supabase accepted the request but deleted 0 rows: the table has no DELETE policy for this API key (RLS).")
+            return
+        _ambil_hasil_feedback.clear()
+        st.session_state.pesan_toast = "Feedback deleted."
+        st.rerun()
+
 
 @st.dialog("Delete user", width="small")
 def _konfirmasi_hapus_user(username: str):
