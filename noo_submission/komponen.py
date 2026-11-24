@@ -2,7 +2,6 @@ import pandas as pd
 from html import escape
 
 def _satu_baris(teks: str) -> str:
-    """Collapse multi-line HTML string menjadi satu baris (buang newline & spasi berlebih)."""
     import re
     return re.sub(r"\s+", " ", teks).strip()
 STATUS_VALID = "Valid"
@@ -11,7 +10,6 @@ STATUS_REVIEW = "Need Review"
 
 # =========================== PAGE HEADER ===========================
 def _ikon_html(ikon: str) -> str:
-    """":material/nama:" -> ikon garis Material (font bawaan Streamlit); selain itu dipakai apa adanya."""
     if ikon.startswith(":material/") and ikon.endswith(":"):
         return f'<span class="mi">{ikon[10:-1]}</span>'
     return ikon
@@ -127,7 +125,6 @@ def html_kepala_kolom(teks: str, wajib: bool = False, gaya: str = "") -> str:
 
 
 def html_sel_teks(teks, gaya: str = "") -> str:
-    """Sel teks read-only. gaya: '' | 'sel-baca' (abu, data tarikan) | 'sel-tebal'."""
     isi = escape(str(teks)) if str(teks).strip() else "-"
     return f'<div class="sel-teks {gaya}">{isi}</div>'
 
@@ -167,7 +164,6 @@ def html_ringkasan_spv(total: int, selesai: int, noo: int, existing: int,
 
 
 def html_info_region(region) -> str:
-    """Chip kecil: region distributor yang dipakai untuk skor similarity."""
     if region:
         isi = escape(", ".join(region))
         return f'<div class="info-region">Region: <b>{isi}</b></div>'

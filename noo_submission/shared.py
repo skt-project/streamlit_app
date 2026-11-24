@@ -154,8 +154,6 @@ def get_id() -> set:
     return {r.cust_id for r in client.query(query).result()}
 
 def bq_cari_duplikat_kode(kode_list) -> tuple:
-    """Cek Customer Store Code ke kolom cust_id di BigQuery master store.
-    Return (ditemukan, gagal_cek), sama seperti sb_cari_duplikat_kode."""
     kode_bersih = {str(k).strip() for k in kode_list if str(k).strip()}
     if not kode_bersih:
         return set(), set()
@@ -292,7 +290,6 @@ KOLOM_NOO_OUTPUT = [
 ]
 
 class channel:
-    """Auto GT di kolom Channel."""
     def __init__(self, nilai):
         self.nilai = nilai
 
@@ -436,7 +433,8 @@ def sb_insert(table: str, row):
         r.raise_for_status()
         return r.json()
     except requests.HTTPError as e:
-        detail = e.response.text[:300] if e.response else str(e)
+        # `if e.response` salah: Response bernilai False untuk status 4xx/5xx, jadi isi error Supabase tidak pernah terbaca
+        detail = e.response.text[:300] if e.response is not None else str(e)
         return {"_error": f"HTTP {e.response.status_code}: {detail}"}
     except Exception as e:
         return {"_error": str(e)}
@@ -473,9 +471,6 @@ def sb_patch_by_kode_nama(table: str, kode: str, nama: str, patch: dict) -> bool
         return False
 
 def sb_baca_status_id(pasangan) -> dict:
-    """BACA ULANG dari Supabase (bukan session_state): status (tagging) dan Store ID baris INPUT_NOO.
-    pasangan = iterable (Customer Store Code, Customer Store Name). Return {(kode, nama): (tagging, store_id)}
-    atau None kalau gagal membaca (pemanggil harus menganggap 'tidak terverifikasi')."""
     pasangan = {(str(k).strip(), str(n).strip()) for k, n in pasangan if str(k).strip()}
     if not pasangan:
         return {}
@@ -501,13 +496,9 @@ def sb_baca_status_id(pasangan) -> dict:
 
 @st.cache_data(ttl=5, show_spinner=False)
 def sb_baca_status_id_singkat(pasangan: tuple):
-    """sb_baca_status_id dengan cache 5 detik, khusus untuk menentukan tombol aktif/nonaktif tiap rerun
-    (supaya tidak menembak Supabase di setiap interaksi). Verifikasi saat tombol DIKLIK memakai versi tanpa cache."""
     return sb_baca_status_id(pasangan)
 
 def sb_delete(table: str, filters: dict):
-    """DELETE baris yang cocok PERSIS dengan semua filters (kolom -> nilai).
-    Return (jumlah_terhapus, pesan_error). Tanpa filter -> ditolak, supaya tidak pernah menghapus seluruh tabel."""
     if not filters or any(str(v).strip() == "" for v in filters.values()):
         return 0, "filter kosong, penghapusan dibatalkan"
     try:
@@ -609,7 +600,6 @@ _SWR_LOCK = _threading.RLock()
 _PREWARM_SUDAH: set = set()
 
 def prewarm(*fungsi):
-    """Muat data berat di thread latar belakang (sekali per proses server) supaya halaman pertama tidak menunggu."""
     baru = [f for f in fungsi if f.__name__ not in _PREWARM_SUDAH]
     if not baru:
         return
@@ -631,10 +621,6 @@ def _ada_isi(v) -> bool:
         return True
 
 def swr_cache(ttl: float, salin: bool = True):
-    """Untuk fungsi TANPA argumen yang mengambil data dari jaringan. Panggilan pertama (atau setelah .clear())
-    menunggu data; setelah itu data lama langsung dikembalikan dan, kalau sudah lewat `ttl` detik, data baru
-    diambil di thread latar belakang untuk panggilan berikutnya. Hasil dikembalikan sebagai salinan
-    (salin=False untuk data besar yang hanya dibaca, tanpa salinan)."""
     def deco(fn):
         # state disimpan di level modul (kunci = nama fungsi): file app dijalankan ulang tiap rerun sehingga
         # fungsi di dalamnya dibuat ulang; state di closure akan ikut hilang
@@ -690,7 +676,6 @@ def ambil_raw_noo() -> list:
 
 # KEMBALIKAN KE INI
 def sb_max_angka_store_id() -> dict:
-    """Max angka per prefix dari SEMUA Store ID di INPUT_NOO (tanpa batas 500 baris)."""
     hasil, start, step = {}, 0, 1000
     while True:
         try:
@@ -812,8 +797,6 @@ POLA_STORE_ID = re.compile(r"^[A-Z]{%d}\d+$" % PANJANG_PREFIX)
 
 @st.cache_data(ttl=120, show_spinner=False)
 def muat_id_data_merge() -> tuple:
-    """Gabungan semua Store ID dari DATA_MERGE_SUMBER, sudah dibersihkan (TRIM, UPPER, buang kosong & format salah).
-    Return (frozenset_id, pesan_error). Sumber yang gagal dibaca dilaporkan di pesan_error, sumber lain tetap dipakai."""
     hasil, galat = set(), []
     for url_sheet, tab, kolom in DATA_MERGE_SUMBER:
         try:
@@ -840,7 +823,6 @@ DATA_MERGE_PIVOT = (HISTORY_GENERATOR, "DATA GENERATOR", "L", "M")
 
 @st.cache_data(ttl=120, show_spinner=False)
 def muat_max_pivot() -> dict:
-    """{prefix: max nomor} dari pivot di sheet. Prefix selain 4 huruf (mis. 'I') & nomor non-angka dibuang. Gagal baca -> {}."""
     url_sheet, tab, kol_prefix, kol_angka = DATA_MERGE_PIVOT
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(url_sheet)}/gviz/tq"
            f"?tqx=out:csv&sheet={quote(tab)}&tq={quote(f'select {kol_prefix}, {kol_angka} where {kol_prefix} is not null')}")
@@ -857,7 +839,6 @@ def muat_max_pivot() -> dict:
     return hasil
 
 def max_angka_data_merge() -> dict:
-    """Max nomor per prefix dari data merge (tab id dms / NEW Generator per-ID + pivot DATA GENERATOR)."""
     hasil = dict(muat_max_pivot())
     for sid in muat_id_data_merge()[0]:
         p, a = sid[:PANJANG_PREFIX], sid[PANJANG_PREFIX:]
@@ -981,7 +962,6 @@ GID_PRODUCT_DESCRIPTION = "2106824930"
 
 @st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_deskripsi_produk() -> dict:
-    """Return dict {Description: Product Code} dari sheet (gid tetap, nama tab boleh berubah)."""
     url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}"
            f"/export?format=csv&gid={GID_PRODUCT_DESCRIPTION}")
     df = pd.read_csv(url, dtype=str, header=None).fillna("")
@@ -1022,7 +1002,6 @@ def _kunci_nama(t) -> str:
     return _rapikan_nama(t).upper()
 
 def _gabung_unik(kumpulan) -> list:
-    """Gabungkan nama dari beberapa daftar; ejaan sama (abaikan huruf besar/kecil & spasi) hanya muncul sekali."""
     lihat, hasil = set(), []
     for nama in kumpulan:
         k = _kunci_nama(nama)
@@ -1061,8 +1040,6 @@ def _norm_distri(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 def _cocokkan_distributor_spv(distri: str, lookup: dict) -> dict:
-    """Cari distributor di lookup yang namanya mirip (beda spasi/tanda baca/PT-CV/cabang), supaya daftar SPV
-    tetap dibatasi ke distributor itu, bukan semua SPV."""
     kunci = _norm_distri(distri)
     if not kunci:
         return {}
@@ -1088,7 +1065,6 @@ def _cocokkan_distributor_spv(distri: str, lookup: dict) -> dict:
     return {}
 
 def peta_spv_sales(distri: str, lookup: dict) -> dict:
-    """{SPV: [sales,...]} untuk satu distributor (fallback: gabungan semua distributor)."""
     peta = lookup.get(str(distri).strip().upper(), {})
     if not peta:
         peta = _cocokkan_distributor_spv(distri, lookup)
@@ -1156,7 +1132,6 @@ def hasil_ke_excel(df: pd.DataFrame, startrow: int = 1) -> bytes:
     return buffer.getvalue()
 
 def nama_pengguna_sesi() -> str:
-    """Nama pengguna dari SESI ini (bukan variabel global modul, yang dipakai bersama semua pengguna server)."""
     user  = st.session_state.get("user") or {}
     uname = str(user.get("username", "")).strip()
     if not uname:
@@ -1185,7 +1160,6 @@ REGION_TO_RSA = {
 }
 
 def rsa_identifier(nama_distributor: str, fallback: str = "rsa") -> str:
-    """'rsa_<nama>' berdasarkan Region distributor; fallback bila distributor/region tidak ditemukan."""
     nama = " ".join(str(nama_distributor or "").split()).lower()
     if not nama:
         return fallback
@@ -1222,7 +1196,6 @@ def catat_riwayat(aksi: str, detail: str = "", pengguna: str = None, distributor
     })
 
 def tampilkan_toast_warna(teks: str, icon: str = ":material/check_circle:"):
-    """Pop-up pojok kanan atas: hijau muda = berhasil, merah muda = gagal/peringatan. Hilang sendiri (CSS)."""
     import html as _html
     gagal = ("warning" in icon) or ("error" in icon)
     bg, bd, fg, simbol = (("#fde2e4","#f5a3ab","#8a1c27","warning") if gagal
@@ -1300,7 +1273,6 @@ NOO_SHEET_KOLOM = [
 ]
 
 def _noo_sheet_credentials():
-    """Service account noo-spreadsheet: dari st.secrets["noo_sheet"] (disarankan) atau file JSON lokal."""
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     try:
         info = dict(st.secrets["noo_sheet"])
@@ -1319,8 +1291,6 @@ def _noo_worksheet():
     return gspread.authorize(_noo_sheet_credentials()).open_by_key(NOO_SHEET_ID).worksheet(NOO_SHEET_TAB)
 
 def kirim_noo_ke_sheet(rows: list, sumber: str = "", pengguna: str = "") -> tuple:
-    """Tambahkan baris NOO yang BARU disubmit (dict hasil noo_row_ke_supabase) ke sheet 'test'.
-    Return (ok, pesan). Tidak pernah raise: kegagalan sheet tidak boleh menggagalkan submit ke Supabase."""
     if not rows:
         return True, ""
     try:
@@ -1339,9 +1309,6 @@ def kirim_noo_ke_sheet(rows: list, sumber: str = "", pengguna: str = "") -> tupl
         return False, f"{type(e).__name__}: {e}"
 
 def update_generate_id_di_sheet(items: list) -> tuple:
-    """Isi kolom 'Generate ID' dan 'generated_at' di sheet untuk baris NOO yang sudah di-generate.
-    items = [{"kode": Customer Store Code, "nama": Customer Store Name, "store_id": ..., "generated_at": "YYYY-MM-DD HH:MM:SS"}]
-    Baris dicari lewat Customer Store Code + Customer Store Name. Return (ok, pesan); tidak pernah raise."""
     if not items:
         return True, ""
     try:
@@ -1410,7 +1377,6 @@ def _noo_lock_worksheet():
         return ws
 
 def kunci_generate_pasang(pengguna: str = "") -> tuple:
-    """Tandai 'sesi ini punya ID yang belum disimpan' supaya Apps Script menunggu. Return (ok, pesan); tidak pernah raise."""
     try:
         ws = _noo_lock_worksheet()
         owner = _pemilik_kunci()
@@ -1431,7 +1397,6 @@ def kunci_generate_pasang(pengguna: str = "") -> tuple:
         return False, f"{type(e).__name__}: {e}"
 
 def kunci_generate_lepas() -> tuple:
-    """Hapus baris kunci milik sesi ini (dipanggil setelah semua ID tersimpan / data di-refresh)."""
     if not st.session_state.get("_kunci_aktif"):
         return True, ""          # sesi ini tidak pernah memasang kunci -> tidak perlu menyentuh Google Sheet
     try:
@@ -1452,8 +1417,6 @@ def kunci_generate_lepas() -> tuple:
 PAKAI_COUNTER_PUSAT = True
 
 def sb_ambil_nomor(prefix: str, jumlah: int, floor: int):
-    """Ambil `jumlah` nomor berurutan untuk prefix. floor = nomor tertinggi yang sudah diketahui dari semua sumber
-    (counter otomatis naik ke atas floor). Return (dari, sampai) atau None kalau gagal."""
     if not PAKAI_COUNTER_PUSAT or jumlah < 1:
         return None
     try:
@@ -1467,8 +1430,6 @@ def sb_ambil_nomor(prefix: str, jumlah: int, floor: int):
         return None
 
 def sb_id_terpakai() -> dict:
-    """Semua Store ID di INPUT_NOO (tanpa cache, tanpa batas 500): {ID: (Customer Store Code, Customer Store Name)}.
-    Return None kalau gagal membaca."""
     hasil, start, step = {}, 0, 1000
     try:
         while True:
@@ -1492,9 +1453,6 @@ def sb_id_terpakai() -> dict:
         return None
 
 def hapus_noo_di_sheet(items: list) -> tuple:
-    """Hapus baris di sheet untuk NOO yang di-Delete di Store Validation.
-    items = [{"kode": Customer Store Code, "nama": Customer Store Name}]. Baris dicari lewat kode + nama.
-    Return (ok, pesan); tidak pernah raise (gagal sheet tidak membatalkan delete di Supabase)."""
     if not items:
         return True, ""
     try:

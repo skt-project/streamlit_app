@@ -842,6 +842,7 @@ div[data-testid="stPopoverBody"] { min-width: 270px !important; max-width: 300px
 .fb-teks { font-size: 14px; font-weight: 500; color: #1c1633; }
 .fb-meta { display: flex; gap: 8px; margin-top: 4px; font-size: 11px; color: #8b849b; }
 .fb-no { background: #f1eef5; border-radius: 5px; padding: 0 6px; }
+.fb-detail { margin-top: 6px; font-size: 12.5px; line-height: 1.45; color: #6b6480; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fb-kanan { text-align: right; flex-shrink: 0; }
 .fb-badge { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 12px; padding: 3px 10px; }
 .fb-badge.progress { background: #e8edff; color: #3550d8; }

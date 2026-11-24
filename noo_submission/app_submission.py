@@ -12,6 +12,7 @@ import komponen
 import shared as _shared
 from login_page import require_login, keluar
 from help_support import dialog_help_support
+from feedback import minta_feedback, tampilkan_feedback_jika_diminta
 from shared import (
     # Constants
     CITY, JENIS_TOKO_DEFAULT, KOLOM_NOO_OUTPUT, KOLOM_SKU_OUTPUT, KOLOM_SKU_STAGED,
@@ -53,8 +54,6 @@ NAVIGASI = [
 PERAN_SEMUA_DISTRIBUTOR = ("RSA", "BD_SUPPORT", "BD SUPPORT")
 
 def distributor_terkunci(user: dict):
-    """None kalau user boleh melihat semua distributor. Selain itu nama distributor milik akun
-    (username = kode distributor di sheet Distributor Mapping), atau "" kalau kodenya tidak ditemukan."""
     if (user or {}).get("tagging") in PERAN_SEMUA_DISTRIBUTOR:
         return None
     kode = str((user or {}).get("username", "")).strip().upper()
@@ -65,8 +64,6 @@ def distributor_terkunci(user: dict):
     return info["distributor"] if info else ""
 
 def _ingat_scroll_tabel():
-    """Tabel lebar (scroll horizontal) kembali ke kolom 1 tiap halaman dirender ulang. Script ini mengingat posisi
-    scroll tiap tabel dan mengembalikannya setelah rerun (dipasang sekali di window induk)."""
     st.components.v1.html("""<script>
 (function(){
   var W = window.parent; if (!W || W.__skpScrollInit) return; W.__skpScrollInit = true;
@@ -124,7 +121,7 @@ def inisialisasi_state():
 # SIMILARITY (untuk SPV Confirmation)
 # ═════════════════════════════════════════════════════════════════════════════
 # MIFTAH EDIT: KOLOM_MASTER lama (Customer Store Code, Store Name, Store Address, City, Region) DIGANTI.
-#   Kolom kode sekarang "Cust ID" (dari cust_id BigQuery) + 3 kolom reference_id_* khusus similarity.
+# Kolom kode sekarang "Cust ID" (dari cust_id BigQuery) + 3 kolom reference_id_* khusus similarity.
 KOLOM_REF    = ["reference_id_skt", "reference_id_g2g", "reference_id_tph"]   # MIFTAH EDIT: baru
 KOLOM_DIST   = ["distributor_skt", "distributor_g2g", "distributor_tph"]   # untuk lookup region distributor
 KOLOM_MASTER = ["Cust ID", "Store Name", "Store Address", "City", "Region"] + KOLOM_REF + KOLOM_DIST   # MIFTAH EDIT: ganti
@@ -132,7 +129,7 @@ BOBOT_NAMA    = 0.4; BOBOT_ALAMAT = 0.4; BOBOT_KOTA = 0.1; BOBOT_REGION = 0.1
 AMBANG_NAMA   = 80;  AMBANG_ALAMAT = 60; AMBANG_GABUNGAN = 75
 AMBANG_NAMA_SAJA = 90; AMBANG_WILAYAH = 90
 AMBANG_NAMA_MIN  = 70   # kandidat minimal: skor nama >= ini, lalu diurutkan by skor gabungan tertinggi
-MIN_HURUF_ALAMAT = 4    # alamat NOO yang lebih pendek (mis. "A") dianggap tidak ada, supaya tidak menipu skor
+MIN_HURUF_ALAMAT = 4   
 KATA_UMUM_NAMA   = {"TOKO","KIOS","KIOSK","UD","CV","PT","WARUNG","TK","SWALAYAN","MINIMARKET","SUPERMARKET",
                     "TOSERBA","GROSIR","AGEN","DEPO","DEPOT"}   # kata jenis usaha: tidak membedakan toko
 SINGKATAN_ALAMAT = {"JL":"JALAN","JLN":"JALAN","GG":"GANG"}
@@ -200,8 +197,6 @@ def _normalkan_master(m: pd.DataFrame) -> pd.DataFrame:
 # MIFTAH EDIT (BARU): pencocokan kode pasti. Customer Store Code NOO dicek ke reference_id_skt/g2g/tph di master,
 #   kalau ketemu -> tampilkan cust_id + store_name baris master itu.
 def _teks_distributor(dists, brand: str = "") -> str:
-    """Distributor toko master yang cocok: utamakan distributor_g2g; kalau kosong lihat distributor_skt,
-    lalu distributor_tph. Kosong kalau ketiganya kosong."""
     d_skt, d_g2g, d_tph = (list(dists) + ["", "", ""])[:3] if dists else ("", "", "")
     for d in (d_g2g, d_skt, d_tph):
         d = str(d or "").strip()
@@ -214,7 +209,6 @@ def _kunci_kode(v) -> str:
 
 @swr_cache(ttl=600, salin=False)
 def _indeks_kode_master() -> dict:
-    """kode referensi (skt/g2g/tph) -> (cust_id, store_name, address, region, (distributor skt, g2g, tph), city)"""
     m = ambil_master_toko()
     indeks = {}
     for kol in KOLOM_REF:
@@ -233,13 +227,6 @@ def _master_ternormalisasi() -> pd.DataFrame:
 MAKS_GABUNG_TOKEN = 3   # maksimal berapa kata bersebelahan yang boleh digabung saat mencocokkan
 
 def _skor_token_nama(a: str, b: str) -> float:
-    """Cocokkan nama TOKEN per TOKEN tanpa peduli urutan. Kalau satu kata tidak ada pasangannya, kata itu
-    boleh DIGABUNG dengan kata di sebelahnya (maks. 3 kata) lalu dicocokkan lagi, mis. "BAU BAU" ~ "BAUBAU",
-    "SEKA WAN" ~ "SEKAWAN". Pasangan (kata atau gabungan) paling mirip dipilih lebih dulu.
-    - bagian yang memuat angka harus sama persis ("12" != "1112")
-    - kemiripan huruf di bawah 60 dianggap beda
-    - skor = total kemiripan pasangan / jumlah kata sisi terpendek, lalu kelebihan kata di salah satu
-      sisi hanya menurunkan sedikit (mis. nama master + nama kota)."""
     ta, tb = a.split(), b.split()
     if not ta or not tb:
         return 0.0
@@ -358,9 +345,6 @@ def cari_kemiripan(nama, alamat, kota, master, region_noo=(), nama_min=AMBANG_NA
             (str(baris["distributor_skt"]), str(baris["distributor_g2g"]), str(baris["distributor_tph"])), kota_mst)
 
 def region_dari_master(distributor: str, min_porsi: float = 0.05) -> tuple:
-    """Region distributor dari kolom `region` master store, dicari lewat kolom distributor_skt/g2g/tph
-    yang sama dengan distributor terpilih. Region yang porsinya < min_porsi dibuang (anggap salah input).
-    Kosong kalau tidak ketemu -> pemanggil pakai region dari sheet Distributor Mapping."""
     kunci = re.sub(r"[^A-Z0-9]", "", str(distributor or "").upper())
     if not kunci:
         return ()
@@ -379,8 +363,6 @@ def region_dari_master(distributor: str, min_porsi: float = 0.05) -> tuple:
     return tuple(sorted(r for r, n in hitung.items() if n / hitung.sum() >= min_porsi))
 
 def _batasi_region(master, region_noo, distributor=""):
-    """Persempit master ke region distributor terpilih. Region kosong -> semua region.
-    Region cocok kalau sama persis / mirip (fuzz.ratio >= AMBANG_WILAYAH) setelah dinormalisasi."""
     region_n = {r for r in (normalisasi_wilayah(x) for x in region_noo) if r}
     kunci_d  = re.sub(r"[^A-Z0-9]", "", str(distributor or "").upper())
     if master is None or not region_n:
@@ -395,10 +377,6 @@ def _batasi_region(master, region_noo, distributor=""):
     return master[master["_region"].isin(cocok) | milik]
 
 def kota_dari_alamat(alamat, kota_form, daftar_kota) -> str:
-    """Cari nama kota yang tertulis di ALAMAT NOO (dicocokkan ke daftar kota master, kata utuh berurutan).
-    - kota di form sudah muncul di alamat -> pakai kota form
-    - ada kota lain di alamat -> pakai yang terpanjang, lalu yang paling belakang (kota biasanya di akhir alamat)
-    - tidak ada -> kota form apa adanya"""
     tok = _bersihkan(alamat).split()
     form_n = normalisasi_wilayah(kota_form)
     if not tok:
@@ -526,9 +504,6 @@ def _sku_tutup_hasil():
     st.session_state.sku_last_batch = None
 
 def tampilkan_helper_apply_all(prefix: str, lebar: list, posisi: dict, peta_row: list):
-    """Baris helper 'Apply to all' di atas header kolom tabel input per-outlet.
-    prefix: 'bulk' (manual) / 'noo' (upload). posisi: {jenis: indeks kolom}.
-    peta_row: [{SPV: [sales]}] per baris (urutan sama dengan baris tabel)."""
     ss = st.session_state
     n  = len(peta_row)
     semua_spv   = sorted({s for p in peta_row for s in p})
@@ -579,8 +554,11 @@ def _sku_tambah_baris(map_raw: dict, map_produk: dict):
     distri  = _sku_str(ss.get("sku_in_distri",""))
     produk  = _sku_str(ss.get("sku_in_produk",""))
     kode_sku = _sku_str(ss.get("sku_in_kode",""))
-    if not (distri and produk and kode_sku):
-        ss.sku_msg = ("warning","Distributor, Product, and Customer Product Code are required.")
+    if not kode_sku:
+        ss.sku_msg = ("warning","Customer Product Code is required. Fill it in, or tick 'Same as Product'.")
+        return
+    if not (distri and produk):
+        ss.sku_msg = ("warning","Distributor and Product are required.")
         return
     cc = bangun_customer_code(map_raw.get(distri,""), produk)
     if not cc:
@@ -651,7 +629,7 @@ def render_manual_sku():
 
         produk_now = _sku_str(ss.get("sku_in_produk",""))
         c1,c2,c3  = st.columns([3,2.2,1.2])
-        distri    = c1.selectbox("Distributor",[""] + sorted(map_raw), key="sku_in_distri")
+        distri    = c1.selectbox("Distributor *",[""] + sorted(map_raw), key="sku_in_distri")
         c2.text_input("Customer Name", value=map_nama.get(distri,"") if distri else "", disabled=True)
         preview_cc = bangun_customer_code(map_raw.get(distri,""), produk_now) if distri else ""
         c3.text_input("Customer Code", value=preview_cc, disabled=True)
@@ -660,8 +638,8 @@ def render_manual_sku():
         def _sku_sinkron_kode():
             if st.session_state.get("sku_same_kode"):
                 st.session_state["sku_in_kode"] = _sku_str(st.session_state.get("sku_in_produk",""))
-        produk = c4.selectbox("Product",[""] + sorted(map_produk), key="sku_in_produk", on_change=_sku_sinkron_kode)
-        c5.text_input("Customer Product Code", key="sku_in_kode", placeholder="Product code...",
+        produk = c4.selectbox("Product *",[""] + sorted(map_produk), key="sku_in_produk", on_change=_sku_sinkron_kode)
+        c5.text_input("Customer Product Code *", key="sku_in_kode", placeholder="Product code (required)...",
                       disabled=bool(ss.get("sku_same_kode")))
         c5.checkbox("Same as Product", key="sku_same_kode", on_change=_sku_sinkron_kode)
         c6.text_input("Customer Product Name", value=cari_nama_produk(produk,map_produk), disabled=True)
@@ -784,9 +762,9 @@ def render_manual_sku():
                 catat_riwayat("Submit Manual SKU Mapping", f"{len(payload)} rows",
                               distributor=next((r["Distributor"] for r in rows_now if r["Distributor"]), None))
                 ss.pesan_toast = f"Manual SKU Mapping saved — {len(payload)} rows"
+                minta_feedback()
                 st.rerun()
 def _distri_dari_noo(df) -> str:
-    """Nama distributor dari baris NOO yang disubmit (kolom Group Name), untuk identifier RSA di history."""
     if df is None or "Group Name" not in df.columns:
         return ""
     for v in df["Group Name"]:
@@ -810,13 +788,10 @@ def _set_produk_dari_deskripsi(produk_key: str, desc_key: str, desc_map: dict):
         st.session_state.pop(produk_key, None)
 
 def _ambil_kode_depan(teks: str) -> str:
-    """Ambil kata pertama sebelum spasi, misal 'G2G-32601' dari
-    'G2G-32601 GLAD2GLOW PERFECT BLURRING POWDER ...'."""
     t = _sku_str(teks)
     return t.split()[0] if t else ""
 
 def _bulk_sku_cocokkan(teks: str, map_produk: dict) -> tuple:
-    """Return (produk_di_dropdown | None, status)."""
     k = _kunci_produk(teks)
     if k in map_produk:
         return k, "Exact"
@@ -944,7 +919,6 @@ def render_bulk_sku():
 # HALAMAN: NOO SUBMISSION
 # ═════════════════════════════════════════════════════════════════════════════
 def cc_salah(df: pd.DataFrame) -> list:
-    """Return [(index, product, customer_code, prefix_benar)] untuk baris yang prefix-nya salah."""
     hasil = []
     if df.empty or not {"Product", "Customer Code"} <= set(df.columns):
         return hasil
@@ -1259,6 +1233,7 @@ def halaman_pengajuan_noo():
             ss.pesan_toast = (f"SKU Mapping saved — {len(payload)} rows"
                               + (f", {len(rows)-len(baru)} duplicates skipped" if len(baru) < len(rows) else ""))
             ss.pesan_toast_icon = ":material/warning:" if len(baru) < len(rows) else ":material/check_circle:"
+            minta_feedback()
             st.rerun()
     st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
 
@@ -1405,6 +1380,7 @@ def halaman_pengajuan_noo():
                                         kode_skip = ", ".join(sorted(data_dilewati["Customer Store Code"].astype(str)))
                                         set_keterangan_noo("warning",
                                                            f"Sent {len(data_bersih)} rows. Skipped: {kode_skip}")
+                                    minta_feedback()
                                     st.rerun()
             tampilkan_keterangan_noo(); _tampilkan_err_sheet()
 
@@ -1552,6 +1528,7 @@ def halaman_pengajuan_noo():
                         else:
                             kode_skip = ", ".join(sorted(data_dilewati["Customer Store Code"].astype(str)))
                             set_keterangan_noo("warning",f"Sent {len(data_bersih)} rows. Skipped: {kode_skip}")
+                        minta_feedback()
                         st.rerun()
     tampilkan_keterangan_noo(); _tampilkan_err_sheet()
 
@@ -1596,16 +1573,10 @@ def _css_status_spv(baris_tampil, tampil_error: bool) -> str:
 PEMISAH_LABEL_SID = " - "   # label dropdown Store ID = "<Store ID> - <Store Name>"
 
 def _id_dari_label(label) -> str:
-    """Ambil Store ID saja dari label dropdown ("IESM07799 - TOKO ABC" -> "IESM07799").
-    Yang disimpan ke Supabase hanya Store ID; nama toko di dropdown cuma bantuan untuk user."""
     return str(label or "").split(PEMISAH_LABEL_SID, 1)[0].strip()
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _opsi_store_id(distributor: str, region: tuple) -> tuple:
-    """Daftar label "Store ID - Store Name" dari master BigQuery untuk dropdown Store ID (Existing).
-    Dibatasi KETAT ke region distributor baris itu: region master harus sama persis (setelah dinormalisasi),
-    jadi "Sulawesi 2" tidak ikut membawa toko "Sulawesi 1". (Beda dengan _batasi_region untuk Similarity yang longgar.)
-    Region tidak ada -> hanya toko milik distributor itu."""
     master = _master_ternormalisasi()
     region_n = {r for r in (normalisasi_wilayah(x) for x in region) if r}
     if region_n:
@@ -1618,8 +1589,6 @@ def _opsi_store_id(distributor: str, region: tuple) -> tuple:
     return tuple(sorted(label))
 
 def _isi_store_id_otomatis(pasangan):
-    """Callback tombol bulk: pilih Store ID dari kolom Similarity (Code) di dropdown Store ID (Validation).
-    Hanya baris yang dipilih Existing dan Store ID-nya masih kosong (pilihan user tidak ditimpa)."""
     ss = st.session_state
     for k, kode in pasangan:
         if ss.get(f"spv_jenis_{k}") == "Existing" and not str(ss.get(f"spv_sid_{k}", "") or "").strip():
@@ -1629,20 +1598,9 @@ def _isi_store_id_otomatis(pasangan):
                     break
 
 def _tagging_dari_jenis(jenis: str) -> str:
-    """Pemetaan hasil SPV Confirmation -> kolom 'tagging' di Supabase.
-    'NOO'      -> STATUS_REVIEW (tetap menunggu; Generate ID hanya dijalankan manual oleh user di Store Validation)
-    'Existing' -> 'Existing' apa adanya (Store ID sudah final, diisi manual oleh SPV)
-    """
     return STATUS_REVIEW if jenis == "NOO" else jenis
 
 def simpan_konfirmasi_spv(baris: list) -> tuple[int, list]:
-    """Push hasil SPV Confirmation ke Supabase.
-    PENTING: fungsi ini HANYA boleh dipanggil dari handler tombol Submit,
-    setelah seluruh baris lolos _masalah_baris_spv (tidak ada yang 'jenis'
-    kosong atau 'Existing' tanpa Store ID). Jangan dipanggil dari dalam
-    loop render (per keystroke/selectbox change) — itu yang menyebabkan
-    status & Store ID "ke-push" ke Supabase sebelum sempat divalidasi.
-    """
     berhasil, gagal = 0, []
     for b in baris:
         kode = str(b["store_code"]).strip()
@@ -1860,6 +1818,8 @@ def halaman_konfirmasi_spv():
         else:
             ss.pesan_toast = (f"SPV Confirmation submitted — {berhasil} rows"
                               + (f" | {n_tertinggal} row(s) not filled yet, still in the list" if n_tertinggal else ""))
+        if berhasil:
+            minta_feedback()
         st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2052,7 +2012,7 @@ def main():
     st.set_page_config(page_title="NOO & SKU Submission", page_icon=":material/inventory_2:", layout="wide")
     # mulai memuat data berat di latar belakang selagi user masih di halaman login
     _shared.prewarm(ambil_master_toko, _master_ternormalisasi, _indeks_kode_master, ambil_raw_noo, ambil_history_noo)
-    user = require_login()
+    user = require_login("submission")
     _shared.PENGGUNA = nama_pengguna(user)
     inisialisasi_state()
     ss = st.session_state
@@ -2088,6 +2048,8 @@ def main():
 
     {"pengajuan": halaman_pengajuan_noo, "spv": halaman_konfirmasi_spv,
      "history": halaman_history}[ss.halaman_aktif]()
+
+    tampilkan_feedback_jika_diminta()     # popup bintang setelah submit NOO / SKU Mapping sukses
 
 if __name__ == "__main__":
     main()

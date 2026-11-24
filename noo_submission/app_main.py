@@ -13,6 +13,7 @@ import shared as _shared
 import streamlit as st
 import komponen
 from noo_grid import noo_grid
+from feedback import TABLE_FEEDBACK
 from shared import (
     # Constants
     KOLOM, KOLOM_EDIT, KOLOM_TAMPIL, WAJIB_ISI, MAPPING_SUPABASE_KE_VALIDASI,
@@ -49,10 +50,6 @@ def nama_pengguna() -> str:
     return f"Admin - {uname.upper()}" if uname else "Admin"
 # GENERATOR ID
 def resequence_prefix(df: pd.DataFrame, prefix: str) -> list:
-    """Susun ulang nomor Store ID utk 1 prefix biar rapat tanpa gap.
-    Urutan berdasar posisi baris di tabel (baris paling atas dapat nomor terkecil).
-    Hanya ID yang BELUM di-save (ss.baris_perlu_push) yang dirapikan; ID yang sudah tersimpan di Supabase tidak digeser.
-    Return list index yang ID-nya berubah (perlu ditandai dirty)."""
     if not prefix or _shared.PAKAI_COUNTER_PUSAT:
         # Dengan counter pusat nomor TIDAK boleh digeser/dirapatkan: nomor di antaranya bisa sudah diambil Apps Script.
         return []
@@ -131,7 +128,6 @@ def generate_store_ids(df: pd.DataFrame, semua: pd.DataFrame = None, kolom_targe
     st.session_state.kunci_err = ""
 
     def nomor_berikut(prefix):
-        """Nomor dari counter pusat (atomik, dipakai juga Apps Script). Gagal -> hitungan lokal max+1."""
         while True:
             if antrian.get(prefix):
                 n = antrian[prefix].pop(0)
@@ -172,8 +168,6 @@ def generate_store_ids(df: pd.DataFrame, semua: pd.DataFrame = None, kolom_targe
     return pd.Series(hasil, index=df.index)
 
 def periksa_ulang_id(df: pd.DataFrame) -> list:
-    """Dipanggil saat Save changes: ID yang BELUM tersimpan dicek lagi ke sheet (tanpa cache) dan Supabase. Kalau sudah
-    dipakai toko lain (mis. Apps Script keburu mengeluarkan nomor yang sama), ID dibuat ulang. Return [(lama, baru), ...]."""
     ss = st.session_state
     idx_baru = [i for i in ss.baris_perlu_push if i in df.index and df.loc[i, "Validasi"] == STATUS_VALID
                 and not _id_kosong(df.loc[i, "Store ID"])]
@@ -338,8 +332,6 @@ def refresh_data_toko():
 KOLOM_EDIT_KE_SUPABASE = ["Store Name", "City", "Store Address", "Longitude", "Latitude", "Store Type"]
 
 def _patch_kolom_edit(baris: pd.Series) -> dict:
-    """Nilai kolom hasil edit grid -> dict patch, memakai nama kolom ASLI di Supabase
-    (huruf besar/spasi/snake_case dicocokkan lewat normalisasi). Kolom yang tidak ada di tabel dilewati."""
     norm = lambda s: re.sub(r"[^a-z0-9]","",str(s).lower())
     rows = ambil_raw_noo()
     asli = {norm(k): k for k in rows[0]} if rows else {}
@@ -359,7 +351,6 @@ def _patch_kolom_edit(baris: pd.Series) -> dict:
     return patch
 
 def _distri_pertama(df, idx_list) -> str:
-    """Distributor pertama yang terisi dari baris idx_list (untuk identifier rsa_<nama> di history)."""
     if "Distributor" not in df.columns:
         return ""
     for i in idx_list:
@@ -379,13 +370,10 @@ def _iso_wib(ts) -> str:
     return wt.isoformat()
 
 def _status_normal(v) -> str:
-    """Nama status dari Supabase -> nama sekarang; kosong / tidak dikenal dianggap Need Review (sama seperti saat load)."""
     v = _shared.ALIAS_STATUS.get(str(v or "").strip(), str(v or "").strip())
     return v if v in KOLOM_VALIDASI else STATUS_REVIEW
 
 def _remark_perubahan(status_lama, id_lama, status_baru, id_baru) -> dict:
-    """Jejak perubahan untuk kolom Remark_status / Remark_ID / Remark_at di sheet. Kosong kalau tidak ada yang berubah
-    (kolom Remark di sheet dibiarkan, jadi tetap menyimpan perubahan terakhir)."""
     sl, sb = _status_normal(status_lama), _status_normal(status_baru)
     il = "" if _id_kosong(id_lama) else str(id_lama).strip()
     ib = "" if _id_kosong(id_baru) else str(id_baru).strip()
@@ -399,7 +387,6 @@ def _remark_perubahan(status_lama, id_lama, status_baru, id_baru) -> dict:
     return hasil
 
 def _item_sheet(df, idx, kode, nama, remark=None) -> dict:
-    """Data satu baris untuk update/tambah di Google Sheet (kolom Generate ID + generated_at + jejak perubahan)."""
     r = df.loc[idx]
     dibuat = r.get("Created At")
     kolom_sheet = {                       # kolom yang bisa diedit di Store Validation -> ikut disinkronkan ke sheet
@@ -438,10 +425,6 @@ def _item_sheet(df, idx, kode, nama, remark=None) -> dict:
         }}
 
 def ubah_status_dan_simpan(df, idx_list, status_lama) -> list:
-    """Dipakai tombol DMS Done / DMS & Basis Done: ubah status lalu SIMPAN ke Supabase dulu (hanya kolom tagging, Store ID tidak
-    disentuh). df sudah berisi status baru; kalau simpan gagal, status dikembalikan ke status_lama.
-    Yang berhasil dicatat ke sheet di Remark_status / Remark_at ("Generate ID > DMS Done").
-    Return (list pesan masalah, pesan sheet)."""
     masalah, item_sheet = [], []
     for i in idx_list:
         kode = str(df.loc[i, "Customer Store Code"]).strip()
@@ -457,7 +440,6 @@ def ubah_status_dan_simpan(df, idx_list, status_lama) -> list:
 
 @contextlib.contextmanager
 def _ukur_ke(kamus, nama):
-    """TIMER loading (sementara): catat durasi blok ke kamus[nama]."""
     t0 = time.perf_counter()
     try:
         yield
@@ -665,12 +647,17 @@ def tab_noo():
         status = st.selectbox("Status",["All statuses"] + KOLOM_VALIDASI, key="f_status",
                                on_change=reset_halaman_data)
     with st.container(key="noo_toolbar"):
-        b1, b2, b3, info = st.columns([1, 1.4, 1.3, 6.3], gap="small", vertical_alignment="center")
+        b1, b2, b3, b4, info = st.columns([1, 1.4, 1.3, 1.5, 4.8], gap="small", vertical_alignment="center")
         b1.button(":material/refresh: Refresh", width="stretch", key="tombol_refresh", on_click=refresh_data_toko,
                   help="Reload data from Supabase. Unsaved changes will be lost.")
         tempat_unduh = b2.empty()      # diisi setelah hasil filter dihitung
         b3.button("Save changes", type="primary", width="stretch", key="tombol_simpan",
                   on_click=simpan_perubahan)
+        opsi_ukuran = [10, 15, 25, 50]
+        b4.selectbox("Rows per page", opsi_ukuran,
+                     index=opsi_ukuran.index(ss.ukuran_halaman) if ss.ukuran_halaman in opsi_ukuran else 1,
+                     format_func=lambda v: f"{v} rows / page", key="atur_ukuran_halaman",
+                     on_change=_callback_ukuran_halaman, label_visibility="collapsed")
         info.markdown(f'<div class="teks-showing">{len(ss.baris_kotor)} rows unsaved</div>'
                       if ss.baris_kotor else "", unsafe_allow_html=True)
 
@@ -1139,7 +1126,9 @@ def _kolom_kunci(df):
     pk = _kolom(df, "id")
     if pk:
         return [pk]
-    return [c for c in (_kolom(df, "customer_code"), _kolom(df, "customer_product_code")) if c]
+    # tanpa kolom id: pakai customer_code + product + customer_product_code. `product` wajib ikut, karena satu
+    # Customer Product Code (mis. "test") bisa dipakai beberapa product berbeda di customer code yang sama
+    return [c for c in (_kolom(df, "customer_code"), _kolom(df, "product"), _kolom(df, "customer_product_code")) if c]
 
 def _kunci_baris(df, cols):
     return df[cols].astype(str).agg("||".join, axis=1)
@@ -1196,8 +1185,6 @@ def _refresh_sku():
             ss.sku_pesan = ("error", f"Refresh failed: {e}")
 
 def _klik_refresh_sku():
-    """on_click Refresh: callback jalan SEBELUM script dirender ulang, jadi tidak perlu st.rerun()
-    di tengah render (penyebab toolbar ganda/hantu)."""
     ss = st.session_state
     if ss.get("sku_pending"):
         ss.sku_konfirmasi = True
@@ -1507,11 +1494,9 @@ def ambil_semua_tiket_help() -> pd.DataFrame:
     return pd.DataFrame(r.json())
 
 def _status_fb(v) -> str:
-    """Status di DB -> 'Solved' atau 'In Progress' (Open dst dianggap In Progress)."""
     return "Solved" if str(v).strip().lower() in ("solved", "closed", "done", "resolved") else "In Progress"
 
 def _tandai_solved(id_tiket) -> str:
-    """Set status tiket jadi 'Solved'. Return pesan error ('' kalau sukses)."""
     try:
         r = requests.patch(f"{SUPABASE_URL}/rest/v1/{TABLE_HELP}",
                            params={"id": f"eq.{id_tiket}"}, json={"status": "Solved"},
@@ -1552,14 +1537,20 @@ def tab_feedback():
     else:
         waktu = pd.to_datetime(df.get("generated_at"), errors="coerce", utc=True, format="ISO8601").dt.tz_convert(ZONA_WAKTU)
         items = []
+        try:
+            peta_distri = muat_distri_code_map()          # kode (username) -> {"distributor": nama, ...} dari sheet Distributor Mapping
+        except Exception:
+            peta_distri = {}
         for i, (_, r) in enumerate(df.iterrows()):
             no = r.get("id")
+            kode_user = str(r.get("username", "") or "").strip().upper()      # selalu tampil sebagai kode user (huruf besar)
             items.append({
                 "id":     (no.item() if hasattr(no, "item") else no) if pd.notna(no) else None,
                 "no":     str(no) if pd.notna(no) else str(len(df) - i),
                 "title":  str(r.get("title", "") or "").strip(),
                 "issue":  str(r.get("issue", "")).strip(),
-                "user":   str(r.get("username", "")),
+                "user":   kode_user,
+                "distri": (peta_distri.get(kode_user) or {}).get("distributor", ""),
                 "wa":     re.sub(r"\D", "", str(r.get("nomor_wa", "") or "")),   # hanya angka
                 "prio":   str(r.get("priority", "")),
                 "status": _status_fb(r.get("status")),
@@ -1576,7 +1567,7 @@ def tab_feedback():
         pilih = ss.get("fb_filter") or "All"
         tampil = [x for x in items
                   if (pilih == "All" or x["status"] == pilih)
-                  and (not kata or kata.lower() in f'{x["title"]} {x["issue"]} {x["user"]} {x["wa"]} #{x["no"]}'.lower())]
+                  and (not kata or kata.lower() in f'{x["title"]} {x["issue"]} {x["user"]} {x["distri"]} {x["wa"]} #{x["no"]}'.lower())]
 
         total = len(tampil)
         n_hal = max(1, math.ceil(total / FB_PER_HALAMAN))
@@ -1599,11 +1590,16 @@ def tab_feedback():
                     f'<div class="fb-baris"><div class="fb-ikon"><span class="mi">chat_bubble_outline</span></div>'
                     f'<div class="fb-isi"><div class="fb-teks">{_html.escape(judul)}</div>'
                     f'<div class="fb-meta"><span class="fb-no">#{_html.escape(x["no"])}</span>'
-                    f'<span>{_html.escape(x["user"])}</span><span>{_html.escape(x["prio"])}</span>'
+                    f'<span>{_html.escape(x["user"])}'
+                    + (f' · {_html.escape(x["distri"])}' if x["distri"] else '') +
+                    f'</span><span>{_html.escape(x["prio"])}</span>'
                     + (f'<span>WA: <a href="https://wa.me/{x["wa"]}" target="_blank" rel="noopener" '
                        f'style="color:inherit">{x["wa"]}</a></span>' if x["wa"] else '<span>WA: -</span>')
-                    + (f'<span>· {_html.escape(isi1[:70])}</span>' if x["title"] else '') +
-                    '</div></div>'
+                    + '</div>'
+                    # penjelasan LENGKAP (semua baris, tanpa dipotong) di baris tersendiri di bawah meta
+                    + (f'<div class="fb-detail">{_html.escape(x["issue"])}</div>'
+                       if x["issue"] and x["issue"] != judul else '') +
+                    '</div>'
                     f'<div class="fb-kanan"><span class="fb-badge {kelas}">● {x["status"]}</span>'
                     f'<div class="fb-tgl">{tgl}</div></div></div>')
             st.markdown("".join(baris), unsafe_allow_html=True)
@@ -1644,12 +1640,21 @@ def _excel_cache(df, startrow=1):
     return hasil_ke_excel(df, startrow=startrow)
 
 def halaman_dashboard_tabs():
+    # st.tabs selalu kembali ke tab pertama (Dashboard) setiap halaman dirender ulang penuh (st.rerun, toast, dll.).
+    # Pilihan tampilan disimpan di session_state, jadi Feedback tetap di Feedback.
+    ss = st.session_state
+    opsi = [":material/trending_up: Dashboard SKU & NOO", ":material/chat: Feedback"]
+    # key widget HARUS beda dari key container "dash_view" (yang dipakai CSS), kalau sama -> DuplicateElementKey
+    if ss.get("dash_view_pilih") not in opsi:
+        ss["dash_view_pilih"] = ss.get("_dash_view_terakhir", opsi[0])      # klik ulang pilihan aktif = None -> pertahankan
     with st.container(key="dash"):
-        tab_dash, tab_fb = st.tabs([":material/trending_up: Dashboard SKU & NOO", ":material/chat: Feedback"])
-        with tab_dash:
-            halaman_dashboard()
-        with tab_fb:
+        with st.container(key="dash_view"):
+            st.segmented_control("View", opsi, key="dash_view_pilih", label_visibility="collapsed")
+        ss["_dash_view_terakhir"] = ss["dash_view_pilih"]
+        if ss["dash_view_pilih"] == opsi[1]:
             tab_feedback()
+        else:
+            halaman_dashboard()
 
 
 def halaman_dashboard():
@@ -1936,6 +1941,7 @@ def halaman_riwayat():
 
 def _callback_ukuran_halaman():
     st.session_state.ukuran_halaman = st.session_state.atur_ukuran_halaman
+    st.session_state.halaman_data = 1          # ukuran halaman berubah -> kembali ke halaman 1
     st.session_state.halaman_data   = 1
 
 TABLE_USER = "users"
@@ -1961,6 +1967,40 @@ def _sb_user_delete(username: str) -> bool:
     st.session_state["_err_del"] = f"HTTP {r.status_code}, rows={r.text[:150]}"
     return False
 
+@st.dialog("Delete user", width="small")
+def _konfirmasi_hapus_user(username: str):
+    ss = st.session_state
+    st.markdown(f"Are you sure you want to delete **{username}**?")
+    st.warning("This user will permanently lose access. This cannot be undone.")
+    c_ya, c_batal = st.columns(2)
+    if c_batal.button("Cancel", key="dlg_del_batal", width="stretch"):
+        st.rerun()
+    if c_ya.button("Yes, delete", type="primary", key="dlg_del_ya", width="stretch"):
+        if not _sb_user_delete(username):
+            st.error(f"Delete failed: {ss.pop('_err_del', '-')}")
+            return
+        _sb_users_list.clear()
+        catat_riwayat("Delete user", username)
+        ss["_del_sukses"] = f"User '{username}' deleted."
+        ss["_reset_del_user"] = True
+        st.rerun()
+
+@st.dialog("Reset password", width="small")
+def _konfirmasi_reset_pw(username: str, pw_baru: str):
+    ss = st.session_state
+    st.markdown(f"Are you sure you want to reset the password of **{username}**?")
+    st.warning("The current password will stop working immediately. Share the new password with the user.")
+    c_ya, c_batal = st.columns(2)
+    if c_batal.button("Cancel", key="dlg_pw_batal", width="stretch"):
+        st.rerun()
+    if c_ya.button("Yes, reset", type="primary", key="dlg_pw_ya", width="stretch"):
+        if not _sb_user_reset_pw(username, pw_baru):
+            st.error("Reset failed (check Supabase RLS policy for UPDATE).")
+            return
+        catat_riwayat("Reset password", username)
+        ss["_pw_sukses"] = f"Password for '{username}' has been reset."
+        st.rerun()
+
 def _sb_user_reset_pw(username: str, pw_baru: str) -> bool:
     hashed = bcrypt.hashpw(pw_baru.encode(), bcrypt.gensalt()).decode()
     r = requests.patch(
@@ -1971,7 +2011,6 @@ def _sb_user_reset_pw(username: str, pw_baru: str) -> bool:
     return r.ok and len(r.json()) == 1
 @st.cache_data(ttl=20, show_spinner=False)
 def _sb_riwayat_hitung() -> int:
-    """Jumlah baris di tabel riwayat_noo (-1 kalau gagal dihitung)."""
     try:
         r = requests.get(f"{SUPABASE_URL}/rest/v1/{TABLE_RIWAYAT}",
                          headers={**_SB_HEADERS, "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
@@ -1983,7 +2022,6 @@ def _sb_riwayat_hitung() -> int:
         return -1
 
 def _sb_riwayat_hapus(lebih_lama_dari_hari=None):
-    """Hapus baris riwayat_noo. lebih_lama_dari_hari=None -> SEMUA baris. Return (jumlah_terhapus, pesan_error)."""
     if lebih_lama_dari_hari is None:
         params = {"waktu": "not.is.null"}
     else:
@@ -2001,7 +2039,6 @@ def _sb_riwayat_hapus(lebih_lama_dari_hari=None):
 
 @st.cache_data(ttl=20, show_spinner=False)
 def _sb_tabel_hitung(tabel: str, kolom: str) -> int:
-    """Jumlah baris sebuah tabel Supabase (-1 kalau gagal dihitung)."""
     try:
         r = requests.get(f"{SUPABASE_URL}/rest/v1/{tabel}",
                          headers={**_SB_HEADERS, "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
@@ -2013,7 +2050,6 @@ def _sb_tabel_hitung(tabel: str, kolom: str) -> int:
         return -1
 
 def _sb_tabel_hapus(tabel: str, params: dict):
-    """DELETE baris yang cocok dengan params (filter PostgREST). Return (jumlah_terhapus, pesan_error)."""
     try:
         r = requests.delete(f"{SUPABASE_URL}/rest/v1/{tabel}",
                             headers={**_SB_HEADERS, "Prefer": "return=representation"}, params=params, timeout=30)
@@ -2024,7 +2060,6 @@ def _sb_tabel_hapus(tabel: str, params: dict):
         return 0, str(e)
 
 def _sb_riwayat_reset_id() -> str:
-    """Panggil fungsi SQL reset_riwayat_noo_id() di Supabase. Return pesan error ('' kalau sukses)."""
     try:
         r = requests.post(f"{SUPABASE_URL}/rest/v1/rpc/reset_riwayat_noo_id", headers=_SB_HEADERS, json={}, timeout=15)
         if r.status_code == 404:
@@ -2036,22 +2071,27 @@ def _sb_riwayat_reset_id() -> str:
     except Exception as e:
         return str(e)
 
-@st.fragment
-def _tab_clear_history():
-    """Isi tab Clear history. Fragment: klik centang/tombol di sini hanya me-render ulang tab ini,
-    bukan seluruh halaman Settings (daftar user dll.), jadi tidak terasa lambat."""
+def _sb_feedback_reset_id() -> str:
+    try:
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/rpc/reset_feedback_id", headers=_SB_HEADERS, json={}, timeout=15)
+        if r.status_code == 404:
+            return ("Function reset_feedback_id() not found in the Supabase API. Run the one-time setup SQL "
+                    f"below first. Supabase says: {r.text[:200]}")
+        if not r.ok:
+            return f"HTTP {r.status_code}: {r.text[:200]}"
+        return ""
+    except Exception as e:
+        return str(e)
+
+def _selesai_clear():
+    # hitungan tabel di-cache 20 dtk: kosongkan supaya angka langsung benar, lalu render ulang HANYA bagian ini
+    # (st.rerun() penuh membuat halaman Settings kembali ke tab/posisi awal)
+    _sb_riwayat_hitung.clear(); _sb_tabel_hitung.clear()
+    st.rerun(scope="fragment")
+
+
+def _bagian_clear_riwayat():
     ss = st.session_state
-    # Streamlit membuang nilai widget yang tidak ditampilkan (mis. saat pindah halaman).
-    # Simpan salinan nilainya dan pulihkan saat tab ini tampil lagi.
-    _keep = ss.setdefault("_keep_clear", {})
-    for _k in ("riw_hari", "riw_yakin_lama", "riw_yakin_semua", "riw_sekalian_reset",
-               "hs_yakin_solved", "hs_hari", "hs_yakin_lama", "hs_yakin_semua"):
-        if _k in ss:
-            _keep[_k] = ss[_k]
-        elif _k in _keep:
-            ss[_k] = _keep[_k]
-    if hasil := ss.pop("riw_hasil", None):
-        (st.error if hasil[0] == "error" else st.success)(hasil[1])
     jumlah = _sb_riwayat_hitung()
     st.caption(f"Table `{TABLE_RIWAYAT}` currently has **{jumlah if jumlah >= 0 else '?'}** record(s).")
 
@@ -2071,7 +2111,7 @@ def _tab_clear_history():
         else:
             # (aksi Clear history sengaja TIDAK dicatat ke riwayat_noo, supaya tabel tetap kosong & id tetap ter-reset)
             ss.riw_hasil = ("success", f"{n} record(s) deleted.")
-        st.rerun()
+        _selesai_clear()
 
     st.divider()
     st.markdown("**Delete ALL history**")
@@ -2093,7 +2133,7 @@ def _tab_clear_history():
                 pesan += " Id counter reset." if not err_r else f" Id reset failed: {err_r}"
             # (aksi Clear history sengaja TIDAK dicatat ke riwayat_noo, supaya tabel tetap kosong & id tetap ter-reset)
             ss.riw_hasil = ("success" if not (sekalian_reset and err_r) else "error", pesan)
-        st.rerun()
+        _selesai_clear()
 
     st.divider()
     st.markdown("**Reset id counter**")
@@ -2102,7 +2142,7 @@ def _tab_clear_history():
     if st.button(":material/restart_alt: Reset id counter", key="riw_btn_reset_id"):
         err_r = _sb_riwayat_reset_id()
         ss.riw_hasil = ("error", f"Reset failed: {err_r}") if err_r else ("success", "Id counter reset.")
-        st.rerun()
+        _selesai_clear()
     with st.expander(":material/code: One-time setup (run once in Supabase SQL Editor)"):
         st.code("""create or replace function public.reset_riwayat_noo_id()
 returns void language plpgsql security definer as $$
@@ -2131,8 +2171,10 @@ notify pgrst, 'reload schema';""", language="sql")
 );""", language="sql")
         st.caption("Cancel it with: select cron.unschedule('clean-riwayat-noo');")
 
+
+def _bagian_clear_help():
+    ss = st.session_state
     # ── Tiket Help & Support (tabel help_support) ──
-    st.divider()
     st.markdown("#### Help & Support tickets")
     jml_hs = _sb_tabel_hitung(TABLE_HELP, "generated_at")
     st.caption(f"Table `{TABLE_HELP}` currently has **{jml_hs if jml_hs >= 0 else '?'}** ticket(s).")
@@ -2148,7 +2190,7 @@ notify pgrst, 'reload schema';""", language="sql")
         else:
             ambil_semua_tiket_help.clear()
             ss.riw_hasil = ("success", f"{n} ticket(s) deleted.")
-        st.rerun()
+        _selesai_clear()
 
     st.markdown("**Delete solved tickets**")
     ok_solved = st.checkbox("I understand all tickets with status Solved will be permanently deleted",
@@ -2178,6 +2220,81 @@ notify pgrst, 'reload schema';""", language="sql")
         _hs_selesai(n, err, kosong_ok=not (jml_hs > 0))
 
 
+def _bagian_clear_feedback():
+    ss = st.session_state
+    # ── Feedback bintang (tabel feedback) ──
+    st.markdown("#### Feedback")
+    jml_fb = _sb_tabel_hitung(TABLE_FEEDBACK, "created_at")
+    st.caption(f"Table `{TABLE_FEEDBACK}` currently has **{jml_fb if jml_fb >= 0 else '?'}** feedback(s).")
+
+    st.markdown("**Delete ALL feedback**")
+    ok_fb_semua = st.checkbox("I understand ALL feedback will be permanently deleted (cannot be undone)",
+                              key="fb_yakin_semua")
+    fb_reset = st.checkbox("Also reset the id counter to 1 after deleting", value=True, key="fb_sekalian_reset")
+    if st.button(":material/delete_forever: Delete all feedback", type="primary", key="fb_btn_semua",
+                 disabled=not ok_fb_semua):
+        n, err = _sb_tabel_hapus(TABLE_FEEDBACK, {"created_at": "not.is.null"})
+        if err:
+            ss.riw_hasil = ("error", f"Delete failed: {err}")
+        elif n == 0 and jml_fb > 0:
+            ss.riw_hasil = ("error", "Supabase accepted the request but deleted 0 rows: the table has no DELETE "
+                                     "policy for this API key (RLS). Add a DELETE policy on feedback.")
+        else:
+            pesan, ada_err = f"{n} feedback(s) deleted.", False
+            if fb_reset:
+                err_r = _sb_feedback_reset_id()
+                ada_err = bool(err_r)
+                pesan += " Id counter reset." if not err_r else f" Id reset failed: {err_r}"
+            ss.riw_hasil = ("error" if ada_err else "success", pesan)
+        _selesai_clear()
+
+    st.markdown("**Reset id counter**")
+    st.caption("Next new feedback gets the next free number: 1 if the table is empty, otherwise "
+               "(highest existing id + 1). Existing feedback is not touched.")
+    if st.button(":material/restart_alt: Reset feedback id counter", key="fb_btn_reset_id"):
+        err_r = _sb_feedback_reset_id()
+        ss.riw_hasil = ("error", f"Reset failed: {err_r}") if err_r else ("success", "Feedback id counter reset.")
+        _selesai_clear()
+    with st.expander(":material/code: One-time setup for feedback (run once in Supabase SQL Editor)"):
+        st.code("""create or replace function public.reset_feedback_id()
+returns void language plpgsql security definer as $$
+begin
+  perform setval(
+    pg_get_serial_sequence('public.feedback', 'id'),
+    coalesce((select max(id) from public.feedback), 0) + 1,
+    false
+  );
+end $$;
+
+grant execute on function public.reset_feedback_id() to anon, authenticated;
+notify pgrst, 'reload schema';
+
+-- kalau RLS aktif, tambahkan policy ini supaya app bisa baca & hapus feedback:
+-- create policy "feedback_select" on public.feedback for select using (true);
+-- create policy "feedback_delete" on public.feedback for delete using (true);""", language="sql")
+
+
+@st.fragment
+def _tab_clear_history():
+    ss = st.session_state
+    # Streamlit membuang nilai widget yang tidak ditampilkan (mis. saat pindah halaman).
+    # Simpan salinan nilainya dan pulihkan saat tab ini tampil lagi.
+    _keep = ss.setdefault("_keep_clear", {})
+    for _k in ("riw_hari", "riw_yakin_lama", "riw_yakin_semua", "riw_sekalian_reset",
+               "hs_yakin_solved", "hs_hari", "hs_yakin_lama", "hs_yakin_semua", "clear_bagian",
+               "fb_yakin_semua", "fb_sekalian_reset"):
+        if _k in ss:
+            _keep[_k] = ss[_k]
+        elif _k in _keep:
+            ss[_k] = _keep[_k]
+    if hasil := ss.pop("riw_hasil", None):
+        (st.error if hasil[0] == "error" else st.success)(hasil[1])
+    bagian = st.selectbox("Select what to clear",
+                          ["History", "Help & Support tickets", "Feedback"], key="clear_bagian")
+    {"History": _bagian_clear_riwayat, "Help & Support tickets": _bagian_clear_help,
+     "Feedback": _bagian_clear_feedback}[bagian]()
+
+
 def halaman_pengaturan():
     ss = st.session_state
     st.markdown(komponen.html_header("Settings","Preferences & user access management.",":material/settings:"),
@@ -2204,17 +2321,6 @@ def halaman_pengaturan():
         st.error("Access denied. Settings is only for BD Support.")
         return
 
-    # ── Preferences (tetap) ──
-    opsi = [10,15,25,50]
-    st.selectbox("Rows per page", opsi, index=opsi.index(ss.ukuran_halaman),
-                 key="atur_ukuran_halaman", on_change=_callback_ukuran_halaman)
-    if st.button("Reload data from Supabase"):
-        ambil_raw_noo.clear()
-        ss.df_toko         = muat_data_noo_dari_supabase()
-        ss.terakhir_update = waktu_sekarang()
-        st.rerun()
-
-    st.divider()
     st.subheader("User Access (Input NOO & SKU)")
 
     try:
@@ -2267,26 +2373,14 @@ def halaman_pengaturan():
         else:
             u_del = st.selectbox("Select username", [""] + list(hapus_opts), key="set_del_user",
                                  format_func=lambda x: x or "Select a user...")
-            # key checkbox mengikuti username: ganti user / habis hapus -> checkbox otomatis kosong lagi,
-            # jadi centang dari user sebelumnya tidak terbawa ke user berikutnya
-            kunci_yakin = f"set_del_yakin_{u_del}"
-            yakin = st.checkbox(f"I understand '{u_del}' will lose access" if u_del else "I understand the user will lose access",
-                                key=kunci_yakin, disabled=not u_del)
-            if st.button("Delete user", type="primary", disabled=not (u_del and yakin), key="set_del_btn"):
-                ss.pop(kunci_yakin, None)      # centang dipakai sekali saja
-                if not _sb_user_delete(u_del):
-                    st.error(f"Delete failed: {ss.pop('_err_del', '-')}")
-                else:
-                    _sb_users_list.clear()
-                    catat_riwayat("Delete user", u_del)
-                    ss["_del_sukses"] = f"User '{u_del}' deleted."
-                    ss["_reset_del_user"] = True
-                    st.rerun()
+            if st.button("Delete user", type="primary", disabled=not u_del, key="set_del_btn"):
+                _konfirmasi_hapus_user(u_del)      # popup konfirmasi dulu sebelum benar-benar dihapus
             if pesan_del:
                 st.success(pesan_del)
 
     # ── Reset password ──
     with tab_pw:
+        pesan_pw = ss.pop("_pw_sukses", None)            # pesan sukses reset, tampil sekali
         u_pw = st.selectbox("Select username", semua_opts, key="set_pw_user")
         with st.form("form_reset_pw", clear_on_submit=True):
             pw1 = st.text_input("New password (min. 8 characters)", type="password")
@@ -2297,11 +2391,10 @@ def halaman_pengaturan():
                 st.error("Password must be at least 8 characters.")
             elif pw1 != pw2:
                 st.error("Passwords do not match.")
-            elif not _sb_user_reset_pw(u_pw, pw1):
-                st.error("Reset failed (check Supabase RLS policy for UPDATE).")
             else:
-                catat_riwayat("Reset password", u_pw)
-                st.success(f"Password for '{u_pw}' has been reset.")
+                _konfirmasi_reset_pw(u_pw, pw1)    # popup konfirmasi dulu sebelum password diganti
+        if pesan_pw:
+            st.success(pesan_pw)
 
     # ── Bersihkan riwayat (tabel riwayat_noo) ──
     with tab_riw:
@@ -2319,13 +2412,13 @@ def main():
     from login_page import require_login, keluar
     # mulai memuat data berat di latar belakang selagi user masih di halaman login
     _shared.prewarm(ambil_raw_noo, ambil_data_dashboard, _riwayat_cache)
-    user = require_login()
+    user = require_login("validation")
 
     IZIN_MASUK = {"RSA", "BD SUPPORT"}
     if user.get("tagging") not in IZIN_MASUK:
         st.error("Access denied. This app is only for RSA and BD Support.")
         if st.button("Back to login"):
-            st.session_state.clear()
+            keluar()          # hapus juga cookie login, kalau tidak sesi dipulihkan lagi dari cookie -> tetap Access denied
             st.rerun()
         st.stop()
 

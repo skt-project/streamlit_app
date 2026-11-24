@@ -389,7 +389,6 @@ def _baca_token(token: str):
 
 
 def _js_cookie(token: str, detik: int):
-    """Tulis/hapus cookie lewat JS (iframe komponen same-origin dengan halaman Streamlit)."""
     components.html(
         f"""<script>
         const sec = (location.protocol === 'https:') ? '; SameSite=None; Secure' : '; SameSite=Lax';
@@ -398,15 +397,17 @@ def _js_cookie(token: str, detik: int):
 
 
 def keluar():
-    """Logout: kosongkan sesi + hapus cookie login. Panggil lalu st.rerun()."""
     ss = st.session_state
     ss.clear()
     ss["_auth_dicoba"] = True      # cookie lama masih terbaca di sesi ini -> jangan dipulihkan lagi
     ss["_hapus_cookie"] = True
 
 
-def require_login():
-    """Panggil setelah st.set_page_config(). Halaman di bawahnya hanya jalan jika sudah login."""
+def require_login(app: str = ""):
+    # `app` memisahkan cookie login per aplikasi (mis. "submission" / "validation"): cookie dibagi ke semua port di
+    # host yang sama, jadi tanpa ini login di satu aplikasi otomatis ikut masuk di aplikasi lain.
+    global COOKIE_LOGIN
+    COOKIE_LOGIN = f"skp_auth_{app}" if app else "skp_auth"
     ss = st.session_state
     if ss.get("user") is None and not ss.get("_auth_dicoba"):
         ss["_auth_dicoba"] = True                       # pulihkan dari cookie hanya sekali per sesi browser

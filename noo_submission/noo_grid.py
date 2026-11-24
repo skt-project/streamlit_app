@@ -122,7 +122,6 @@ _komponen = st.components.v2.component("noo_grid", html=_HTML, css=_CSS, js=_JS)
 
 
 def _js(v):
-    """Nilai pandas -> nilai JSON-aman."""
     if v is None or (not isinstance(v, (list, dict)) and pd.isna(v)):
         return None
     if isinstance(v, (pd.Timestamp,)):
@@ -137,11 +136,6 @@ def _js(v):
 
 
 def noo_grid(df: pd.DataFrame, cols: list, *, key: str, select_all=False, warna=None, terkunci=()) -> pd.DataFrame:
-    """Render tabel; kembalikan df + edit user (indeks sama dengan df).
-
-    cols: list dict {name, label, kind, width, options?, help?};
-          kind = index | check | status | select | storeid | number | text | ro
-    """
     nama = [c["name"] for c in cols]
     rows = [{n: _js(v) for n, v in zip(nama, tup)}
             for tup in df[nama].itertuples(index=False, name=None)]

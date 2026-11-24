@@ -1,4 +1,3 @@
-"""Help & Support: popup tiket yang dipakai bersama oleh halaman login, app_submission, dan app_main."""
 import datetime
 import re
 from zoneinfo import ZoneInfo
