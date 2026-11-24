@@ -1914,7 +1914,7 @@ def _kartu_tutorial():
         return
     if not rows:
         st.markdown('<div class="rf-tut2"><div class="tt">Tutorial feedback <span>0 jawaban</span></div>'
-                    '<div class="ct">Belum ada jawaban. Muncul setelah user menyelesaikan tutorial dan mengirim feedback.</div></div>',
+                    '<div class="ct">No response yet. Displayed after the user completes the tutorial and submits their feedback.</div></div>',
                     unsafe_allow_html=True)
         return
     n = len(rows)
