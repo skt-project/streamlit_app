@@ -135,7 +135,27 @@ def get_actual_so(distributor_code: str) -> pd.DataFrame:
         st.warning(f"⚠️ Gagal fetch actual SO ({distributor_code}): {e}")
         return pd.DataFrame(columns=["distributor_name", "sku", "actual_so_mtd"])
 
-    
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_actual_si(distributor_code: str) -> pd.DataFrame:
+    client = get_bq_client()
+    query = f"""
+        SELECT
+            UPPER(TRIM(distributor_name)) AS distributor_name,
+            UPPER(TRIM(sku))              AS sku,
+            SUM(sell_in_qty)              AS actual_si_mtd
+        FROM `skintific-data-warehouse.rsa.si_st_so_target_data_all`
+    WHERE UPPER(TRIM(distributor_code)) = '{distributor_code.upper()}'
+      AND DATE_TRUNC(calendar_date, MONTH) = DATE_TRUNC(CURRENT_DATE(), MONTH)
+    GROUP BY 1, 2
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.warning(f"⚠️ Gagal fetch actual SI ({distributor_code}): {e}")
+        return pd.DataFrame(columns=["distributor_name", "sku", "actual_si_mtd"])
+
+
 def _filter_already_saved(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -310,7 +330,8 @@ SELECT UPPER(region) AS region, UPPER(distributor) AS distributor,
         st.error(f"Error fetching stock data: {e}")
         return pd.DataFrame()
 TARGET_SO_SHEET_URL = "https://docs.google.com/spreadsheets/d/1VZLM_H3QJCvLdAYioXh2Ap1wykf85gMVVrzbMJFm4eE/edit?gid=1652651155#gid=1652651155"
-TARGET_SO_DATA_TYPE = "SO"   # CEK nilai data_type di sheet
+TARGET_SO_DATA_TYPE = "SO" 
+TARGET_SI_DATA_TYPE = "SI"  # CEK nilai data_type di sheet
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -331,16 +352,17 @@ def _load_target_so_raw() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def get_target_so(distributor_code: str, month: int) -> pd.DataFrame:
+def get_target_so(distributor_code: str, month: int, data_type: str = None, out_col: str = "target_so") -> pd.DataFrame:
+    data_type = data_type or TARGET_SO_DATA_TYPE
     df = _load_target_so_raw()
     if df.empty:
-        return pd.DataFrame(columns=["distributor_code", "sku", "target_so"])
+        return pd.DataFrame(columns=["distributor_code", "sku", out_col])
 
     required_cols = {"distributor_code", "sku", "qty_target", "month", "data_type"}
     missing = required_cols - set(df.columns)
     if missing:
         st.error(f"Kolom berikut tidak ditemukan di sheet Target SO: {missing}. Kolom tersedia: {list(df.columns)}")
-        return pd.DataFrame(columns=["distributor_code", "sku", "target_so"])
+        return pd.DataFrame(columns=["distributor_code", "sku", out_col])
 
     df["distributor_code"] = df["distributor_code"].astype(str).str.strip().str.upper()
     df["sku"] = df["sku"].astype(str).str.strip().str.upper()
@@ -351,24 +373,30 @@ def get_target_so(distributor_code: str, month: int) -> pd.DataFrame:
     filtered = df[
         (df["distributor_code"] == str(distributor_code).strip().upper())
         & (df["month"] == int(month))
-        & (df["data_type"] == TARGET_SO_DATA_TYPE.upper())
+        & (df["data_type"] == str(data_type).strip().upper())
     ].copy()
 
     if filtered.empty:
-        return pd.DataFrame(columns=["distributor_code", "sku", "target_so"])
+        return pd.DataFrame(columns=["distributor_code", "sku", out_col])
 
     result = (
         filtered.groupby(["distributor_code", "sku"], as_index=False)["qty_target"]
         .sum()
-        .rename(columns={"qty_target": "target_so"})
+        .rename(columns={"qty_target": out_col})
     )
     return result
+
+
+def get_target_si(distributor_code: str, month: int) -> pd.DataFrame:
+    return get_target_so(distributor_code, month, data_type=TARGET_SI_DATA_TYPE, out_col="target_si")
 
 ##################################--------LOGIC SO : QTY FINAL SUGGESTED
 def apply_oos_sellout_logic(
     df: pd.DataFrame,
     target_df: pd.DataFrame,
     actual_so_df: pd.DataFrame | None = None,   # <-- param baru
+    target_si_df: pd.DataFrame | None = None,
+    actual_si_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
 
     # --- Target SO ---
@@ -390,6 +418,20 @@ def apply_oos_sellout_logic(
     # net_target = sisa target yg belum terpenuhi
     df["net_target_so"] = np.maximum(df["target_so"] - df["actual_so_mtd"], 0)
 
+    # --- Target SI & Actual SI MTD (logika sama dengan SO) ---
+    if target_si_df is not None and not target_si_df.empty:
+        df["target_si"] = df["Customer SKU Code"].map(target_si_df.set_index("sku")["target_si"].to_dict())
+    else:
+        df["target_si"] = 0
+    df["target_si"] = pd.to_numeric(df["target_si"], errors="coerce").fillna(0)
+
+    if actual_si_df is not None and not actual_si_df.empty:
+        df["actual_si_mtd"] = df["Customer SKU Code"].map(actual_si_df.set_index("sku")["actual_si_mtd"].to_dict())
+    else:
+        df["actual_si_mtd"] = 0
+    df["actual_si_mtd"] = pd.to_numeric(df["actual_si_mtd"], errors="coerce").fillna(0)
+    df["net_target_si"] = np.maximum(df["target_si"] - df["actual_si_mtd"], 0)
+
     # --- Base series ---
     sugg_init = pd.to_numeric(df["buffer_plan_by_lm_qty_adj"], errors="coerce").fillna(0)
     stock     = pd.to_numeric(df["total_stock"], errors="coerce").fillna(0)
@@ -407,11 +449,17 @@ def apply_oos_sellout_logic(
 
     df["target_so_minus_stock"] = gap
 
+    # Suggested QTY SI: sama dengan SO tapi pakai net_target_si
+    gap_si  = df["net_target_si"] - stock
+    calc_si = np.maximum(sugg_init, gap_si)
+    calc_si = np.where(alloc > 0, np.minimum(calc_si, alloc), calc_si)
+    df["sugg_qty_si"] = np.where(calc_si > 0, calc_si, 0)
+
     # Suggested QTY SO = final (tanpa cabang STOP / NORMAL)
     df["sugg_qty_so"] = final
 
-    # Suggested QTY Final = max(Suggested QTY SO, Suggested PO buffer)
-    df["sugg_qty_final"] = np.maximum(df["sugg_qty_so"], sugg_init)
+    # Suggested QTY Final = max(Suggested QTY SO, Suggested QTY SI, Suggested PO buffer)
+    df["sugg_qty_final"] = np.maximum(np.maximum(df["sugg_qty_so"], df["sugg_qty_si"]), sugg_init)
     return df
 ##################################--------LOGIC SO : QTY FINAL SUGGESTED
 
@@ -738,7 +786,7 @@ def _write_po_rows(ws, df_no_flag, is_po_sku_series, npd_sku_list=None):
     currency_cols = ["PO Value", "Suggested PO Value", "Suggested Value Final"]
     integer_cols = ["Remaining Allocation (By Region)", "National Alloc Qty (Basis)", "Avg Weekly Sales LM (Qty)",
                     "Target SO", "Suggested QTY SO", "Suggested QTY Final"]
-    decimal_cols = ["WOI (Stock + PO Ori)", "woi_standard", "WOI Threshold", "Current WOI",
+    decimal_cols = ["WOI (Stock + PO Ori)", "WOI STANDARD", "WOI Threshold", "Current WOI",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)"]
     moq_safe_font = Font(bold=True, color="54CE54")
@@ -1177,7 +1225,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 
         _target_df    = get_target_so(_dist_code, datetime.now().month) if _dist_code else pd.DataFrame()
         _actual_so_df = get_actual_so(_dist_code) if _dist_code else pd.DataFrame()
-        res_df = apply_oos_sellout_logic(res_df, _target_df, _actual_so_df)
+        _target_si_df = get_target_si(_dist_code, datetime.now().month) if _dist_code else pd.DataFrame()
+        _actual_si_df = get_actual_si(_dist_code) if _dist_code else pd.DataFrame()
+        res_df = apply_oos_sellout_logic(res_df, _target_df, _actual_so_df, _target_si_df, _actual_si_df)
 
 
 
@@ -1272,6 +1322,9 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             "remaining_allocation_qty_region":"Remaining Allocation (By Region)",
             "target_so":"Target SO",
             "sugg_qty_so":"Suggested QTY SO",
+            "target_si":"Target SI",
+            "actual_si_mtd":"Actual SI MTD",
+            "sugg_qty_si":"Suggested QTY SI",
             "sugg_qty_final":"Suggested QTY Final",
         })
         if rejected_skus_1:
@@ -1328,9 +1381,10 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
 #----------------PENAMAAN KOLOM", jika mau tambah kolom
         out_cols = ["Distributor","SKU","Product Name","Assortment","Supply Control",
                     "Avg Weekly Sales LM (Qty)","Total Stock (Qty)","Current WOI",
-                    "PO Qty","PO Value","WOI (Stock + PO Ori)","woi_standard","80% Max ST YTD","WOI Threshold","WOI Threshold Status","Remark",
+                    "PO Qty","PO Value","WOI (Stock + PO Ori)","WOI STANDARD","80% Max ST YTD","WOI Threshold","WOI Threshold Status","Remark",
                     "Suggested PO buffer","Suggested PO Value",
-                    "Target SO","Suggested QTY SO","Suggested QTY Final","Suggested Value Final",
+                    "Target SO","Suggested QTY SO","Target SI",#"Actual SI MTD",
+                    "Suggested QTY SI","Suggested QTY Final","Suggested Value Final",
                     "WOI After Buffer (Stock + Suggested Qty)",
                     "Stock + Suggested Qty WOI (Projection at EOM)",
                     "Remaining Allocation (By Region)","National Alloc Qty (Basis)","National Alloc %","National Alloc Status","is_po_sku","RSA Notes", "MOQ", "Check MOQ"]
@@ -1340,6 +1394,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             _bm = res_df.set_index(res_df["SKU"].astype(str).str.upper())["brand"].dropna().to_dict()
             brand_map.update(_bm)
 
+        res_df = res_df.rename(columns={"woi_standard": "WOI STANDARD"})
         res_df = res_df.reindex(columns=out_cols)
         res_df.sort_values(by=["is_po_sku","SKU"], ascending=[False,True], inplace=True)
         zero_sugg = res_df[(res_df["Suggested PO buffer"] == 0) & (res_df["is_po_sku"] == True)][["SKU","Product Name","PO Qty","Suggested PO buffer","Remark"]]
@@ -3121,7 +3176,7 @@ if st.session_state.get('page') == 'po_changer':
                 st.divider()
                 _cached = st.session_state.get("sim_result_rsa")
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
-                              "WOI Threshold", "WOI Threshold Status", "woi_standard", "80% Max ST YTD",
+                              "WOI Threshold", "WOI Threshold Status", "WOI STANDARD", "80% Max ST YTD",
                               "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
                 if _cached and _cached.get("dfs"):
                     _first_df = next(iter(_cached["dfs"].values()))
@@ -3293,7 +3348,7 @@ if st.session_state.get('page') == 'po_spv':
                 import hashlib as _hashlib
                 _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
                 _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
-                              "WOI Threshold", "WOI Threshold Status", "woi_standard", "80% Max ST YTD",
+                              "WOI Threshold", "WOI Threshold Status", "WOI STANDARD", "80% Max ST YTD",
                               "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
                 _spv_cache =st.session_state.get("sim_result_spv")
                 if _spv_cache and _spv_cache.get("dfs"):
@@ -3320,7 +3375,7 @@ if st.session_state.get('page') == 'po_spv':
                 st.success(f"Simulasi selesai — {len(excel_dfs)} distributor")
 
                 # SPV: output sama persis dengan RSA, KECUALI kolom MOQ tidak ikut di Excel
-                # + kolom bantu WOI Threshold tidak ikut; woi_standard & 80% Max ST YTD tampil (sama dengan PO Result RSA)
+                # + kolom bantu WOI Threshold tidak ikut; WOI STANDARD & 80% Max ST YTD tampil (sama dengan PO Result RSA)
                 _MOQ_COLS = ["MOQ", "Check MOQ", "Suggested Min Order Qty",
                              "WOI Threshold"]
                 spv_dfs = {k: v.drop(columns=_MOQ_COLS, errors="ignore") for k, v in excel_dfs.items()}
