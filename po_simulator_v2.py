@@ -1763,7 +1763,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     if woi_col is None:
         woi_col = next((c for c in final_disp.columns if "woi" in c.lower()), "WOI (Stock + PO Ori)")
 
-    st.markdown("""<div class="pipeline-step active"><span class="step-number">3</span><strong>Preview Data — Top 10 WOI (Exclude : STOP PO/DISCONTINUED and Reject by Steve)</strong></div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="pipeline-step active"><span class="step-number">3</span><strong>Preview Data - Top 10 WOI (Exclude : STOP PO/DISCONTINUED)</strong></div>""", unsafe_allow_html=True)
 
     _woi_ori = "WOI (Stock + PO Ori)"
     _stock_col = "Total Stock (Qty)"
@@ -1782,7 +1782,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         & (_final_num["National Alloc Status"].fillna("").astype(str).str.strip() != "> 75% National Alloc")
     ].copy()
 
-    _top10_cols = PO_IMG_COLS + ["WOI Threshold Status", "National Alloc Status"]
+    _final_map = {"Suggested PO buffer": "Suggested QTY Final", "Suggested PO Value": "Suggested Value Final"}
+    _top10_cols = [_final_map.get(c, c) for c in PO_IMG_COLS] + ["WOI Threshold Status", "National Alloc Status"]
     top10 = prev_df.sort_values(_woi_ori, ascending=False)[_top10_cols].reset_index(drop=True)
     num_cols_top10 = top10.select_dtypes(include=['number']).columns
     if top10.empty:
