@@ -1801,7 +1801,7 @@ def _smiley_svg(persen, jenis):
             f'<path d="{mulut}" stroke="{gelap}" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>')
 
 
-def _garis_harian_svg(nilai):
+def _garis_harian_svg(nilai, labels=None):
     # line chart kecil (area + garis + titik) jumlah feedback per hari
     w, h, pad = 220, 62, 6
     mx = max(max(nilai), 1)
@@ -1818,13 +1818,20 @@ def _garis_harian_svg(nilai):
     titik = "".join(f'<path d="M{x:.1f} {y:.1f}h0" stroke="#ff4f8b" stroke-width="9" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
                     f'<path d="M{x:.1f} {y:.1f}h0" stroke="#fff" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
                     for x, y, v in zip(xs, ys, nilai) if v > 0)
+    # area hover transparan per hari -> tooltip bawaan browser (tanggal + jumlah feedback)
+    lebar = (w - 2 * pad) / (n - 1)
+    hover = "".join(
+        f'<rect x="{x - lebar / 2:.1f}" y="0" width="{lebar:.1f}" height="{h}" fill="#ff4f8b" fill-opacity="0" '
+        f'onmouseover="this.setAttribute(\'fill-opacity\',\'.08\')" onmouseout="this.setAttribute(\'fill-opacity\',\'0\')">'
+        f'<title>{(labels[i] + ": ") if labels else ""}{v} feedback</title></rect>'
+        for i, (x, v) in enumerate(zip(xs, nilai)))
     return (f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}" preserveAspectRatio="none">'
             '<defs><linearGradient id="gh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4f8b" stop-opacity=".30"/>'
             '<stop offset="1" stop-color="#ff4f8b" stop-opacity="0"/></linearGradient></defs>'
             f'<line x1="{pad}" y1="{h - pad}" x2="{w - pad}" y2="{h - pad}" stroke="#f1e9ee"/>'
             f'<path d="{area}" fill="url(#gh)"/>'
             f'<path d="{d}" fill="none" stroke="#ff4f8b" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
-            f'{titik}</svg>')
+            f'{titik}{hover}</svg>')
 
 
 def _gauge_rating_html(rata):
@@ -1914,7 +1921,7 @@ def _kartu_tutorial():
         return
     if not rows:
         st.markdown('<div class="rf-tut2"><div class="tt">Tutorial feedback <span>0 jawaban</span></div>'
-                    '<div class="ct">No response yet. Displayed after the user completes the tutorial and submits their feedback.</div></div>',
+                    '<div class="ct">Belum ada jawaban. Muncul setelah user menyelesaikan tutorial dan mengirim feedback.</div></div>',
                     unsafe_allow_html=True)
         return
     n = len(rows)
@@ -1940,9 +1947,9 @@ def _kartu_tutorial():
         f'<div class="tile bl"><div class="em">{f_bl}</div><div class="no">{bl}</div><div class="lb">Belum membantu</div></div></div>'
         f'{baris_html}</div>', unsafe_allow_html=True)
 
-    komentar = [x for x in rows if str(x.get("komentar") or "").strip()]
+    komentar = rows   # semua jawaban (termasuk yang tanpa komentar) supaya bisa dihapus
     if komentar:
-        with st.expander(f"Tutorial comments ({len(komentar)})", expanded=False):
+        with st.expander(f"Tutorial answers ({len(komentar)})", expanded=False):
             hanya_bl = st.toggle("Belum membantu saja", key="tf_hanya_bl")
             tampil = [x for x in komentar if not (hanya_bl and x.get("membantu"))]
             bisa_hapus = (st.session_state.get("user") or {}).get("tagging") in ("RSA", "BD SUPPORT", "BD_SUPPORT")   # sama dengan hapus feedback aplikasi
@@ -1951,7 +1958,7 @@ def _kartu_tutorial():
                 kartu = (f'<div class="rf-tc"><b>{_h.escape(str(x.get("user") or "-"))}</b> '
                          f'<span class="{"ya" if ok else "bl"}">{"Membantu" if ok else "Belum membantu"}</span>'
                          f'<span class="tg">{_h.escape(str(x.get("tutorial_judul") or x.get("tutorial_key") or ""))}</span>'
-                         f'<div>{_h.escape(str(x.get("komentar") or ""))}</div></div>')
+                         f'<div>{_h.escape(str(x.get("komentar") or "").strip()) or "<i>(tanpa komentar)</i>"}</div></div>')
                 tid = x.get("id")
                 if bisa_hapus and tid is not None:
                     c_k, c_h = st.columns([20, 1], vertical_alignment="center", gap="small")
@@ -2005,7 +2012,7 @@ def tab_hasil_feedback():
     n_neg = jml[1] + jml[2]
     n_net = jml[3]
     pos_p, neg_p, net_p = n_pos / total * 100, n_neg / total * 100, n_net / total * 100
-    harian, tgl_awal, tgl_akhir = [0] * 14, "", ""
+    harian, tgl_awal, tgl_akhir, label_hari = [0] * 14, "", "", None
     try:
         waktu_fb = pd.to_datetime(pd.Series([x.get("created_at") for x in data]), utc=True, errors="coerce").dt.tz_convert(ZONA_WAKTU)
         hari_ini = pd.Timestamp.now(tz=ZONA_WAKTU).normalize()
@@ -2013,6 +2020,7 @@ def tab_hasil_feedback():
         harian = [int((selisih == 13 - k).sum()) for k in range(14)]      # 14 hari terakhir, lama -> baru
         tgl_awal = (hari_ini - pd.Timedelta(days=13)).strftime("%d %b")
         tgl_akhir = hari_ini.strftime("%d %b")
+        label_hari = [(hari_ini - pd.Timedelta(days=13 - k)).strftime("%d %b") for k in range(14)]
     except Exception:
         pass
     try:
@@ -2040,7 +2048,7 @@ def tab_hasil_feedback():
         f'<div class="rf-card rf-tot"><div class="rf-ct">Feedback <span>All time</span></div>'
         f'<div class="rf-bigrow"><div class="rf-big">{total}</div><div class="rf-ikon">{_gauge_rating_html(rata)}</div></div>'
         f'<div class="rf-naik">▲ +{minggu} <span>received in the last 7 days</span></div>'
-        f'<div class="rf-grafik"><div class="rf-gt">Last 14 days</div>{_garis_harian_svg(harian)}'
+        f'<div class="rf-grafik"><div class="rf-gt">Last 14 days</div>{_garis_harian_svg(harian, label_hari)}'
         f'<div class="rf-gx"><span>{tgl_awal}</span><span>{tgl_akhir}</span></div></div></div></div>', unsafe_allow_html=True)
 
     _kartu_tutorial()
