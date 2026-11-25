@@ -252,7 +252,7 @@ def get_sku_data(sku_list) -> pd.DataFrame:
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
 def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
-    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date = DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH)"
+    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date = DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH) and sku in ('G2G-493', 'G2G-303')"
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -1975,7 +1975,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     cat1, cat2, cat3 = st.columns(3)
     for col_ui, df_cat, title, label, icon in [
         (cat1, stop_df, "Product <br> Stop PO / OOS / DISCONTINUED / UNAVAILABLE / Price Not Available Yet", "product_stop_po", "🚫"),
-        (cat2, steve_df, "Reject by Steve", "reject_by_steve", "❌"),
+        (cat2, steve_df, "Reject (Negative Allocation)", "reject_negative_allocation", "❌"),
         (cat3, approval_df, "Product Reject ≠ High WOI", "product_reject", "⚠️"),
     ]:
         with col_ui:
