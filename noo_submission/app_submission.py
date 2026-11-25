@@ -1070,6 +1070,7 @@ def halaman_pengajuan_noo():
                 ss.sku_upload_editor_key += 1
             df_edit = data_sku.copy()
             df_edit["Customer SKU Name"] = data_sku["Customer Product Name"]  # ← teks asli dari file, hanya referensi tampilan
+            df_edit["Product"] = df_edit["Product"].astype(object)   # kolom bisa terbaca numerik; pandas baru menolak isi teks
             for i, b in enumerate(ss.get("_sku_upload_baris", [])):
                 if i < len(df_edit):
                     df_edit.loc[df_edit.index[i], "Product"] = b["product_fix"]
