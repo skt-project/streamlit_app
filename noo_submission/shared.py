@@ -1168,7 +1168,11 @@ def rsa_identifier(nama_distributor: str, fallback: str = "rsa") -> str:
     except Exception:
         return fallback
     peta = {" ".join(k.split()).lower(): v for k, v in REGION_TO_RSA.items()}   # abaikan beda huruf/spasi
-    cocok = df[df["Distributor Name"].map(lambda s: " ".join(str(s).split()).lower()) == nama]
+    nama_sheet = df["Distributor Name"].map(lambda s: " ".join(str(s).split()).lower())
+    cocok = df[nama_sheet == nama]
+    if cocok.empty:
+        # fallback contains: nama dari file bisa berbentuk "<distributor> - <cabang>" (mis. SKU Mapping dari upload)
+        cocok = df[nama_sheet.map(lambda s: len(s) >= 5 and (s in nama or nama in s))]
     for rg in cocok["Region"]:
         rsa = peta.get(" ".join(str(rg).split()).lower())
         if rsa:
@@ -1180,6 +1184,8 @@ def catat_riwayat(aksi: str, detail: str = "", pengguna: str = None, distributor
     df    = ss.get("df_toko", pd.DataFrame())
     total = len(df)
     pengguna = pengguna or nama_pengguna_sesi()
+    if distributor:
+        ss["_fb_distri_terakhir"] = distributor      # dipakai popup feedback untuk mengenali RSA dari distributor yang disubmit
     # user RSA: jejak submit dicatat spesifik per RSA sesuai region distributor yang disubmit
     if distributor and (ss.get("user") or {}).get("tagging") == "RSA":
         pengguna = rsa_identifier(distributor, fallback=pengguna)

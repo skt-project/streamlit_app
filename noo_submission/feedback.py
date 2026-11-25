@@ -69,8 +69,11 @@ def minta_feedback():
         # ===== DEBUG TOAST (dimatikan): alasan popup tidak muncul - akun dikecualikan / username kosong =====
         # _debug(f"skip: user='{username}', tagging='{user.get('tagging')}' dikecualikan / username kosong")
         return
+    rsa_terdeteksi = _rsa_dari_distributor(ss.get("_fb_distri_terakhir")) if str(user.get("tagging") or "").strip().upper() == "RSA" else ""
+    if rsa_terdeteksi:
+        ss["fb_nama_rsa"] = f"RSA - {rsa_terdeteksi}"      # dasar cek "sudah pernah kasih feedback" (per nama RSA di tabel)
     sudah = _sudah_kasih_feedback(username)
-    if sudah is None:                                      # gagal cek ke Supabase -> jangan menghalangi user
+    if sudah is None:                                    # gagal cek ke Supabase -> jangan menghalangi user
         return
     # sudah pernah kasih feedback: popup (boleh di-skip) cukup MUNCUL SEKALI per sesi login, di submit mana pun yang
     # lebih dulu (NOO / SKU Mapping / SPV Confirmation). Submit berikutnya di sesi yang sama tidak memunculkannya lagi.
@@ -89,6 +92,24 @@ def minta_feedback():
     ss.pop("fb_selesai", None)
     for k in ("fb_bintang", "fb_kategori", "fb_lainnya", "fb_keterangan", "fb_rsa", "fb_rsa_lain"):
         ss.pop(k, None)
+    if rsa_terdeteksi:
+        ss["fb_rsa"] = rsa_terdeteksi                      # nama RSA terpilih otomatis (masih bisa diganti)
+
+
+# nama di REGION_TO_RSA (huruf kecil) -> nama di DAFTAR_RSA, kalau penulisannya beda
+_ALIAS_RSA = {"erlin": "Erliana"}
+
+
+def _rsa_dari_distributor(distributor) -> str:
+    """Nama RSA (sesuai DAFTAR_RSA) yang meng-handle region distributor ini, berdasarkan mapping region sebelumnya. '' = tidak dikenali."""
+    if not distributor:
+        return ""
+    kode = _shared.rsa_identifier(distributor, fallback="")        # "rsa_shaltsa" / ""
+    if not kode.startswith("rsa_"):
+        return ""
+    kunci = kode[4:]
+    nama = _ALIAS_RSA.get(kunci, kunci.capitalize())
+    return nama if nama in DAFTAR_RSA else ""
 
 
 DEBUG_FEEDBACK = False     # ===== DEBUG TOAST: True = tampilkan toast [feedback] ...; juga hapus tanda # pada baris _debug(...) di atas =====

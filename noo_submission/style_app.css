@@ -1116,3 +1116,19 @@ body div[data-baseweb="popover"]:has([role="listbox"]) [role="option"] * {
 }
 .st-key-tutorial_kanan button p { color: #d6336c !important; font-weight: 700 !important; font-size: 12px !important; }
 .st-key-tutorial_kanan button:hover { background: #ffe3ed !important; border-color: #ffb3cd !important; text-decoration: none !important; }
+
+/* Dropdown di tabel SKU Mapping / NOO / SPV: tulisan dikecilkan (nilai terpilih + opsi di daftar) */
+.st-key-tabel_sku_upload_scroll [data-testid="stSelectbox"] [data-baseweb="select"] *,
+.st-key-tabel_noo_scroll [data-testid="stSelectbox"] [data-baseweb="select"] *,
+.st-key-tabel_manual_scroll [data-testid="stSelectbox"] [data-baseweb="select"] *,
+.st-key-tabel_spv_scroll [data-testid="stSelectbox"] [data-baseweb="select"] * {
+    font-size: 0.74rem !important;
+}
+.st-key-tabel_sku_upload_scroll [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+.st-key-tabel_sku_upload_scroll [data-testid="stSelectbox"] input {
+    min-height: 34px !important;
+}
+body div[data-baseweb="popover"] li,
+body div[data-baseweb="popover"] li * {
+    font-size: 0.78rem !important;
+}
