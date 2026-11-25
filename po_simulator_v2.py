@@ -302,8 +302,14 @@ def get_distributor_suggestions(distributor_names, brand_name: str = "All") -> p
         return pd.DataFrame()
 
 
+#===modifikasi ST dari Distri baru===== (INFO)
+# Fungsi ini = get_stock_data ASLI (query BigQuery stock analysis), isinya TIDAK diubah.
+# Namanya diganti jadi _get_stock_data_bq karena get_stock_data sekarang jadi wrapper di blok
+# "modifikasi ST dari Distri baru" di bawah (yang menimpa avg_weekly_st_lm_qty utk distri tertentu, mis. KLATEN).
+# Kalau modifikasi dihapus: ganti nama fungsi ini kembali jadi get_stock_data.
+#===modifikasi ST dari Distri baru=====
 @st.cache_data(ttl=21600, show_spinner="Fetching Stock Analysis from BigQuery...")
-def get_stock_data(distributor_name: str, sku_list) -> pd.DataFrame:
+def _get_stock_data_bq(distributor_name: str, sku_list) -> pd.DataFrame:
     if not sku_list:
         return pd.DataFrame()
     client = get_bq_client()
@@ -329,6 +335,58 @@ SELECT UPPER(region) AS region, UPPER(distributor) AS distributor,
     except Exception as e:
         st.error(f"Error fetching stock data: {e}")
         return pd.DataFrame()
+
+
+#===modifikasi ST dari Distri baru===== START
+# SATU-SATUNYA blok modifikasi
+# jadi avg_weekly_st_lm_qty (kolom yang sama) -> WOI & Remark ikut berubah tanpa edit lain.
+# Rumus: avg distri target = persentase brand x SUM(avg_weekly_st_lm_qty distri sumber) per SKU.
+# Brand di luar brand_pct tidak diubah. Tambah/ganti distri lain: edit dict ini saja.
+ST_FROM_OTHER_DISTRI = {
+    "PT UNIRAMA DUTA NIAGA - KLATEN": {
+        "sources": ["PT UNIRAMA DUTA NIAGA - SURAKARTA", "PT UNIRAMA DUTA NIAGA - YOGYAKARTA"],
+        "brand_pct": {"G2G": 0.0675, "NEXTPRIME": 0.1519, "BODIBREZE": 0.0541},
+    },
+}
+
+# Cara maintain
+# 
+# Untuk menambah distributor lain, cukup tambah satu entri di dict ST_FROM_OTHER_DISTRI: 
+# >nama distributor target, distributor sumber, dan persentase brand.
+# >Untuk menghapus modifikasi ini, hapus blok di antara dua penanda dan ganti nama _get_stock_data_bq kembali jadi get_stock_data.
+
+def get_stock_data(distributor_name: str, sku_list) -> pd.DataFrame:
+    # Wrapper: ambil data asli dulu. Distri yg TIDAK ada di ST_FROM_OTHER_DISTRI -> dikembalikan apa adanya.
+    df = _get_stock_data_bq(distributor_name, sku_list)
+    cfg =ST_FROM_OTHER_DISTRI.get(str(distributor_name).strip().upper())
+    if not cfg or df.empty or "avg_weekly_st_lm_qty" not in df.columns:
+        return df
+
+    # Langkah 1: jumlahkan avg_weekly_st_lm_qty per SKU dari distri sumber (mis. SURAKARTA + YOGYAKARTA)
+    src_sum = pd.Series(dtype=float)
+    for src in cfg["sources"]:
+        d = _get_stock_data_bq(src.strip().upper(), sku_list)
+        if d.empty or "avg_weekly_st_lm_qty" not in d.columns:
+            continue
+        v = pd.to_numeric(d["avg_weekly_st_lm_qty"], errors="coerce").fillna(0)
+        v.index = d["sku"].astype(str).str.strip().str.upper()
+        src_sum = src_sum.add(v.groupby(level=0).sum(), fill_value=0)
+
+    def _brand(sku):
+        s = str(sku).strip().upper()
+        return "NEXTPRIME" if s.startswith("N") else "BODIBREZE" if s.startswith("B") else "G2G" if s.startswith("G") else "LAINNYA"
+
+    # Langkah 2 (INI YG MENIMPA AVG WEEKLY): avg distri target = persentase brand x total avg distri sumber.
+    # Kolom 'avg_weekly_st_lm_qty' di-overwrite (kolom sama) -> otomatis dipakai WOI, Remark, dst.
+    # Brand di luar brand_pct (pct NaN) tidak ditimpa. SKU tidak ada di distri sumber -> avg = 0.
+    df = df.copy()
+    skus = df["sku"].astype(str).str.strip().str.upper()
+    pct = skus.map(_brand).map(cfg["brand_pct"])      # NaN = brand di luar tabel
+    new_avg = skus.map(src_sum).fillna(0) * pct
+    df.loc[pct.notna(), "avg_weekly_st_lm_qty"] = new_avg[pct.notna()]
+    return df
+#===modifikasi ST dari Distri baru===== END
+
 TARGET_SO_SHEET_URL = "https://docs.google.com/spreadsheets/d/1VZLM_H3QJCvLdAYioXh2Ap1wykf85gMVVrzbMJFm4eE/edit?gid=1652651155#gid=1652651155"
 TARGET_SO_DATA_TYPE = "SO" 
 TARGET_SI_DATA_TYPE = "SI"  # CEK nilai data_type di sheet
@@ -510,8 +568,13 @@ def calculate_woi(stock, po_qty, avg_weekly_sales):
     return np.where(avg_weekly_sales > 0, (stock + po_qty) / avg_weekly_sales, 0)
 
 
+#===modifikasi ST dari Distri baru===== (INFO)
+# Fungsi ini = get_max_monthly_st_ytd ASLI (isi TIDAK diubah), namanya diganti jadi _get_max_monthly_st_ytd_bq.
+# get_max_monthly_st_ytd sekarang wrapper di blok "modifikasi ST dari Distri baru" tepat di bawahnya.
+# Kalau modifikasi dihapus: ganti nama fungsi ini kembali jadi get_max_monthly_st_ytd.
+#===modifikasi ST dari Distri baru=====
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_max_monthly_st_ytd() -> pd.DataFrame:
+def _get_max_monthly_st_ytd_bq() -> pd.DataFrame:
     query = """
         WITH bulan AS (
             SELECT EXTRACT(MONTH FROM order_date) AS month, distributor, sku, SUM(qty) AS total_qty
@@ -531,6 +594,37 @@ def get_max_monthly_st_ytd() -> pd.DataFrame:
     except Exception as e:
         st.warning(f"⚠️ Gagal memuat ST bulanan tertinggi YTD (WOI Threshold dilewati): {e}")
         return pd.DataFrame(columns=["distributor", "sku", "max_qty_ytd"])
+
+
+#===modifikasi ST dari Distri baru===== START (80% Max ST YTD -> dipakai WOI Threshold)
+# Memakai config ST_FROM_OTHER_DISTRI yang sama dengan avg weekly (sources & brand_pct).
+# Rumus distri target per SKU = brand_pct x (max_qty_ytd SURAKARTA + max_qty_ytd YOGYAKARTA).
+# max_qty_ytd dari fungsi asli SUDAH x 80% (per distri, ST bulanan tertinggi YTD), jadi tidak dikali 0.8 lagi.
+# Distri yang sudah punya data sendiri di hasil asli tidak ditimpa; brand di luar brand_pct tidak dibuat barisnya.
+def get_max_monthly_st_ytd() -> pd.DataFrame:
+    df = _get_max_monthly_st_ytd_bq()
+    if df.empty:
+        return df
+    extra = []
+    for target, cfg in ST_FROM_OTHER_DISTRI.items():
+        src = df[df["distributor"].isin([s.strip().upper() for s in cfg["sources"]])]
+        if src.empty:
+            continue
+        tot = src.groupby("sku", as_index=False)["max_qty_ytd"].sum()   # max Yogya + max Surakarta per SKU
+        def _pct(sku):
+            s = str(sku).strip().upper()
+            b = "NEXTPRIME" if s.startswith("N") else "BODIBREZE" if s.startswith("B") else "G2G" if s.startswith("G") else ""
+            return cfg["brand_pct"].get(b)
+        tot["pct"] = tot["sku"].map(_pct)
+        tot = tot[tot["pct"].notna()].copy()
+        tot["max_qty_ytd"] = tot["max_qty_ytd"] * tot["pct"]
+        tot["distributor"] = target.strip().upper()
+        extra.append(tot[["distributor", "sku", "max_qty_ytd"]])
+    if not extra:
+        return df
+    df = df[~df["distributor"].isin([t.strip().upper() for t in ST_FROM_OTHER_DISTRI])]
+    return pd.concat([df] + extra, ignore_index=True)
+#===modifikasi ST dari Distri baru===== END
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -728,10 +822,15 @@ def detect_header_row(file_bytes: bytes, fname: str = "", max_scan: int = 15, sh
     engine = _excel_engine(fname)
     df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, header=None, engine=engine, dtype=str, nrows=max_scan)
     best_row, best_score = 0, -1
+    # Kata kunci header umum: baris yg berisi kata ini diprioritaskan (menghindari baris kop surat
+    # seperti "CUSTOMER NAME / NPWP / ADDRESS" yang jumlah teksnya sama/lebih banyak dari header asli)
+    _HDR_KW = {"PRODUCT CODE","SKU","SKU CODE","KODE","KODE PRODUK","KODE G2G","PRODUCT KODE","KODE SKU",
+               "PRODUCT ID","ITEM CODE","QTY","QUANTITY","FINAL PO","QTY PO","JUMLAH","DESCRIPTION"}
     for i in range(len(df_raw)):
         vals = [str(v).strip() for v in df_raw.iloc[i].values if pd.notna(v) and str(v).strip()]
         text_count = sum(1 for v in vals if not v.replace('.','',1).replace(',','',1).lstrip('-').isdigit())
-        score = text_count * 10 + len(vals)
+        kw_hits = sum(1 for v in vals if v.upper().rstrip(" :") in _HDR_KW)
+        score = text_count * 10 + len(vals) + kw_hits * 100
         if score > best_score:
             best_score = score; best_row = i
     return best_row
@@ -1139,6 +1238,7 @@ with st.sidebar:
 
 # PO SIMULATOR LOGIC - RSA PAGE--------------->>
 
+
 def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
                        manual_reject_approval, manual_reject_no_tol,
                        rejected_skus_1, _region_list_1,
@@ -1407,7 +1507,13 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["Check MOQ"] = "MOQ Not Found"
             res_df["Suggested Min Order Qty"] = np.nan
 
-        is_stop = res_df["Supply Control"].astype(str).str.upper().isin(["STOP PO", "DISCONTINUED", "UNAVAILABLE"])
+        # Region Sulawesi / Maluku Papua (pakai contains, sama dengan logic Remark "Reject (Sulawesi Only)"):
+        # SKU yang kena "Reject (Sulawesi Only)" dikecualikan dari cek MOQ, sama seperti Stop PO / Discontinued
+        _reg_s = res_df["region"].astype(str).str.lower() if "region" in res_df.columns else pd.Series("", index=res_df.index)
+        _is_sulmal = _reg_s.str.contains("sulawesi", na=False) | _reg_s.str.contains("maluku", na=False) | _reg_s.str.contains("papua", na=False)
+        _is_sul_only = _is_sulmal & res_df["Remark"].astype(str).str.strip().str.lower().eq("reject (sulawesi only)")
+        is_stop = (res_df["Supply Control"].astype(str).str.upper().isin(["STOP PO", "DISCONTINUED", "UNAVAILABLE"])
+                   | _is_sul_only)
         res_df.loc[is_stop, "Check MOQ"] = ""
         res_df.loc[is_stop, "Suggested Min Order Qty"] = np.nan
 
@@ -1730,19 +1836,34 @@ def _render_pi_validation():
             st.info("Tidak ada perubahan — pilih nomor PI dulu.")
 
 def _flag_po_downloaded():
-    st.session_state["show_save_reminder"] = True
+    # Dipanggil saat user klik download apa pun -> Supply Control otomatis disimpan di step 8
+    st.session_state["pending_auto_save_sc"] = True
 
 
-@st.dialog("⚠️ Reminder")
-def _save_reminder_dialog():
-    st.markdown(
-        """<p style="color:#1F1F1F;font-size:1.15rem;font-weight:700;margin:.5rem 0 1rem;">
-        Don't forget to save your PO file in Supply Control Table
-        </p>""",
-        unsafe_allow_html=True,
+@st.dialog("Successfully submitted to Table")
+def _submitted_dialog(n_rows: int):
+    # HTML ditulis TANPA indentasi di awal baris (indentasi 4+ spasi dianggap code block oleh markdown)
+    _html = (
+        "<style>"
+        "@keyframes sc-bounce{0%,100%{transform:translateY(0) rotate(-6deg);}50%{transform:translateY(-14px) rotate(6deg);}}"
+        "@keyframes sc-pop{0%,100%{transform:scale(1);}50%{transform:scale(1.25);}}"
+        ".sc-emo1{display:inline-block;animation:sc-bounce 1s ease-in-out infinite;}"
+        ".sc-emo2{display:inline-block;animation:sc-pop 1s ease-in-out infinite .25s;}"
+        "</style>"
+        '<div style="text-align:center;">'
+        '<div style="font-size:5rem;line-height:1.2;"><span class="sc-emo1">🥳</span> <span class="sc-emo2">🎉</span></div>'
+        '<p style="color:#1E8E3E;font-size:1.3rem;font-weight:800;margin:.5rem 0 .2rem;">Submitted!</p>'
+        f'<p style="color:#555;margin:0 0 1rem;">{n_rows} Supply Control rows were saved successfully 🐥</p>'
+        "</div>"
     )
-    if st.button("OK, Got it", use_container_width=True, key="btn_close_reminder"):
-        st.rerun()
+    st.markdown(_html, unsafe_allow_html=True)
+    st.markdown("""<style>
+    .st-key-btn_close_submitted button{background:#D32F2F!important;border:1px solid #D32F2F!important;}
+    .st-key-btn_close_submitted button:hover{background:#B71C1C!important;border-color:#B71C1C!important;}
+    .st-key-btn_close_submitted button *{color:#FFFFFF!important;}
+    </style>""", unsafe_allow_html=True)
+    if st.button("Back", use_container_width=True, key="btn_close_submitted"):
+        st.rerun()   # tutup dialog, kembali ke tampilan hasil sebelum popup
 
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim, brand_map=None):
     brand_map = brand_map or {}
@@ -1779,11 +1900,14 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
        &  ~_final_num["Remark"].str.contains("Reject (Sulawesi Only)", case=False, na=False, regex=False)
         & (_final_num[_woi_ori] > 17 )
         & (_final_num["WOI Threshold Status"].fillna("").astype(str).str.strip() == "> Highest WOI Threshold")
-        & (_final_num["National Alloc Status"].fillna("").astype(str).str.strip() != "> 75% National Alloc")
+        & ((_final_num["National Alloc Status"].fillna("").astype(str).str.strip() != "> 75% National Alloc")
+           | _final_num["Remark"].str.contains("Reject (Negative Allocation)", case=False, na=False, regex=False))
     ].copy()
 
     _final_map = {"Suggested PO buffer": "Suggested QTY Final", "Suggested PO Value": "Suggested Value Final"}
-    _top10_cols = [_final_map.get(c, c) for c in PO_IMG_COLS] + ["WOI Threshold Status", "National Alloc Status"]
+    _top10_base = [_final_map.get(c, c) for c in PO_IMG_COLS]
+    _top10_base.insert(_top10_base.index("Assortment") + 1, "Supply Control")  # tampilkan Supply Control setelah Assortment
+    _top10_cols = _top10_base + ["WOI Threshold Status", "National Alloc Status"]
     top10 = prev_df.sort_values(_woi_ori, ascending=False)[_top10_cols].reset_index(drop=True)
     num_cols_top10 = top10.select_dtypes(include=['number']).columns
     if top10.empty:
@@ -1824,10 +1948,6 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True,
                         key="dl_po_result", on_click=_flag_po_downloaded)
 
-    # Dialog reminder dipanggil di AKHIR fungsi (setelah semua gambar/pivot selesai dirender),
-    # supaya tombol "OK, Got it" langsung bisa diklik tanpa nunggu loading.
-    _show_reminder = st.session_state.pop("show_save_reminder", False)
-
     st.markdown(f"""<div class="pipeline-step active"><span class="step-number">{final_step+1}</span><strong>Auto Kategorisasi &amp; Download Gambar</strong></div>""", unsafe_allow_html=True)
 
     if not MATPLOTLIB_OK:
@@ -1842,8 +1962,10 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
                  | img_df["Remark"].astype(str).str.strip().str.lower().eq("price not available yet"))
     stop_df = img_df[stop_mask].reset_index(drop=True)
     non_stop_df = img_df[~stop_mask].copy()
+    _na_75 = (final_disp["National Alloc Status"].reindex(non_stop_df.index).fillna("").astype(str).str.strip()
+              == "> 75% National Alloc")
     steve_mask = (non_stop_df["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) |
-                  non_stop_df["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False))
+                  (non_stop_df["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False) & _na_75))
     steve_df = non_stop_df[steve_mask].reset_index(drop=True)
     sul1_mask = non_stop_df["Remark"].str.strip().str.lower() == "reject (sulawesi only)"
     sul1_df = non_stop_df[sul1_mask].reset_index(drop=True)
@@ -1954,8 +2076,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         price_na_s = grp_po["Remark"].str.strip().str.lower().eq("price not available yet")
         stop_mask_s = sc_stop_s | price_na_s
         stop_grp = grp_po[stop_mask_s]
-        steve_mask_s = (grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) |
-                        grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False))
+        _neg_s = (grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False)
+                  & (grp_po["National Alloc Status"].fillna("").astype(str).str.strip() == "> 75% National Alloc"))
+        steve_mask_s = (grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False) | _neg_s)
         steve_grp = grp_po[steve_mask_s]
         sul1_mask_s = (grp_po["Remark"].str.strip().str.lower().str.contains("sulawesi only", na=False) & ~stop_mask_s)
         sul1_grp = grp_po[sul1_mask_s]
@@ -1971,7 +2094,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         if len(steve_grp):
             if grp_po["Remark"].str.lower().str.contains("reject (stop by steve", na=False, regex=False).any():
                 steve_cats.append("Stop by Steve")
-            if grp_po["Remark"].str.lower().str.contains("reject (negative allocation)", na=False, regex=False).any():
+            if _neg_s.any():
                 steve_cats.append("Negative Allocation")
         steve_label = ", ".join(steve_cats) if steve_cats else "Reject by Steve"
 
@@ -2015,7 +2138,9 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         if "reject (stop by steve" in rm:
             return "Reject (Stop by Steve)"
         if "reject (negative allocation)" in rm:
-            return "Reject (Negative Allocation)"
+            if str(r.get("National Alloc Status", "")).strip() == "> 75% National Alloc":
+                return "Reject (Negative Allocation)"
+            return None
         if "sulawesi only" in rm:
             return "Reject (Sulawesi Only)"
         return None
@@ -2065,6 +2190,7 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     # ============ 8. Save Supply Control ============
     st.markdown("""<div class="pipeline-step active"><span class="step-number">8</span><strong>Save Supply Control</strong></div>""", unsafe_allow_html=True)
+    st.caption("Tersimpan otomatis saat kamu klik download (PO Result / gambar).")
 #--------------------MASUKKAN/MAPPING KOLOM BARU
     sc_base = final_disp.rename(columns={
     "Distributor": "distributor_name", "SKU": "sku",
@@ -2127,7 +2253,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     supply_rows = sc_base.loc[valid_final, base_cols].copy()
     supply_rows["status_supply"] = sc_base.loc[supply_rows.index, "status_supply"]
 
-    npd_mask = sc_base["sku"].astype(str).str.upper().isin([str(s).upper() for s in (e_npd or [])])
+    # NPD hanya dari baris PO asli; baris Additional Suggestion (is_po_sku=False, warna kuning) tidak ikut disimpan
+    npd_mask = sc_base["sku"].astype(str).str.upper().isin([str(s).upper() for s in (e_npd or [])]) & is_po_row
     npd_rows = sc_base.loc[npd_mask, base_cols].copy()
     npd_rows["status_supply"] = "NPD ALLOCATION"
 
@@ -2150,8 +2277,14 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
         st.caption(f"{len(sc_df)} baris · {sc_df['distributor_name'].nunique()} distributor")
         st.dataframe(sc_df[preview_cols].reset_index(drop=True), use_container_width=True, hide_index=True)
 
-        saved = st.session_state.get("supply_control_saved", False)
-        if st.button("Save Supply Control", disabled=saved, use_container_width=True, key="btn_save_supply_control"):
+    # ===== AUTO SAVE: tanpa tombol, otomatis tersimpan saat user download (PO Result / gambar / pivot) =====
+    # Duplikat dicegah oleh _filter_already_saved (file_name+sku+qty+tanggal) + flag per simulasi.
+    _do_save = st.session_state.pop("pending_auto_save_sc", False)
+    _submitted_rows = None
+    if _do_save and not sc_df.empty:
+        if st.session_state.get("supply_control_saved", False):
+            st.toast("Supply Control sudah tersimpan sebelumnya.", icon="ℹ️")
+        else:
             try:
                 out_df = sc_df[preview_cols].copy()
                 out_df["po_qty"] = pd.to_numeric(out_df["po_qty"], errors="coerce").fillna(0).astype(int)
@@ -2168,19 +2301,19 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
                 if filtered_df.empty:
                     st.session_state["supply_control_saved"] = True
-                    st.warning("All rows already exist (file_name+sku+qty+tanggal).")
+                    st.toast("Semua baris sudah pernah tersimpan (file_name+sku+qty+tanggal).", icon="ℹ️")
                 else:
                     _insert_supply_control(filtered_df)
                     st.session_state["supply_control_saved"] = True
-                    msg = f"{len(filtered_df)} baris baru tersimpan ke po_supply_control_g2g"
+                    msg = f"{len(filtered_df)} baris tersimpan ke po_supply_control_g2g"
                     if n_skipped:
-                        msg += f" ({n_skipped} baris dilewati karena sudah pernah tersimpan di tanggal yang sama)"
-                    st.success(msg)
+                        msg += f" ({n_skipped} dilewati, sudah ada)"
+                    st.toast(msg, icon="✅")
+                    _submitted_rows = len(filtered_df)
             except Exception as e:
                 st.error(f"Gagal simpan ke BigQuery: {e}")
-
-    if _show_reminder:
-        _save_reminder_dialog()
+    if _submitted_rows:
+        _submitted_dialog(_submitted_rows)
 
 def _file_upload_section(page_key: str):
     _INVALID_QTY = {"-","null","none","","0","0.0"}
