@@ -530,6 +530,9 @@ def simpan_perubahan():
         ss.pesan_toast += " | ID already used, regenerated: " + ", ".join(f"{a} → {b}" for a, b in ganti_id[:5])
     if not ok_sheet:
         ss.pesan_toast += f" | Google Sheet not updated: {err_sheet[:120]}"
+        # toast cepat hilang: catat juga ke riwayat (Supabase) supaya kegagalan sinkron sheet bisa ditelusuri belakangan
+        catat_riwayat("Sheet sync FAILED", f"{len(untuk_sheet)} rows: {err_sheet[:200]}",
+                      distributor=_distri_pertama(df, sorted(baris_target)))
 
 def selesai_impor(df, nama_file):
     ss = st.session_state

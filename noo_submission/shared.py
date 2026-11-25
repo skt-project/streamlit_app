@@ -1491,10 +1491,13 @@ def cari_kolom_keterangan_failure(df_mentah: pd.DataFrame) -> str:
     raise KeyError("Failure reason column not found. Columns searched: "
                    + ", ".join(KEMUNGKINAN_KOLOM_KETERANGAN_FAILURE))
 
-def ambil_baris_unik(df: pd.DataFrame, kolom_kunci: str) -> pd.DataFrame:
+def ambil_baris_unik(df: pd.DataFrame, kolom_kunci: str, kolom_brand: str = None) -> pd.DataFrame:
     df = df.copy()
     df["_kunci_bersih"] = df[kolom_kunci].astype(str).str.strip().str.upper()
     df = df[df["_kunci_bersih"] != ""]
+    if kolom_brand and kolom_brand in df.columns:
+        # toko yang sama di brand berbeda (Customer Code 12 = G2G, 17 = NXP/BB) dianggap 2 baris berbeda
+        df["_kunci_bersih"] = df["_kunci_bersih"] + "|" + df[kolom_brand].astype(str).str.strip().str[:2]
     df = df.drop_duplicates(subset=["_kunci_bersih"], keep="first")
     return df.drop(columns="_kunci_bersih").reset_index(drop=True)
 
@@ -1512,7 +1515,7 @@ def pivot_noo(df_mentah: pd.DataFrame) -> pd.DataFrame:
     kolom_keterangan = cari_kolom_keterangan_failure(df_mentah)
     keterangan = df_mentah[kolom_keterangan].astype(str)
     baris_noo  = df_mentah[keterangan.str.contains(KATA_KUNCI_NOO, case=False, na=False)]
-    baris_noo  = ambil_baris_unik(baris_noo, KOLOM_KUNCI_UNIK_NOO)
+    baris_noo  = ambil_baris_unik(baris_noo, KOLOM_KUNCI_UNIK_NOO, "Customer Code")
     hasil = pd.DataFrame()
     for kolom_output, kolom_sumber in MAPPING_KOLOM_NOO.items():
         if kolom_output == "Store Address":
