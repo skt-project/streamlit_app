@@ -1308,8 +1308,10 @@ def _tab_sku():
 
     m = pd.Series(True, index=df.index)
     if kc_nama and ss.sku_f_nama != "All customers":
-        m &= (df[kc_nama].astype(str).str.strip().str.lower()
-              == ss.sku_f_nama.strip().lower())
+        # contains, bukan exact: nama di data bisa "<distributor> - <cabang>" (mis. "... SEJAHTERA - KENDARI")
+        _nk = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
+        _kunci_f = _nk(ss.sku_f_nama)
+        m &= df[kc_nama].map(lambda v: _kunci_f in _nk(v))
     if ss.sku_f_brand == "NXP":
         m &= cc2 == "17"
     elif ss.sku_f_brand == "G2G":
