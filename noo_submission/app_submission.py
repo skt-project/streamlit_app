@@ -803,16 +803,27 @@ def _saran_deskripsi(nama_sku: str, daftar_desk: list) -> str:
     q = _norm_deskripsi(nama_sku)
     if not q:
         return ""
-    norm = [(d, _norm_deskripsi(d)) for d in daftar_desk]
-    contains = [d for d, n in norm if n and (q in n or n in q)]
+    # abaikan entri sampah di master (angka saja / terlalu pendek, mis. "2") supaya tidak cocok ke mana-mana
+    norm = [(d, n) for d, n in ((d, _norm_deskripsi(d)) for d in daftar_desk)
+            if len(n) >= 8 and any(c.isalpha() for c in n)]
+    contains = [d for d, n in norm if q in n or n in q]
     if contains:
-        return min(contains, key=len) if len(contains) > 1 else contains[0]
+        return max(contains, key=len)       # paling spesifik (terpanjang)
     angka = lambda s: set(re.findall(r"\d+", s))
-    kandidat = [(d, n) for d, n in norm if n and angka(q) <= angka(n)]   # angka (shade/ukuran) harus ada di deskripsi
-    if not kandidat:
-        return ""
-    hit = process.extractOne(q, [n for _, n in kandidat], scorer=fuzz.token_set_ratio, score_cutoff=85)
-    return kandidat[hit[2]][0] if hit else ""
+    # singkatan umum di nama SKU distributor (POWD, FOUND, dst.) diperluas supaya lebih mirip deskripsi master
+    kamus = {"POWD": "POWDER", "FOUND": "FOUNDATION", "FACE": "FACIAL", "SRM": "SERUM", "MOIST": "MOISTURIZER"}
+    q2 = " ".join(kamus.get(t, t) for t in q.split())
+
+    def _skor(pilihan):
+        h = process.extractOne(q2, [n for _, n in pilihan], scorer=fuzz.WRatio, score_cutoff=68)
+        return (pilihan[h[2]][0], h[1]) if h else None
+    # 1) utamakan kandidat yang angka (shade/ukuran) nya ada semua di deskripsi, supaya 01 tidak ketukar dengan 02
+    kandidat = [(d, n) for d, n in norm if angka(q2) <= angka(n)]
+    if kandidat and (h := _skor(kandidat)):
+        return h[0]
+    # 2) kalau tidak ada, longgarkan angka tapi minta kemiripan lebih tinggi (>= 80); user tetap bisa ganti lewat dropdown
+    h = _skor(norm) if norm else None
+    return h[0] if h and h[1] >= 80 else ""
 
 def _ambil_kode_depan(teks: str) -> str:
     t = _sku_str(teks)
