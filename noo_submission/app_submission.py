@@ -788,6 +788,32 @@ def _set_produk_dari_deskripsi(produk_key: str, desc_key: str, desc_map: dict):
         # (hasil auto-match dari file) saat dirender ulang
         st.session_state.pop(produk_key, None)
 
+def _norm_deskripsi(t) -> str:
+    # samakan format: huruf besar, G2G -> GLAD2GLOW, koma desimal -> titik, buang tanda baca, rapikan spasi
+    import re
+    s = _sku_str(t).upper()
+    s = re.sub(r"\bG2G\b", "GLAD2GLOW", s)
+    s = re.sub(r"(\d),(\d)", r"\1.\2", s)
+    s = re.sub(r"[^A-Z0-9. ]+", " ", s)
+    return " ".join(s.split())
+
+def _saran_deskripsi(nama_sku: str, daftar_desk: list) -> str:
+    """Saran Product Description untuk Customer SKU Name: 1) contains (dua arah), 2) fuzzy dengan penjaga angka. '' = tidak ada."""
+    import re
+    q = _norm_deskripsi(nama_sku)
+    if not q:
+        return ""
+    norm = [(d, _norm_deskripsi(d)) for d in daftar_desk]
+    contains = [d for d, n in norm if n and (q in n or n in q)]
+    if contains:
+        return min(contains, key=len) if len(contains) > 1 else contains[0]
+    angka = lambda s: set(re.findall(r"\d+", s))
+    kandidat = [(d, n) for d, n in norm if n and angka(q) <= angka(n)]   # angka (shade/ukuran) harus ada di deskripsi
+    if not kandidat:
+        return ""
+    hit = process.extractOne(q, [n for _, n in kandidat], scorer=fuzz.token_set_ratio, score_cutoff=85)
+    return kandidat[hit[2]][0] if hit else ""
+
 def _ambil_kode_depan(teks: str) -> str:
     t = _sku_str(teks)
     return t.split()[0] if t else ""
@@ -1119,6 +1145,18 @@ def halaman_pengajuan_noo():
             CELL_STYLE_WRAP = ("font-size:0.78rem; white-space:normal; word-break:break-word; "
                                "line-height:1.3; display:block;")
             opsi_deskripsi = [""] + sorted(map_deskripsi_upload.keys())
+
+            # auto-saran Product Description (contains / fuzzy) sekali per upload baru, hanya untuk baris yang Product-nya belum ketemu
+            _kunci_saran = f"_saran_desk_{ss.sku_upload_editor_key}"
+            if not ss.get(_kunci_saran):
+                ss[_kunci_saran] = True
+                for _i, (_, _r) in enumerate(df_edit.reset_index(drop=True).iterrows()):
+                    if _kunci_produk(_r["Product"]) in map_produk_upload:
+                        continue            # Product sudah cocok (Exact), tidak perlu saran
+                    _d = _saran_deskripsi(_r["Customer SKU Name"], opsi_deskripsi[1:])
+                    if _d:
+                        ss[f"sku_upload_desc_{ss.sku_upload_editor_key}_{_i}"] = _d
+                        ss[f"sku_upload_produk_{ss.sku_upload_editor_key}_{_i}"] = map_deskripsi_upload[_d]
 
             produk_terupdate = []
             for i, r in df_edit.reset_index(drop=True).iterrows():
