@@ -795,6 +795,9 @@ def _norm_deskripsi(t) -> str:
     s = re.sub(r"\bG2G\b", "GLAD2GLOW", s)
     s = re.sub(r"(\d),(\d)", r"\1.\2", s)
     s = re.sub(r"[^A-Z0-9. ]+", " ", s)
+    s = re.sub(r"(\d)([A-Z])", r"\1 \2", s)          # 01BUTTER -> 01 BUTTER, 30ML -> 30 ML
+    s = re.sub(r"([A-Z])(\d)", r"\1 \2", s)
+    s = s.replace("GLAD 2 GLOW", "GLAD2GLOW")         # jangan ikut terpecah
     return " ".join(s.split())
 
 def _saran_deskripsi(nama_sku: str, daftar_desk: list) -> str:
@@ -809,10 +812,18 @@ def _saran_deskripsi(nama_sku: str, daftar_desk: list) -> str:
     contains = [d for d, n in norm if q in n or n in q]
     if contains:
         return max(contains, key=len)       # paling spesifik (terpanjang)
+    # tahap 2: token demi token. Setiap kata di nama SKU harus ada di deskripsi, sama persis atau sebagai awalan
+    # (POWD -> POWDER, FOUND -> FOUNDATION). Angka/shade (01, 4.5, 30) harus sama persis. Pilih deskripsi dengan kata sisa paling sedikit.
+    tq = q.split()
+    def _token_cocok(t, tokens_d):
+        return any(d == t or (len(t) >= 3 and not t.replace(".", "").isdigit() and d.startswith(t)) for d in tokens_d)
+    cocok_token = [(d, n) for d, n in norm if all(_token_cocok(t, n.split()) for t in tq)]
+    if cocok_token:
+        return min(cocok_token, key=lambda x: len(x[1].split()))[0]
     angka = lambda s: set(re.findall(r"\d+", s))
-    # singkatan umum di nama SKU distributor (POWD, FOUND, dst.) diperluas supaya lebih mirip deskripsi master
-    kamus = {"POWD": "POWDER", "FOUND": "FOUNDATION", "FACE": "FACIAL", "SRM": "SERUM", "MOIST": "MOISTURIZER"}
-    q2 = " ".join(kamus.get(t, t) for t in q.split())
+    # singkatan umum di nama SKU distributor diperluas supaya lebih mirip deskripsi master
+    kamus = {"SRM": "SERUM", "MOIST": "MOISTURIZER"}
+    q2 = " ".join(kamus.get(t, t) for t in tq)
 
     def _skor(pilihan):
         h = process.extractOne(q2, [n for _, n in pilihan], scorer=fuzz.WRatio, score_cutoff=68)
@@ -1929,7 +1940,8 @@ def _history_sku():
     kunci_distri = distributor_terkunci(ss.get("user"))
     if kunci_distri is not None:
         nk = lambda v: re.sub(r"\s+", " ", str(v or "")).strip().upper()
-        df = df[df["customer_name"].map(nk) == nk(kunci_distri)] if ("customer_name" in df.columns and kunci_distri) else df.iloc[0:0]
+        # contains, bukan exact: customer_name dari file bisa berbentuk "<distributor> - <cabang>"
+        df = df[df["customer_name"].map(lambda v: nk(kunci_distri) in nk(v))] if ("customer_name" in df.columns and kunci_distri) else df.iloc[0:0]
         st.caption(f"Showing data for distributor: {kunci_distri or '-'}")
 
     out = pd.DataFrame(index=df.index)

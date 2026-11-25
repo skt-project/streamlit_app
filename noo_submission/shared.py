@@ -335,7 +335,7 @@ KOLOM_SKU_OUTPUT = [
 ]
 MAPPING_KOLOM_SKU = {
     "Customer Code":             "Customer Code",
-    "Customer Name":             "Customer Branch Name",
+    "Customer Name":             "Customer Name",
     "Product":                   "Customer SKU Code",
     "Product Chinese Short Name": None,
     "Product English Name":       None,
