@@ -386,14 +386,15 @@ MAPPING_SUPABASE_KE_VALIDASI = {
     "store_type":          "Store Type",
     "created_at":          "Created At",
     "generated_at":        "Generated At",
+    "remark":              "Remark",
 }
 KOLOM = [
     "Validasi","Store ID","Distributor","Store Name","Customer Code",
     "Customer Store Code","Customer Store Name","City","Store Address",
-    "Longitude","Latitude","Store Type","Created At","Generated At",
+    "Longitude","Latitude","Store Type","Created At","Generated At","Remark",
 ]
 KOLOM_EDIT   = KOLOM
-WAJIB_ISI    = KOLOM[1:]
+WAJIB_ISI    = [k for k in KOLOM[1:] if k != "Remark"]      # Remark opsional (tidak wajib di file import)
 KOLOM_TAMPIL = ["#"] + KOLOM + ["_sb_id"]
 
 PANJANG_PREFIX = 4

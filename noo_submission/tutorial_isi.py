@@ -12,12 +12,46 @@ Catatan: akun distributor memakai **kode distributor** sebagai username."""),
         ("daftar", "Belum punya akun?",
          """Klik **Sign Up**, lalu:
 
-1. Isi **Username**: 3-20 karakter (huruf, angka, `_` atau `.`) *WAJIB DIISI KODE DISTRI MASING-MASING
+1. Isi **Username**: 3-20 karakter (huruf, angka, `_` atau `.`). **Wajib diisi kode distributor masing-masing** yang terdaftar.
 2. Isi **Email**.
 3. Isi **Password**: minimal 8 karakter, ketik 2 kali.
-4. Klik **Create Account**, lalu login dengan akun baru."""),
+4. Klik **Create Account**.
+
+Jika kode **belum pernah didaftarkan**, akun langsung jadi dan muncul notifikasi hijau **"Akun berhasil dibuat. Silakan login."** Lanjutkan login dengan akun baru.
+
+Jika kode **sudah pernah didaftarkan**, lihat langkah berikutnya."""),
+        ("daftar_spv", "Kode sudah terdaftar: Are you SPV?",
+         """Satu kode distributor boleh punya **maksimal 2 akun**. Akun ke-2 **khusus untuk SPV**.
+
+1. Jika kode sudah punya 1 akun, setelah klik **Create Account** muncul pertanyaan **Are you SPV?**
+2. Klik **Yes, I'm SPV** jika Anda memang SPV. Klik **No** jika bukan: pendaftaran dibatalkan, karena kode yang sudah terdaftar hanya boleh ditambah akun oleh SPV.
+3. Jika kode sudah punya **2 akun**, pendaftaran ditolak dengan pesan *sudah mencapai batas maksimal 2 akun*."""),
+        ("daftar_tunggu", "Waiting approval: tunggu persetujuan admin",
+         """1. Setelah menjawab **Yes, I'm SPV**, muncul notifikasi hijau: **"Akun berhasil dibuat. Waiting approval: kamu baru bisa login setelah admin menyetujui."**
+2. Akun ke-2 **belum aktif**. Jika dicoba login sebelum disetujui, muncul pesan merah **"Akun kamu masih menunggu persetujuan admin (Waiting approval)"**.
+3. Admin akan meninjau permintaan Anda. Setelah **disetujui**, Anda bisa login seperti biasa dengan username dan password yang Anda buat.
+4. Jika **ditolak**, akun tidak dibuat. Hubungi admin atau daftar ulang."""),
+        ("lupa_klik", "Lupa password? Klik Forgot password?",
+         """1. Di halaman login, klik **Forgot password?** (di bawah tombol Login).
+2. Halaman **Lupa Password** akan terbuka.
+
+Password tidak bisa diganti sendiri secara langsung: permintaan harus **disetujui admin** terlebih dahulu."""),
+        ("lupa_form", "Isi Username dan Email",
+         """1. **Username**: isi **kode distributor yang terdaftar** (sama seperti saat login). Username selain kode distributor yang terdaftar **tidak bisa dipakai**.
+2. Akun **RSA** dan **BD_SUPPORT** **tidak bisa** reset lewat halaman ini.
+3. **Email**: isi email aktif Anda sebagai kontak untuk admin. Email **tidak harus sama** dengan email saat mendaftar.
+4. Klik **Lanjutkan** untuk mengirim permintaan ke admin."""),
+        ("lupa_tunggu", "Tunggu persetujuan admin",
+         """1. Setelah dikirim, muncul layar **Waiting for approval**. Admin (BD Support) akan meninjau permintaan Anda.
+2. Klik **Check status** untuk memeriksa apakah sudah disetujui.
+3. Sudah menutup halaman? Buka lagi **Forgot password?**, klik **Sudah pernah mengajukan? Cek status**, lalu isi username. Anda tidak perlu mengajukan ulang.
+4. Jika **ditolak** (layar *Request declined*), klik **Send a new request** atau hubungi admin."""),
+        ("lupa_baru", "Buat password baru",
+         """1. Setelah **disetujui**, layar **Create new password** muncul otomatis.
+2. Isi **Password** baru (minimal 8 karakter) lalu ketik ulang di **Confirm password**. Kedua isian harus sama dan **berbeda** dari password sebelumnya.
+3. Klik **Reset password**, lalu login dengan password baru."""),
         ("login_bawah", "Butuh bantuan?",
-         """1. **Forgot password?** Hubungi admin untuk reset password.
+         """1. **Forgot password?** Ajukan reset password ke admin (lihat langkah sebelumnya).
 2. **Help & Support** untuk mengirim tiket ke tim, bahkan sebelum login.
 3. **Tutorial** untuk membuka panduan ini lagi."""),
     ]),
@@ -27,8 +61,8 @@ Catatan: akun distributor memakai **kode distributor** sebagai username."""),
 2. Kapan saja Anda bisa membukanya lagi lewat tombol **Tutorial** di kanan atas."""),
         ("menu", "Gunakan menu di sebelah kiri",
          """1. **NOO & SKU Submission**: kirim outlet baru (NOO) dan SKU Mapping.
-2. **SPV Confirmation**: konfirmasi tipe outlet dan validasi data.
-3. **History**: lihat data yang sudah dikirim, per bulan."""),
+2. **SPV Confirmation**: konfirmasi tipe outlet dan validasi data. Menu ini **hanya muncul untuk akun SPV** (akun ke-2 sebuah kode distributor). Akun Admin tidak melihat menu ini.
+3. **History**: lihat data yang sudah dikirim, per bulan. Hanya menampilkan data milik **kode akun Anda**."""),
         ("topbar_help", "Ada kendala?",
          """1. Klik **Help & Support** di kanan atas.
 2. Ceritakan masalahnya, lalu kirim tiketnya.
@@ -269,6 +303,14 @@ def _exp(judul, isi):
 
 
 # ------------------------------------------------------------------ tampilan per langkah
+_RST_SHIELD = ('<div style="margin:0 0 2px"><svg width="64" height="64" viewBox="0 0 150 150">'
+               '<path d="M75 10 L128 30 V74 C128 104 105 126 75 140 C45 126 22 104 22 74 V30 Z" fill="#fbeeee" stroke="#c98283" stroke-width="8" stroke-linejoin="round"/>'
+               '<path d="M62 62 V52 a13 13 0 0 1 26 0 V62" fill="none" stroke="#45343b" stroke-width="6" stroke-linecap="round"/>'
+               '<rect x="56" y="60" width="38" height="28" rx="5" fill="#fff" stroke="#45343b" stroke-width="6"/>'
+               '<rect x="34" y="94" width="82" height="22" rx="6" fill="#fff" stroke="#bd9a65" stroke-width="3"/>'
+               '<text x="75" y="112" text-anchor="middle" font-size="22" font-weight="700" fill="#45343b" letter-spacing="3">****</text></svg></div>')
+
+
 ILUSTRASI = {
     "login": _mk('<div class="lg"><div class="kiri"><div class="tube" style="left:8%;height:62%"></div>'
                  '<div class="tube" style="left:34%;height:78%"></div><div class="tube" style="left:60%;height:56%"></div></div>'
@@ -283,6 +325,59 @@ ILUSTRASI = {
                   + "".join(f'<div class="f hl" style="animation-delay:{k * .3}s">{t}</div>'
                             for k, t in enumerate(("Username", "Email", "Password (min. 8 characters)", "Confirm Password")))
                   + '<div class="rb hl">Create Account &rarr;' + _CUR + '</div></div></div></div>'),
+    "daftar_spv": _mk('<div class="dlg"><div class="dt"><span>Create your account</span><span style="font-weight:400">&times;</span></div>'
+                      '<div class="al w" style="margin:8px 0">Kode <b>DST314</b> sudah terdaftar. Akun ke-2 hanya untuk <b>SPV</b> dan perlu '
+                      'persetujuan admin sebelum bisa login.</div>'
+                      '<div style="font-size:12px;font-weight:700;color:#45343b;margin:4px 0 6px">Are you SPV?</div>'
+                      '<div style="display:flex;gap:8px"><div class="rb hl" style="flex:1;margin:0">Yes, I&#39;m SPV' + _CUR + '</div>'
+                      '<div class="ob" style="flex:1;margin:0;text-align:center">No</div></div></div>'),
+    "daftar_tunggu": _mk('<div class="al" style="background:#e9f9ee;border:1px solid #b9e5c6;color:#1c6b3a;border-radius:12px;padding:10px 14px;'
+                         'font-size:11px;font-weight:600;animation:mk-toast 1s ease-out both">Akun berhasil dibuat. Waiting approval: kamu baru bisa '
+                         'login setelah admin menyetujui.</div>'
+                         '<div class="lg"><div class="kiri" style="min-height:150px"><div class="tube" style="left:8%;height:62%"></div>'
+                         '<div class="tube" style="left:34%;height:78%"></div><div class="tube" style="left:60%;height:56%"></div></div>'
+                         '<div class="kanan"><div class="f">Username</div><div class="f">Password</div>'
+                         '<div class="rb">Login &rarr;</div>'
+                         '<div class="al e" style="margin-top:8px">Akun kamu masih menunggu persetujuan admin (Waiting approval).</div></div></div>'),
+    "lupa_klik": _mk('<div class="lg"><div class="kiri" style="min-height:170px"><div class="tube" style="left:8%;height:62%"></div>'
+                     '<div class="tube" style="left:34%;height:78%"></div><div class="tube" style="left:60%;height:56%"></div></div>'
+                     '<div class="kanan"><div class="dim2"><div class="logo">Glad2Glow</div>'
+                     '<div class="f">Username</div><div class="f">Password</div><div class="rb">Login &rarr;</div></div>'
+                     '<div class="lk"><span>&#9432; Help &amp; Support</span><span>Tutorial</span>'
+                     '<span class="hl">Forgot password?' + _CUR + '</span></div>'
+                     '<div class="ob">Sign Up</div></div></div>'),
+    "lupa_form": _mk('<div class="dlg" style="background:linear-gradient(180deg,#fdf0f1,#f8dfe1);text-align:center">'
+                     + _RST_SHIELD +
+                     '<div class="dt" style="justify-content:center;margin-top:2px">Lupa Password</div>'
+                     '<div class="sb" style="font-size:10px;color:#8c7a80;margin:2px 0 8px">Masukkan <b style="color:#a95e69">email</b> kamu, kami akan mengirim '
+                     'permintaan ke <b style="color:#a95e69">admin</b>.</div>'
+                     '<div class="lg" style="border:0;overflow:visible;background:none"><div class="kanan" style="padding:2px 0 0;background:none">'
+                     '<div class="f hl" style="text-align:left">&#128100;&nbsp; Kode distributor terdaftar</div>'
+                     '<div class="f hl" style="animation-delay:.3s;text-align:left">&#9993;&nbsp; Masukkan email kamu...</div>'
+                     '<div class="rb hl" style="animation-delay:.6s">Lanjutkan &rarr;' + _CUR + '</div></div></div>'
+                     '<div style="font-size:9px;color:#8c6f75;margin-top:6px"><b>Info:</b> username hanya kode distributor yang terdaftar. '
+                     'RSA &amp; BD_SUPPORT tidak bisa.</div></div>'),
+    "lupa_tunggu": _mk('<div class="dlg" style="background:linear-gradient(180deg,#fdf0f1,#f8dfe1);text-align:center">'
+                       '<div style="margin:2px 0 4px"><svg width="86" height="86" viewBox="0 0 120 120">'
+                       '<circle cx="60" cy="60" r="54" fill="#bd9a65" fill-opacity=".16"/><circle cx="60" cy="60" r="44" fill="#bd9a65" fill-opacity=".16"/>'
+                       '<path d="M40 30h40M40 90h40M46 30c0 24 28 18 28 30s-28 6-28 30M74 30c0 24-28 18-28 30s28 6 28 30" fill="none" '
+                       'stroke="#a95e69" stroke-width="5" stroke-linecap="round"/><path d="M50 38c4 8 16 8 20 0z M52 88c2-10 14-10 16 0z" fill="#c98283"/></svg></div>'
+                       '<div class="dt" style="justify-content:center">Waiting for approval</div>'
+                       '<div class="sb" style="font-size:10px;color:#8c7a80;margin:2px 0 10px">Your request has been sent to the admin. '
+                       'Come back and check the status once it has been approved.</div>'
+                       '<div class="rb hl">&#8635; Check status' + _CUR + '</div>'
+                       '<div class="ob" style="margin-top:8px">&#128337; Sudah pernah mengajukan? Cek status</div></div>'),
+    "lupa_baru": _mk('<div class="dlg" style="background:linear-gradient(180deg,#fdf0f1,#f8dfe1);text-align:center">'
+                     '<div style="margin:2px 0 4px"><svg width="70" height="70" viewBox="0 0 120 120">'
+                     '<circle cx="60" cy="60" r="54" fill="#6aa77f" fill-opacity=".16"/><circle cx="60" cy="60" r="44" fill="#6aa77f" fill-opacity=".16"/>'
+                     '<path d="M40 62l14 14 28-30" fill="none" stroke="#3f8f5a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>'
+                     '<div class="dt" style="justify-content:center">Create new password</div>'
+                     '<div class="sb" style="font-size:10px;color:#8c7a80;margin:2px 0 8px">Your request was approved. Your new password must be '
+                     'different from previously used passwords.</div>'
+                     '<div class="lg" style="border:0;overflow:visible;background:none"><div class="kanan" style="padding:2px 0 0;background:none">'
+                     '<div class="f hl" style="text-align:left">Password (min. 8 characters)</div>'
+                     '<div class="f hl" style="animation-delay:.3s;text-align:left">Confirm password</div>'
+                     '<div class="rb hl" style="animation-delay:.6s">Reset password' + _CUR + '</div></div></div></div>'),
     "login_bawah": _mk('<div class="lg"><div class="kiri" style="min-height:170px"><div class="tube" style="left:8%;height:62%"></div>'
                        '<div class="tube" style="left:34%;height:78%"></div><div class="tube" style="left:60%;height:56%"></div></div>'
                        '<div class="kanan"><div class="dim2"><div class="logo">Glad2Glow</div>'

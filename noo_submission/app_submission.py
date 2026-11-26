@@ -54,6 +54,13 @@ NAVIGASI = [
 # hanya melihat distributornya sendiri
 PERAN_SEMUA_DISTRIBUTOR = ("RSA", "BD_SUPPORT", "BD SUPPORT")
 
+# SPV Confirmation: hanya akun bertagging SPV (akun ke-2 sebuah kode distributor, username = kode distributor sehingga
+# selalu terlacak ke distributornya) + peran internal. Akun Admin Distributor TIDAK punya menu ini.
+PERAN_SPV_CONFIRMATION = ("SPV", "RSA", "BD_SUPPORT", "BD SUPPORT")
+
+def boleh_spv_confirmation(user: dict) -> bool:
+    return (user or {}).get("tagging") in PERAN_SPV_CONFIRMATION
+
 def distributor_terkunci(user: dict):
     if (user or {}).get("tagging") in PERAN_SEMUA_DISTRIBUTOR:
         return None
@@ -1693,6 +1700,11 @@ def halaman_konfirmasi_spv():
                 unsafe_allow_html=True)
 
     kunci_distri = distributor_terkunci(ss.get("user"))
+    if not boleh_spv_confirmation(ss.get("user")):
+        st.error("Access denied. SPV Confirmation is only for SPV accounts."); return
+    if (ss.get("user") or {}).get("tagging") == "SPV":
+        st.caption(f"Logged in as SPV code {str(ss.user.get('username', '')).upper()}"
+                   f" · distributor: {kunci_distri or '-'}")
     c_distributor, c_region, c_refresh_spv, _ = st.columns([1.6,1.4,0.8,1.2])
     with c_distributor:
         if kunci_distri is None:
@@ -2012,7 +2024,13 @@ def _history_noo():
     if kunci_distri is not None:
         nk = lambda v: re.sub(r"\s+", " ", str(v or "")).strip().upper()
         df = df[df[k_distri].map(nk) == nk(kunci_distri)] if (k_distri and kunci_distri) else df.iloc[0:0]
-        st.caption(f"Showing data for distributor: {kunci_distri or '-'}")
+        # lebih ketat: hanya baris dengan Customer Store Code berawalan KODE akun ini (6 karakter awal = kode distributor)
+        kode_user = str((ss.get("user") or {}).get("username", "")).strip().upper()
+        if k_kode and kode_user:
+            df = df[df[k_kode].fillna("").astype(str).str.strip().str.upper().str.startswith(kode_user)]
+        else:
+            df = df.iloc[0:0]
+        st.caption(f"Showing data for code {kode_user or '-'} · distributor: {kunci_distri or '-'}")
 
     out = pd.DataFrame(index=df.index)
     if k_waktu:
@@ -2070,6 +2088,8 @@ def nama_pengguna(user: dict) -> str:
         return uname
     if user.get("tagging") == "Admin Distributor":
         return f"Admin - {uname.upper()}"
+    if user.get("tagging") == "SPV":
+        return f"SPV - {uname.upper()}"       # jejak: SPV dari kode distributor mana
     return uname or "Admin"
 def main():
     st.set_page_config(page_title="NOO & SKU Submission", page_icon=":material/inventory_2:", layout="wide")
@@ -2093,6 +2113,8 @@ def main():
                     '<div class="brand-sub">Submit and confirm NOO data.</div>',
                     unsafe_allow_html=True)
         for label, ikon, kunci in NAVIGASI:
+            if kunci == "spv" and not boleh_spv_confirmation(user):
+                continue                      # Admin Distributor: tombol SPV Confirmation tidak ditampilkan
             nama_tombol = f"navaktif_{kunci}" if ss.halaman_aktif == kunci else f"nav_{kunci}"
             st.button(label, icon=ikon, key=nama_tombol, on_click=tuju_halaman,
                       args=(kunci,), width="stretch")
@@ -2114,6 +2136,8 @@ def main():
     picu_tutorial_otomatis(ss.halaman_aktif)      # semua user sekali saja: intro, lalu tutorial halaman yang dibuka (bisa Skip)
   # nama + peran + menu (Log Out ada di dalam menu ini)
 
+    if ss.halaman_aktif == "spv" and not boleh_spv_confirmation(user):
+        ss.halaman_aktif = "pengajuan"        # tidak punya akses (mis. halaman aktif sisa sesi lama)
     {"pengajuan": halaman_pengajuan_noo, "spv": halaman_konfirmasi_spv,
      "history": halaman_history}[ss.halaman_aktif]()
 

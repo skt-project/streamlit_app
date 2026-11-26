@@ -212,6 +212,9 @@ def muat_data_noo_dari_supabase() -> pd.DataFrame:
         df[val_col] = df_raw[asli] if asli else ""
     df["Longitude"]  = pd.to_numeric(df["Longitude"],  errors="coerce")
     df["Latitude"]   = pd.to_numeric(df["Latitude"],   errors="coerce")
+    asli_remark = peta.get("remark")
+    df["Remark"]     = (df_raw[asli_remark] if asli_remark else pd.Series("", index=df_raw.index)) \
+                         .fillna("").astype(str).str.strip()
     df["Created At"] = ke_wib_naive(df["Created At"])
     df["Generated At"] = ke_wib_naive(df["Generated At"])
     df["_sb_id"]     = ""
@@ -329,7 +332,7 @@ def refresh_data_toko():
 
 # Kolom grid yang boleh diedit user dan harus ikut tersimpan ke INPUT_NOO.
 # (Customer Store Code/Name tidak dimasukkan: dipakai sebagai kunci pencarian baris.)
-KOLOM_EDIT_KE_SUPABASE = ["Store Name", "City", "Store Address", "Longitude", "Latitude", "Store Type"]
+KOLOM_EDIT_KE_SUPABASE = ["Store Name", "City", "Store Address", "Longitude", "Latitude", "Store Type", "Remark"]
 
 def _patch_kolom_edit(baris: pd.Series) -> dict:
     norm = lambda s: re.sub(r"[^a-z0-9]","",str(s).lower())
@@ -556,6 +559,7 @@ def normalisasi_impor(mentah: pd.DataFrame) -> pd.DataFrame:
     df["Latitude"]  = pd.to_numeric(df["Latitude"],  errors="coerce")
     df.insert(0,"#", np.arange(1,len(df)+1))
     df["Validasi"] = STATUS_REVIEW        # Generate ID hanya lewat aksi user
+    df["Remark"]   = ""
     df["_sb_id"]   = ""
     df = df[KOLOM_TAMPIL]
     df.index = pd.Index(df["#"].to_numpy(), name="_id")
@@ -705,9 +709,13 @@ def tab_noo():
         tombol_hapus = st.button(":material/delete: Delete", type="primary", key="tombol_hapus_noo", width="stretch")
 
     # Tabel = custom component (noo_grid.py): dropdown Validation berwarna + Store ID jelas bisa/tidak diedit
+    # >>> EDIT LETAK KOLOM STORE VALIDATION DI SINI <<<
+    # Urutan kolom di layar = urutan baris dict(...) di list ini (atas = paling kiri).
+    # Mau pindah kolom (mis. Remark): potong barisnya, tempel di posisi lain.
     kolom_grid = [
         dict(name="#",                   label="#",                   kind="index",   width=50),
         dict(name="Pilih",               label="Select",              kind="check",   width=60),
+        dict(name="Remark",              label="Remark",              kind="text",    width=220),
         dict(name="Validasi",            label="Validation",          kind="status",  width=150, options=KOLOM_VALIDASI,
              help="Click to change status"),
         dict(name="Store ID",            label="Store ID (Existing: Editable)", kind="storeid", width=210,
@@ -1152,6 +1160,30 @@ def _sku_on_change():
     ss.sku_select_all = bool(ss.sku_view_keys) and all(k in ss.sku_pilih for k in ss.sku_view_keys)
     ss.sku_ver += 1      # remount editor supaya menampilkan overlay pending
 
+def _sku_sinkron_grid():
+    """Ambil hasil edit dari grid SKU (centang Select + dropdown Tagging) ke session_state.
+    Dipanggil di AWAL render supaya tombol (Mark as Done, Delete, Save) sudah memakai state terbaru."""
+    ss = st.session_state
+    if ss.get("sku_grid_ver") != ss.get("sku_ver") or "sku_asli" not in ss:
+        return                                   # grid sudah diganti (remount) -> edit lama dibuang
+    try:
+        edits = ss[ss.sku_grid_key]["edits"] or {}
+    except Exception:
+        return
+    tag = ss.sku_tag_col
+    for pos, ch in edits.items():
+        try:
+            k = ss.sku_view_keys[int(pos)]
+        except (ValueError, IndexError, TypeError):
+            continue
+        if "Pilih" in ch:
+            (ss.sku_pilih.add if ch["Pilih"] else ss.sku_pilih.discard)(k)
+        if tag in ch:
+            if ch[tag] == ss.sku_asli.get(k):
+                ss.sku_pending.pop(k, None)
+            else:
+                ss.sku_pending[k] = ch[tag]
+
 def _sku_pilih_semua():
     ss = st.session_state
     ss.sku_pilih = set(ss.sku_view_keys) if ss.sku_select_all else set()
@@ -1228,11 +1260,12 @@ def _simpan_sku(df, kc_pk, tag, rk):
     return ok, gagal
 
 def warna_tagging(v):
-    return ("background-color:#dcfce7;color:#166534;font-weight:600" if v == "Done"
-            else "background-color:#fee2e2;color:#b91c1c;font-weight:600")
+    return ("background-color:#dcfce7;color:#166534" if v == "Done"
+            else "background-color:#fee2e2;color:#b91c1c")
 
 def _tab_sku():
     ss = st.session_state
+    _sku_sinkron_grid()
     if ss.sku_df is None:
         try:
             ss.sku_df = ambil_sku_mapping()
@@ -1373,15 +1406,18 @@ def _tab_sku():
     pend_pos = {i for i, k in enumerate(keys) if k in ss.sku_pending}
     view.insert(0, "Pilih", [k in ss.sku_pilih for k in keys])
 
-    styler = (view.style
-              .apply(lambda r: ["background-color:#eff6ff" if r.name in pend_pos else "" for _ in r], axis=1)
-              .map(warna_tagging, subset=[tag]))
     tampil = [c for c in view.columns if _norm(c) not in SKU_HIDE_VIEW]
     if kc_cc in tampil:
         tampil.remove(kc_cc); tampil.insert(0, kc_cc)      
     if "Pilih" in tampil:
         tampil.remove("Pilih")
     tampil.insert(0, "Pilih")
+    # >>> EDIT LETAK KOLOM SKU MAPPING DI SINI <<<
+    # Urutan tampilan = isi list `tampil`. Index 0 = Select, index 1 = Tagging (Not Yet / Done), dst.
+    # Mau pindah Tagging: ubah angka di insert(1, tag) (0 = paling kiri, 2 = kolom ke-3, dst).
+    if tag in tampil:
+        tampil.remove(tag)
+        tampil.insert(1, tag)
     s1, s2, s3, _ = st.columns([1.3, 1.4, 1.0, 6.3], gap="small", vertical_alignment="center")
     if ss.pop("_reset_sku_select_all", False):          # reset harus SEBELUM widget dibuat (tidak boleh sesudahnya)
         ss.sku_select_all = False
@@ -1424,20 +1460,20 @@ def _tab_sku():
             ss.sku_pesan = (("ok", f"{len(terhapus)} record(s) deleted") if not gagal else
                             ("error", f"{len(terhapus)} deleted, {len(gagal)} failed: " + "; ".join(gagal[:3])))
             st.rerun()
-    st.data_editor(
-        styler, key=f"editor_sku_{ss.sku_ver}", on_change=_sku_on_change,
-        column_order=tampil,
-        column_config={
-            **{c: st.column_config.TextColumn(label_kolom(c))
-               for c in view.columns if c not in (tag, "Pilih")},
-            "Pilih": st.column_config.CheckboxColumn("Select", width=50, default=False),
-            tag: st.column_config.SelectboxColumn(label_kolom(tag), options=SKU_TAGGING,
-                                                  required=True, width=130),
-        },
-        disabled=[c for c in view.columns if c not in (tag, "Pilih")],
-        hide_index=True, num_rows="fixed", width="stretch",
-        height=min(len(view) * 35 + 38, 560),
-    )
+    # Tabel = custom component noo_grid (sama seperti Store Validation) supaya dropdown Tagging bisa berwarna.
+    kolom_grid_sku = []
+    for c in tampil:
+        if c == "Pilih":
+            kolom_grid_sku.append(dict(name=c, label="Select", kind="check", width=60))
+        elif c == tag:
+            kolom_grid_sku.append(dict(name=c, label=label_kolom(c), kind="status", width=130, options=SKU_TAGGING))
+        else:
+            kolom_grid_sku.append(dict(name=c, label=label_kolom(c), kind="ro", width=170))
+    ss.sku_grid_key = f"sku_grid_{ss.sku_ver}_{abs(hash(tuple(keys)))}"
+    ss.sku_grid_ver = ss.sku_ver
+    noo_grid(view[tampil], kolom_grid_sku, key=ss.sku_grid_key, select_all=bool(ss.get("sku_select_all")),
+             warna={"Done": "background-color:#dcfce7;color:#166534",
+                    "Not Yet": "background-color:#fee2e2;color:#b91c1c"})
 
 def halaman_validasi_toko():
     ss = st.session_state
@@ -2456,12 +2492,15 @@ def _sb_users_list() -> list:
     r.raise_for_status()
     return r.json()
 
-def _sb_user_delete(username: str) -> bool:
+def _sb_user_delete(username: str, email: str = "") -> bool:
+    filt = {"username": f"eq.{username}"}
+    if email:
+        filt["email"] = f"eq.{email}"          # 1 kode bisa punya 2 akun: hapus hanya akun dengan email ini
     r = requests.delete(
         f"{SUPABASE_URL}/rest/v1/{TABLE_USER}",
         headers={**_SB_HEADERS, "Prefer": "return=representation"},
-        params={"username": f"eq.{username}"}, timeout=10)
-    if r.ok and len(r.json()) == 1:
+        params=filt, timeout=10)
+    if r.ok and len(r.json()) >= 1:
         return True
     st.session_state["_err_del"] = f"HTTP {r.status_code}, rows={r.text[:150]}"
     return False
@@ -2487,15 +2526,15 @@ def _konfirmasi_hapus_feedback(fid, nama):
 
 
 @st.dialog("Delete user", width="small")
-def _konfirmasi_hapus_user(username: str):
+def _konfirmasi_hapus_user(username: str, email: str = ""):
     ss = st.session_state
-    st.markdown(f"Are you sure you want to delete **{username}**?")
+    st.markdown(f"Are you sure you want to delete **{username}**" + (f" ({email})" if email else "") + "?")
     st.warning("This user will permanently lose access. This cannot be undone.")
     c_ya, c_batal = st.columns(2)
     if c_batal.button("Cancel", key="dlg_del_batal", width="stretch"):
         st.rerun()
     if c_ya.button("Yes, delete", type="primary", key="dlg_del_ya", width="stretch"):
-        if not _sb_user_delete(username):
+        if not _sb_user_delete(username, email):
             st.error(f"Delete failed: {ss.pop('_err_del', '-')}")
             return
         _sb_users_list.clear()
@@ -2808,6 +2847,19 @@ def _tab_clear_history():
             ss[_k] = _keep[_k]
     if hasil := ss.pop("riw_hasil", None):
         (st.error if hasil[0] == "error" else st.success)(hasil[1])
+    # judul halaman tab ini (gaya sama dengan tab Reset password / Sign-up approval), judulnya di-highlight
+    st.markdown("""<style>
+.rq-head h4.hl-judul{display:inline-block;background:linear-gradient(transparent 55%,#fde68a 55%);padding:0 6px;border-radius:4px}
+</style>
+<div class="rq-head"><h4 class="hl-judul">Clear history</h4></div>
+<p class="rq-desc">Delete old records from the app tables. Choose what to clear, then confirm. This cannot be undone.</p>""",
+                unsafe_allow_html=True)
+    # judul "Select what to clear" di-highlight (latar kuning seperti stabilo + tebal)
+    st.markdown("""<style>
+.st-key-clear_bagian [data-testid="stWidgetLabel"] p{
+  display:inline-block; background:linear-gradient(transparent 12%,#fde68a 12%); color:#1f2937 !important;
+  font-weight:700 !important; padding:1px 8px; border-radius:4px; }
+</style>""", unsafe_allow_html=True)
     bagian = st.selectbox("Select what to clear",
                           ["History", "Help & Support tickets", "Feedback"], key="clear_bagian")
     {"History": _bagian_clear_riwayat, "Help & Support tickets": _bagian_clear_help,
@@ -2849,11 +2901,28 @@ def halaman_pengaturan():
         return
 
     #   akses_users = [u for u in users if u.get("tagging") == "user"]
-    hapus_opts = [u["username"] for u in users if u["username"] != me.get("username")]
+    # 1 kode bisa punya 2 akun -> pilihan hapus ditampilkan "username · email"
+    _peta_hapus = {f"{u['username']} · {u.get('email') or '-'}": (u["username"], u.get("email") or "")
+                   for u in users if not (u["username"] == me.get("username") and (u.get("email") or "") == me.get("email", ""))}
+    hapus_opts = list(_peta_hapus)
     semua_opts = [u["username"] for u in users]
 
-    tab_add, tab_del, tab_pw, tab_riw = st.tabs([":material/person_add: Add user", ":material/delete: Delete user",
-                                                 ":material/key: Reset password", ":material/history: Clear history"])
+    from login_page import (reset_daftar, reset_ubah_status, reset_password_user, RESET_APPROVED, RESET_REJECTED,
+                            signup_daftar_pending, signup_putuskan)
+    try:
+        antrian_su, err_su = signup_daftar_pending(), ""      # akun ke-2 (SPV) yang menunggu persetujuan
+    except Exception as e:
+        antrian_su, err_su = [], str(e)
+    try:
+        antrian_reset = reset_daftar()                  # permintaan Forgot password yang menunggu keputusan admin
+    except Exception as e:
+        antrian_reset, err_reset = [], str(e)
+    else:
+        err_reset = ""
+    label_pw = ":material/key: Reset password" + (f" ({len(antrian_reset)})" if antrian_reset else "")
+    label_su = ":material/how_to_reg: Sign-up approval" + (f" ({len(antrian_su)})" if antrian_su else "")
+    tab_add, tab_del, tab_pw, tab_su, tab_riw = st.tabs([":material/person_add: Add user", ":material/delete: Delete user",
+                                                         label_pw, label_su, ":material/history: Clear history"])
 
     # ── Tambah user ──
     with tab_add:
@@ -2893,27 +2962,137 @@ def halaman_pengaturan():
             u_del = st.selectbox("Select username", [""] + list(hapus_opts), key="set_del_user",
                                  format_func=lambda x: x or "Select a user...")
             if st.button("Delete user", type="primary", disabled=not u_del, key="set_del_btn"):
-                _konfirmasi_hapus_user(u_del)      # popup konfirmasi dulu sebelum benar-benar dihapus
+                _konfirmasi_hapus_user(*_peta_hapus[u_del])      # popup konfirmasi dulu sebelum benar-benar dihapus
             if pesan_del:
                 st.success(pesan_del)
 
-    # ── Reset password ──
+    # ── Reset password: permintaan Forgot password dari user, admin Approve / Reject ──
     with tab_pw:
-        pesan_pw = ss.pop("_pw_sukses", None)            # pesan sukses reset, tampil sekali
-        u_pw = st.selectbox("Select username", semua_opts, key="set_pw_user")
-        with st.form("form_reset_pw", clear_on_submit=True):
-            pw1 = st.text_input("New password (min. 8 characters)", type="password")
-            pw2 = st.text_input("Confirm new password", type="password")
-            ok_pw = st.form_submit_button("Reset password", type="primary")
-        if ok_pw:
-            if len(pw1) < 8:
-                st.error("Password must be at least 8 characters.")
-            elif pw1 != pw2:
-                st.error("Passwords do not match.")
-            else:
-                _konfirmasi_reset_pw(u_pw, pw1)    # popup konfirmasi dulu sebelum password diganti
-        if pesan_pw:
+        st.markdown("""<style>
+.rq-head{display:flex;align-items:center;gap:10px;margin:2px 0 2px}
+.rq-head h4{margin:0;font-size:22px;font-weight:750;color:#0f172a;letter-spacing:-.3px}
+.rq-count{background:#fef3c7;color:#92400e;font-size:12px;font-weight:700;padding:2px 10px;border-radius:99px}
+.rq-desc{color:#64748b;font-size:13px;margin:0 0 14px}
+[class*="st-key-rqc_"]{background:#fff;border:1px solid #eef0f6 !important;border-left:4px solid #f59e0b !important;
+  border-radius:16px !important;padding:16px 18px 18px !important;margin-bottom:14px;overflow:visible !important;
+  box-shadow:0 6px 20px rgba(30,41,59,.07);transition:transform .15s ease,box-shadow .15s ease}
+[class*="st-key-rqc_"]:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(30,41,59,.12)}
+[class*="st-key-rqc_"] [data-testid="stMarkdownContainer"], [class*="st-key-rqc_"] [data-testid="stElementContainer"]{overflow:visible !important}
+.rq-card{display:flex;align-items:center;gap:14px;padding:2px 0 6px}
+.rq-av{width:54px;height:54px;border-radius:16px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+  box-shadow:0 4px 10px rgba(30,41,59,.12)}
+.rq-av svg{width:40px;height:40px}
+.rq-name{font-weight:700;font-size:15.5px;color:#0f172a;line-height:1.25;display:flex;align-items:center;gap:8px}
+.rq-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;
+  background:#fef3c7;color:#92400e}
+.rq-chip::before{content:"";width:6px;height:6px;border-radius:50%;background:#f59e0b;animation:rqBlink 1.4s ease-in-out infinite}
+@keyframes rqBlink{50%{opacity:.25}}
+.rq-sub{font-size:12.5px;color:#64748b;margin-top:3px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.rq-sub span{display:inline-flex;align-items:center;gap:5px}
+.rq-sub svg{width:13px;height:13px;stroke:#94a3b8;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* tombol Approve / Reject: ringkas (sesuai isi), bentuk pil */
+div[class*="st-key-rq_ok_"] button[data-testid="stBaseButton-primary"],[class*="st-key-rq_ok_"] button{border:0 !important;border-radius:99px !important;padding:6px 18px !important;min-height:38px;
+  color:#fff !important;font-weight:700;background:linear-gradient(110deg,#16a34a,#22c55e) !important;
+  box-shadow:0 8px 18px rgba(34,197,94,.32);transition:transform .15s ease,box-shadow .15s ease}
+div[class*="st-key-rq_ok_"] button[data-testid="stBaseButton-primary"]:hover,[class*="st-key-rq_ok_"] button:hover{transform:translateY(-2px);box-shadow:0 12px 22px rgba(34,197,94,.42)}
+[class*="st-key-rq_no_"] button{border-radius:99px !important;padding:6px 18px !important;min-height:38px;font-weight:650;
+  color:#dc2626 !important;background:#fff1f2 !important;border:1px solid #fecdd3 !important;transition:all .15s ease}
+[class*="st-key-rq_no_"] button:hover{background:#ffe4e6 !important;border-color:#fda4af !important;transform:translateY(-2px)}
+.rq-empty{text-align:center;padding:38px 10px;color:#64748b;background:#fff;border-radius:16px;
+  box-shadow:0 6px 20px rgba(30,41,59,.06)}
+.rq-empty b{display:block;color:#0f172a;font-size:16px;margin-top:8px}
+</style>""", unsafe_allow_html=True)
+        if pesan_pw := ss.pop("_pw_sukses", None):
             st.success(pesan_pw)
+        _n_rq = f'<span class="rq-count">{len(antrian_reset)} waiting</span>' if antrian_reset else ""
+        st.markdown(f'<div class="rq-head"><h4>Password reset requests</h4>{_n_rq}</div>'
+                    '<p class="rq-desc">Users who tapped <b>Forgot password?</b> appear here. After you approve, '
+                    'they can set a new password from the login page.</p>', unsafe_allow_html=True)
+        # Data permintaan dibaca ulang dari Supabase setiap rerun; tombol ini memicu rerun supaya permintaan baru muncul
+        st.button(":material/refresh: Refresh", key="rq_refresh_pw", width="content")
+        if err_reset:
+            st.error(f"Could not load requests (is the table created? see sql_account_requests.sql): {err_reset}")
+        elif not antrian_reset:
+            st.markdown('<div class="rq-empty"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" '
+                        'stroke="#6aa77f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
+                        '<circle cx="12" cy="12" r="10"/><path d="M8 12.5l3 3 5-6"/></svg>'
+                        '<b>No pending requests</b>All caught up.</div>', unsafe_allow_html=True)
+        import zlib
+        _PASTEL_AV = ["#ffe4ec", "#e0f2fe", "#fef3c7", "#dcfce7", "#ede9fe", "#ffedd5", "#fce7f3", "#e0e7ff"]
+        _svg_mail = ('<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>')
+        _svg_clock = ('<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>')
+        for q in antrian_reset:
+            try:
+                dibuat = pd.Timestamp(q["created_at"]).tz_convert(ZONA_WAKTU).strftime("%d %b %Y, %H:%M")
+            except Exception:
+                dibuat = str(q.get("created_at", ""))[:16]
+            with st.container(key=f"rqc_{q['id']}"):
+                c_info, c_btn = st.columns([5, 2.4], vertical_alignment="center")
+                c_info.markdown(
+                    f'<div class="rq-card"><div class="rq-av" style="background:{_PASTEL_AV[zlib.crc32(str(q["username"]).encode()) % len(_PASTEL_AV)]}">'
+                    f'{_hewan_avatar(q["username"])}</div><div>'
+                    f'<div class="rq-name">{str(q["username"]).upper()}<span class="rq-chip">Waiting</span></div>'
+                    f'<div class="rq-sub"><span>{_svg_mail}{q.get("email") or "-"}</span>'
+                    f'<span>{_svg_clock}{dibuat}</span></div></div></div>', unsafe_allow_html=True)
+                with c_btn.container(horizontal=True, horizontal_alignment="right", gap="small"):
+                    klik_ok = st.button(":material/check: Approve", type="primary", key=f"rq_ok_{q['id']}", width="content")
+                    klik_no = st.button(":material/close: Reject", key=f"rq_no_{q['id']}", width="content")
+                if klik_ok:
+                    if reset_ubah_status(q["id"], RESET_APPROVED, me.get("username", "")):
+                        catat_riwayat("Approve reset password", q["username"])
+                        ss["_pw_sukses"] = f"Approved. '{q['username']}' can now create a new password on the login page."
+                        st.rerun()
+                    st.error("Approve failed (check Supabase RLS policy for UPDATE).")
+                if klik_no:
+                    if reset_ubah_status(q["id"], RESET_REJECTED, me.get("username", "")):
+                        catat_riwayat("Reject reset password", q["username"])
+                        ss["_pw_sukses"] = f"Request from '{q['username']}' rejected."
+                        st.rerun()
+                    st.error("Reject failed (check Supabase RLS policy for UPDATE).")
+
+    # ── Sign-up approval: akun ke-2 (SPV) untuk kode yang sudah terdaftar ──
+    with tab_su:
+        import zlib
+        _n_su = f'<span class="rq-count">{len(antrian_su)} waiting</span>' if antrian_su else ""
+        st.markdown(f'<div class="rq-head"><h4>Sign-up approval</h4>{_n_su}</div>'
+                    '<p class="rq-desc">A distributor code can have up to 2 accounts. The 2nd account is registered by an '
+                    '<b>SPV</b> and can only log in after you approve it here. Reject means the account is not created.</p>',
+                    unsafe_allow_html=True)
+        st.button(":material/refresh: Refresh", key="rq_refresh_su", width="content")   # baca ulang permintaan baru
+        if pesan_su := ss.pop("_su_sukses", None):
+            st.success(pesan_su)
+        if err_su:
+            st.error(f"Could not load pending accounts (is the account_requests table created? see sql_account_requests.sql): {err_su}")
+        elif not antrian_su:
+            st.markdown('<div class="rq-empty"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" '
+                        'stroke="#6aa77f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
+                        '<circle cx="12" cy="12" r="10"/><path d="M8 12.5l3 3 5-6"/></svg>'
+                        '<b>No pending accounts</b>All caught up.</div>', unsafe_allow_html=True)
+        _pastel = ["#ffe4ec", "#e0f2fe", "#fef3c7", "#dcfce7", "#ede9fe", "#ffedd5", "#fce7f3", "#e0e7ff"]
+        for i, q in enumerate(antrian_su):
+            try:
+                dibuat = pd.Timestamp(q["created_at"]).tz_convert(ZONA_WAKTU).strftime("%d %b %Y, %H:%M")
+            except Exception:
+                dibuat = str(q.get("created_at", ""))[:16]
+            with st.container(key=f"rqc_su{i}"):
+                c_info, c_btn = st.columns([5, 2.4], vertical_alignment="center")
+                c_info.markdown(
+                    f'<div class="rq-card"><div class="rq-av" style="background:{_pastel[zlib.crc32(str(q["username"]).encode()) % len(_pastel)]}">'
+                    f'{_hewan_avatar(q["username"])}</div><div>'
+                    f'<div class="rq-name">{str(q["username"]).upper()}<span class="rq-chip">2nd account (SPV)</span></div>'
+                    f'<div class="rq-sub"><span>{q.get("email") or "-"}</span><span>{dibuat}</span></div></div></div>',
+                    unsafe_allow_html=True)
+                with c_btn.container(horizontal=True, horizontal_alignment="right", gap="small"):
+                    ok_su = st.button(":material/check: Approve", type="primary", key=f"rq_ok_su{i}", width="content")
+                    no_su = st.button(":material/close: Reject", key=f"rq_no_su{i}", width="content")
+                if ok_su or no_su:
+                    _ok_su, _err_su = signup_putuskan(q["id"], bool(ok_su), me.get("username", ""))
+                    if _ok_su:
+                        catat_riwayat("Approve sign-up" if ok_su else "Reject sign-up", q["username"])
+                        ss["_su_sukses"] = (f"Approved. {q['username']} ({q.get('email')}) can now log in." if ok_su
+                                            else f"Rejected. Pending account {q['username']} ({q.get('email')}) was not created.")
+                        st.rerun()
+                    st.error(f"Failed: {_err_su or 'check Supabase RLS policy on account_requests / users'}")
 
     # ── Bersihkan riwayat (tabel riwayat_noo) ──
     with tab_riw:
