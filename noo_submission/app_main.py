@@ -768,8 +768,6 @@ def tab_noo():
         dict(name="Store ID",            label="Store ID (Existing: Editable)", kind="storeid", width=210,
              help="Type the Store ID here only when Validation = Existing. Otherwise it is generated automatically."),
         dict(name="Distributor",         label="Distributor",         kind="ro",      width=230),
-        dict(name="Region",              label="Region",              kind="ro",      width=100,
-             help="Looked up from the Distributor column (Distributor Mapping, column J)"),
         dict(name="Store Name",          label="Store Name",          kind="text",    width=180),
         dict(name="Customer Code",       label="Customer Code",       kind="ro",      width=150),
         dict(name="Customer Store Code", label="Customer Store Code", kind="text",    width=190),
@@ -788,8 +786,6 @@ def tab_noo():
     # tetap dipakai sbg kunci Supabase (Customer Store Code + Customer Store Name), jadi dikembalikan setelah render.
     tampil_grid = ss.snapshot.copy()
     tampil_grid["Customer Store Name"] = tampil_grid["Store Name"]
-    _peta_reg = {v: _shared.region_grup(v) for v in tampil_grid["Distributor"].astype(str).unique()}
-    tampil_grid["Region"] = tampil_grid["Distributor"].astype(str).map(_peta_reg)      # lookup Region dari kolom Distributor
     hasil_edit = noo_grid(tampil_grid, kolom_grid, key=f"noo_grid_{ss.kunci_editor}",
                           select_all=select_all, warna=warna_css, terkunci=_shared.STATUS_TERKUNCI)
     hasil_edit["Customer Store Name"] = ss.snapshot["Customer Store Name"]
@@ -1475,9 +1471,6 @@ def _tab_sku():
     keys = rk[m].tolist()
     ss.sku_view_keys = keys
     view = df_f.reset_index(drop=True).copy()
-    if kc_nama:                                     # kolom Region = lookup dari nama distributor (Distributor Mapping kolom J)
-        _peta_reg = {v: _shared.region_grup(v) for v in view[kc_nama].astype(str).unique()}
-        view["Region"] = view[kc_nama].astype(str).map(_peta_reg)
     view[tag] = [ss.sku_pending.get(k, v) for k, v in zip(keys, view[tag].fillna("Not Yet"))]
     pend_pos = {i for i, k in enumerate(keys) if k in ss.sku_pending}
     view.insert(0, "Pilih", [k in ss.sku_pilih for k in keys])
@@ -1488,8 +1481,6 @@ def _tab_sku():
     if "Pilih" in tampil:
         tampil.remove("Pilih")
     tampil.insert(0, "Pilih")
-    if "Region" in tampil and kc_nama in tampil:      # Region tepat di sebelah kolom nama distributor
-        tampil.remove("Region"); tampil.insert(tampil.index(kc_nama) + 1, "Region")
     # >>> EDIT LETAK KOLOM SKU MAPPING DI SINI <<<
     # Urutan tampilan = isi list `tampil`. Index 0 = Select, index 1 = Tagging (Not Yet / Done), dst.
     # Mau pindah Tagging: ubah angka di insert(1, tag) (0 = paling kiri, 2 = kolom ke-3, dst).
