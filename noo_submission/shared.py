@@ -891,6 +891,57 @@ def muat_distri_code_map() -> dict:
         hasil[h] = {"distributor": nama, "company_code": g}
     return hasil
 
+# ── Region (Region 1..5) = kolom J sheet "Distributor Mapping" (A: company name, B: Distributor Name, H: kode distributor).
+#    Dipakai untuk filter Region di semua dashboard. Berbeda dengan kolom F ("Region" geografis, mis. East Java).
+def _nk_region(s) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(s or "").upper())
+
+@st.cache_data(ttl=600, show_spinner=False)
+def muat_region_map() -> dict:
+    nama_sheet = SHEET_DISTRI.split("!")[0]
+    url = (f"https://docs.google.com/spreadsheets/d/{_id_spreadsheet(HISTORY_GENERATOR)}/gviz/tq"
+           f"?tqx=out:csv&sheet={quote(nama_sheet)}&headers=1")
+    df = pd.read_csv(url, dtype=str).fillna("")
+    hasil = {"nama": {}, "kode": {}}
+    if df.shape[1] < 10:
+        return hasil
+    for _, r in df.iterrows():
+        reg = r.iloc[9].strip()
+        nama = r.iloc[1].strip()
+        if not reg or not nama or nama in ("Distributor Name", df.columns[1]):
+            continue
+        hasil["nama"][_nk_region(nama)] = reg
+        kode = r.iloc[7].strip().upper()
+        if kode:
+            hasil["kode"][kode] = reg
+    return hasil
+
+def daftar_region() -> list:
+    try:
+        return sorted(set(muat_region_map()["nama"].values()))
+    except Exception:
+        return []
+
+def region_grup(nama_distributor: str) -> str:
+    """Region (kolom J) dari NAMA distributor; cocok persis, atau awalan (mis. 'CV X - cabang' -> 'CV X'). '' bila tidak ada."""
+    n = _nk_region(nama_distributor)
+    if not n:
+        return ""
+    try:
+        m = muat_region_map()["nama"]
+    except Exception:
+        return ""
+    if n in m:
+        return m[n]
+    cocok = [k for k in m if n.startswith(k) or k.startswith(n)]
+    return m[max(cocok, key=len)] if cocok else ""
+
+def region_dari_kode(kode: str) -> str:
+    try:
+        return muat_region_map()["kode"].get(str(kode or "").strip().upper(), "")
+    except Exception:
+        return ""
+
 @st.cache_resource(ttl=600, show_spinner=False)  # read-only dict: tanpa salinan/pickle tiap dipanggil
 def muat_mapping_distributor_name() -> dict:
     df = muat_distributor_dari_sheet()

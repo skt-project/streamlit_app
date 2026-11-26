@@ -98,7 +98,8 @@ export default function (component) {
         } else if (c.kind === 'number') {
           h += `<td class="${lock ? 'sid-off' : ''}"><input class="cell" type="number" step="0.0001" data-i="${i}" data-c="${c.name}" value="${esc(v)}" style="text-align:right" ${lock ? 'disabled title="' + LOCK_TIP + '"' : ''}></td>`;
         } else if (c.kind === 'text') {
-          h += `<td class="${lock ? 'sid-off' : ''}"><input class="cell" data-i="${i}" data-c="${c.name}" value="${esc(v)}" ${lock ? 'disabled title="' + LOCK_TIP + '"' : ''}></td>`;
+          const lk = lock && !c.free;      // c.free = kolom tetap bisa diedit walau baris terkunci (mis. Remark)
+          h += `<td class="${lk ? 'sid-off' : ''}"><input class="cell" data-i="${i}" data-c="${c.name}" value="${esc(v)}" ${lk ? 'disabled title="' + LOCK_TIP + '"' : ''}></td>`;
         } else {
           h += `<td class="ro">${esc(v)}</td>`;
         }

@@ -316,7 +316,18 @@ def inisialisasi_state():
         ss.tanda_tangan     = None
         ss.snapshot         = None
 
+def segarkan_sheet_distributor():
+    """Baca ulang sheet Distributor Mapping (Region kolom J, daftar distributor, kode). Datanya disimpan sementara 10 menit,
+    jadi perubahan di sheet baru terlihat setelah ini (dipanggil oleh tombol Refresh)."""
+    for fn in (_shared.muat_region_map, muat_distributor_dari_sheet, muat_distri_code_map):
+        try:
+            fn.clear()
+        except Exception:
+            pass
+
+
 def refresh_data_toko():
+    segarkan_sheet_distributor()
     ss = st.session_state
     ambil_raw_noo.clear()
     ss.df_toko          = muat_data_noo_dari_supabase()
@@ -568,8 +579,11 @@ def normalisasi_impor(mentah: pd.DataFrame) -> pd.DataFrame:
 def template_csv() -> bytes:
     return pd.DataFrame(columns=WAJIB_ISI).to_csv(index=False).encode("utf-8")
 
-def terapkan_filter(df, status, distributor="All distributors", rentang=None, brand="All brands"):
+def terapkan_filter(df, status, distributor="All distributors", rentang=None, brand="All brands", region="All regions"):
     m = pd.Series(True, index=df.index)
+    if region != "All regions" and "Distributor" in df.columns:        # Region = kolom J sheet Distributor Mapping
+        _r = {v: _shared.region_grup(v) for v in df["Distributor"].astype(str).unique()}
+        m &= df["Distributor"].astype(str).map(_r) == region
     if brand != "All brands":
         if "Customer Code" in df.columns:
             awal = df["Customer Code"].astype(str).str.strip().str[:2]
@@ -625,17 +639,16 @@ def tab_noo():
             with st.expander(f"⏱ {_judul} timing — total {w.get(_tot, 0):.2f}s (from last run)"):
                 st.table(pd.DataFrame({"Step": list(w), "Seconds": [round(v, 2) for v in w.values()]}).set_index("Step"))
     if ss.pop("reset_filter", False):
-        ss.f_status = "All statuses"; ss.f_distri = "All distributors"; ss.f_brand = "All brands"
+        ss.f_status = "All statuses"; ss.f_distri = "All distributors"; ss.f_brand = "All brands"; ss.f_region = "All regions"
         ss.pop("f_tgl_awal",None); ss.pop("f_tgl_akhir",None)
 
     opsi_jenis  = sorted((set(JENIS_TOKO_DEFAULT) | set(ss.df_toko["Store Type"].dropna().astype(str))) - {""})
-    daftar_distri = ["All distributors"] + daftar_distributor()      # hanya distributor Active
     hari_ini = datetime.datetime.now(ZONA_WAKTU).date()
     tgl_min  = pd.to_datetime(ss.df_toko.get("Created At"), errors="coerce").min() \
         if "Created At" in ss.df_toko.columns else pd.NaT
     tgl_awal = hari_ini if pd.isna(tgl_min) else tgl_min.date()
 
-    c_tgl1,c_tgl2,c_distri,c_brand,c_status = st.columns([1.3,1.3,1.8,1.2,1.4])
+    c_tgl1,c_tgl2,c_region,c_distri,c_brand,c_status = st.columns([1.2,1.2,1.0,1.7,1.1,1.3])
     with c_tgl1:
         tgl_dari = st.date_input("Date from", value=tgl_awal, key="f_tgl_awal",
                                   format="YYYY-MM-DD", on_change=reset_halaman_data)
@@ -645,7 +658,16 @@ def tab_noo():
     if tgl_dari > tgl_sampai:
         st.warning("Start date is later than end date, range reversed automatically.")
     rentang = (min(tgl_dari,tgl_sampai), max(tgl_dari,tgl_sampai))
+    with c_region:
+        # Region (Region 1..5) = kolom J sheet Distributor Mapping; menyaring tabel dan pilihan Distributor
+        region_nilai = st.selectbox("Region", ["All regions"] + _shared.daftar_region(), key="f_region",
+                                    on_change=reset_halaman_data)
     with c_distri:
+        daftar_distri = ["All distributors"] + [d for d in daftar_distributor()      # hanya distributor Active
+                                                 if st.session_state.get("f_region", "All regions") == "All regions"
+                                                 or _shared.region_grup(d) == st.session_state.get("f_region")]
+        if st.session_state.get("f_distri") not in daftar_distri:
+            st.session_state["f_distri"] = "All distributors"       # distributor terpilih tidak ada di Region ini
         distributor = st.selectbox("Distributor", daftar_distri, key="f_distri", on_change=reset_halaman_data)
     with c_brand:
         brand = st.selectbox("Brand", ["All brands", "NXP", "G2G"], key="f_brand",
@@ -668,7 +690,10 @@ def tab_noo():
         info.markdown(f'<div class="teks-showing">{len(ss.baris_kotor)} rows unsaved</div>'
                       if ss.baris_kotor else "", unsafe_allow_html=True)
 
-    hasil_filter = terapkan_filter(ss.df_toko, status, distributor, tuple(rentang), brand)
+    hasil_filter = terapkan_filter(ss.df_toko, status, distributor, tuple(rentang), brand, region_nilai)
+    # Kartu KPI mengikuti filter Region / Distributor / Brand / Tanggal (kecuali filter Status, supaya angka per status tetap utuh)
+    def _df_kpi():
+        return terapkan_filter(ss.df_toko, "All statuses", distributor, tuple(rentang), brand, region_nilai)
     total_filter = len(hasil_filter)
 
     ukuran       = ss.ukuran_halaman
@@ -682,11 +707,11 @@ def tab_noo():
             st.download_button(":material/download: Download NOO", b"", "hasil_noo.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                disabled=True, width="stretch", key="unduh_noo_validasi")
-        tempat_kpi.markdown(komponen.html_kpi_validasi(ss.df_toko), unsafe_allow_html=True)
+        tempat_kpi.markdown(komponen.html_kpi_validasi(_df_kpi()), unsafe_allow_html=True)
         st.info("No stores match the filter.")
         return
 
-    tanda = (status, distributor, brand, tuple(rentang), ss.halaman_data, ukuran, ss.versi_impor)
+    tanda = (status, distributor, brand, region_nilai, tuple(rentang), ss.halaman_data, ukuran, ss.versi_impor)
     if ss.tanda_tangan != tanda or ss.snapshot is None:
         ss.snapshot        = hasil_filter.iloc[mulai:akhir][KOLOM_TAMPIL].copy()
         ss.snapshot["Pilih"] = False
@@ -715,12 +740,14 @@ def tab_noo():
     kolom_grid = [
         dict(name="#",                   label="#",                   kind="index",   width=50),
         dict(name="Pilih",               label="Select",              kind="check",   width=60),
-        dict(name="Remark",              label="Remark",              kind="text",    width=220),
+        dict(name="Remark",              label="Remark",              kind="text",    width=220, free=True),   # tetap bisa diedit walau DMS Done / DMS & Basis Done
         dict(name="Validasi",            label="Validation",          kind="status",  width=150, options=KOLOM_VALIDASI,
              help="Click to change status"),
         dict(name="Store ID",            label="Store ID (Existing: Editable)", kind="storeid", width=210,
              help="Type the Store ID here only when Validation = Existing. Otherwise it is generated automatically."),
         dict(name="Distributor",         label="Distributor",         kind="ro",      width=230),
+        dict(name="Region",              label="Region",              kind="ro",      width=100,
+             help="Looked up from the Distributor column (Distributor Mapping, column J)"),
         dict(name="Store Name",          label="Store Name",          kind="text",    width=180),
         dict(name="Customer Code",       label="Customer Code",       kind="ro",      width=150),
         dict(name="Customer Store Code", label="Customer Store Code", kind="text",    width=190),
@@ -739,6 +766,8 @@ def tab_noo():
     # tetap dipakai sbg kunci Supabase (Customer Store Code + Customer Store Name), jadi dikembalikan setelah render.
     tampil_grid = ss.snapshot.copy()
     tampil_grid["Customer Store Name"] = tampil_grid["Store Name"]
+    _peta_reg = {v: _shared.region_grup(v) for v in tampil_grid["Distributor"].astype(str).unique()}
+    tampil_grid["Region"] = tampil_grid["Distributor"].astype(str).map(_peta_reg)      # lookup Region dari kolom Distributor
     hasil_edit = noo_grid(tampil_grid, kolom_grid, key=f"noo_grid_{ss.kunci_editor}",
                           select_all=select_all, warna=warna_css, terkunci=_shared.STATUS_TERKUNCI)
     hasil_edit["Customer Store Name"] = ss.snapshot["Customer Store Name"]
@@ -750,15 +779,16 @@ def tab_noo():
     pilih_idx = hasil_edit.index[hasil_edit["Pilih"] == True].tolist()
     pasangan_pilih = tuple((str(ss.df_toko.loc[i, "Customer Store Code"]).strip(),
                             str(ss.df_toko.loc[i, "Customer Store Name"]).strip()) for i in pilih_idx)
-    tombol_aktif, tombol_info = False, "Tick rows that are already Generate ID and saved."
+    _STATUS_BOLEH_DMS = (STATUS_VALID, "Existing")          # status asal yang boleh ke DMS Done / DMS & Basis Done
+    tombol_aktif, tombol_info = False, "Tick rows that are already Generate ID / Existing and saved."
     if pasangan_pilih:
         status_sb = _shared.sb_baca_status_id_singkat(pasangan_pilih)
         if status_sb is None:
             tombol_info = "Could not read Supabase to verify. Try again."
         else:
-            tombol_aktif = all(status_sb.get(p, ("", ""))[0] == STATUS_VALID and not _id_kosong(status_sb.get(p, ("", ""))[1])
+            tombol_aktif = all(status_sb.get(p, ("", ""))[0] in _STATUS_BOLEH_DMS and not _id_kosong(status_sb.get(p, ("", ""))[1])
                                for p in pasangan_pilih)
-            tombol_info = "" if tombol_aktif else "Only rows saved as Generate ID with a Store ID in Supabase can be marked."
+            tombol_info = "" if tombol_aktif else "Only rows saved as Generate ID / Existing with a Store ID in Supabase can be marked."
     klik_dms   = tempat_dms.button("DMS Done", type="primary", key="tombol_dms_done", width="stretch",
                                    disabled=not tombol_aktif, help=tombol_info or None)
     klik_basis = tempat_basis.button("DMS & Basis Done", type="primary", key="tombol_basis_done", width="stretch",
@@ -772,14 +802,14 @@ def tab_noo():
         else:
             df = ss.df_toko
             siap_idx = [i for i, p in zip(pilih_idx, pasangan_pilih)
-                        if segar.get(p, ("", ""))[0] == STATUS_VALID and not _id_kosong(segar.get(p, ("", ""))[1])]
+                        if segar.get(p, ("", ""))[0] in _STATUS_BOLEH_DMS and not _id_kosong(segar.get(p, ("", ""))[1])]
             status_lama = {i: df.loc[i, "Validasi"] for i in siap_idx}
             for i in siap_idx:
                 df.loc[i, "Validasi"] = status_baru
             masalah, _info_sheet = ubah_status_dan_simpan(df, siap_idx, status_lama)
             n_lewat = len(pilih_idx) - len(siap_idx)
             ss.pesan_toast = (f"{len(siap_idx) - len(masalah)} row(s) set to {status_baru}"
-                              + (f" | {n_lewat} skipped (not Generate ID in Supabase)" if n_lewat else "")
+                              + (f" | {n_lewat} skipped (not Generate ID / Existing in Supabase)" if n_lewat else "")
                               + (f" | {len(masalah)} NOT saved, reverted: {'; '.join(masalah[:2])}" if masalah else ""))
             ss.pesan_toast_icon = ":material/warning:" if (n_lewat or masalah) else ":material/check_circle:"
             ambil_raw_noo.clear()
@@ -967,18 +997,25 @@ def tab_noo():
     # semula (pengaman server, selain input yang sudah dinonaktifkan di grid).
     baris_kunci = [i for i in hasil_edit.index if validasi_lama.get(i) in _shared.STATUS_TERKUNCI]
     if baris_kunci:
-        for c in [c for c in KOLOM_EDIT if c in hasil_edit.columns and c != "Validasi"]:
+        for c in [c for c in KOLOM_EDIT if c in hasil_edit.columns and c not in ("Validasi", "Remark")]:   # Remark tetap bisa diedit
             hasil_edit.loc[baris_kunci, c] = ss.df_toko.loc[baris_kunci, c]
-    # Baris yang sudah DMS Done / DMS & Basis Done tidak boleh turun ke Need Review / Existing (ID-nya sudah dipakai di DMS).
+    # Baris yang sudah DMS Done / DMS & Basis Done BOLEH kembali ke Existing (Store ID dipertahankan), tapi tidak boleh
+    # kembali ke Generate ID / Need Review (ID-nya sudah dipakai di DMS).
     ditolak_status = []
     for i in hasil_edit.index[hasil_edit["Validasi"] != validasi_lama.loc[hasil_edit.index]]:
-        if validasi_lama.get(i) in _shared.STATUS_TERKUNCI and hasil_edit.loc[i, "Validasi"] in (STATUS_REVIEW, "Existing"):
+        if validasi_lama.get(i) in _shared.STATUS_TERKUNCI and hasil_edit.loc[i, "Validasi"] in (STATUS_REVIEW, STATUS_VALID):
             hasil_edit.loc[i, "Validasi"] = validasi_lama.get(i)
             ditolak_status.append(f"#{ss.df_toko.loc[i, '#']}")
     id_berubah = terapkan_edit(ss.df_toko, hasil_edit)
     if id_berubah:
         ss.baris_kotor.update(id_berubah)
         df = ss.df_toko
+        # DMS Done / DMS & Basis Done -> Existing: Store ID DIPERTAHANKAN (sudah dipakai di DMS). Generated At dikosongkan
+        # supaya diperlakukan seperti Existing biasa (ID tidak ikut dibuang saat Save).
+        for i in id_berubah:
+            if validasi_lama.get(i) in _shared.STATUS_TERKUNCI and df.loc[i, "Validasi"] == "Existing":
+                df.loc[i, "Generated At"] = pd.NaT
+                ss.baris_perlu_push.discard(i)
         # Existing -> Generate ID: buang Store ID lama (milik Existing) supaya ID baru benar-benar di-generate
         dari_existing = [i for i in id_berubah
                          if validasi_lama.get(i) == "Existing" and df.loc[i, "Validasi"] == STATUS_VALID]
@@ -1043,12 +1080,12 @@ def tab_noo():
         if not snapshot_baru["Validasi"].equals(ss.snapshot["Validasi"]):
             ss.snapshot = snapshot_baru; ss.kunci_editor += 1; st.rerun()
     if ditolak_status:          # turun dari DMS Done / DMS & Basis Done ditolak: gambar ulang grid + beri tahu user
-        ss.pesan_toast = f"Status not changed for {', '.join(ditolak_status[:5])} — already DMS Done / DMS & Basis Done, cannot go back."
+        ss.pesan_toast = f"Status not changed for {', '.join(ditolak_status[:5])} — already DMS Done / DMS & Basis Done, it can only go back to Existing (not Generate ID / Need Review)."
         ss.pesan_toast_icon = ":material/warning:"
         ss.kunci_editor += 1
         st.rerun()
 
-    tempat_kpi.markdown(komponen.html_kpi_validasi(ss.df_toko), unsafe_allow_html=True)
+    tempat_kpi.markdown(komponen.html_kpi_validasi(_df_kpi()), unsafe_allow_html=True)
     awal_nomor    = max(1, min(ss.halaman_data-2, total_halaman-4))
     nomor_halaman = list(range(awal_nomor, min(total_halaman, awal_nomor+4)+1))
     kolom_footer  = st.columns([14]+[1]*(len(nomor_halaman)+2))
@@ -1068,8 +1105,8 @@ def tab_noo():
 # ═════════════════════════════════════════════════════════════════════════════
 SKU_TABLE    = "sku_mapping"
 SKU_TAGGING  = ["Not Yet", "Done"]
-KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_distri", "f_brand", "f_status")
-KUNCI_SKU    = ("sku_f_nama", "sku_f_brand", "sku_f_tagging", "sku_f_dari", "sku_f_sampai", "sku_select_all")
+KUNCI_NOO    = ("f_tgl_awal", "f_tgl_akhir", "f_region", "f_distri", "f_brand", "f_status")
+KUNCI_SKU    = ("sku_f_region", "sku_f_nama", "sku_f_brand", "sku_f_tagging", "sku_f_dari", "sku_f_sampai", "sku_select_all")
 
 SKU_DL_HEADERS = ["Customer Code", "Customer Name", "Product", "Product Chinese Short Name",
                   "Product English Name", "Customer Product Code", "Customer Product Name",
@@ -1204,10 +1241,12 @@ def reset_filter_sku(tgl_min, tgl_max):
     ss = st.session_state
     ss.sku_f_nama, ss.sku_f_brand = "All customers", "All brands"
     ss.sku_f_tagging = "All tagging"
+    ss.sku_f_region = "All regions"
     ss.sku_f_dari, ss.sku_f_sampai = tgl_min, tgl_max
 
 def _refresh_sku():
     ss = st.session_state
+    segarkan_sheet_distributor()
     with st.spinner("Refreshing SKU Mapping..."):
         try:
             ambil_sku_mapping.clear()
@@ -1321,6 +1360,11 @@ def _tab_sku():
                         .replace("", np.nan).dropna().unique().tolist())
     except Exception:
         daftar_sheet = []
+    ss.setdefault("sku_f_region", "All regions")
+    region_opts = ["All regions"] + _shared.daftar_region()
+    if ss.sku_f_region not in region_opts: ss.sku_f_region = "All regions"
+    if ss.sku_f_region != "All regions":          # pilihan customer ikut menyempit sesuai Region (kolom J Distributor Mapping)
+        daftar_sheet = [d for d in daftar_sheet if _shared.region_grup(d) == ss.sku_f_region]
     nama_opts  = ["All customers"] + sorted(daftar_sheet)
     brand_opts = ["All brands", "NXP", "G2G"]
     tagging_opts = ["All tagging"] + SKU_TAGGING
@@ -1333,7 +1377,8 @@ def _tab_sku():
 
     # ── Filters ──
     with st.container(key="sku_filters"):
-        f1, f2, f3, f4, f5, f6 = st.columns([2.2, 1.2, 1.2, 1.2, 1.2, 0.8], vertical_alignment="bottom")
+        f0, f1, f2, f3, f4, f5, f6 = st.columns([1.0, 2.0, 1.1, 1.1, 1.2, 1.2, 0.8], vertical_alignment="bottom")
+        f0.selectbox("Region", region_opts, key="sku_f_region")
         f1.selectbox("Customer Store Name", nama_opts, key="sku_f_nama")
         f2.selectbox("Brand", brand_opts, key="sku_f_brand")
         f3.selectbox("Tagging", tagging_opts, key="sku_f_tagging")
@@ -1343,6 +1388,12 @@ def _tab_sku():
           args=(tgl_min, hari_ini), width="stretch")
 
     m = pd.Series(True, index=df.index)
+    if ss.sku_f_region != "All regions":
+        if kc_nama:
+            _r = {v: _shared.region_grup(v) for v in df[kc_nama].astype(str).unique()}
+            m &= df[kc_nama].astype(str).map(_r) == ss.sku_f_region
+        else:
+            m &= False
     if kc_nama and ss.sku_f_nama != "All customers":
         # contains, bukan exact: nama di data bisa "<distributor> - <cabang>" (mis. "... SEJAHTERA - KENDARI")
         _nk = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
@@ -1402,6 +1453,9 @@ def _tab_sku():
     keys = rk[m].tolist()
     ss.sku_view_keys = keys
     view = df_f.reset_index(drop=True).copy()
+    if kc_nama:                                     # kolom Region = lookup dari nama distributor (Distributor Mapping kolom J)
+        _peta_reg = {v: _shared.region_grup(v) for v in view[kc_nama].astype(str).unique()}
+        view["Region"] = view[kc_nama].astype(str).map(_peta_reg)
     view[tag] = [ss.sku_pending.get(k, v) for k, v in zip(keys, view[tag].fillna("Not Yet"))]
     pend_pos = {i for i, k in enumerate(keys) if k in ss.sku_pending}
     view.insert(0, "Pilih", [k in ss.sku_pilih for k in keys])
@@ -1412,6 +1466,8 @@ def _tab_sku():
     if "Pilih" in tampil:
         tampil.remove("Pilih")
     tampil.insert(0, "Pilih")
+    if "Region" in tampil and kc_nama in tampil:      # Region tepat di sebelah kolom nama distributor
+        tampil.remove("Region"); tampil.insert(tampil.index(kc_nama) + 1, "Region")
     # >>> EDIT LETAK KOLOM SKU MAPPING DI SINI <<<
     # Urutan tampilan = isi list `tampil`. Index 0 = Select, index 1 = Tagging (Not Yet / Done), dst.
     # Mau pindah Tagging: ubah angka di insert(1, tag) (0 = paling kiri, 2 = kolom ke-3, dst).
@@ -1599,15 +1655,18 @@ def tab_feedback():
             })
 
     with st.container(key="fb_kartu"):
-        c_filter, c_cari = st.columns([2, 1], vertical_alignment="center")
+        c_filter, c_reg, c_cari = st.columns([2, 0.9, 1], vertical_alignment="center")
         c_filter.segmented_control("Status", FB_FILTER, key="fb_filter", label_visibility="collapsed",
                                    on_change=_fb_reset_halaman)
+        f_region_fb = c_reg.selectbox("Region", ["All Region"] + _shared.daftar_region(), key="fb_region",
+                                      label_visibility="collapsed", on_change=_fb_reset_halaman)
         kata = c_cari.text_input("Search", key="fb_cari", placeholder="Search feedback...",
                                  label_visibility="collapsed", on_change=_fb_reset_halaman)
 
         pilih = ss.get("fb_filter") or "All"
         tampil = [x for x in items
                   if (pilih == "All" or x["status"] == pilih)
+                  and (f_region_fb == "All Region" or _shared.region_grup(x["distri"]) == f_region_fb)
                   and (not kata or kata.lower() in f'{x["title"]} {x["issue"]} {x["user"]} {x["distri"]} {x["wa"]} #{x["no"]}'.lower())]
 
         total = len(tampil)
@@ -2094,14 +2153,18 @@ def tab_hasil_feedback():
 
     _kartu_tutorial()
     opsi = ["All", "5★", "4★", "3★", "2★", "1★"]
-    c_f, c_c = st.columns([3, 2], vertical_alignment="center")
+    c_f, c_reg, c_c = st.columns([3, 1, 2], vertical_alignment="center")
     pilih = c_f.segmented_control("Rating", opsi, key="hf_filter", label_visibility="collapsed",
                                   on_change=lambda: ss.update(hf_halaman=1)) or "All"
+    f_region_hf = c_reg.selectbox("Region", ["All Region"] + _shared.daftar_region(), key="hf_region",
+                                  label_visibility="collapsed", on_change=lambda: ss.update(hf_halaman=1))
     kata = c_c.text_input("Search", key="hf_cari", placeholder="Search user, category, comment...",
                           label_visibility="collapsed", on_change=lambda: ss.update(hf_halaman=1))
 
     def _cocok(x):
         if pilih != "All" and _rating(x) != int(pilih[0]):
+            return False
+        if f_region_hf != "All Region" and _shared.region_dari_kode(x.get(KOLOM_FB_USER)) != f_region_hf:
             return False
         if kata:
             u = str(x.get(KOLOM_FB_USER) or "").upper()
@@ -2220,8 +2283,13 @@ def halaman_dashboard():
         df_sku["_brand"] = df_sku[col_cc_sku].astype(str).apply(_brand_dari_cc)
 
     st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
-    f1,f2,f3,f4,f5 = st.columns([1.4,1.4,1.4,1.4,0.8])
-    distri_opts = ["All Distributor"] + daftar_distributor()          # dari Distributor Mapping, Status = Active
+    f0,f1,f2,f3,f4,f5 = st.columns([1.1,1.4,1.2,1.3,1.3,0.8])
+    # Region = kolom J sheet Distributor Mapping (Region 1..5); memfilter NOO, SKU, dan pilihan Distributor
+    f_region   = f0.selectbox("Region", ["All Region"] + _shared.daftar_region(), key="dash_region")
+    distri_opts = ["All Distributor"] + [d for d in daftar_distributor()          # dari Distributor Mapping, Status = Active
+                                         if f_region == "All Region" or _shared.region_grup(d) == f_region]
+    if st.session_state.get("dash_distri") not in distri_opts:
+        st.session_state["dash_distri"] = "All Distributor"      # distributor yang dipilih tidak ada di Region ini
     f_distri   = f1.selectbox("Distributor", distri_opts, key="dash_distri")
     brand_opts = ["All Brand", "G2G", "NXP"]
     if not df_sku.empty and "Other" in df_sku["_brand"].values:
@@ -2234,7 +2302,7 @@ def halaman_dashboard():
     with f5:
         st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
         if st.button(":material/refresh: Refresh", key="dash_refresh", width="stretch"):
-            ambil_data_dashboard.clear(); st.rerun()
+            ambil_data_dashboard.clear(); segarkan_sheet_distributor(); st.rerun()
 
     df_noo_f = df_noo.copy() if not df_noo.empty else df_noo
     df_sku_f = df_sku.copy() if not df_sku.empty else df_sku
@@ -2244,6 +2312,16 @@ def halaman_dashboard():
     if not df_noo_f.empty and col_distri and f_distri != "All Distributor":
         df_noo_f = df_noo_f[df_noo_f[col_distri].astype(str).str.strip().str.lower()
                             .str.startswith(f_distri.strip().lower())]
+    if f_region != "All Region":
+        if not df_noo_f.empty and col_distri:
+            _r = {v: _shared.region_grup(v) for v in df_noo_f[col_distri].astype(str).unique()}
+            df_noo_f = df_noo_f[df_noo_f[col_distri].astype(str).map(_r) == f_region]
+        _col_nama_sku = peta_sku.get("customername") or peta_sku.get("customer_name")
+        if not df_sku_f.empty and _col_nama_sku:
+            _r = {v: _shared.region_grup(v) for v in df_sku_f[_col_nama_sku].astype(str).unique()}
+            df_sku_f = df_sku_f[df_sku_f[_col_nama_sku].astype(str).map(_r) == f_region]
+        elif not df_sku_f.empty:
+            df_sku_f = df_sku_f.iloc[0:0]
     if not df_sku_f.empty and col_created_sku:
         tgl_sku  = ke_wib_naive(df_sku_f[col_created_sku]).dt.date
         df_sku_f = df_sku_f[(tgl_sku >= f_tgl_dari) & (tgl_sku <= f_tgl_sampai)]
@@ -2847,13 +2925,6 @@ def _tab_clear_history():
             ss[_k] = _keep[_k]
     if hasil := ss.pop("riw_hasil", None):
         (st.error if hasil[0] == "error" else st.success)(hasil[1])
-    # judul halaman tab ini (gaya sama dengan tab Reset password / Sign-up approval), judulnya di-highlight
-    st.markdown("""<style>
-.rq-head h4.hl-judul{display:inline-block;background:linear-gradient(transparent 55%,#fde68a 55%);padding:0 6px;border-radius:4px}
-</style>
-<div class="rq-head"><h4 class="hl-judul">Clear history</h4></div>
-<p class="rq-desc">Delete old records from the app tables. Choose what to clear, then confirm. This cannot be undone.</p>""",
-                unsafe_allow_html=True)
     # judul "Select what to clear" di-highlight (latar kuning seperti stabilo + tebal)
     st.markdown("""<style>
 .st-key-clear_bagian [data-testid="stWidgetLabel"] p{
@@ -3168,12 +3239,16 @@ def main():
                 keluar()
                 st.rerun()
 
-    {
-        "dashboard":  halaman_dashboard_tabs,
-        "validasi":   halaman_validasi_toko,
-        "riwayat":    halaman_riwayat,
-        "pengaturan": halaman_pengaturan,
-    }[ss.halaman_aktif]()
+    # Anti "jejak" halaman sebelumnya: st.empty() langsung mengosongkan isi halaman lama saat pindah halaman (tanpa menunggu
+    # skrip selesai, mis. Settings yang membaca Supabase dulu), dan tiap halaman punya container sendiri.
+    _slot_halaman = st.empty()
+    with _slot_halaman.container(key=f"halaman_{ss.halaman_aktif}"):
+        {
+            "dashboard":  halaman_dashboard_tabs,
+            "validasi":   halaman_validasi_toko,
+            "riwayat":    halaman_riwayat,
+            "pengaturan": halaman_pengaturan,
+        }[ss.halaman_aktif]()
 
 if __name__ == "__main__":
     main()  
