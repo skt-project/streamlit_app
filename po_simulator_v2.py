@@ -249,10 +249,56 @@ def get_sku_data(sku_list) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+
+# =====================================================================
+# NPD ALLOCATION SKU FILTER  (<-- EDIT DI SINI KALAU SKU BERUBAH)
+# ---------------------------------------------------------------------
+# Daftar SKU yang dianggap NPD / punya allocation di bulan ini.
+# Dipakai di 2 tempat (otomatis ikut berubah, tidak perlu edit query):
+#   1. _get_npd_data_cached()    -> highlight biru NPD di Excel
+#   2. get_national_alloc_total() -> hitung National Alloc Qty (Basis)
+#
+# Cara ganti tiap bulan: ubah isi list di bawah (pakai huruf BESAR).
+# Mau tampilkan SEMUA SKU di npd_allocation (tanpa filter)? -> set jadi [].
+#
+# CATATAN: hasil di-cache (6 jam untuk NPD, 1 jam untuk national alloc).
+# Setelah ganti list, clear cache (menu Streamlit "Clear cache" / tekan C)
+# atau restart app, supaya perubahan langsung terlihat.
+# =====================================================================
+NPD_ALLOC_SKUS = ["G2G-493", "G2G-303"]   # periode: bulan ini
+
+
+def _npd_sku_filter_sql(col: str = "sku") -> str:
+    """Return potongan SQL 'AND UPPER(col) IN (...)' dari NPD_ALLOC_SKUS.
+    Kalau list kosong -> string kosong (artinya tanpa filter SKU)."""
+    if not NPD_ALLOC_SKUS:
+        return ""
+    skus = ", ".join(f"'{s.upper()}'" for s in NPD_ALLOC_SKUS)
+    return f"AND UPPER({col}) IN ({skus})"
+
+
+def _alloc_applies(sku_series: pd.Series) -> pd.Series:
+    """True untuk SKU yang aturan allocation-nya boleh berlaku (= SKU di NPD_ALLOC_SKUS).
+
+    Dipakai supaya remark 'Reject (Negative Allocation)' HANYA muncul untuk SKU NPD.
+    SKU lain (mis. G2G-32500x) dianggap tidak punya allocation bulan ini, jadi nilai
+    remaining_allocation_qty_region negatif di BQ-nya diabaikan.
+    Kalau NPD_ALLOC_SKUS kosong ([]) -> berlaku untuk semua SKU (perilaku lama).
+    """
+    if not NPD_ALLOC_SKUS:
+        return pd.Series(True, index=sku_series.index)
+    return sku_series.astype(str).str.upper().isin([s.upper() for s in NPD_ALLOC_SKUS])
+
+
 @st.cache_data(ttl=21600, show_spinner="Fetching NPD data from BigQuery...")
 def _get_npd_data_cached() -> pd.DataFrame:
     client = get_bq_client()
-    query = f"SELECT calendar_date, region, sku FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` WHERE calendar_date = DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH) and sku in ('G2G-493', 'G2G-303')"
+    query = (
+        f"SELECT calendar_date, region, sku "
+        f"FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation` "
+        f"WHERE calendar_date = DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH) "
+        f"{_npd_sku_filter_sql('sku')}"
+    )
     try:
         return client.query(query).to_dataframe()
     except Exception as e:
@@ -634,6 +680,7 @@ def get_national_alloc_total() -> pd.DataFrame:
             SELECT DISTINCT UPPER(sku) AS sku
             FROM `{GCP_PROJECT_ID}.gt_schema.npd_allocation`
             WHERE calendar_date = DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH)
+            {_npd_sku_filter_sql('sku')}  -- filter SKU NPD: ubah di NPD_ALLOC_SKUS
         ),
         per_region AS (
             SELECT UPPER(region) AS region, UPPER(sku) AS sku,
@@ -1390,7 +1437,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         bp_s = res_df.get("buffer_plan_by_lm_qty_adj", pd.Series([0]*len(res_df), index=res_df.index))
 
         excl = (res_df["Customer SKU Code"].isin(skus_not_found) |
-                (ra_s < 0) |
+                ((ra_s < 0) & _alloc_applies(res_df["Customer SKU Code"])) |   # negative alloc hanya utk SKU NPD (NPD_ALLOC_SKUS)
                 sc_s.str.upper().isin(["STOP PO","DISCONTINUED","OOS","UNAVAILABLE"]) |
                 (res_df["Customer SKU Code"].isin(limited_skus_qty) & (bp_s > __MAX_QTY_LIMIT)) |
                 (bp_s == 0))
@@ -1420,7 +1467,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
             res_df["Customer SKU Code"].isin(zero_price_skus), #1
             res_df["Customer SKU Code"].isin(skus_not_found), #2
             res_df["Customer SKU Code"].isin(limited_skus_qty) & (res_df["PO Qty"] > __MAX_QTY_LIMIT), #3
-            ra2 < 0, #4
+            (ra2 < 0) & _alloc_applies(res_df["Customer SKU Code"]), #4  (hanya SKU NPD_ALLOC_SKUS)
             res_df["is_po_sku"] == False, #5
             (res_df["Customer SKU Code"].isin(VITA_C_INC_STOP) 
              &((res_df["region"].astype(str).str.lower().str.contains("sulawesi", case=False, na=False)) |(res_df["region"].astype(str).str.lower().str.contains("maluku", case=False, na=False)))), #6
@@ -1838,6 +1885,26 @@ def _render_pi_validation():
 def _flag_po_downloaded():
     # Dipanggil saat user klik download apa pun -> Supply Control otomatis disimpan di step 8
     st.session_state["pending_auto_save_sc"] = True
+
+
+@st.dialog("Confirm submit")
+def _confirm_submit_dialog(n_rows: int):
+    # Konfirmasi SEBELUM data Supply Control ditulis ke BigQuery.
+    # Yes    -> set flag 'sc_confirmed_save', lalu rerun -> blok AUTO SAVE di step 8 yang menyimpan.
+    # Cancel -> tutup dialog, tidak ada yang disimpan.
+    st.markdown(
+        f"<div style='text-align:center;'>"
+        f"<p style='font-size:1.1rem;font-weight:700;margin:.2rem 0;'>Are you sure you want to submit?</p>"
+        f"<p style='color:#555;margin:0 0 1rem;'>{n_rows} Supply Control rows will be saved to the table.</p>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    c_yes, c_no = st.columns(2)
+    if c_yes.button("Yes, submit", use_container_width=True, type="primary", key="btn_confirm_submit_yes"):
+        st.session_state["sc_confirmed_save"] = True
+        st.rerun()
+    if c_no.button("Cancel", use_container_width=True, key="btn_confirm_submit_no"):
+        st.rerun()
 
 
 @st.dialog("Successfully submitted to Table")
@@ -2279,11 +2346,18 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
     # ===== AUTO SAVE: tanpa tombol, otomatis tersimpan saat user download (PO Result / gambar / pivot) =====
     # Duplikat dicegah oleh _filter_already_saved (file_name+sku+qty+tanggal) + flag per simulasi.
-    _do_save = st.session_state.pop("pending_auto_save_sc", False)
+    # Alur: download -> pending_auto_save_sc -> dialog konfirmasi -> (Yes) sc_confirmed_save -> simpan -> dialog sukses.
+    _ask_save = st.session_state.pop("pending_auto_save_sc", False)
+    _do_save = st.session_state.pop("sc_confirmed_save", False)   # hanya True setelah user klik "Yes, submit"
     _submitted_rows = None
+    if _ask_save and not sc_df.empty:
+        if st.session_state.get("supply_control_saved", False):
+            st.toast("Supply Control has already been saved.", icon="ℹ️")
+        else:
+            _confirm_submit_dialog(len(sc_df))
     if _do_save and not sc_df.empty:
         if st.session_state.get("supply_control_saved", False):
-            st.toast("Supply Control sudah tersimpan sebelumnya.", icon="ℹ️")
+            st.toast("Supply Control has already been saved.", icon="ℹ️")
         else:
             try:
                 out_df = sc_df[preview_cols].copy()
@@ -2301,17 +2375,17 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
 
                 if filtered_df.empty:
                     st.session_state["supply_control_saved"] = True
-                    st.toast("Semua baris sudah pernah tersimpan (file_name+sku+qty+tanggal).", icon="ℹ️")
+                    st.toast("All rows were already saved (file_name+sku+qty+date).", icon="ℹ️")
                 else:
                     _insert_supply_control(filtered_df)
                     st.session_state["supply_control_saved"] = True
-                    msg = f"{len(filtered_df)} baris tersimpan ke po_supply_control_g2g"
+                    msg = f"{len(filtered_df)} rows saved to po_supply_control_g2g"
                     if n_skipped:
-                        msg += f" ({n_skipped} dilewati, sudah ada)"
+                        msg += f" ({n_skipped} skipped, already exist)"
                     st.toast(msg, icon="✅")
                     _submitted_rows = len(filtered_df)
             except Exception as e:
-                st.error(f"Gagal simpan ke BigQuery: {e}")
+                st.error(f"Failed to save to BigQuery: {e}")
     if _submitted_rows:
         _submitted_dialog(_submitted_rows)
 
