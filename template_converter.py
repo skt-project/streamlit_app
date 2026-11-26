@@ -522,6 +522,13 @@ def _read_excel_cells_as_text(
     if not all_rows:
         return pd.DataFrame()
 
+    # openpyxl read-only rows can have different lengths. pandas 3 warns (and a
+    # later version will raise) on ragged rows, so pad every row to the same width.
+    width = max(len(r) for r in all_rows)
+    for r in all_rows:
+        if len(r) < width:
+            r.extend([""] * (width - len(r)))
+
     if header is None:
         return pd.DataFrame(all_rows)
 
@@ -547,9 +554,11 @@ def sniff_file_kind(uploaded_file) -> str:
     Lets a mislabelled file (xlsx saved as .xls, .xls that is really xlsx, ...)
     still load.
     """
+    # Only the first couple of KB are needed; reading the whole upload on every
+    # rerun copies the full file into RAM each time.
     if hasattr(uploaded_file, "seek"):
         uploaded_file.seek(0)
-    data = uploaded_file.read()
+    data = uploaded_file.read(2048)
     if hasattr(uploaded_file, "seek"):
         uploaded_file.seek(0)
     if isinstance(data, str):
@@ -557,14 +566,18 @@ def sniff_file_kind(uploaded_file) -> str:
 
     if data[:4] == b"PK\x03\x04":
         try:
-            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            # ZipFile reads just the central directory from the file object.
+            with zipfile.ZipFile(uploaded_file) as zf:
                 names = set(zf.namelist())
-                if "xl/workbook.xml" in names or "xl/workbook.bin" in names:
-                    return "xlsx"
-                if "content.xml" in names and "mimetype" in names:
-                    return "ods"
+            if "xl/workbook.xml" in names or "xl/workbook.bin" in names:
+                return "xlsx"
+            if "content.xml" in names and "mimetype" in names:
+                return "ods"
         except zipfile.BadZipFile:
             pass
+        finally:
+            if hasattr(uploaded_file, "seek"):
+                uploaded_file.seek(0)
         return "unknown"
     if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return "xls"
@@ -637,7 +650,9 @@ def get_bq_client() -> bigquery.Client:
 # =========================
 # BigQuery Bootstrap
 # =========================
+@st.cache_resource(show_spinner=False)
 def ensure_bq_objects():
+    """Create dataset/table if missing. Cached: runs once per server process, not per rerun."""
     client = get_bq_client()
     dataset_ref = bigquery.Dataset(f"{client.project}.{BQ_DATASET}")
     try:
@@ -663,6 +678,7 @@ def ensure_bq_objects():
 # =========================
 # BigQuery Helpers
 # =========================
+@st.cache_data(ttl=600, show_spinner=False)
 def list_distributors() -> List[str]:
     client = get_bq_client()
     sql = f"""
@@ -674,6 +690,7 @@ def list_distributors() -> List[str]:
     return [r.distributor for r in rows]
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_config(distributor: str) -> Optional[Dict]:
     client = get_bq_client()
     sql = f"""
@@ -696,7 +713,7 @@ def get_config(distributor: str) -> Optional[Dict]:
     }
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=3600, max_entries=2000, show_spinner=False)
 def lookup_branch_info_by_store_prefix(store_code_prefix: str) -> Optional[Dict]:
     """
     Looks up Customer Branch Code and Customer Branch Name from master_distributor
@@ -882,10 +899,12 @@ def map_3m_to_master(
             "Customer Branch Name": static_fields.get("Customer Branch Name", ""),
         })
 
-    enriched = out["Customer Store Code"].apply(enrich_from_bq)
-    out["Customer Name"] = enriched["Customer Name"]
-    out["Customer Branch Code"] = enriched["Customer Branch Code"]
-    out["Customer Branch Name"] = enriched["Customer Branch Name"]
+    # Resolve once per unique store code (not once per row, which built a
+    # pd.Series per row and was very slow on large files).
+    store_codes = out["Customer Store Code"].astype(object)
+    lookup = {code: enrich_from_bq(code) for code in store_codes.unique()}
+    for col in ("Customer Name", "Customer Branch Code", "Customer Branch Name"):
+        out[col] = store_codes.map(lambda code, c=col: lookup[code][c])
 
     # Deduplicate miss list
     bq_lookup_misses = list(dict.fromkeys(bq_lookup_misses))
@@ -1795,6 +1814,18 @@ def main():
     except Exception as e:
         st.error(f"BigQuery setup error: {e}")
         st.stop()
+
+    def _refresh_config():
+        # Only the config-related caches; the BQ client and branch lookups stay warm.
+        list_distributors.clear()
+        get_config.clear()
+        lookup_branch_info_by_store_prefix.clear()
+
+    st.button(
+        "🔄 Refresh config",
+        on_click=_refresh_config,
+        help="Reload distributor list and config from BigQuery (cached up to 5-10 minutes otherwise).",
+    )
 
     distributors = list_distributors()
     if not distributors:
