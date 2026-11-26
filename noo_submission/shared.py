@@ -97,21 +97,21 @@ WARNA_VALIDASI = {
 # Kiri = nilai status asli di Supabase (kolom tagging), kanan = teks yang dilihat user/distributor di History.
 # Mau ganti istilahnya? Ubah sisi kanan saja (dan warnanya di WARNA_HISTORY di bawah).
 LABEL_HISTORY = {
-    "Need Review":   "Under Review",         # NOO baru masuk, masih dicek
-    "Existing":      "Existing Store",       # bukan NOO: toko sudah ada
-    "Generate ID":   "Awaiting DMS Upload",  # Store ID sudah dibuat, menunggu di-upload ke DMS
-    "DMS Done":      "Ready in DMS",         # sudah di-upload ke DMS
-    "DMS & Basis Done": "Fully Processed",   # sudah masuk DMS dan basis, semua tahap selesai
-    "Basis Done":    "Fully Processed",      # nama lama status (kompatibilitas)
-    "DMS Uploaded":  "Ready in DMS",         # nama lama status (kompatibilitas)
-    "Basis Updated": "Fully Processed",      # nama lama status (kompatibilitas)
+    "Need Review":   "Sedang Direview",         # NOO baru masuk, masih dicek
+    "Existing":      "Toko Sudah Ada",       # bukan NOO: toko sudah ada
+    "Generate ID":   "Menunggu Upload DMS",  # Store ID sudah dibuat, menunggu di-upload ke DMS
+    "DMS Done":      "Sudah di DMS",         # sudah di-upload ke DMS
+    "DMS & Basis Done": "Selesai Diproses",   # sudah masuk DMS dan basis, semua tahap selesai
+    "Basis Done":    "Selesai Diproses",      # nama lama status (kompatibilitas)
+    "DMS Uploaded":  "Sudah di DMS",         # nama lama status (kompatibilitas)
+    "Basis Updated": "Selesai Diproses",      # nama lama status (kompatibilitas)
 }
 WARNA_HISTORY = {
-    "Under Review":        "background-color: #fff3cd; color: #8a5a00; font-weight: 600",   # kuning
-    "Existing Store":      "background-color: #e5e7eb; color: #374151; font-weight: 600",   # abu
-    "Awaiting DMS Upload": "background-color: #d3f9d8; color: #1b5e20; font-weight: 600",   # hijau (sama dgn Generate ID)
-    "Ready in DMS":        "background-color: #cfe8ff; color: #0b4a8f; font-weight: 600",   # biru (sama dgn DMS Done)
-    "Fully Processed":     "background-color: #e6d9ff; color: #5b21b6; font-weight: 600",   # ungu (sama dgn Basis Done)
+    "Sedang Direview":        "background-color: #fff3cd; color: #8a5a00; font-weight: 600",   # kuning
+    "Toko Sudah Ada":      "background-color: #e5e7eb; color: #374151; font-weight: 600",   # abu
+    "Menunggu Upload DMS": "background-color: #d3f9d8; color: #1b5e20; font-weight: 600",   # hijau (sama dgn Generate ID)
+    "Sudah di DMS":        "background-color: #cfe8ff; color: #0b4a8f; font-weight: 600",   # biru (sama dgn DMS Done)
+    "Selesai Diproses":     "background-color: #e6d9ff; color: #5b21b6; font-weight: 600",   # ungu (sama dgn Basis Done)
 }
 
 #--------------------BIGQUERY---------------------
