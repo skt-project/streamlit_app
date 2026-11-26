@@ -364,6 +364,23 @@ def _patch_kolom_edit(baris: pd.Series) -> dict:
         patch[nama_sb] = v
     return patch
 
+def _cap_waktu_status(patch: dict, tagging_baru: str, status_lama) -> dict:
+    """Catat kapan sebuah toko menjadi DMS Done / DMS & Basis Done (untuk SLA). Hanya dipakai bila kolom dms_done_at /
+    basis_done_at sudah dibuat di Supabase (sql_sla_timestamps.sql); kalau belum, tidak ada yang ditambahkan."""
+    baru, lama = _status_normal(tagging_baru), _status_normal(status_lama) if status_lama else ""
+    if baru == lama:
+        return patch
+    try:
+        rows = ambil_raw_noo()
+        kolom = {re.sub(r"[^a-z0-9]", "", k.lower()): k for k in (rows[0] if rows else {})}
+    except Exception:
+        return patch
+    nama_kolom = {_shared.STATUS_DMS: "dmsdoneat", _shared.STATUS_BASIS: "basisdoneat"}.get(baru)
+    if nama_kolom and nama_kolom in kolom:
+        patch[kolom[nama_kolom]] = datetime.datetime.now(ZONA_WAKTU).isoformat(timespec="seconds")
+    return patch
+
+
 def _distri_pertama(df, idx_list) -> str:
     if "Distributor" not in df.columns:
         return ""
@@ -443,7 +460,9 @@ def ubah_status_dan_simpan(df, idx_list, status_lama) -> list:
     for i in idx_list:
         kode = str(df.loc[i, "Customer Store Code"]).strip()
         nama = str(df.loc[i, "Customer Store Name"]).strip()
-        if kode and nama and sb_patch_by_kode_nama(TABLE_SUBMIT_NOO, kode, nama, {"tagging": df.loc[i, "Validasi"]}):
+        if kode and nama and sb_patch_by_kode_nama(
+                TABLE_SUBMIT_NOO, kode, nama,
+                _cap_waktu_status({"tagging": df.loc[i, "Validasi"]}, df.loc[i, "Validasi"], status_lama.get(i))):
             remark = _remark_perubahan(status_lama.get(i), df.loc[i, "Store ID"], df.loc[i, "Validasi"], df.loc[i, "Store ID"])
             item_sheet.append(_item_sheet(df, i, kode, nama, remark))
             continue
@@ -492,6 +511,9 @@ def simpan_perubahan():
         tagging = str(df.loc[idx,"Validasi"]).strip()
         patch   = {"tagging": tagging}
         patch.update(_patch_kolom_edit(df.loc[idx]))     # City, Address, Long/Lat, Store Type, Store Name
+        _lama_sb = sebelum.get((kode, nama))
+        if _lama_sb is not None:
+            _cap_waktu_status(patch, tagging, _lama_sb[0])   # waktu DMS Done / Basis Done (SLA), bila kolomnya ada
         if tagging == "Existing" and pd.isna(df.loc[idx,"Generated At"]):
             # Existing dari SPV Confirmation / diketik manual: Store ID diisi user -> simpan apa adanya, jangan dikosongkan
             sid_ada = str(df.loc[idx,"Store ID"]).strip()
@@ -648,7 +670,7 @@ def tab_noo():
         if "Created At" in ss.df_toko.columns else pd.NaT
     tgl_awal = hari_ini if pd.isna(tgl_min) else tgl_min.date()
 
-    c_tgl1,c_tgl2,c_region,c_distri,c_brand,c_status = st.columns([1.2,1.2,1.0,1.7,1.1,1.3])
+    c_tgl1,c_tgl2,c_region,c_distri,c_brand,c_status = st.columns([1,1,1,1,1,1])
     with c_tgl1:
         tgl_dari = st.date_input("Date from", value=tgl_awal, key="f_tgl_awal",
                                   format="YYYY-MM-DD", on_change=reset_halaman_data)
@@ -1377,7 +1399,7 @@ def _tab_sku():
 
     # ── Filters ──
     with st.container(key="sku_filters"):
-        f0, f1, f2, f3, f4, f5, f6 = st.columns([1.0, 2.0, 1.1, 1.1, 1.2, 1.2, 0.8], vertical_alignment="bottom")
+        f0, f1, f2, f3, f4, f5, f6 = st.columns([1, 1, 1, 1, 1, 1, 0.7], vertical_alignment="bottom")
         f0.selectbox("Region", region_opts, key="sku_f_region")
         f1.selectbox("Customer Store Name", nama_opts, key="sku_f_nama")
         f2.selectbox("Brand", brand_opts, key="sku_f_brand")
@@ -1613,6 +1635,10 @@ def _fb_reset_halaman():
 def _fb_ke_halaman(n):
     st.session_state.fb_halaman = n
 
+def _baca_bukti(nilai) -> list:
+    from help_support import baca_bukti
+    return baca_bukti(nilai)
+
 def tab_feedback():
     import html as _html
     ss = st.session_state
@@ -1649,6 +1675,7 @@ def tab_feedback():
                 "user":   kode_user,
                 "distri": (peta_distri.get(kode_user) or {}).get("distributor", ""),
                 "wa":     re.sub(r"\D", "", str(r.get("nomor_wa", "") or "")),   # hanya angka
+                "bukti":  _baca_bukti(r.get("attachments")),
                 "prio":   str(r.get("priority", "")),
                 "status": _status_fb(r.get("status")),
                 "waktu":  waktu.iloc[i],
@@ -1703,6 +1730,10 @@ def tab_feedback():
                     f'<div class="fb-kanan"><span class="fb-badge {kelas}">● {x["status"]}</span>'
                     f'<div class="fb-tgl">{tgl}</div></div></div>')
             st.markdown("".join(baris), unsafe_allow_html=True)
+            for x in potong:                                  # bukti gambar dari user (kalau ada)
+                if x["bukti"]:
+                    with st.expander(f":material/image: Evidence for #{x['no']} ({len(x['bukti'])} image(s))"):
+                        st.image(x["bukti"], width="stretch")
 
             # ubah In Progress -> Solved (tiket di halaman ini yang punya id)
             is_bd = (ss.get("user") or {}).get("tagging") in ("RSA", "BD SUPPORT", "BD_SUPPORT")
@@ -1830,61 +1861,8 @@ _WARNA_RATING = {1: "#e5484d", 2: "#f76b15", 3: "#f5b400", 4: "#46a758", 5: "#12
 _HASIL_FB_PER_HAL = 6
 
 
-# Avatar hewan bergaya kawaii (SVG orisinal, digambar sendiri). Satu hewan per user, dipilih dari hash nama.
-_WAJAH = ('<circle cx="24" cy="38" r="2.6" fill="#2b2233"/><circle cx="40" cy="38" r="2.6" fill="#2b2233"/>'
-          '<circle cx="25" cy="37" r="0.9" fill="#fff"/><circle cx="41" cy="37" r="0.9" fill="#fff"/>'
-          '<ellipse cx="19" cy="44" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/>'
-          '<ellipse cx="45" cy="44" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/>'
-          '<path d="M29 44q3 3 6 0" stroke="#2b2233" stroke-width="1.6" fill="none" stroke-linecap="round"/>')
-_HEWAN_SVG = {
-    "cat": '<path d="M13 28L15 8L28 19Z" fill="#ffc98a"/><path d="M51 28L49 8L36 19Z" fill="#ffc98a"/>'
-           '<path d="M16 24L17 14L24 20Z" fill="#ffadc2"/><path d="M48 24L47 14L40 20Z" fill="#ffadc2"/>'
-           '<circle cx="32" cy="38" r="21" fill="#ffd9a8"/>' + _WAJAH +
-           '<path d="M6 40h9M7 46l8-2M58 40h-9M57 46l-8-2" stroke="#b08a6a" stroke-width="1.2" stroke-linecap="round"/>',
-    "bear": '<circle cx="14" cy="21" r="8" fill="#b9825a"/><circle cx="50" cy="21" r="8" fill="#b9825a"/>'
-            '<circle cx="14" cy="21" r="4" fill="#e8b48f"/><circle cx="50" cy="21" r="4" fill="#e8b48f"/>'
-            '<circle cx="32" cy="38" r="21" fill="#c99468"/><ellipse cx="32" cy="45" rx="9" ry="7" fill="#f1d3b3"/>'
-            + _WAJAH.replace('<path d="M29 44q3 3 6 0"', '<ellipse cx="32" cy="42" rx="2.4" ry="1.8" fill="#3b2a2a"/><path d="M29 46q3 3 6 0"'),
-    "rabbit": '<ellipse cx="22" cy="14" rx="6" ry="14" fill="#fff"/><ellipse cx="42" cy="14" rx="6" ry="14" fill="#fff"/>'
-              '<ellipse cx="22" cy="15" rx="3" ry="9" fill="#ffc2d4"/><ellipse cx="42" cy="15" rx="3" ry="9" fill="#ffc2d4"/>'
-              '<circle cx="32" cy="40" r="20" fill="#fff" stroke="#f1e6ee" stroke-width="1"/>' + _WAJAH,
-    "panda": '<circle cx="14" cy="21" r="8" fill="#2b2233"/><circle cx="50" cy="21" r="8" fill="#2b2233"/>'
-             '<circle cx="32" cy="38" r="21" fill="#fff" stroke="#eee" stroke-width="1"/>'
-             '<ellipse cx="23" cy="37" rx="6" ry="7" fill="#2b2233" transform="rotate(-20 23 37)"/>'
-             '<ellipse cx="41" cy="37" rx="6" ry="7" fill="#2b2233" transform="rotate(20 41 37)"/>'
-             '<circle cx="24" cy="37" r="2.4" fill="#fff"/><circle cx="40" cy="37" r="2.4" fill="#fff"/>'
-             '<circle cx="24.4" cy="37.2" r="1.2" fill="#2b2233"/><circle cx="39.6" cy="37.2" r="1.2" fill="#2b2233"/>'
-             '<ellipse cx="32" cy="44" rx="2.4" ry="1.8" fill="#2b2233"/>'
-             '<path d="M29 47q3 3 6 0" stroke="#2b2233" stroke-width="1.6" fill="none" stroke-linecap="round"/>'
-             '<ellipse cx="18" cy="47" rx="3.4" ry="2" fill="#ff9fb8" opacity=".7"/><ellipse cx="46" cy="47" rx="3.4" ry="2" fill="#ff9fb8" opacity=".7"/>',
-    "dog": '<ellipse cx="11" cy="32" rx="7" ry="13" fill="#9a6b45" transform="rotate(15 11 32)"/>'
-           '<ellipse cx="53" cy="32" rx="7" ry="13" fill="#9a6b45" transform="rotate(-15 53 32)"/>'
-           '<circle cx="32" cy="38" r="20" fill="#f3d3a8"/><ellipse cx="32" cy="46" rx="9" ry="7" fill="#fff3e0"/>'
-           + _WAJAH.replace('<path d="M29 44q3 3 6 0"', '<ellipse cx="32" cy="42" rx="3" ry="2.2" fill="#2b2233"/><path d="M29 47q3 3 6 0"'),
-    "frog": '<circle cx="19" cy="20" r="9" fill="#7ed37e"/><circle cx="45" cy="20" r="9" fill="#7ed37e"/>'
-            '<circle cx="19" cy="20" r="5" fill="#fff"/><circle cx="45" cy="20" r="5" fill="#fff"/>'
-            '<circle cx="19" cy="20.5" r="2.6" fill="#2b2233"/><circle cx="45" cy="20.5" r="2.6" fill="#2b2233"/>'
-            '<ellipse cx="32" cy="42" rx="22" ry="17" fill="#8fdc8f"/>'
-            '<ellipse cx="17" cy="45" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/><ellipse cx="47" cy="45" rx="3.6" ry="2.2" fill="#ff9fb8" opacity=".8"/>'
-            '<path d="M24 46q8 7 16 0" stroke="#2b2233" stroke-width="1.8" fill="none" stroke-linecap="round"/>'
-            '<circle cx="29" cy="38" r="1" fill="#4a9a4a"/><circle cx="35" cy="38" r="1" fill="#4a9a4a"/>',
-    "penguin": '<circle cx="32" cy="36" r="23" fill="#3a3550"/><ellipse cx="32" cy="42" rx="16" ry="15" fill="#fff"/>'
-               '<circle cx="24" cy="36" r="2.6" fill="#2b2233"/><circle cx="40" cy="36" r="2.6" fill="#2b2233"/>'
-               '<circle cx="25" cy="35" r="0.9" fill="#fff"/><circle cx="41" cy="35" r="0.9" fill="#fff"/>'
-               '<path d="M27 41h10l-5 6Z" fill="#ffb347"/>'
-               '<ellipse cx="19" cy="42" rx="3.4" ry="2" fill="#ff9fb8" opacity=".8"/><ellipse cx="45" cy="42" rx="3.4" ry="2" fill="#ff9fb8" opacity=".8"/>',
-    "chick": '<path d="M32 10q-5 -3 -6 2q4 0 6 4q2 -4 6 -4q-1 -5 -6 -2Z" fill="#ffd23f"/>'
-             '<circle cx="32" cy="38" r="22" fill="#ffe066"/>' + _WAJAH.replace('<path d="M29 44q3 3 6 0" stroke="#2b2233" stroke-width="1.6" fill="none" stroke-linecap="round"/>', '<path d="M28 42h8l-4 5Z" fill="#ff9f43"/>') +
-             '<path d="M9 36q-4 8 3 11M55 36q4 8 -3 11" stroke="#f5c518" stroke-width="3" fill="none" stroke-linecap="round"/>',
-}
-_HEWAN_URUT = list(_HEWAN_SVG)
-
-
-def _hewan_avatar(nama):
-    # hewan kawaii acak tapi KONSISTEN per user (dipilih dari hash nama), jadi user yang sama selalu dapat hewan yang sama
-    import zlib
-    h = _HEWAN_URUT[zlib.crc32(str(nama).encode("utf-8")) % len(_HEWAN_URUT)]
-    return f'<svg width="34" height="34" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">{_HEWAN_SVG[h]}</svg>'
+# Avatar hewan kawaii dipindah ke avatar_hewan.py (dipakai juga oleh pop-up Welcome)
+from avatar_hewan import _HEWAN_SVG, _HEWAN_URUT, _hewan_avatar
 
 
 def _smiley_svg(persen, jenis):
@@ -2230,11 +2208,280 @@ def tab_hasil_feedback():
 def _excel_cache(df, startrow=1):
     return hasil_ke_excel(df, startrow=startrow)
 
+
+# ═══════════════════════════════════════
+# SLA PERFORMANCE (waktu proses NOO)
+# ═══════════════════════════════════════
+def _fmt_durasi(jam) -> str:
+    if jam is None or pd.isna(jam):
+        return "-"
+    if jam < 1:
+        return f"{jam * 60:.0f} min"
+    if jam < 48:
+        return f"{jam:.1f} h"
+    return f"{jam / 24:.1f} d"
+
+
+_TPL_CHART = """
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<canvas id="__ID__" style="max-height:__H__px"></canvas>
+<script>
+const plug = { id:'plug', afterDatasetsDraw(c){ const ctx=c.ctx; ctx.save(); ctx.font='700 11px "Source Sans 3",sans-serif'; ctx.fillStyle='#334155';
+  const ds=c.data.datasets[0]; const tot=ds.data.reduce((a,b)=>a+b,0)||1; const donat=c.config.type==='doughnut'; const horiz=c.options.indexAxis==='y';
+  c.getDatasetMeta(0).data.forEach((el,i)=>{ const v=ds.data[i]; if(v==null) return;
+    if(donat){ if(!v) return; const a=(el.startAngle+el.endAngle)/2, r=el.outerRadius+13; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(Math.round(v/tot*100)+'%', el.x+Math.cos(a)*r, el.y+Math.sin(a)*r); }
+    else { const t=Number.isInteger(v)?v:v.toFixed(1); ctx.textBaseline='middle';
+      if(horiz){ ctx.textAlign='left'; ctx.fillText(t, el.x+6, el.y); } else { ctx.textAlign='center'; ctx.fillText(t, el.x, el.y-9); } }
+  }); ctx.restore(); } };
+Chart.defaults.font.family='"Source Sans 3","Source Sans Pro",sans-serif';Chart.defaults.color='#475569';
+const cfg = __CFG__;
+cfg.plugins = [plug];
+document.fonts.load('12px "Source Sans 3"').finally(()=>new Chart(document.getElementById('__ID__'), cfg));
+</script>"""
+
+
+_TPL_CHART_BAR = _TPL_CHART.replace('<canvas id="__ID__" style="max-height:__H__px"></canvas>',
+                                    '<div style="position:relative;height:__H__px"><canvas id="__ID__"></canvas></div>')
+
+
+def _html_chart(cid: str, jenis: str, labels: list, values: list, warna, tinggi: int = 150) -> str:
+    """jenis: 'donut' (label di luar = persentase), 'bar' (horizontal) atau 'kolom' (vertikal): angka di ujung batang."""
+    warna = warna if isinstance(warna, list) else [warna] * len(values)
+    if jenis == "donut":
+        cfg = {"type": "doughnut",
+               "data": {"labels": labels, "datasets": [{"data": values, "backgroundColor": warna, "borderWidth": 1}]},
+               "options": {"responsive": True, "layout": {"padding": 18},
+                           "plugins": {"legend": {"position": "right", "labels": {"font": {"size": 10}, "boxWidth": 10, "padding": 6}}}}}
+    else:
+        horiz = jenis == "bar"
+        cfg = {"type": "bar",
+               "data": {"labels": labels, "datasets": [{"data": values, "backgroundColor": warna, "borderRadius": 4}]},
+               "options": {"indexAxis": "y" if horiz else "x", "responsive": True,
+                           "layout": {"padding": {"right": 30} if horiz else {"top": 16}},
+                           "plugins": {"legend": {"display": False}},
+                           "scales": {"x": {"grid": {"display": False}, "ticks": {"font": {"size": 10}}},
+                                      "y": {"grid": {"display": False}, "ticks": {"font": {"size": 10}}, "beginAtZero": True}}}}
+    if jenis == "bar":
+        cfg["options"]["maintainAspectRatio"] = False
+        cfg["options"]["scales"]["y"]["ticks"]["autoSkip"] = False
+        cfg["options"]["layout"]["padding"]["bottom"] = 4
+        return _TPL_CHART_BAR.replace("__ID__", cid).replace("__H__", str(tinggi_bar(len(labels)) - 10)).replace("__CFG__", json.dumps(cfg))
+    return (_TPL_CHART.replace("__ID__", cid).replace("__H__", str(tinggi - 10)).replace("__CFG__", json.dumps(cfg)))
+
+
+def tinggi_bar(n: int) -> int:
+    """Tinggi grafik batang horizontal: 28 px per batang (min. 150) supaya batang tidak berdesakan."""
+    return max(150, 28 * n + 50)
+
+
+def _kartu_sla(judul, nilai, sub="", tema="abu") -> str:
+    T = {"abu": ("#f8fafc", "#e2e8f0", "#64748b", "#0f172a"), "hijau": ("#f0fdf4", "#bbf7d0", "#15803d", "#166534"),
+         "merah": ("#fff1f2", "#fecdd3", "#be123c", "#9f1239"), "biru": ("#eff6ff", "#bfdbfe", "#1d4ed8", "#1e3a8a"),
+         "kuning": ("#fefce8", "#fde68a", "#a16207", "#854d0e"), "ungu": ("#f5f3ff", "#ddd6fe", "#6d28d9", "#4c1d95")}[tema]
+    return (f'<div style="background:{T[0]};border:1px solid {T[1]};border-radius:10px;padding:9px 12px;min-height:84px;box-sizing:border-box">'
+            f'<div style="font-size:0.75rem;color:{T[2]};font-weight:500;margin-bottom:3px">{judul}</div>'
+            f'<div style="font-size:1.35rem;font-weight:800;color:{T[3]};line-height:1.1">{nilai}</div>'
+            f'<div style="font-size:0.66rem;color:{T[2]};margin-top:3px">{sub}</div></div>')
+
+
+def _judul_grafik(teks: str):
+    st.markdown(f'<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">{teks}</p>',
+                unsafe_allow_html=True)
+
+
+def halaman_sla():
+    """SLA / performa proses NOO: Submit -> Generate ID, antrean Need Review, menunggu DMS, dan (bila tercatat) DMS Done / Basis Done."""
+    ss = st.session_state
+    st.markdown(komponen.html_header("SLA Performance", "How fast NOO stores are processed: submission to Generate ID, review backlog and DMS.",
+                                      ":material/timer:"), unsafe_allow_html=True)
+    with st.spinner("Loading SLA data..."):
+        df = ambil_data_dashboard()["noo"]
+    if df.empty:
+        st.info("No NOO data yet."); return
+    norm = lambda x: re.sub(r"[^a-z0-9]", "", str(x).lower())
+    peta = {norm(c): c for c in df.columns}
+    c_created, c_gen, c_tag = peta.get("createdat"), peta.get("generatedat"), peta.get("tagging")
+    c_distri = peta.get("groupname") or peta.get("customerstorename")
+    c_code, c_name, c_cc = peta.get("customerstorecode"), peta.get("storename"), peta.get("customercode")
+    c_dms, c_basis = peta.get("dmsdoneat"), peta.get("basisdoneat")       # kolom opsional (sql_sla_timestamps.sql)
+    if not (c_created and c_tag):
+        st.error("Columns created_at / tagging not found in INPUT_NOO."); return
+
+    d = df.copy()
+    d["_dibuat"] = ke_wib_naive(d[c_created])
+    d["_gen"] = ke_wib_naive(d[c_gen]) if c_gen else pd.NaT
+    d["_dms"] = ke_wib_naive(d[c_dms]) if c_dms else pd.NaT
+    d["_basis"] = ke_wib_naive(d[c_basis]) if c_basis else pd.NaT
+    d["_tag"] = d[c_tag].astype(str).str.strip().replace(_shared.ALIAS_STATUS)
+    d["_distri"] = d[c_distri].fillna("").astype(str).str.strip() if c_distri else ""
+    d["_brand"] = (d[c_cc].astype(str).str.strip().str[:2].map({"12": "G2G", "17": "NXP"}).fillna("Other") if c_cc else "Other")
+    now = datetime.datetime.now(ZONA_WAKTU).replace(tzinfo=None)
+
+    # ── Filter ──
+    hari_ini = now.date()
+    f0, f1, f2, f3, f4, f5, f6 = st.columns([1, 1, 1, 1, 1, 1, 0.7])
+    f_region = f0.selectbox("Region", ["All Region"] + _shared.daftar_region(), key="sla_region")
+    opsi_d = ["All Distributor"] + [x for x in daftar_distributor()
+                                    if f_region == "All Region" or _shared.region_grup(x) == f_region]
+    if ss.get("sla_distri") not in opsi_d:
+        ss["sla_distri"] = "All Distributor"
+    f_distri = f1.selectbox("Distributor", opsi_d, key="sla_distri")
+    f_brand = f2.selectbox("Brand", ["All Brand", "G2G", "NXP"], key="sla_brand")
+    t_dari = f3.date_input("Submitted from", value=hari_ini - datetime.timedelta(days=30), key="sla_dari", format="YYYY-MM-DD")
+    t_sampai = f4.date_input("Submitted to", value=hari_ini, key="sla_sampai", format="YYYY-MM-DD")
+    target_gen = f5.number_input("SLA target (hours)", min_value=1, max_value=720, value=24, step=1, key="sla_target",
+                                 help="Generate ID counts as ON TIME when it is done within this many hours after submission.")
+    with f6:
+        st.markdown('<div style="height:1.7rem"></div>', unsafe_allow_html=True)
+        if st.button(":material/refresh: Refresh", key="sla_refresh", width="stretch"):
+            ambil_data_dashboard.clear(); segarkan_sheet_distributor(); st.rerun()
+
+    m = (d["_dibuat"].dt.date >= t_dari) & (d["_dibuat"].dt.date <= t_sampai)
+    if f_region != "All Region":
+        _r = {v: _shared.region_grup(v) for v in d["_distri"].unique()}
+        m &= d["_distri"].map(_r) == f_region
+    if f_distri != "All Distributor":
+        m &= d["_distri"].str.lower().str.startswith(f_distri.strip().lower())
+    if f_brand != "All Brand":
+        m &= d["_brand"] == f_brand
+    d = d[m]
+    if d.empty:
+        st.info("No NOO data for these filters."); return
+
+    # ── Hitung ──
+    sudah_gen = d[d["_gen"].notna()].copy()
+    sudah_gen["_jam"] = (sudah_gen["_gen"] - sudah_gen["_dibuat"]).dt.total_seconds() / 3600
+    dipakai_ulang = int((sudah_gen["_jam"] < 0).sum())            # ID dipakai ulang dari toko yang sama (generated_at < created_at)
+    sudah_gen = sudah_gen[sudah_gen["_jam"] >= 0]
+    jam = sudah_gen["_jam"]
+    tepat = int((jam <= target_gen).sum())
+    pct_tepat = round(tepat / len(jam) * 100) if len(jam) else 0
+
+    review = d[d["_tag"] == STATUS_REVIEW].copy()
+    review["_umur"] = (now - review["_dibuat"]).dt.total_seconds() / 3600
+    tunggu_dms = d[d["_tag"] == STATUS_VALID].copy()
+    tunggu_dms["_umur"] = (now - tunggu_dms["_gen"].fillna(tunggu_dms["_dibuat"])).dt.total_seconds() / 3600
+
+    st.markdown('<hr style="margin:8px 0 14px 0;border:none;border-top:1px solid #e2e8f0">', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-bottom:10px">Submission → Generate ID</p>',
+                unsafe_allow_html=True)
+    kartu = "".join([
+        _kartu_sla("Stores submitted", f"{len(d):,}", f"{len(sudah_gen):,} already have a Store ID"),
+        _kartu_sla("Average time", _fmt_durasi(jam.mean()) if len(jam) else "-", "submission → Generate ID", "biru"),
+        _kartu_sla("Median", _fmt_durasi(jam.median()) if len(jam) else "-", "typical store", "biru"),
+        _kartu_sla("P90 (slowest 10%)", _fmt_durasi(jam.quantile(0.9)) if len(jam) else "-", "90% done within this time", "ungu"),
+        _kartu_sla(f"On time (≤ {target_gen} h)", f"{pct_tepat}%" if len(jam) else "-", f"{tepat:,} of {len(jam):,} stores",
+                   "hijau" if pct_tepat >= 80 else ("kuning" if pct_tepat >= 50 else "merah")),
+        _kartu_sla("Fastest / slowest", f"{_fmt_durasi(jam.min())} / {_fmt_durasi(jam.max())}" if len(jam) else "-", "", "abu"),
+    ])
+    st.markdown(f'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px">{kartu}</div>',
+                unsafe_allow_html=True)
+    if dipakai_ulang:
+        st.caption(f"{dipakai_ulang} store(s) reused an existing Store ID (generated before submission) and are not counted.")
+
+    g1, g2, g3 = st.columns(3)
+    with g1:
+        with st.container(key="g_sla1"):
+            _judul_grafik("On time vs late")
+            if len(jam):
+                st.components.v1.html(_html_chart("sla_donut", "donut", ["On time", "Late"], [tepat, len(jam) - tepat],
+                                                  ["#475569", "#cbd5e1"]), height=150)
+            else:
+                st.caption("No Generate ID data yet.")
+    with g2:
+        with st.container(key="g_sla2"):
+            _judul_grafik("Time to Generate ID (number of stores)")
+            if len(jam):
+                batas = [(0, 1, "≤ 1 h"), (1, 4, "1–4 h"), (4, 24, "4–24 h"), (24, 72, "1–3 d"), (72, 168, "3–7 d"), (168, 1e9, "> 7 d")]
+                nilai = [int(((jam > lo) & (jam <= hi)).sum()) for lo, hi, _ in batas]
+                nilai[0] += int((jam == 0).sum())
+                st.components.v1.html(_html_chart("sla_dist", "kolom", [x[2] for x in batas], nilai, "#94a3b8", 150), height=150)
+            else:
+                st.caption("No Generate ID data yet.")
+    with g3:
+        with st.container(key="g_sla3"):
+            _judul_grafik("Slowest distributors (avg hours to Generate ID)")
+            if len(jam):
+                per = (sudah_gen[sudah_gen["_distri"] != ""].groupby("_distri")["_jam"].mean().sort_values(ascending=False).head(8))
+                lab = [x if len(x) <= 26 else x[:25] + "…" for x in per.index]
+                st.components.v1.html(_html_chart("sla_distri", "bar", lab, [round(v, 1) for v in per.values], "#64748b", 150),
+                                      height=tinggi_bar(len(lab)))
+            else:
+                st.caption("No Generate ID data yet.")
+
+    st.markdown('<hr style="margin:18px 0 14px 0;border:none;border-top:1px solid #e2e8f0">', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-bottom:10px">Waiting in the process (backlog)</p>',
+                unsafe_allow_html=True)
+    kartu2 = "".join([
+        _kartu_sla("Need Review", f"{len(review):,}", f"avg waiting {_fmt_durasi(review['_umur'].mean())}" if len(review) else "none waiting", "merah"),
+        _kartu_sla("Oldest Need Review", _fmt_durasi(review["_umur"].max()) if len(review) else "-", "since submission", "merah"),
+        _kartu_sla("Generate ID, waiting DMS", f"{len(tunggu_dms):,}", f"avg waiting {_fmt_durasi(tunggu_dms['_umur'].mean())}" if len(tunggu_dms) else "none waiting", "hijau"),
+        _kartu_sla("Oldest waiting DMS", _fmt_durasi(tunggu_dms["_umur"].max()) if len(tunggu_dms) else "-", "since Store ID was generated", "hijau"),
+        _kartu_sla("DMS Done", f"{int((d['_tag'] == _shared.STATUS_DMS).sum()):,}", "", "biru"),
+        _kartu_sla("DMS & Basis Done", f"{int((d['_tag'] == _shared.STATUS_BASIS).sum()):,}", "", "ungu"),
+    ])
+    st.markdown(f'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px">{kartu2}</div>',
+                unsafe_allow_html=True)
+
+    b1, b2 = st.columns(2)
+    umur_bucket = [(0, 24, "< 1 d"), (24, 72, "1–3 d"), (72, 168, "3–7 d"), (168, 1e9, "> 7 d")]
+    with b1:
+        with st.container(key="g_sla4"):
+            _judul_grafik("Need Review: how long they have waited")
+            if len(review):
+                st.components.v1.html(_html_chart("sla_rev", "kolom", [x[2] for x in umur_bucket],
+                                                  [int(((review["_umur"] >= lo) & (review["_umur"] < hi)).sum()) for lo, hi, _ in umur_bucket],
+                                                  "#64748b", 150), height=150)
+            else:
+                st.caption("No Need Review stores waiting.")
+    with b2:
+        with st.container(key="g_sla5"):
+            _judul_grafik("Generate ID: how long they have waited for DMS")
+            if len(tunggu_dms):
+                st.components.v1.html(_html_chart("sla_dmswait", "kolom", [x[2] for x in umur_bucket],
+                                                  [int(((tunggu_dms["_umur"] >= lo) & (tunggu_dms["_umur"] < hi)).sum()) for lo, hi, _ in umur_bucket],
+                                                  "#94a3b8", 150), height=150)
+            else:
+                st.caption("No Generate ID stores waiting for DMS.")
+
+    # ── DMS: butuh kolom dms_done_at / basis_done_at ──
+    st.markdown('<hr style="margin:18px 0 14px 0;border:none;border-top:1px solid #e2e8f0">', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-bottom:10px">Generate ID → DMS</p>', unsafe_allow_html=True)
+    if not (c_dms or c_basis):
+        st.info("DMS timestamps are not recorded yet. Run sql_sla_timestamps.sql in Supabase: from then on the app records when each "
+                "store becomes DMS Done / DMS & Basis Done, and this section fills in automatically.")
+    else:
+        kk = []
+        for judul_k, kolom_k, tema in (("Generate ID → DMS Done", "_dms", "biru"), ("Generate ID → DMS & Basis Done", "_basis", "ungu")):
+            x = d[d[kolom_k].notna() & d["_gen"].notna()]
+            jam_k = ((x[kolom_k] - x["_gen"]).dt.total_seconds() / 3600).clip(lower=0)
+            kk.append(_kartu_sla(judul_k, _fmt_durasi(jam_k.mean()) if len(jam_k) else "-",
+                                 f"average · {len(jam_k):,} stores recorded" if len(jam_k) else "no data recorded yet", tema))
+        st.markdown(f'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px">{"".join(kk)}</div>',
+                    unsafe_allow_html=True)
+
+    # ── Tabel antrean terlama ──
+    with st.expander("Oldest stores still waiting (top 20)", expanded=False):
+        gab = pd.concat([review.assign(_tahap="Need Review"), tunggu_dms.assign(_tahap="Generate ID, waiting DMS")])
+        if gab.empty:
+            st.info("Nothing waiting.")
+        else:
+            gab = gab.sort_values("_umur", ascending=False).head(20)
+            tampil = pd.DataFrame({"Stage": gab["_tahap"], "Store Code": gab[c_code] if c_code else "", "Store Name": gab[c_name] if c_name else "",
+                                   "Distributor": gab["_distri"], "Waiting": gab["_umur"].map(_fmt_durasi),
+                                   "Submitted": gab["_dibuat"].dt.strftime("%d %b %Y %H:%M")})
+            st.dataframe(tampil, hide_index=True, width="stretch")
+    st.caption("Times are calendar hours (weekends and holidays included), counted from the submission time shown in the app (WIB).")
+
+
 def halaman_dashboard_tabs():
     # st.tabs selalu kembali ke tab pertama (Dashboard) setiap halaman dirender ulang penuh (st.rerun, toast, dll.).
     # Pilihan tampilan disimpan di session_state, jadi Feedback tetap di Feedback.
     ss = st.session_state
-    opsi = [":material/trending_up: Dashboard SKU & NOO", ":material/chat: Help & Support", ":material/star: Feedback"]
+    opsi = [":material/trending_up: Dashboard SKU & NOO", ":material/chat: Help & Support", ":material/star: Feedback",
+            ":material/timer: SLA Performance"]
     # key widget HARUS beda dari key container "dash_view" (yang dipakai CSS), kalau sama -> DuplicateElementKey
     if ss.get("dash_view_pilih") not in opsi:
         ss["dash_view_pilih"] = ss.get("_dash_view_terakhir", opsi[0])      # klik ulang pilihan aktif = None -> pertahankan
@@ -2251,6 +2498,8 @@ def halaman_dashboard_tabs():
                 tab_feedback()
             elif idx == 2:
                 tab_hasil_feedback()
+            elif idx == 3:
+                halaman_sla()
             else:
                 halaman_dashboard()
 
@@ -2284,7 +2533,7 @@ def halaman_dashboard():
         df_sku["_brand"] = df_sku[col_cc_sku].astype(str).apply(_brand_dari_cc)
 
     st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
-    f0,f1,f2,f3,f4,f5 = st.columns([1.1,1.4,1.2,1.3,1.3,0.8])
+    f0,f1,f2,f3,f4,f5 = st.columns([1,1,1,1,1,0.7])
     # Region = kolom J sheet Distributor Mapping (Region 1..5); memfilter NOO, SKU, dan pilihan Distributor
     f_region   = f0.selectbox("Region", ["All Region"] + _shared.daftar_region(), key="dash_region")
     distri_opts = ["All Distributor"] + [d for d in daftar_distributor()          # dari Distributor Mapping, Status = Active
@@ -2363,6 +2612,12 @@ def halaman_dashboard():
                            f'<div style="font-size:0.66rem;color:{t["pc"]};margin-top:2px">{pct_st}% dari total</div></div>')
         st.markdown(f'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:8px">{kartu_html}</div>',
                     unsafe_allow_html=True)
+        if col_distri:
+            per_distri = (df_noo_f[col_distri].replace("","(undetected)").fillna("(undetected)").value_counts().head(10))
+            labels_d, values_d = per_distri.index.tolist(), per_distri.values.tolist()
+        else:
+            labels_d, values_d = [], []
+        tinggi_bar = max(150, 28 * len(labels_d) + 50)      # tinggi grafik NOO = mengikuti jumlah batang distributor (kedua kartu sama tinggi)
         cn1,cn2 = st.columns(2)
         with cn1:
             with st.container(key="g_tag"):
@@ -2376,35 +2631,38 @@ def halaman_dashboard():
                     st.components.v1.html(f"""
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<canvas id="donut_noo" style="max-height:140px"></canvas>
+<div style="position:relative;height:{tinggi_bar - 10}px"><canvas id="donut_noo"></canvas></div>
 <script>
+const nilaiDonat = {{ id:'nilaiDonat', afterDatasetsDraw(c){{ const ctx=c.ctx; ctx.save(); ctx.font='700 11px "Source Sans 3",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#334155'; const ds=c.data.datasets[0]; const tot=ds.data.reduce((a,b)=>a+b,0)||1; c.getDatasetMeta(0).data.forEach((arc,i)=>{{ const v=ds.data[i]; if(!v) return; const a=(arc.startAngle+arc.endAngle)/2, r=arc.outerRadius+13; ctx.fillText(Math.round(v/tot*100)+'%', arc.x+Math.cos(a)*r, arc.y+Math.sin(a)*r); }}); ctx.restore(); }} }};
 Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
 document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('donut_noo'),{{
   type:'doughnut',
   data:{{labels:{json.dumps(labels)},datasets:[{{data:{json.dumps(values)},backgroundColor:{json.dumps(colors)},borderWidth:1}}]}},
-  options:{{responsive:true,plugins:{{legend:{{position:'right',labels:{{font:{{size:10}},boxWidth:10,padding:6}}}}}}}}
+  options:{{responsive:true,maintainAspectRatio:false,layout:{{padding:18}},plugins:{{legend:{{position:'right',labels:{{font:{{size:10}},boxWidth:10,padding:6}}}}}}}}
+,
+  plugins:[nilaiDonat]
 }}));
-</script>""", height=150)
+</script>""", height=tinggi_bar)
         with cn2:
             with st.container(key="g_distri"):
                 st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">NOO by Distributor (Top 10)</p>',
                             unsafe_allow_html=True)
                 if col_distri:
-                    per_distri  = (df_noo_f[col_distri].replace("","(undetected)").fillna("(undetected)").value_counts().head(10))
-                    labels_d    = per_distri.index.tolist()
-                    values_d    = per_distri.values.tolist()
                     st.components.v1.html(f"""
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<canvas id="bar_distri" style="max-height:140px"></canvas>
+<div style="position:relative;height:{tinggi_bar - 10}px"><canvas id="bar_distri"></canvas></div>
 <script>
+const angkaBatang = {{ id:'angkaBatang', afterDatasetsDraw(c){{ const ctx=c.ctx; ctx.save(); ctx.font='700 11px "Source Sans 3",sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillStyle='#334155'; c.getDatasetMeta(0).data.forEach((bar,i)=>{{ const v=c.data.datasets[0].data[i]; if(v==null) return; ctx.fillText(v, bar.x+6, bar.y); }}); ctx.restore(); }} }};
 Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
 document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('bar_distri'),{{
   type:'bar',
   data:{{labels:{json.dumps(labels_d)},datasets:[{{data:{json.dumps(values_d)},backgroundColor:'#94a3b8',borderRadius:4}}]}},
-  options:{{indexAxis:'y',responsive:true,plugins:{{legend:{{display:false}}}},scales:{{x:{{grid:{{display:false}},ticks:{{font:{{size:10}}}}}},y:{{grid:{{display:false}},ticks:{{font:{{size:10}}}}}}}}}}
+  options:{{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{{padding:{{right:28}}}},plugins:{{legend:{{display:false}}}},scales:{{x:{{grid:{{display:false}},ticks:{{font:{{size:10}}}}}},y:{{grid:{{display:false}},ticks:{{font:{{size:10}},autoSkip:false}}}}}}}}
+,
+  plugins:[angkaBatang]
 }}));
-</script>""", height=150)
+</script>""", height=tinggi_bar)
         with st.expander("Recent NOO Submissions (last 20)"):
             kolom_show = [c for c in [peta_noo.get("customerstorecode"),peta_noo.get("storename"),
                                        col_distri,col_city,col_tagging,col_created_noo] if c]
@@ -2461,7 +2719,7 @@ document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.get
   <div style="font-size:0.66rem;color:#64748b;margin-top:2px">{pct}% dari total</div>
 </div>""", unsafe_allow_html=True)
 
-        # Tagging SKU Mapping: Not Yet / Done (warna sama dengan kolom Tagging di tab SKU Mapping)
+        # Tagging SKU Mapping: hanya Not Yet dan Done (warna sama dengan kolom Tagging di tab SKU Mapping)
         if col_tagging_sku:
             tag_sku = (df_sku_f[col_tagging_sku].fillna("").astype(str).str.strip().replace("", "Not Yet"))
             n_done, n_notyet = int((tag_sku == "Done").sum()), int((tag_sku == "Not Yet").sum())
@@ -2492,26 +2750,30 @@ document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.get
                     cnt_tag = tag_sku.value_counts()
                     lab_t, val_t = cnt_tag.index.tolist(), cnt_tag.values.tolist()
                     col_t = [{"Done": "#475569", "Not Yet": "#cbd5e1"}.get(l, "#94a3b8") for l in lab_t]      # abu tua / abu muda
+                    _tot_t = sum(val_t) or 1
+                    legenda_html = "".join(
+                        f'<div style="display:flex;align-items:center;gap:6px;margin:3px 0;white-space:nowrap">'
+                        f'<i style="width:10px;height:10px;border-radius:2px;background:{c};display:inline-block"></i>'
+                        f'<span>{l}: <b style="color:#0f172a">{v:,}</b> ({round(v / _tot_t * 100)}%)</span></div>'
+                        for l, v, c in zip(lab_t, val_t, col_t))
                     st.components.v1.html(f"""
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<canvas id="donut_tagsku" style="max-height:140px"></canvas>
+<div style="display:flex;align-items:center;justify-content:center;gap:16px;font:12px 'Source Sans 3','Source Sans Pro',sans-serif;color:#475569">
+  <div style="width:150px;flex:0 0 150px"><canvas id="donut_tagsku" style="max-height:140px"></canvas></div>
+  <div>{legenda_html}</div>
+</div>
 <script>
+const nilaiDonat = {{ id:'nilaiDonat', afterDatasetsDraw(c){{ const ctx=c.ctx; ctx.save(); ctx.font='700 11px "Source Sans 3",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#334155'; const ds=c.data.datasets[0]; const tot=ds.data.reduce((a,b)=>a+b,0)||1; c.getDatasetMeta(0).data.forEach((arc,i)=>{{ const v=ds.data[i]; if(!v) return; const a=(arc.startAngle+arc.endAngle)/2, r=arc.outerRadius+13; ctx.fillText(Math.round(v/tot*100)+'%', arc.x+Math.cos(a)*r, arc.y+Math.sin(a)*r); }}); ctx.restore(); }} }};
 Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
 document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('donut_tagsku'),{{
   type:'doughnut',
   data:{{labels:{json.dumps(lab_t)},datasets:[{{data:{json.dumps(val_t)},backgroundColor:{json.dumps(col_t)},borderWidth:1}}]}},
-  options:{{responsive:true,plugins:{{legend:{{display:false}}}}}}
+  options:{{responsive:true,layout:{{padding:18}},plugins:{{legend:{{display:false}}}}}}
+,
+  plugins:[nilaiDonat]
 }}));
 </script>""", height=150)
-                    # legenda (label) sebagai HTML supaya SELALU tampil: warna + nama + jumlah + persen
-                    _tot_t = sum(val_t) or 1
-                    st.markdown('<div style="display:flex;justify-content:center;gap:18px;flex-wrap:wrap;font-size:0.78rem;color:#475569;margin-top:2px">'
-                                + "".join(f'<span style="display:inline-flex;align-items:center;gap:6px">'
-                                          f'<i style="width:10px;height:10px;border-radius:2px;background:{c};display:inline-block"></i>'
-                                          f'{l}: <b style="color:#0f172a">{v:,}</b> ({round(v / _tot_t * 100)}%)</span>'
-                                          for l, v, c in zip(lab_t, val_t, col_t))
-                                + '</div>', unsafe_allow_html=True)
                 else:
                     st.caption("No tagging column in SKU Mapping data.")
         with cs1:
@@ -2528,11 +2790,14 @@ document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.get
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <canvas id="donut_brand" style="max-height:140px"></canvas>
 <script>
+const nilaiDonat = {{ id:'nilaiDonat', afterDatasetsDraw(c){{ const ctx=c.ctx; ctx.save(); ctx.font='700 11px "Source Sans 3",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#334155'; const ds=c.data.datasets[0]; const tot=ds.data.reduce((a,b)=>a+b,0)||1; c.getDatasetMeta(0).data.forEach((arc,i)=>{{ const v=ds.data[i]; if(!v) return; const a=(arc.startAngle+arc.endAngle)/2, r=arc.outerRadius+13; ctx.fillText(Math.round(v/tot*100)+'%', arc.x+Math.cos(a)*r, arc.y+Math.sin(a)*r); }}); ctx.restore(); }} }};
 Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
 document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('donut_brand'),{{
   type:'doughnut',
   data:{{labels:{json.dumps(labels_b)},datasets:[{{data:{json.dumps(values_b)},backgroundColor:{json.dumps(colors_b)},borderWidth:1}}]}},
-  options:{{responsive:true,plugins:{{legend:{{position:'right',labels:{{font:{{size:10}},boxWidth:10,padding:6}}}}}}}}
+  options:{{responsive:true,layout:{{padding:18}},plugins:{{legend:{{position:'right',labels:{{font:{{size:10}},boxWidth:10,padding:6}}}}}}}}
+,
+  plugins:[nilaiDonat]
 }}));
 </script>""", height=150)
         with cs2:
@@ -3257,6 +3522,9 @@ def main():
         st.toast(ss.pop("pesan_toast"), icon=ss.pop("pesan_toast_icon",":material/check_circle:"))
 
     user = ss.get("user", {})
+    tampil_welcome = not ss.get("_welcome_done")           # pop-up Welcome: sekali per login (semua peran)
+    if tampil_welcome:
+        ss["_welcome_done"] = True
 
     with st.sidebar:
         st.markdown(
@@ -3300,6 +3568,10 @@ def main():
             "riwayat":    halaman_riwayat,
             "pengaturan": halaman_pengaturan,
         }[ss.halaman_aktif]()
+
+    if tampil_welcome:
+        from welcome import dialog_welcome
+        dialog_welcome(user)
 
 if __name__ == "__main__":
     main()  

@@ -908,6 +908,11 @@ section[data-testid="stSidebar"] .stLinkButton a p { font-size: 11.5px !importan
 .st-key-dash [data-testid="stDataFrame"] { font-size: 11px; }
 .st-key-dash hr { margin: 0.5rem 0 !important; }
 .st-key-dash div[data-testid="stTextInput"] input, .st-key-dash div[data-baseweb="select"] > div { min-height: 30px; font-size: 11.5px; }
+/* kolom tanggal di dashboard: tinggi, huruf, dan ukuran font SAMA dengan kolom select / teks di sebelahnya */
+.st-key-dash div[data-testid="stDateInput"] [data-baseweb="input"], .st-key-dash div[data-testid="stDateInput"] [data-baseweb="base-input"] { min-height: 30px; height: 30px; }
+.st-key-dash div[data-testid="stDateInput"] input {
+  min-height: 30px; height: 30px; font-size: 11.5px !important;
+  font-family: "Source Sans", "Source Sans Pro", ui-sans-serif, system-ui, sans-serif !important; padding-top: 0; padding-bottom: 0; }
 .st-key-dash [data-testid="stTabs"] button[role="tab"] { padding: 4px 10px; height: 30px; }
 .st-key-dash [data-testid="stTabs"] button[role="tab"] p { font-size: 12px; }
 
@@ -1091,17 +1096,17 @@ body div[data-baseweb="popover"]:has([role="listbox"]) [role="option"] * {
   font-size: 13px !important; line-height: 1.35 !important; font-weight: 500; }
 
 /* ---------- Kartu pembungkus tiap grafik Dashboard: putih, rounded square ---------- */
-.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu, .st-key-g_tagsku {
+.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu, .st-key-g_tagsku, .st-key-g_progress, .st-key-g_sla1, .st-key-g_sla2, .st-key-g_sla3, .st-key-g_sla4, .st-key-g_sla5 {
   background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px 8px;
   box-shadow: 0 1px 3px rgba(15,23,42,.05); }
 .st-key-g_tag [data-testid="stVerticalBlock"], .st-key-g_distri [data-testid="stVerticalBlock"],
-.st-key-g_brand [data-testid="stVerticalBlock"], .st-key-g_waktu [data-testid="stVerticalBlock"], .st-key-g_tagsku [data-testid="stVerticalBlock"] { gap: 0.2rem; }
+.st-key-g_brand [data-testid="stVerticalBlock"], .st-key-g_waktu [data-testid="stVerticalBlock"], .st-key-g_tagsku [data-testid="stVerticalBlock"], .st-key-g_progress [data-testid="stVerticalBlock"], .st-key-g_sla1 [data-testid="stVerticalBlock"], .st-key-g_sla2 [data-testid="stVerticalBlock"], .st-key-g_sla3 [data-testid="stVerticalBlock"], .st-key-g_sla4 [data-testid="stVerticalBlock"], .st-key-g_sla5 [data-testid="stVerticalBlock"] { gap: 0.2rem; }
 
 /* ikon .mi (HTML) harus tetap memakai font ikon, jangan tertimpa aturan font teks */
 .mi, .stApp .mi, .stApp [data-testid="stMarkdownContainer"] .mi { font-family: 'Material Symbols Rounded' !important; }
 
 /* jarak antara kartu KPI dan kartu grafik */
-.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu, .st-key-g_tagsku { margin-top: 14px; }
+.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu, .st-key-g_tagsku, .st-key-g_progress, .st-key-g_sla1, .st-key-g_sla2, .st-key-g_sla3, .st-key-g_sla4, .st-key-g_sla5 { margin-top: 14px; }
 
 
 /* tombol Tutorial: di kiri tombol Help & Support (kanan atas), gaya sama */

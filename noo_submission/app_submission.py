@@ -12,6 +12,7 @@ import komponen
 import shared as _shared
 from login_page import require_login, keluar
 from help_support import dialog_help_support
+from welcome import dialog_welcome
 from feedback import minta_feedback, tampilkan_feedback_jika_diminta
 from tutorial import picu_tutorial_otomatis, buka_tutorial, tampilkan_tutorial_jika_aktif
 from shared import (
@@ -1965,6 +1966,9 @@ def _history_sku():
         if label in ("Product Chinese Short Name", "Product English Name", "Specification", "Barcode", "Description"):
             continue
         out[label] = df[kol].fillna("").astype(str) if kol in df.columns else ""
+    # Tagging SKU Mapping: Done / Not Yet (kosong dianggap Not Yet)
+    k_tagging = next((c for c in df.columns if str(c).strip().lower() == "tagging"), None)
+    out["Tagging"] = (df[k_tagging].fillna("").astype(str).str.strip().replace("", "Not Yet") if k_tagging else "Not Yet")
 
     f1, f2, f3 = st.columns([1.2, 2.4, 0.9], vertical_alignment="bottom")
     bulan = ["All months"] + sorted([m for m in out["Month"].unique() if m != "-"], reverse=True)
@@ -1989,7 +1993,10 @@ def _history_sku():
     st.markdown(f'<div class="teks-showing">Showing {len(tampil):,} of {len(out):,} records</div>', unsafe_allow_html=True)
     if tampil.empty:
         st.info("No records match the filters."); return
-    st.dataframe(tampil.drop(columns=["Month"]), hide_index=True, width="stretch",
+    warna_tag = {"Done": "background-color:#dcfce7;color:#166534;font-weight:600",
+                 "Not Yet": "background-color:#fee2e2;color:#b91c1c;font-weight:600"}
+    tabel_sku = tampil.drop(columns=["Month"])
+    st.dataframe(tabel_sku.style.map(lambda v: warna_tag.get(v, ""), subset=["Tagging"]), hide_index=True, width="stretch",
                  height=min(len(tampil) * 35 + 38, 560))
 
 def halaman_history():
@@ -2023,13 +2030,19 @@ def _history_noo():
     kunci_distri = distributor_terkunci(ss.get("user"))
     if kunci_distri is not None:
         nk = lambda v: re.sub(r"\s+", " ", str(v or "")).strip().upper()
-        df = df[df[k_distri].map(nk) == nk(kunci_distri)] if (k_distri and kunci_distri) else df.iloc[0:0]
-        # lebih ketat: hanya baris dengan Customer Store Code berawalan KODE akun ini (6 karakter awal = kode distributor)
+        # Baris milik KODE akun ini: cocok bila salah satu benar -> Customer Branch Code = kode akun, Customer Store Code
+        # berawalan kode akun, atau nama distributornya = distributor kode ini (1 distributor = 1 kode, jadi tidak tumpang tindih)
         kode_user = str((ss.get("user") or {}).get("username", "")).strip().upper()
-        if k_kode and kode_user:
-            df = df[df[k_kode].fillna("").astype(str).str.strip().str.upper().str.startswith(kode_user)]
-        else:
-            df = df.iloc[0:0]
+        k_branch = ambil("Customer Branch Code")
+        cocok = pd.Series(False, index=df.index)
+        if kode_user:
+            if k_branch:
+                cocok |= df[k_branch].fillna("").astype(str).str.strip().str.upper() == kode_user
+            if k_kode:
+                cocok |= df[k_kode].fillna("").astype(str).str.strip().str.upper().str.startswith(kode_user)
+            if k_distri and kunci_distri:
+                cocok |= df[k_distri].map(nk) == nk(kunci_distri)
+        df = df[cocok]
         st.caption(f"Showing data for code {kode_user or '-'} · distributor: {kunci_distri or '-'}")
 
     out = pd.DataFrame(index=df.index)
@@ -2082,6 +2095,7 @@ def _history_noo():
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
+
 def nama_pengguna(user: dict) -> str:
     uname = str(user.get("username", "")).strip()
     if user.get("tagging") in ("RSA", "BD SUPPORT"):
@@ -2133,7 +2147,11 @@ def main():
     with st.container(key="tutorial_kanan"):
         if st.button(":material/school: Tutorial", key="btn_tutorial", help="Step-by-step guide for this page"):
             buka_tutorial(ss.halaman_aktif)
-    picu_tutorial_otomatis(ss.halaman_aktif)      # semua user sekali saja: intro, lalu tutorial halaman yang dibuka (bisa Skip)
+    tampil_welcome = not ss.get("_welcome_done")           # pop-up Welcome: sekali per login (sesudah itu tutorial / feedback boleh muncul)
+    if tampil_welcome:
+        ss["_welcome_done"] = True
+    else:
+        picu_tutorial_otomatis(ss.halaman_aktif)      # semua user sekali saja: intro, lalu tutorial halaman yang dibuka (bisa Skip)
   # nama + peran + menu (Log Out ada di dalam menu ini)
 
     if ss.halaman_aktif == "spv" and not boleh_spv_confirmation(user):
@@ -2141,7 +2159,9 @@ def main():
     {"pengajuan": halaman_pengajuan_noo, "spv": halaman_konfirmasi_spv,
      "history": halaman_history}[ss.halaman_aktif]()
 
-    if ss.get("fb_wajib"):
+    if tampil_welcome:
+        dialog_welcome(user)
+    elif ss.get("fb_wajib"):
         tampilkan_feedback_jika_diminta()     # popup bintang setelah submit NOO / SKU Mapping sukses
     else:
         tampilkan_tutorial_jika_aktif()       # hanya satu dialog per run: feedback didahulukan

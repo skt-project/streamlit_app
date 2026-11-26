@@ -1,4 +1,7 @@
+import base64
 import datetime
+import io
+import json
 import re
 from zoneinfo import ZoneInfo
 
@@ -18,6 +21,47 @@ HELP_KOLOM = {
     "title": "title",
 }
 OPSI_PRIORITAS = ["Low", "Medium", "High"]
+
+# Bukti gambar (screenshot): maks 3 gambar, tiap gambar diperkecil (sisi terpanjang 1280 px, JPEG) lalu disimpan sebagai
+# data URL di kolom `attachments` (teks JSON) tabel help_support. Kolom dibuat lewat sql_help_attachments.sql.
+MAKS_BUKTI = 3
+MAKS_BYTE_ASLI = 8 * 1024 * 1024
+
+
+def gambar_ke_data_url(file) -> str:
+    """UploadedFile -> data URL JPEG yang sudah diperkecil. Melempar ValueError kalau bukan gambar / terlalu besar."""
+    from PIL import Image
+    mentah = file.getvalue()
+    if len(mentah) > MAKS_BYTE_ASLI:
+        raise ValueError(f"{file.name}: file is larger than 8 MB.")
+    try:
+        im = Image.open(io.BytesIO(mentah))
+        im.load()
+    except Exception:
+        raise ValueError(f"{file.name}: not a valid image.")
+    if im.mode in ("RGBA", "LA", "P"):                 # transparan -> latar putih supaya aman disimpan sebagai JPEG
+        im = im.convert("RGBA")
+        latar = Image.new("RGB", im.size, (255, 255, 255))
+        latar.paste(im, mask=im.split()[-1])
+        im = latar
+    else:
+        im = im.convert("RGB")
+    im.thumbnail((1280, 1280))
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=80, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def baca_bukti(nilai) -> list:
+    """Isi kolom attachments (teks JSON) -> daftar data URL. Kosong / rusak -> []."""
+    if not nilai or (isinstance(nilai, float) and pd.isna(nilai)):
+        return []
+    try:
+        data = nilai if isinstance(nilai, list) else json.loads(nilai)
+        return [x for x in data if isinstance(x, str) and x.startswith("data:image")]
+    except Exception:
+        return []
+
 OPSI_TITLE = [
     "Account Issue",
     "Password Issue",
@@ -80,6 +124,10 @@ div[data-testid="stDialog"] [data-testid="stTextInput"] input { font-size: 13px 
             judul     = st.selectbox("Title *", OPSI_TITLE, index=None, placeholder="Select the issue category")
             issue     = st.text_area("Issue *", height=90,
                                      placeholder="Jelaskan kendala / pertanyaan, langkah yang dilakukan, kode toko terkait, dll.")
+            bukti = st.file_uploader(
+                "Evidence / screenshot (optional)", type=["png", "jpg", "jpeg", "webp"],
+                accept_multiple_files=True, key="help_bukti",
+                help=f"Up to {MAKS_BUKTI} images. Click to choose a file, drag it here, or press Ctrl+V to paste a screenshot.")
             kirim = st.form_submit_button(":material/send: Submit", type="primary", width="stretch")
 
         if kirim:
@@ -95,7 +143,13 @@ div[data-testid="stDialog"] [data-testid="stTextInput"] input { font-size: 13px 
                 st.warning("WhatsApp Number must contain digits only (no spaces, +, or dashes).")
             elif not (11 <= len(wa_input) <= 13):
                 st.warning("WhatsApp Number must be 11-13 digits.")
+            elif len(bukti or []) > MAKS_BUKTI:
+                st.warning(f"Maximum {MAKS_BUKTI} images per ticket.")
             else:
+                try:
+                    lampiran = [gambar_ke_data_url(f) for f in (bukti or [])]
+                except ValueError as e:
+                    st.warning(str(e)); return
                 row = {
                     HELP_KOLOM["title"]:        judul,
                     HELP_KOLOM["issue"]:        issue.strip(),
@@ -105,10 +159,15 @@ div[data-testid="stDialog"] [data-testid="stTextInput"] input { font-size: 13px 
                     HELP_KOLOM["priority"]:     prioritas,
                     HELP_KOLOM["status"]:       "In Progress",
                 }
+                if lampiran:
+                    row["attachments"] = json.dumps(lampiran)
                 with st.spinner("Sending..."):
                     result = sb_insert(TABLE_HELP, [row])
                 if isinstance(result, dict) and "_error" in result:
-                    st.error(f"Failed to send: {result['_error']}")
+                    pesan = result["_error"]
+                    if lampiran and "attachments" in pesan:
+                        pesan += "  -> run sql_help_attachments.sql in Supabase to add the `attachments` column."
+                    st.error(f"Failed to send: {pesan}")
                 else:
                     ambil_tiket_help.clear()
                     catat_riwayat("Help & Support", f"{judul} | {prioritas} - {issue.strip()[:40]}", pengguna=uname)
@@ -131,3 +190,9 @@ div[data-testid="stDialog"] [data-testid="stTextInput"] input { font-size: 13px 
         kolom = [HELP_KOLOM[k] for k in ("generated_at","title","issue","nomor_wa","priority","status")
                  if HELP_KOLOM[k] in df.columns]
         st.dataframe(df[kolom], hide_index=True, width="stretch")
+        if "attachments" in df.columns:                   # bukti gambar tiap tiket (kalau ada)
+            for _, r in df.iterrows():
+                gambar = baca_bukti(r.get("attachments"))
+                if gambar:
+                    with st.expander(f":material/image: {r.get(HELP_KOLOM['title'], 'Ticket')}  ({len(gambar)} image(s))"):
+                        st.image(gambar, width="stretch")
