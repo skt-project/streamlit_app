@@ -2277,6 +2277,7 @@ def halaman_dashboard():
     col_cpc_sku     = peta_sku.get("customerproductcode") or peta_sku.get("customer_product_code")
     col_cpn_sku     = peta_sku.get("customerproductname") or peta_sku.get("customer_product_name")
     col_created_sku = peta_sku.get("createdat") or peta_sku.get("created_at")
+    col_tagging_sku = peta_sku.get("tagging")
 
     if not df_sku.empty and col_cc_sku:
         df_sku = df_sku.copy()
@@ -2337,37 +2338,31 @@ def halaman_dashboard():
         st.info("No NOO data in this period.")
     else:
         tagging    = df_noo_f[col_tagging].astype(str).str.strip() if col_tagging else pd.Series(dtype=str)
+        tagging    = tagging.replace(_shared.ALIAS_STATUS)          # nama status lama -> nama sekarang
         total_noo  = len(df_noo_f)
-        n_generate = int((tagging == "Generate ID").sum())
-        n_review   = int((tagging == "Need Review").sum())
-        n_existing = int((tagging == "Existing").sum())
-        pct_gen    = round(n_generate/total_noo*100) if total_noo else 0
-        pct_rev    = round(n_review/total_noo*100) if total_noo else 0
-        pct_ext    = round(n_existing/total_noo*100) if total_noo else 0
-
-        st.markdown(f"""
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px;width:66.6%">
-  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
-    <div style="font-size:0.75rem;color:#64748b;font-weight:500;margin-bottom:3px">Total Stores</div>
-    <div style="font-size:1.35rem;font-weight:800;color:#0f172a;line-height:1">{total_noo:,}</div>
-  </div>
-  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
-    <div style="font-size:0.75rem;color:#15803d;font-weight:500;margin-bottom:3px">Generate ID</div>
-    <div style="font-size:1.35rem;font-weight:800;color:#166534;line-height:1">{n_generate:,}</div>
-    <div style="font-size:0.66rem;color:#16a34a;margin-top:2px">▲ {pct_gen}% dari total</div>
-  </div>
-  <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
-    <div style="font-size:0.75rem;color:#be123c;font-weight:500;margin-bottom:3px">Need Review</div>
-    <div style="font-size:1.35rem;font-weight:800;color:#9f1239;line-height:1">{n_review:,}</div>
-    <div style="font-size:0.66rem;color:#e11d48;margin-top:2px">{pct_rev}% dari total</div>
-  </div>
-  <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
-    <div style="font-size:0.75rem;color:#a16207;font-weight:500;margin-bottom:3px">Existing</div>
-    <div style="font-size:1.35rem;font-weight:800;color:#854d0e;line-height:1">{n_existing:,}</div>
-    <div style="font-size:0.66rem;color:#ca8a04;margin-top:2px">{pct_ext}% dari total</div>
-  </div>
-</div>
-        """, unsafe_allow_html=True)
+        # warna kartu & grafik = warna status di tabel Store Validation (hijau / merah muda / kuning / biru / ungu)
+        TEMA_STATUS = {
+            "Generate ID":      dict(bg="#f0fdf4", bd="#bbf7d0", lb="#15803d", nl="#166534", pc="#16a34a", chart="#22c55e"),
+            "Need Review":      dict(bg="#fff1f2", bd="#fecdd3", lb="#be123c", nl="#9f1239", pc="#e11d48", chart="#f43f5e"),
+            "Existing":         dict(bg="#fefce8", bd="#fde68a", lb="#a16207", nl="#854d0e", pc="#ca8a04", chart="#eab308"),
+            "DMS Done":         dict(bg="#eff6ff", bd="#bfdbfe", lb="#1d4ed8", nl="#1e3a8a", pc="#2563eb", chart="#3b82f6"),
+            "DMS & Basis Done": dict(bg="#f5f3ff", bd="#ddd6fe", lb="#6d28d9", nl="#4c1d95", pc="#7c3aed", chart="#8b5cf6"),
+        }
+        kartu_html = (f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">'
+                      f'<div style="font-size:0.75rem;color:#64748b;font-weight:500;margin-bottom:3px">Total Stores</div>'
+                      f'<div style="font-size:1.35rem;font-weight:800;color:#0f172a;line-height:1">{total_noo:,}</div></div>')
+        ABU_GRAFIK = {"Generate ID": "#334155", "Need Review": "#64748b", "Existing": "#94a3b8",
+                      "DMS Done": "#b4bfcf", "DMS & Basis Done": "#d5dce6"}      # grafik donat: abu tua -> abu muda
+        for nama_st in KOLOM_VALIDASI:
+            t = TEMA_STATUS[nama_st]
+            n_st = int((tagging == nama_st).sum())
+            pct_st = round(n_st / total_noo * 100) if total_noo else 0
+            kartu_html += (f'<div style="background:{t["bg"]};border:1px solid {t["bd"]};border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">'
+                           f'<div style="font-size:0.75rem;color:{t["lb"]};font-weight:500;margin-bottom:3px">{nama_st}</div>'
+                           f'<div style="font-size:1.35rem;font-weight:800;color:{t["nl"]};line-height:1">{n_st:,}</div>'
+                           f'<div style="font-size:0.66rem;color:{t["pc"]};margin-top:2px">{pct_st}% dari total</div></div>')
+        st.markdown(f'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:8px">{kartu_html}</div>',
+                    unsafe_allow_html=True)
         cn1,cn2 = st.columns(2)
         with cn1:
             with st.container(key="g_tag"):
@@ -2377,8 +2372,7 @@ def halaman_dashboard():
                     chart_tag = tagging.value_counts()
                     labels    = chart_tag.index.tolist()
                     values    = chart_tag.values.tolist()
-                    WARNA_TAG = {"Generate ID":"#475569","Need Review":"#94a3b8","Existing":"#cbd5e1"}   # abu tua -> abu muda
-                    colors    = [WARNA_TAG.get(l,"#94a3b8") for l in labels]
+                    colors    = [ABU_GRAFIK.get(l, "#94a3b8") for l in labels]
                     st.components.v1.html(f"""
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -2467,8 +2461,59 @@ document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.get
   <div style="font-size:0.66rem;color:#64748b;margin-top:2px">{pct}% dari total</div>
 </div>""", unsafe_allow_html=True)
 
+        # Tagging SKU Mapping: Not Yet / Done (warna sama dengan kolom Tagging di tab SKU Mapping)
+        if col_tagging_sku:
+            tag_sku = (df_sku_f[col_tagging_sku].fillna("").astype(str).str.strip().replace("", "Not Yet"))
+            n_done, n_notyet = int((tag_sku == "Done").sum()), int((tag_sku == "Not Yet").sum())
+            pct_done = round(n_done / total_sku * 100) if total_sku else 0
+            pct_notyet = round(n_notyet / total_sku * 100) if total_sku else 0
+            st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+            tg_cols = st.columns([1, 1, 4], gap="small")
+            tg_cols[0].markdown(f"""
+<div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+  <div style="font-size:0.75rem;color:#be123c;font-weight:500;margin-bottom:3px">Not Yet</div>
+  <div style="font-size:1.35rem;font-weight:800;color:#9f1239;line-height:1">{n_notyet:,}</div>
+  <div style="font-size:0.66rem;color:#e11d48;margin-top:2px">{pct_notyet}% dari total</div>
+</div>""", unsafe_allow_html=True)
+            tg_cols[1].markdown(f"""
+<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:9px 12px;min-height:78px;box-sizing:border-box">
+  <div style="font-size:0.75rem;color:#15803d;font-weight:500;margin-bottom:3px">Done</div>
+  <div style="font-size:1.35rem;font-weight:800;color:#166534;line-height:1">{n_done:,}</div>
+  <div style="font-size:0.66rem;color:#16a34a;margin-top:2px">{pct_done}% dari total</div>
+</div>""", unsafe_allow_html=True)
+
         st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
-        cs1,cs2 = st.columns(2)
+        cs1, cs_tag, cs2 = st.columns(3)
+        with cs_tag:
+            with st.container(key="g_tagsku"):
+                st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">SKU by Tagging</p>',
+                            unsafe_allow_html=True)
+                if col_tagging_sku:
+                    cnt_tag = tag_sku.value_counts()
+                    lab_t, val_t = cnt_tag.index.tolist(), cnt_tag.values.tolist()
+                    col_t = [{"Done": "#475569", "Not Yet": "#cbd5e1"}.get(l, "#94a3b8") for l in lab_t]      # abu tua / abu muda
+                    st.components.v1.html(f"""
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<canvas id="donut_tagsku" style="max-height:140px"></canvas>
+<script>
+Chart.defaults.font.family='\"Source Sans 3\",\"Source Sans Pro\",sans-serif';Chart.defaults.color='#475569';
+document.fonts.load('12px \"Source Sans 3\"').finally(()=>new Chart(document.getElementById('donut_tagsku'),{{
+  type:'doughnut',
+  data:{{labels:{json.dumps(lab_t)},datasets:[{{data:{json.dumps(val_t)},backgroundColor:{json.dumps(col_t)},borderWidth:1}}]}},
+  options:{{responsive:true,plugins:{{legend:{{display:false}}}}}}
+}}));
+</script>""", height=150)
+                    # legenda (label) sebagai HTML supaya SELALU tampil: warna + nama + jumlah + persen
+                    _tot_t = sum(val_t) or 1
+                    st.markdown('<div style="display:flex;justify-content:center;gap:18px;flex-wrap:wrap;font-size:0.78rem;color:#475569;margin-top:2px">'
+                                + "".join(f'<span style="display:inline-flex;align-items:center;gap:6px">'
+                                          f'<i style="width:10px;height:10px;border-radius:2px;background:{c};display:inline-block"></i>'
+                                          f'{l}: <b style="color:#0f172a">{v:,}</b> ({round(v / _tot_t * 100)}%)</span>'
+                                          for l, v, c in zip(lab_t, val_t, col_t))
+                                + '</div>', unsafe_allow_html=True)
+                else:
+                    st.caption("No tagging column in SKU Mapping data.")
         with cs1:
             with st.container(key="g_brand"):
                 st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#334155;text-align:center;margin:0 0 6px 0">SKU per Brand</p>',
@@ -2990,8 +3035,14 @@ def halaman_pengaturan():
         antrian_reset, err_reset = [], str(e)
     else:
         err_reset = ""
-    label_pw = ":material/key: Reset password" + (f" ({len(antrian_reset)})" if antrian_reset else "")
-    label_su = ":material/how_to_reg: Sign-up approval" + (f" ({len(antrian_su)})" if antrian_su else "")
+    def _bulatan(n: int) -> str:
+        """Angka dalam bulatan merah (judul tab): 1-10 pakai lingkaran terisi, di atas itu teks biasa."""
+        if not n:
+            return ""
+        lingkaran = "❶❷❸❹❺❻❼❽❾❿"
+        return f" :red[{lingkaran[n - 1]}]" if n <= 10 else f" :red[({n})]"
+    label_pw = ":material/key: Reset password" + _bulatan(len(antrian_reset))
+    label_su = ":material/how_to_reg: Sign-up approval" + _bulatan(len(antrian_su))
     tab_add, tab_del, tab_pw, tab_su, tab_riw = st.tabs([":material/person_add: Add user", ":material/delete: Delete user",
                                                          label_pw, label_su, ":material/history: Clear history"])
 

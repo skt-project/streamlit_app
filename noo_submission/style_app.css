@@ -1091,17 +1091,17 @@ body div[data-baseweb="popover"]:has([role="listbox"]) [role="option"] * {
   font-size: 13px !important; line-height: 1.35 !important; font-weight: 500; }
 
 /* ---------- Kartu pembungkus tiap grafik Dashboard: putih, rounded square ---------- */
-.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu {
+.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu, .st-key-g_tagsku {
   background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px 8px;
   box-shadow: 0 1px 3px rgba(15,23,42,.05); }
 .st-key-g_tag [data-testid="stVerticalBlock"], .st-key-g_distri [data-testid="stVerticalBlock"],
-.st-key-g_brand [data-testid="stVerticalBlock"], .st-key-g_waktu [data-testid="stVerticalBlock"] { gap: 0.2rem; }
+.st-key-g_brand [data-testid="stVerticalBlock"], .st-key-g_waktu [data-testid="stVerticalBlock"], .st-key-g_tagsku [data-testid="stVerticalBlock"] { gap: 0.2rem; }
 
 /* ikon .mi (HTML) harus tetap memakai font ikon, jangan tertimpa aturan font teks */
 .mi, .stApp .mi, .stApp [data-testid="stMarkdownContainer"] .mi { font-family: 'Material Symbols Rounded' !important; }
 
 /* jarak antara kartu KPI dan kartu grafik */
-.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu { margin-top: 14px; }
+.st-key-g_tag, .st-key-g_distri, .st-key-g_brand, .st-key-g_waktu, .st-key-g_tagsku { margin-top: 14px; }
 
 
 /* tombol Tutorial: di kiri tombol Help & Support (kanan atas), gaya sama */
