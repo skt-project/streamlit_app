@@ -587,6 +587,33 @@ def sb_cari_duplikat_sku(table: str, pasangan):
             gagal_cek.add(cc)
     return ditemukan, gagal_cek
 
+def sb_cari_duplikat_kode_sku(table: str, pasangan):
+    """pasangan: [(customer_code, customer_product_code)]. Return (set{(cc_upper, kode_upper)}, gagal_cek)
+    untuk kombinasi Customer Code + Customer Product Code yang sudah ada di tabel."""
+    kol_cc  = SKU_KOLOM_DB["Customer Code"]
+    kol_cpc = SKU_KOLOM_DB["Customer Product Code"]
+    per_kode = {}
+    for cc, kd in pasangan:
+        if _sku_str(kd):
+            per_kode.setdefault(_sku_str(cc), set()).add(_sku_str(kd))
+    ditemukan, gagal_cek = set(), set()
+    for cc, kode_set in per_kode.items():
+        daftar = ",".join('"' + k.replace("\\","\\\\").replace('"','\\"') + '"' for k in sorted(kode_set))
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                headers={**_SB_HEADERS, "Prefer": ""},
+                params={"select": f"{kol_cc},{kol_cpc}", kol_cc: f"eq.{cc}", kol_cpc: f"in.({daftar})"},
+                timeout=10,
+            )
+            if not r.ok:
+                gagal_cek.add(cc); continue
+            for row in r.json():
+                ditemukan.add((_sku_str(row.get(kol_cc)).upper(), _sku_str(row.get(kol_cpc)).upper()))
+        except Exception:
+            gagal_cek.add(cc)
+    return ditemukan, gagal_cek
+
 
 # ══════════════════════════════════════════════
 # CACHE "STALE-WHILE-REVALIDATE": halaman tidak pernah menunggu fetch ulang setelah TTL habis

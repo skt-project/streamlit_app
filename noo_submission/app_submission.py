@@ -21,7 +21,7 @@ from shared import (
     KOLOM_SKU_TAMPIL, KOLOM_SKU_OPSIONAL, SKU_KOLOM_DB, TABLE_SUBMIT_NOO,
     ZONA_WAKTU, PENGGUNA, STATUS_REVIEW, STATUS_VALID,
     # Supabase
-    sb_insert, sb_select, sb_cari_duplikat_kode, sb_cari_duplikat_sku, sb_select_batch, ambil_raw_noo,
+    sb_insert, sb_select, sb_cari_duplikat_kode, sb_cari_duplikat_sku, sb_cari_duplikat_kode_sku, sb_select_batch, ambil_raw_noo,
     sb_patch_by_kode_nama, swr_cache,
     # BigQuery
     bq_cari_duplikat_kode,
@@ -1035,7 +1035,8 @@ def halaman_pengajuan_noo():
             try:
                 semua = []
                 for berkas in daftar_berkas:
-                    semua.append(pd.read_excel(berkas))
+                    # dtype=str: pertahankan leading zero (mis. "01490" tidak boleh jadi 1490)
+                    semua.append(pd.read_excel(berkas, dtype=str))
                     uk = (f"{berkas.size/1024/1024:.1f} MB" if berkas.size > 1024*1024
                           else f"{max(1,round(berkas.size/1024))} KB")
                     st.markdown(komponen.html_info_file(berkas.name, uk), unsafe_allow_html=True)
@@ -1275,16 +1276,24 @@ def halaman_pengajuan_noo():
         with st.spinner("Checking duplicates..."):
             dup_db, gagal_cek = sb_cari_duplikat_sku(
                 "sku_mapping", [(_sku_str(r["Customer Code"]), _sku_str(r["Product"])) for r in rows])
+            dup_kode, gagal_kode = sb_cari_duplikat_kode_sku(
+                "sku_mapping", [(_sku_str(r["Customer Code"]), _sku_str(r["Customer Product Code"])) for r in rows])
+        gagal_cek = set(gagal_cek) | set(gagal_kode)
         if gagal_cek:
             ss.pesan_toast = "Cancelled — could not check duplicates: " + ", ".join(sorted(gagal_cek))
             ss.pesan_toast_icon = ":material/warning:"
             st.rerun()
-        seen, baru = set(), []
+        seen, seen_kode, baru = set(), set(), []
         for r in rows:
-            k = _sku_kunci(r["Customer Code"], r["Product"])
-            if k in dup_db or k in seen:
+            k  = _sku_kunci(r["Customer Code"], r["Product"])
+            kk = (_sku_str(r["Customer Code"]).upper(), _sku_str(r["Customer Product Code"]).upper())
+            # duplikat = pasangan Customer Code+Product ATAU Customer Code+Customer Product Code sudah ada (DB / baris lain di batch ini)
+            if k in dup_db or k in seen or (kk[1] and (kk in dup_kode or kk in seen_kode)):
                 continue
-            seen.add(k); baru.append(r)
+            seen.add(k)
+            if kk[1]:
+                seen_kode.add(kk)
+            baru.append(r)
         if not baru:
             ss.pesan_toast = "All rows already exist in sku_mapping. Nothing saved."
             ss.pesan_toast_icon = ":material/warning:"
