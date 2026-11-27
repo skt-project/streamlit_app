@@ -35,6 +35,7 @@ KOLOM_ORDER_EDITOR =["#","Pilih","Validasi","Store ID"] + list(KOLOM[2:])
 NAVIGASI = [
     ("Dashboard",          ":material/trending_up:", "dashboard"),
     ("Store Validation",   ":material/description:", "validasi"),
+    ("BD & RSA NOO Check",     ":material/verified_user:", "bdrsa"),
     ("Submission History", ":material/history:",     "riwayat"),
     ("Settings",           ":material/settings:",    "pengaturan"),
    # ("Input NOO", "noo"),
@@ -1562,6 +1563,23 @@ def halaman_validasi_toko():
         tab_noo()
     else:
         _tab_sku()
+# ═══════════════════════════════════════
+# HALAMAN: BD & RSA CHECK (fitur sama dengan SPV Confirmation di app_submission)
+# ═══════════════════════════════════════
+def halaman_bd_rsa_check():
+    import app_submission as _sub      # import lazy: hanya dimuat saat halaman ini dibuka
+    ss = st.session_state
+    for k, v in (("spv_tampil_error", False), ("baris_spv", []), ("sim_tanda", None), ("sim_hasil", {})):
+        ss.setdefault(k, v)
+    _sub.halaman_konfirmasi_spv(judul="BD & RSA NOO Check", kembali_ke="validasi")
+    # Setelah submit, status tagging di Supabase berubah -> segarkan tabel Store Validation (kecuali ada perubahan belum disimpan)
+    n_selesai = len(ss.get("spv_selesai", ()))
+    if n_selesai != ss.get("_bdrsa_n_selesai", 0):
+        ss["_bdrsa_n_selesai"] = n_selesai
+        if not ss.baris_kotor and not ss.baris_perlu_push:
+            ss.df_toko = muat_data_noo_dari_supabase()
+            ss.tanda_tangan = None; ss.snapshot = None; ss.versi_impor += 1
+
 # ═══════════════════════════════════════
 # HALAMAN: DASHBOARD
 # ═══════════════════════════════════════
@@ -3274,7 +3292,9 @@ def halaman_pengaturan():
 
     #   akses_users = [u for u in users if u.get("tagging") == "user"]
     # 1 kode bisa punya 2 akun -> pilihan hapus ditampilkan "username · email"
-    _peta_hapus = {f"{u['username']} · {u.get('email') or '-'}": (u["username"], u.get("email") or "")
+    _ROLE_LBL = {"SPV": "SPV", "Admin Distributor": "Admin", "RSA": "RSA", "BD SUPPORT": "BD Support", "BD_SUPPORT": "BD Support"}
+    _role = lambda u: _ROLE_LBL.get(str(u.get("tagging") or "").strip(), str(u.get("tagging") or "").strip() or "-")
+    _peta_hapus = {f"{u['username']} · {u.get('email') or '-'} · {_role(u)}": (u["username"], u.get("email") or "")
                    for u in users if not (u["username"] == me.get("username") and (u.get("email") or "") == me.get("email", ""))}
     hapus_opts = list(_peta_hapus)
     semua_opts = [u["username"] for u in users]
@@ -3488,6 +3508,10 @@ def main():
     from login_page import require_login, keluar
     # mulai memuat data berat di latar belakang selagi user masih di halaman login
     _shared.prewarm(ambil_raw_noo, ambil_data_dashboard, _riwayat_cache)
+    # BD & RSA Check memakai master toko BigQuery (besar) + normalisasi untuk similarity: muat lebih dulu di latar belakang
+    # selagi user di login / halaman lain, supaya halaman itu tidak menunggu saat pertama dibuka.
+    import app_submission as _sub
+    _shared.prewarm(_sub.ambil_master_toko, _sub._master_ternormalisasi, _sub._indeks_kode_master)
     user = require_login("validation")
 
     IZIN_MASUK = {"RSA", "BD SUPPORT"}
@@ -3556,6 +3580,7 @@ def main():
         {
             "dashboard":  halaman_dashboard_tabs,
             "validasi":   halaman_validasi_toko,
+            "bdrsa":      halaman_bd_rsa_check,
             "riwayat":    halaman_riwayat,
             "pengaturan": halaman_pengaturan,
         }[ss.halaman_aktif]()

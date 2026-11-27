@@ -1692,11 +1692,11 @@ def simpan_konfirmasi_spv(baris: list) -> tuple[int, list]:
     return berhasil, gagal
 
 @st.fragment   # ubah NOO/Existing, Store ID, Remarks hanya me-render ulang fragment ini, bukan seluruh halaman/app
-def halaman_konfirmasi_spv():
+def halaman_konfirmasi_spv(judul: str = "SPV Confirmation", kembali_ke: str = "pengajuan"):
     ss = st.session_state
     ss.setdefault("spv_tampil_error", False)
-    st.markdown(komponen.html_breadcrumb("SPV Confirmation"), unsafe_allow_html=True)
-    st.markdown(komponen.html_header("SPV Confirmation",
+    st.markdown(komponen.html_breadcrumb(judul), unsafe_allow_html=True)
+    st.markdown(komponen.html_header(judul,
                                       "Confirm outlet type and validate data before submission.",":material/verified_user:"),
                 unsafe_allow_html=True)
 
@@ -1861,7 +1861,7 @@ def halaman_konfirmasi_spv():
     st.markdown('<hr class="pemisah-tipis">', unsafe_allow_html=True)
     c_kembali,_,c_draft,c_submit = st.columns([1.2,5.2,1.5,1.9], gap="xxsmall")
     if c_kembali.button("← Kembali", key="spv_kembali"):
-        tuju_halaman("pengajuan"); st.rerun()
+        tuju_halaman(kembali_ke); st.rerun()
     if c_draft.button(":material/save: Save as Draft", key="spv_draft", disabled=not semua, width="stretch"):
         with st.spinner("Saving draft..."):
             time.sleep(0.7)
@@ -1949,13 +1949,31 @@ def _history_sku():
     if df.empty:
         st.info("No SKU Mapping data yet."); return
 
-    # akun distributor hanya melihat SKU Mapping distributornya sendiri (customer_name = nama distributor)
+    # akun distributor hanya melihat SKU Mapping milik COMPANY CODE-nya (username = kode, mis. DST217).
+    # SKU Mapping berbasis Company Code: customer_code = "17"/"12" + company code, jadi dicocokkan lewat kode, bukan nama distributor.
     kunci_distri = distributor_terkunci(ss.get("user"))
     if kunci_distri is not None:
-        nk = lambda v: re.sub(r"\s+", " ", str(v or "")).strip().upper()
-        # contains, bukan exact: customer_name dari file bisa berbentuk "<distributor> - <cabang>"
-        df = df[df["customer_name"].map(lambda v: nk(kunci_distri) in nk(v))] if ("customer_name" in df.columns and kunci_distri) else df.iloc[0:0]
-        st.caption(f"Showing data for distributor: {kunci_distri or '-'}")
+        kode_user = str((ss.get("user") or {}).get("username", "")).strip().upper()
+        kandidat = {kode_user} if kode_user else set()
+        try:   # company code kolom G sheet Distributor Mapping (mis. SPL, tanpa awalan 12/17)
+            cc_user = str((_shared.muat_distri_code_map().get(kode_user) or {}).get("company_code", "")).strip().upper()
+            if cc_user:
+                kandidat.add(cc_user)
+        except Exception:
+            pass
+        try:   # cadangan: kode dari nama distributor
+            raw = muat_distri_customer_code_raw().get(kunci_distri, "") if kunci_distri else ""
+            sisa = re.sub(r"^\s*\d+\s*/\s*", "", raw) if re.match(r"^\s*\d+\s*/", raw) else re.sub(r"^(12|17)", "", raw)
+            if sisa.strip():
+                kandidat.add(sisa.strip().upper())
+        except Exception:
+            pass
+        if "customer_code" in df.columns and kandidat:
+            cc = df["customer_code"].fillna("").astype(str).str.upper()
+            df = df[cc.map(lambda v: any(k in v for k in kandidat))]
+        else:
+            df = df.iloc[0:0]
+        st.caption(f"Showing data for company code {kode_user or '-'}")
 
     out = pd.DataFrame(index=df.index)
     waktu = (pd.to_datetime(df["created_at"], errors="coerce", utc=True, format="ISO8601").dt.tz_convert(ZONA_WAKTU)
@@ -2040,6 +2058,27 @@ def _history_noo():
                 cocok |= df[k_branch].fillna("").astype(str).str.strip().str.upper() == kode_user
             if k_kode:
                 cocok |= df[k_kode].fillna("").astype(str).str.strip().str.upper().str.startswith(kode_user)
+            # Company code (kolom G sheet Distributor Mapping, mis. SPL; dipakai bersama oleh DST215/216/217):
+            # baris tampil bila kolom Customer Code (juga Customer Store Code) MENGANDUNG company code akun ini
+            kand_cc = set()
+            try:
+                c0 = str((_shared.muat_distri_code_map().get(kode_user) or {}).get("company_code", "")).strip().upper()
+                if c0:
+                    kand_cc.add(c0)
+            except Exception:
+                pass
+            try:   # cadangan: dari nama distributor (kolom G, tanpa awalan 12/17)
+                raw = _shared.muat_distri_customer_code_raw().get(kunci_distri, "") if kunci_distri else ""
+                raw = re.sub(r"^\s*\d+\s*/\s*", "", raw) if re.match(r"^\s*\d+\s*/", raw) else re.sub(r"^(12|17)", "", raw)
+                if raw.strip():
+                    kand_cc.add(raw.strip().upper())
+            except Exception:
+                pass
+            k_cc = ambil("Customer Code")
+            for kol in (k_cc, k_kode):
+                if kol and kand_cc:
+                    s = df[kol].fillna("").astype(str).str.upper()
+                    cocok |= s.map(lambda v: any(c in v for c in kand_cc))
             if k_distri and kunci_distri:
                 cocok |= df[k_distri].map(nk) == nk(kunci_distri)
         df = df[cocok]
@@ -2123,6 +2162,25 @@ def main():
         _shared.tampilkan_toast_warna(ss.pop("pesan_toast"), ss.pop("pesan_toast_icon", ":material/check_circle:"))
 
     with st.sidebar:
+        # Profil user (di atas judul): avatar inisial + kode/nama + badge peran berwarna
+        _peran = {"SPV": ("SPV", "#7c3aed", "#ede9fe"), "RSA": ("RSA", "#0369a1", "#e0f2fe"),
+                  "BD SUPPORT": ("BD Support", "#b45309", "#fef3c7"), "BD_SUPPORT": ("BD Support", "#b45309", "#fef3c7")}
+        _tag = str(user.get("tagging", "")).strip()
+        _lbl, _fg, _bg = _peran.get(_tag, ("Admin Distributor", "#166534", "#dcfce7"))
+        _uname = str(user.get("username", "")).strip()
+        _inisial = (re.sub(r"[^A-Za-z0-9]", "", _uname)[:2] or "U").upper()
+        _distri = distributor_terkunci(user) or ""          # None (RSA/BD) atau kosong -> baris distributor tidak ditampilkan
+        _baris_distri = (f'<div style="font-size:11px;color:#758299;margin-top:4px;line-height:1.35;'
+                         f'word-break:break-word">{_distri}</div>') if _distri else ""
+        st.markdown(
+            f'<div style="font-family:inherit;display:flex;flex-direction:column;align-items:center;text-align:center;'
+            f'padding:0 4px;margin:-48px 0 20px 0">'
+            f'<div style="width:46px;height:46px;border-radius:50%;background:{_bg};color:{_fg};font-weight:700;'
+            f'font-size:16px;display:flex;align-items:center;justify-content:center;margin-bottom:6px">{_inisial}</div>'
+            f'<div style="font-weight:700;font-size:14px;color:#10213f;line-height:1.2">{_uname.upper() or "-"}</div>'
+            f'<span style="display:inline-block;margin-top:4px;padding:0 8px;border-radius:999px;font-size:10px;'
+            f'font-weight:600;background:{_bg};color:{_fg}">{_lbl}</span>{_baris_distri}</div>',
+            unsafe_allow_html=True)
         st.markdown('<div class="brand"><span class="mi">inventory_2</span> NOO & SKU Submission</div>'
                     '<div class="brand-sub">Submit and confirm NOO data.</div>',
                     unsafe_allow_html=True)
