@@ -954,7 +954,15 @@ def resolve_distributor(nama_toko: str, kota: str = "") -> str:
         return ""
     kunci = str(nama_toko).strip().upper()
     mapping = muat_mapping_distributor_name()
-    return mapping.get(kunci, "")
+    if kunci in mapping:
+        return mapping[kunci]
+    # toleran spasi ganda / spasi di sekitar tanda "-" (nama di file bisa sedikit beda format dengan sheet)
+    rapih = lambda t: re.sub(r"\s*-\s*", "-", re.sub(r"\s+", " ", t)).strip()
+    k2 = rapih(kunci)
+    for nama_sheet, asli in mapping.items():
+        if rapih(nama_sheet) == k2:
+            return asli
+    return ""
 
 def region_distributor(nama_distributor: str) -> tuple:
     if not nama_distributor:

@@ -235,14 +235,17 @@ def muat_data_noo_dari_supabase() -> pd.DataFrame:
             if kolom_grup else [""] * len(df))
     kode_distri = muat_distri_code_map()      # 6 karakter awal Customer Store Code -> distributor (Distributor Mapping kol. H)
     def _cari_distri(g, csn, kota, kode):
-        # 1) Group Name, 2) Customer Store Name (data lama), 3) prefix 6 karakter Customer Store Code
-        #    (nama distributor di file bisa berubah, kode toko tetap)
+        # 1) Kode DST = 6 karakter awal Customer Store Code -> Distributor Mapping kol. H (utama, kode toko tetap)
+        info = kode_distri.get(str(kode).strip()[:6].upper())
+        if info and info["distributor"].strip():
+            return info["distributor"].strip()
+        # 2) Group Name, 3) Customer Store Name (data lama) -- dicocokkan ke nama distributor di sheet
         for kandidat in (g, csn):
             hasil = resolve_distributor(kandidat, kota) if str(kandidat).strip() else ""
             if hasil:
                 return hasil
-        info = kode_distri.get(str(kode).strip()[:6].upper())
-        return info["distributor"].strip() if info else ""
+        # 4) Terakhir: Group Name apa adanya (sama seperti History) supaya kolom tidak kosong
+        return str(g or "").strip()
     df["Distributor"] = [_cari_distri(g, csn, kota, kode)
                          for g, csn, kota, kode in zip(grup, df["Customer Store Name"], df["City"],
                                                        df["Customer Store Code"])]
