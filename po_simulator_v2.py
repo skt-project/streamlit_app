@@ -921,6 +921,33 @@ def _convert_to_xlsx(fname: str, fbytes: bytes):
 
 
 
+@st.cache_data(show_spinner=False, max_entries=64)
+def _convert_to_xlsx_cached(fname: str, fbytes: bytes):
+    return _convert_to_xlsx(fname, fbytes)
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def _visible_sheets_cached(fbytes: bytes) -> list:
+    wb = openpyxl.load_workbook(io.BytesIO(fbytes), data_only=True, read_only=True)
+    try:
+        return [ws.title for ws in wb.worksheets if ws.sheet_state == 'visible']
+    finally:
+        wb.close()
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _detect_header_row_cached(fbytes: bytes, fname: str, sheet_name) -> int:
+    return detect_header_row(fbytes, fname, sheet_name=sheet_name)
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _read_sheet_cached(fbytes: bytes, fname: str, sheet_name, header: int) -> pd.DataFrame:
+    if fname.rsplit(".", 1)[-1].lower() == "csv":
+        return pd.read_csv(io.BytesIO(fbytes), header=header, dtype=str, encoding_errors="replace")
+    return pd.read_excel(io.BytesIO(fbytes), sheet_name=sheet_name, header=header,
+                         engine=_excel_engine(fname), dtype=str)
+
+
 def numeric_coerce(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         try:
@@ -1090,6 +1117,7 @@ def df_to_image_bytes(df: pd.DataFrame, title: str = "") -> bytes:
 
 
 @st.cache_data(show_spinner=False, max_entries=16)
+@st.cache_data(show_spinner=False, max_entries=16)
 def pivot_to_png_bytes(df: pd.DataFrame, kinds: list, title: str = "") -> bytes:
     if not MATPLOTLIB_OK:
         raise RuntimeError("matplotlib tidak tersedia.")
@@ -1116,6 +1144,46 @@ def pivot_to_png_bytes(df: pd.DataFrame, kinds: list, title: str = "") -> bytes:
     buf.seek(0); plt.close(fig)
     return buf.getvalue()
 
+
+
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def summary_pivot_png_bytes(df: pd.DataFrame, kinds: list, title: str = "") -> bytes:
+    """Gambar pivot dengan gaya yang sama seperti tabel di web (header abu terang, garis tipis,
+    baris distributor/status tebal, Grand Total biru muda, angka rata kanan).
+    df kolom: Row Labels (teks) + kolom angka lain (sudah berformat teks)."""
+    if not MATPLOTLIB_OK:
+        raise RuntimeError("matplotlib tidak tersedia.")
+    HDR_BG, HDR_INK, GRID, INK, MUTED, GRAND = "#F6F7FA", "#7A8394", "#E3E6EC", "#1F2430", "#6B7280", "#DDEBF7"
+    n_rows, n_cols = df.shape
+    with plt.rc_context({"font.family": "sans-serif",
+                         "font.sans-serif": ["Segoe UI", "Arial", "Liberation Sans", "DejaVu Sans"]}):
+        fig, ax = plt.subplots(figsize=(max(7.5, n_cols * 2.4), max(1.2, n_rows * 0.30 + 0.9)))
+        ax.axis("off")
+        if title:
+            ax.set_title(title, fontsize=11, fontweight="bold", color=INK, pad=14, loc="left")
+        tbl = ax.table(cellText=df.values.tolist(), colLabels=df.columns.tolist(), loc="upper left", cellLoc="left")
+        tbl.auto_set_font_size(False); tbl.set_fontsize(9.5)
+        tbl.auto_set_column_width(col=list(range(n_cols)))
+        tbl.scale(1, 1.6)
+        for (i, j), c in tbl.get_celld().items():
+            c.set_edgecolor(GRID); c.set_linewidth(0.8)
+            c.PAD = 0.04
+            c._loc = "right" if j > 0 else "left"
+            c.get_text().set_ha("right" if j > 0 else "left")
+            if i == 0:
+                c.set_facecolor(HDR_BG); c.set_text_props(color=HDR_INK, fontweight="normal")
+                continue
+            k = kinds[i - 1]
+            c.set_facecolor(GRAND if k == "grand" else "#FFFFFF")
+            c.set_text_props(color=MUTED if k == "item" else INK,
+                             fontweight="normal" if k == "item" else "bold")
+        fig.patch.set_facecolor("white")
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches="tight", dpi=200, facecolor="white")
+        buf.seek(0); plt.close(fig)
+    return buf.getvalue()
 
 
 
@@ -1308,7 +1376,7 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
     sim_df["is_po_sku"] = True
     sim_df = sim_df[["Distributor","Customer SKU Code","PO Qty","is_po_sku"]]
 
-    all_npd = []; excel_dfs = {}; brand_map = {}
+    all_npd = []; excel_dfs = {}; brand_map = {}; zero_sugg_all = []
     zero_price_skus = get_zero_price_skus()
     prog = st.progress(0)
     distributors = sim_df["Distributor"].unique().tolist()
@@ -1585,12 +1653,16 @@ def _run_po_simulation(sim_df, sku_col, qty_col, dist_col,
         res_df.sort_values(by=["is_po_sku","SKU"], ascending=[False,True], inplace=True)
         zero_sugg = res_df[(res_df["Suggested PO buffer"] == 0) & (res_df["is_po_sku"] == True)][["SKU","Product Name","PO Qty","Suggested PO buffer","Remark"]]
         if not zero_sugg.empty:
-            st.warning(f"⚠️ **{dist_name}** — {len(zero_sugg)} SKU memiliki Suggested PO Qty = 0")
-            st.dataframe(zero_sugg, use_container_width=True, hide_index=True)
+            zero_sugg_all.append(zero_sugg.assign(Distributor=dist_name))
 
         excel_dfs[dist_name] = res_df.copy()
 
     prog.progress(1.0, "Selesai")
+    if zero_sugg_all:
+        _zs = pd.concat(zero_sugg_all, ignore_index=True)
+        with st.expander(f"ℹ️ {len(_zs)} SKU dengan Suggested PO Qty = 0 (detail)", expanded=False):
+            st.dataframe(_zs[["Distributor", "SKU", "Product Name", "PO Qty", "Suggested PO buffer", "Remark"]],
+                         use_container_width=True, hide_index=True)
             
     missing_dist = [d for d in distributors if d not in excel_dfs]
     if missing_dist:
@@ -1932,6 +2004,194 @@ def _submitted_dialog(n_rows: int):
     if st.button("Back", use_container_width=True, key="btn_close_submitted"):
         st.rerun()   # tutup dialog, kembali ke tampilan hasil sebelum popup
 
+
+# =====================================================================
+# SUPPLY CONTROL HISTORY (tab ke-3 PO Simulator - RSA)
+# Satu "history" = satu file_name + calendar_date yang pernah disimpan ke TEST_TABLE.
+# =====================================================================
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_sc_history(d_from, d_to, limit: int = 500) -> pd.DataFrame:
+    """Filter berdasarkan tanggal simpan (record_time), inklusif d_from..d_to."""
+    client = get_bq_client()
+    cfg = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("d1", "DATE", pd.Timestamp(d_from).date()),
+        bigquery.ScalarQueryParameter("d2", "DATE", pd.Timestamp(d_to).date()),
+    ])
+    query = f"""
+        SELECT file_name, calendar_date,
+               COUNT(*)                         AS n_rows,
+               COUNT(DISTINCT distributor_name) AS n_dist,
+               SUM(po_qty)                      AS sum_po,
+               SUM(final_qty)                   AS sum_final,
+               MAX(record_time)                 AS last_saved,
+               STRING_AGG(DISTINCT region, ', ' ORDER BY region) AS regions
+        FROM `{TEST_TABLE}`
+        WHERE DATE(record_time) BETWEEN @d1 AND @d2
+        GROUP BY file_name, calendar_date
+        ORDER BY last_saved DESC
+        LIMIT {int(limit)}
+    """
+    return client.query(query, job_config=cfg).to_dataframe()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_sc_history_detail(file_name: str, calendar_date) -> pd.DataFrame:
+    client = get_bq_client()
+    cfg = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("f", "STRING", file_name),
+        bigquery.ScalarQueryParameter("d", "DATE", pd.Timestamp(calendar_date).date()),
+    ])
+    query = f"""
+        SELECT region, distributor_name, brand, sku, product_name, status_supply,
+               po_qty, current_woi, allocation, final_qty
+        FROM `{TEST_TABLE}`
+        WHERE file_name = @f AND calendar_date = @d
+        ORDER BY distributor_name, sku
+    """
+    return client.query(query, job_config=cfg).to_dataframe()
+
+
+def _delete_sc_history(file_name: str, calendar_date) -> int:
+    client = get_bq_client()
+    cfg = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("f", "STRING", file_name),
+        bigquery.ScalarQueryParameter("d", "DATE", pd.Timestamp(calendar_date).date()),
+    ])
+    job = client.query(
+        f"DELETE FROM `{TEST_TABLE}` WHERE file_name = @f AND calendar_date = @d",
+        job_config=cfg,
+    )
+    job.result()
+    return job.num_dml_affected_rows or 0
+
+
+@st.dialog("Delete this history?")
+def _delete_history_dialog(file_name: str, calendar_date, n_rows: int):
+    from html import escape as _esc
+    st.markdown(
+        f"<div style='background:#FFF1F1;border:1px solid #F3B4B4;border-radius:14px;padding:14px 16px;'>"
+        f"<div style='font-weight:800;color:#B3261E;margin-bottom:4px;'>⚠️ This action is permanent</div>"
+        f"<div style='color:#444;font-size:.9rem;line-height:1.5;'>"
+        f"<b>{n_rows}</b> Supply Control rows from file <b>{_esc(file_name)}</b> "
+        f"({pd.Timestamp(calendar_date).strftime('%d %b %Y')}) will be deleted from table "
+        f"<code>po_supply_control_g2g</code> and <b>cannot be restored</b>. "
+        f"Deleted data will no longer be used as Supply Control context."
+        f"</div></div>",
+        unsafe_allow_html=True,
+    )
+    ok = st.checkbox("I understand and want to delete this history", key="chk_del_hist")
+    c_no, c_yes = st.columns(2)
+    if c_no.button("Cancel", use_container_width=True, key="btn_del_hist_no"):
+        st.rerun()
+    if c_yes.button("Delete permanently", type="primary", use_container_width=True,
+                    disabled=not ok, key="btn_del_hist_yes"):
+        try:
+            n = _delete_sc_history(file_name, calendar_date)
+            fetch_sc_history.clear()
+            fetch_sc_history_detail.clear()
+            st.session_state.pop("supply_control_saved", None)
+            st.session_state.pop("hist_open", None)
+            st.session_state["hist_toast"] = f"{n} rows from '{file_name}' deleted."
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to delete: {e}")
+
+
+def _render_sc_history():
+    from html import escape as _esc
+    st.markdown("""<style>
+    [class*="st-key-hist_card_"]{background:#fff;border:1px solid #F0E3E8!important;border-radius:20px!important;
+        padding:.9rem 1.1rem!important;box-shadow:0 4px 14px rgba(110,37,58,.06);transition:box-shadow .2s,transform .2s;}
+    [class*="st-key-hist_card_"]:hover{box-shadow:0 8px 22px rgba(255,137,170,.25);transform:translateY(-1px);}
+    .hc-title{font-weight:800;font-size:1rem;color:#2B1B20;word-break:break-all;}
+    .hc-time{font-size:.78rem;color:#8A7A80;}
+    .hc-chip{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.74rem;font-weight:700;margin:6px 6px 0 0;}
+    .hc-pink{background:#FFE8EF;color:#C2185B;border:1px solid #FAC3D4;}
+    .hc-green{background:#E3F6F1;color:#13806B;}
+    .hc-amber{background:#FFF4D6;color:#9A6B00;}
+    .hc-gray{background:#F3F0F1;color:#5F5257;}
+    [class*="st-key-hist_card_"]{padding-bottom:1.1rem!important;overflow:visible!important;}
+    [class*="st-key-hist_card_"] .hc-chip{margin-bottom:8px;}
+    [class*="st-key-hist_det_"] button,[class*="st-key-hist_del_"] button,.st-key-hist_refresh button{
+        min-height:1.9rem!important;padding:.15rem .6rem!important;font-size:.78rem!important;
+        border-radius:10px!important;}
+    [class*="st-key-hist_det_"] button p,.st-key-hist_refresh button p{font-size:.78rem!important;}
+    .st-key-hist_search [data-baseweb="input"],.st-key-hist_search [data-baseweb="base-input"]{
+        min-height:2.4rem!important;border-radius:12px!important;background:#fff!important;}
+    .st-key-hist_search input{font-size:.88rem!important;padding:0 .8rem!important;height:2.4rem!important;}
+    .st-key-hist_search,.st-key-hist_refresh,.st-key-hist_period{margin:0!important;}
+    .st-key-hist_period [data-baseweb="select"]>div{min-height:2.4rem!important;border-radius:12px!important;background:#fff!important;font-size:.85rem!important;}
+    .st-key-hist_search input::placeholder{font-size:.88rem!important;}
+    .st-key-hist_refresh button{min-height:2.4rem!important;width:100%!important;}
+    [class*="st-key-hist_det_"] button,.st-key-hist_refresh button{background:#fff!important;border:1px solid #E5D5DB!important;}
+    </style>""", unsafe_allow_html=True)
+
+    if _t := st.session_state.pop("hist_toast", None):
+        st.toast(_t, icon="🗑️")
+
+    # Preset ringkas; default 7 hari terakhir (rolling, bergeser tiap hari).
+    _today = pd.Timestamp.now().date()
+    _presets = {"Last 7 days": 6, "Last 14 days": 13, "Last 30 days": 29}
+    c_m, c_s, c_r = st.columns([2, 8.8, 1.2], vertical_alignment="center")
+    _opt = c_m.selectbox("Period", list(_presets) + ["Pick dates..."], key="hist_period",
+                         label_visibility="collapsed")
+    q = c_s.text_input("Search file", placeholder="🔍 Search file name...", label_visibility="collapsed", key="hist_search")
+    if c_r.button("↻ Refresh", use_container_width=True, key="hist_refresh"):
+        fetch_sc_history.clear()
+        fetch_sc_history_detail.clear()
+        st.rerun()
+
+    if _opt in _presets:
+        d_from, d_to = (pd.Timestamp(_today) - pd.Timedelta(days=_presets[_opt])).date(), _today
+    else:
+        c_d, _ = st.columns([3, 9])
+        rng = c_d.date_input("Date range", value=((pd.Timestamp(_today) - pd.Timedelta(days=6)).date(), _today),
+                             max_value=_today, key="hist_range", format="DD/MM/YYYY")
+        if not isinstance(rng, (list, tuple)) or len(rng) != 2:
+            st.caption("Pick an end date to show history.")
+            return
+        d_from, d_to = rng
+
+    try:
+        with st.spinner("Loading history..."):
+            hist = fetch_sc_history(d_from, d_to)
+    except Exception as e:
+        st.error(f"Failed to load history: {e}")
+        return
+    if q:
+        hist = hist[hist["file_name"].astype(str).str.contains(q, case=False, na=False, regex=False)]
+    if hist.empty:
+        st.info("No history in this date range.")
+        return
+    st.caption(f"{len(hist)} files • {d_from.strftime('%d %b')} – {d_to.strftime('%d %b %Y')}")
+
+    for i, r in enumerate(hist.itertuples(index=False)):
+        fname = str(r.file_name)
+        key = f"{fname}|{pd.Timestamp(r.calendar_date).date()}"
+        with st.container(border=True, key=f"hist_card_{i}"):
+            c_main, c_a, c_b = st.columns([12, 1.5, 0.7], vertical_alignment="center")
+            saved = pd.Timestamp(r.last_saved).strftime("%b %d, %Y • %H:%M") if pd.notna(r.last_saved) else "-"
+            c_main.markdown(
+                f"<div class='hc-title'>{_esc(fname)}</div>"
+                f"<div class='hc-time'>Saved {saved}</div>"
+                f"<span class='hc-chip hc-pink'>{int(r.n_rows)} rows</span>"
+                f"<span class='hc-chip hc-green'>{int(r.n_dist)} distributor</span>"
+                f"<span class='hc-chip hc-amber'>PO {int(r.sum_po or 0):,} → Final {int(r.sum_final or 0):,}</span>"
+                f"<span class='hc-chip hc-gray'>{_esc(str(r.regions or '-'))}</span>",
+                unsafe_allow_html=True,
+            )
+            is_open = st.session_state.get("hist_open") == key
+            if c_a.button("Close" if is_open else "Detail", key=f"hist_det_{i}", use_container_width=True,
+                          icon=":material/visibility:", type="secondary"):
+                st.session_state["hist_open"] = None if is_open else key
+                st.rerun()
+            if c_b.button("", key=f"hist_del_{i}", icon=":material/delete:", use_container_width=True,
+                          help="Delete this file's history"):
+                _delete_history_dialog(fname, r.calendar_date, int(r.n_rows))
+            if is_open:
+                st.dataframe(fetch_sc_history_detail(fname, r.calendar_date),
+                             use_container_width=True, hide_index=True)
+
 def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist_col_sim, brand_map=None):
     brand_map = brand_map or {}
     final_disp = pd.concat(e_dfs.values(), ignore_index=True)
@@ -2212,48 +2472,279 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
             return "Reject (Sulawesi Only)"
         return None
 
-    pv_src = summary_df[summary_df["is_po_sku"] == True].copy() if "is_po_sku" in summary_df.columns else summary_df.copy()
-    pv_src["_Status"] = pv_src.apply(_pivot_status, axis=1)
-    pv_src = pv_src[pv_src["_Status"].notna()]
-    pv_src["PO Qty"] = pd.to_numeric(pv_src["PO Qty"], errors="coerce").fillna(0)
+    # ---- Summary Pivot: Distributor > Status pengurangan > Product ----
+    # Sum of PO Value = nilai PO sebelum pengurangan. Sum of Final = setelah dikurangi baris berstatus
+    # Stop PO / OOS / Discontinued / Unavailable / Price Not Available / Reject (Steve, Neg. Alloc, Sulawesi Only).
+    pv_all = summary_df[summary_df["is_po_sku"] == True].copy() if "is_po_sku" in summary_df.columns else summary_df.copy()
+    pv_all["_Status"] = pv_all.apply(_pivot_status, axis=1)
+    pv_all["PO Value"] = pd.to_numeric(pv_all["PO Value"], errors="coerce").fillna(0)
+    pv_all["_Final"] = pv_all["PO Value"].where(pv_all["_Status"].isna(), 0)
 
-    st.markdown("""<div style="font-size:.95rem;font-weight:700;color:#FFFFFF;margin:1rem 0 .4rem;">Summary Pivot — Distributor › Status › Product</div>""", unsafe_allow_html=True)
-    if pv_src.empty:
-        st.info("Tidak ada produk berstatus Stop PO / OOS / Discontinued / Unavailable / Price Not Available / Reject.")
-    else:
-        pv_rows, pv_kind = [], []
-        for d_name, d_grp in pv_src.groupby("Distributor", sort=True):
-            first_d = True
-            for s_name, s_grp in d_grp.groupby("_Status", sort=True):
-                first_s = True
+    def _build_pivot(src):
+        _ind1, _ind2 = chr(160) * 4, chr(160) * 8
+        rows, kinds = [], []
+        _has_woi = "_woi_a" in src.columns and src["_woi_a"].notna().any()
+
+        def _woi_cols(g):   # g: baris yang punya simulasi WOI. Group = WOI gabungan (stock+qty)/avg
+            if not _has_woi:   # Summary Pivot utama tidak punya kolom simulasi WOI
+                return {}
+            g = g[g["_woi_a"].notna()]
+            if g.empty:
+                return {}
+            avg = g["_avg"].sum()
+            wb = float(calculate_woi(g["_stk"].sum(), g["_po_r"].sum(), avg))
+            wa = float(calculate_woi(g["_stk"].sum(), g["_fq"].sum(), avg))
+            return {"Qty Final": float(g["_fq"].sum()), "WOI Before": wb, "WOI After": wa}
+
+        for d_name, d_grp in src.groupby("Distributor", sort=True):
+            rows.append({"Row Labels": d_name, "Sum of PO Value": d_grp["PO Value"].sum(), "Sum of Final": d_grp["_Final"].sum()})
+            kinds.append("dist")
+            red = d_grp[d_grp["_Status"].notna()]
+            for s_name, s_grp in red.groupby("_Status", sort=True):
+                rows.append({"Row Labels": _ind1 + s_name, "Sum of PO Value": s_grp["PO Value"].sum(),
+                             "Sum of Final": s_grp["_Final"].sum(), **_woi_cols(s_grp)})
+                kinds.append("sub")
                 for _, r in s_grp.sort_values("SKU").iterrows():
-                    pv_rows.append({"Distributor": d_name if first_d else "", "Status": s_name if first_s else "",
-                                    "SKU": r["SKU"], "Product": r.get("Product Name", ""),
-                                    "QTY": r["PO Qty"], "Value": r["PO Value"]})
-                    pv_kind.append("item"); first_d = first_s = False
-                pv_rows.append({"Distributor": "", "Status": f"Total {s_name}", "SKU": "", "Product": "",
-                                "QTY": s_grp["PO Qty"].sum(), "Value": s_grp["PO Value"].sum()})
-                pv_kind.append("sub")
-            pv_rows.append({"Distributor": f"Total {d_name}", "Status": "", "SKU": "", "Product": "",
-                            "QTY": d_grp["PO Qty"].sum(), "Value": d_grp["PO Value"].sum()})
-            pv_kind.append("dist")
-        pv_rows.append({"Distributor": "GRAND TOTAL", "Status": "", "SKU": "", "Product": "",
-                        "QTY": pv_src["PO Qty"].sum(), "Value": pv_src["PO Value"].sum()})
-        pv_kind.append("grand")
-        pv_df = pd.DataFrame(pv_rows)
-        pv_df["QTY"] = pv_df["QTY"].apply(lambda v: f"{v:,.0f}")
-        pv_df["Value"] = pv_df["Value"].apply(_rp)
-        pv_df["Product"] = pv_df["Product"].fillna("").astype(str)
+                    _pn = str(r.get("Product Name", "") or "")
+                    rows.append({"Row Labels": f"{_ind2}{r['SKU']} - {_pn}"[:70],
+                                 "Sum of PO Value": r["PO Value"], "Sum of Final": r["_Final"],
+                                 **_woi_cols(src.loc[[r.name]])})
+                    kinds.append("item")
+        rows.append({"Row Labels": "Grand Total", "Sum of PO Value": src["PO Value"].sum(), "Sum of Final": src["_Final"].sum()})
+        kinds.append("grand")
+        return pd.DataFrame(rows), kinds
 
+    def _show_pivot(src, png_title, key):
+        if src.empty:
+            st.info("Tidak ada baris PO untuk diringkas.")
+            return
+        pv_num, kinds = _build_pivot(src)
+        _bold = [k != "item" for k in kinds]
+        _grand = [k == "grand" for k in kinds]
+
+        def _style_rows(row):
+            i = row.name
+            base = "font-weight:700;" if _bold[i] else "color:#555;"
+            if _grand[i]:
+                base += "background-color:#DDEBF7;"
+            return [base] * len(row)
+
+        # Angka diformat jadi teks supaya sel kosong benar-benar kosong (bukan "None"); rata kanan lewat column_config
+        _fmts = {"Sum of PO Value": "{:,.0f}", "Sum of Final": "{:,.0f}", "Qty Final": "{:,.0f}",
+                 "WOI Before": "{:.1f}", "WOI After": "{:.1f}"}
+        _disp = pv_num.copy()
+        for _c, _f in _fmts.items():
+            if _c in _disp.columns:
+                _disp[_c] = _disp[_c].apply(lambda v, _f=_f: "" if pd.isna(v) else _f.format(v))
+        st.dataframe(
+            _disp.style.apply(_style_rows, axis=1),
+            column_config={_c: st.column_config.TextColumn(_c, alignment="right") for _c in _disp.columns if _c != "Row Labels"},
+            use_container_width=True, hide_index=True,
+            height=min(520, 35 * (len(pv_num) + 1) + 3),
+        )
+        pv_df = pv_num.copy()
+        pv_df["Sum of PO Value"] = pv_df["Sum of PO Value"].apply(lambda v: f"{v:,.0f}")
+        pv_df["Sum of Final"] = pv_df["Sum of Final"].apply(lambda v: f"{v:,.0f}")
+        for _wc, _fmt in (("Qty Final", "{:,.0f}"), ("WOI Before", "{:.1f}"), ("WOI After", "{:.1f}")):
+            if _wc in pv_df.columns:
+                pv_df[_wc] = pv_df[_wc].apply(lambda v, _f=_fmt: "" if pd.isna(v) else _f.format(v))
         try:
-            pv_png = pivot_to_png_bytes(pv_df, pv_kind, title=f"Summary Pivot PO — {po_date_str}")
-            st.image(pv_png, width=720)
-            st.download_button(label="Download Summary Pivot (.png)", data=pv_png,
-                               file_name=f"summary_pivot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                               mime="image/png",
-                               key="dl_img_summary_pivot", on_click=_flag_po_downloaded)
+            png = summary_pivot_png_bytes(pv_df, kinds, title=png_title)
+            st.download_button(label="Download Summary Pivot (.png)", data=png,
+                               file_name=f"{key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                               mime="image/png", key=f"dl_img_{key}", on_click=_flag_po_downloaded)
         except Exception as e:
             st.error(f"Gagal generate gambar pivot: {e}")
+
+    st.markdown("""<div style="font-size:.95rem;font-weight:700;color:#FFFFFF;margin:1rem 0 .4rem;">Summary Pivot — Distributor › Status › Product</div>""", unsafe_allow_html=True)
+    _show_pivot(pv_all, f"Summary Pivot PO - All Brand - {po_date_str}", "summary_pivot")
+
+    # ---- Pivot Helper: simulasi pengurangan High WOI, dipisah per brand ----
+    st.markdown("""<div style="font-size:.95rem;font-weight:700;color:#FFFFFF;margin:1.4rem 0 .4rem;">Pivot Helper — Pengurangan High WOI (per Brand)</div>""", unsafe_allow_html=True)
+    _hw_box = st.container(border=True)
+    with _hw_box:
+        hw1, _ = st.columns([1, 2])
+        hw_limit = hw1.number_input("Batas WOI (dikurangi jika WOI Stock + PO Ori >)", min_value=0.0, value=17.0,
+                                    step=1.0, key="hw_limit")
+        hw_remarks = ["Reject with suggestion", "Reject"]   # tetap: kedua remark Reject, kondisi lain sama dengan preview poin 3
+        hw_follow = st.radio("Isi awal Qty Final",
+                             ["Ikuti Suggested Final", "Tidak ikut Suggested (mulai dari PO Qty)"], horizontal=True, key="hw_follow")
+
+    def _high_woi_mask(df, limit, remark_opts):
+        sc = df["Supply Control"].astype(str)
+        rm = df["Remark"].astype(str)
+        rm_lo = rm.str.strip().str.lower()
+        woi = pd.to_numeric(df["WOI (Stock + PO Ori)"], errors="coerce")
+        stock = pd.to_numeric(df["Total Stock (Qty)"], errors="coerce")
+        is_sugg = rm_lo.eq("reject with suggestion")
+        is_rej_other = rm_lo.str.startswith("reject") & ~is_sugg
+        remark_ok = pd.Series(False, index=df.index)
+        if "Reject with suggestion" in remark_opts:
+            remark_ok |= is_sugg
+        if "Reject" in remark_opts:
+            remark_ok |= is_rej_other
+        return (~sc.str.contains("Stop PO|Discontinued", case=False, na=False)
+                & (stock > 0)
+                & ~rm.str.contains("Steve", case=False, na=False)
+                & remark_ok
+                & ~rm.str.contains("Reject (Sulawesi Only)", case=False, na=False, regex=False)
+                & (woi > limit)
+                & (df["WOI Threshold Status"].fillna("").astype(str).str.strip() == "> Highest WOI Threshold")
+                & ((df["National Alloc Status"].fillna("").astype(str).str.strip() != "> 75% National Alloc")
+                   | rm.str.contains("Reject (Negative Allocation)", case=False, na=False, regex=False)))
+
+    if not hw_remarks:
+        st.info("Pilih minimal satu Remark yang perlu dikurangi.")
+    elif pv_all.empty:
+        st.info("Tidak ada baris PO untuk diringkas.")
+    else:
+        pv_hw = pv_all.copy()
+        _hw_m = _high_woi_mask(pv_hw, hw_limit, hw_remarks) & pv_hw["_Status"].isna()
+        _hw_label = f"High WOI (> {hw_limit:g})"
+        pv_hw["_Brand"] = pv_hw["SKU"].map(_brand_from_sku)   # G2G / NEXTPRIME / BODIBREZE dari awalan product code
+        _cand_all = pv_hw[_hw_m].copy()
+        _cand_all["_woi"] = pd.to_numeric(_cand_all["WOI (Stock + PO Ori)"], errors="coerce").fillna(0)
+        _cand_all["_po_q"] = pd.to_numeric(_cand_all["PO Qty"], errors="coerce").fillna(0)
+        _cand_all["_sg_q"] = pd.to_numeric(_cand_all["Suggested QTY Final"], errors="coerce").fillna(0)
+        # Qty awal dropdown: ikut Suggested Final HANYA kalau suggested-nya ada (> 0); kalau 0/kosong -> PO Qty asli
+        # (tidak di-0-kan otomatis). Mode "Tidak ikut Suggested" juga mulai dari PO Qty.
+        _cand_all["_init_q"] = (np.where(_cand_all["_sg_q"] > 0, np.minimum(_cand_all["_sg_q"], _cand_all["_po_q"]), _cand_all["_po_q"])
+                                if hw_follow == "Ikuti Suggested Final" else _cand_all["_po_q"])
+        _moq_df = check_moq()
+        _moq_map = ({} if _moq_df.empty else
+                    _moq_df.assign(sku=_moq_df["sku"].astype(str).str.strip().str.upper())
+                           .set_index("sku")["MOQ"].to_dict())
+
+        # Store stabil di session_state: pilihan SKU & qty disimpan di sini (kunci = "distributor|SKU"), terpisah dari
+        # kunci widget. Jadi walau kunci widget / daftar opsi berubah (mis. setelah update kode), pilihan tidak hilang.
+        _store = st.session_state.setdefault("_hw_store", {"qty": {}, "pick": {}, "follow": hw_follow})
+        if _store.get("ver") != 3:                 # versi default berubah (qty awal 0 -> PO Qty): buang qty lama yang tersimpan
+            _store["qty"].clear(); _store["ver"] = 3
+            # state widget qty lama (termasuk backup di _widget_snap) ikut dibuang, kalau tidak default baru diabaikan
+            for _k in [k for k in list(st.session_state.keys()) if str(k).startswith("hw_qty_")]:
+                del st.session_state[_k]
+            for _k in [k for k in st.session_state.get("_widget_snap", {}) if str(k).startswith("hw_qty_")]:
+                del st.session_state["_widget_snap"][_k]
+        if _store.get("follow") != hw_follow:      # ganti mode awal -> qty tersimpan di-reset sekali
+            _store["qty"].clear(); _store["follow"] = hw_follow
+
+        _cap = st.empty()   # ringkasan total diisi setelah semua tab diproses
+        _qty_new, _n_red, _val_red = {}, 0, 0.0
+        _brands = sorted(pv_hw["_Brand"].unique())
+        for _tab, _b in zip(st.tabs(_brands), _brands):
+            with _tab:
+                # --- SKU di atas batas WOI untuk brand ini: pilih Qty Final (kelipatan MOQ) ---
+                _cb = _cand_all[_cand_all["_Brand"] == _b].sort_values(["_woi", "SKU"], ascending=[False, True])   # WOI tertinggi di atas
+                if _cb.empty:
+                    st.caption(f"Tidak ada SKU {_b} di atas batas WOI.")
+                else:
+                    def _short_d(d):   # "PT SINAR PONTI LESTARI - PONTIANAK" -> "PONTIANAK"
+                        return str(d).split(" - ")[-1].strip()
+                    st.markdown(f"**{len(_cb)} SKU {_b} di atas batas WOI (> {hw_limit:g})** — diurutkan dari WOI tertinggi")
+                    for _i, _r in _cb.iterrows():
+                        _po, _sg, _in = int(_r["_po_q"]), int(_r["_sg_q"]), int(_r["_init_q"])
+                        _moq = pd.to_numeric(_moq_map.get(str(_r["SKU"]).strip().upper()), errors="coerce")
+                        cl, cm, cr = st.columns([3, 2.2, 3.2], vertical_alignment="center")   # info | dropdown | After + WOI (satu baris, compact)
+                        with cl:   # SKU, dan PO Qty tepat di bawahnya
+                            st.markdown(f"**{_r['SKU']}** · {_short_d(_r['Distributor'])}")
+                            _pv = float(pd.to_numeric(_r["PO Value"], errors="coerce") or 0)
+                            st.caption(f"Before — Qty: {_po:,} · Value: Rp {_pv:,.0f}")
+                            st.caption(f"Sugg. Final: {_sg:,} · "
+                                       f"WOI {pd.to_numeric(_r['WOI (Stock + PO Ori)'], errors='coerce'):.1f} · {_r['Remark']}")
+                        _sid = f"{_r['Distributor']}|{_r['SKU']}"
+                        _kfx = f"{_sid}_{hw_follow[:5]}"        # kunci stabil per distributor+SKU
+                        _in = _store["qty"].get(_sid, _in)      # nilai tersimpan menang atas default
+                        if pd.notna(_moq) and _moq > 0:
+                            _m = int(_moq)
+                            _opts = sorted(set(range(0, _po + 1, _m)) | {_po})   # 0, MOQ, 2xMOQ, ... + PO Qty asli (supaya bisa tetap tanpa diubah)
+                            _def = max((o for o in _opts if o <= _in), default=0)
+                            _val = cm.selectbox(f"Qty Final (kelipatan {_m})", _opts, index=_opts.index(_def),
+                                                key=f"hw_qty_{_kfx}",
+                                                format_func=lambda o, _m=_m: ("0" if o == 0 else f"{o:,}  ({o // _m}×{_m})" if o % _m == 0 else f"{o:,}  (PO Qty)"))
+                        else:   # MOQ tidak ditemukan -> input angka biasa
+                            _val = cm.number_input("Qty Final (MOQ tidak ditemukan)", min_value=0, max_value=max(_po, 0),
+                                                   value=min(_in, _po), step=1, key=f"hw_qty_{_kfx}")
+                        _qty_new[_i] = float(min(max(_val, 0), _po))
+                        _store["qty"][_sid] = int(_qty_new[_i])
+                        _after_v = _qty_new[_i] * (_pv / _po if _po > 0 else 0)
+                        cr.caption(f"After — Qty: {int(_qty_new[_i]):,} · Value: Rp {_after_v:,.0f}  "
+                                   f"(−Rp {_pv - _after_v:,.0f})")
+                        # Simulasi WOI: (Total Stock + Qty) / Avg Weekly Sales LM  (rumus sama dengan calculate_woi)
+                        _stk = float(pd.to_numeric(_r["Total Stock (Qty)"], errors="coerce") or 0)
+                        _avg = float(pd.to_numeric(_r["Avg Weekly Sales LM (Qty)"], errors="coerce") or 0)
+                        _woi_b = float(calculate_woi(_stk, _po, _avg))
+                        _woi_a = float(calculate_woi(_stk, _qty_new[_i], _avg))
+                        _ok = "✅" if _woi_a <= hw_limit else "⚠️"
+                        cr.caption(f"WOI: {_woi_b:.1f} → **{_woi_a:.1f}** {_ok}"
+                                   + ("" if _woi_a <= hw_limit else f" (masih > {hw_limit:g})"))
+
+                # --- pivot brand ini: nilai final = qty pilihan x harga satuan (PO Value / PO Qty) ---
+                _sub = pv_hw[pv_hw["_Brand"] == _b].copy()
+                _m_sub = _sub.index.isin(list(_qty_new.keys()))
+                if _m_sub.any():
+                    _po_s = pd.to_numeric(_sub.loc[_m_sub, "PO Qty"], errors="coerce").fillna(0)
+                    _unit = (_sub.loc[_m_sub, "PO Value"] / _po_s.where(_po_s > 0)).fillna(0)
+                    _fq_arr = np.array([_qty_new[i] for i in _sub.index[_m_sub]], dtype=float)
+                    _stk_s = pd.to_numeric(_sub.loc[_m_sub, "Total Stock (Qty)"], errors="coerce").fillna(0).values
+                    _avg_s = pd.to_numeric(_sub.loc[_m_sub, "Avg Weekly Sales LM (Qty)"], errors="coerce").fillna(0).values
+                    for _cn in ("_stk", "_avg", "_po_r", "_fq", "_woi_b", "_woi_a"):
+                        _sub[_cn] = np.nan
+                    _sub.loc[_m_sub, "_stk"], _sub.loc[_m_sub, "_avg"] = _stk_s, _avg_s
+                    _sub.loc[_m_sub, "_po_r"], _sub.loc[_m_sub, "_fq"] = _po_s.values, _fq_arr
+                    _sub.loc[_m_sub, "_woi_b"] = calculate_woi(_stk_s, _po_s.values, _avg_s)
+                    _sub.loc[_m_sub, "_woi_a"] = calculate_woi(_stk_s, _fq_arr, _avg_s)
+                    _sub.loc[_m_sub, "_Status"] = _hw_label
+                    _sub.loc[_m_sub, "_Final"] = [_qty_new[i] for i in _sub.index[_m_sub]] * _unit.values
+                    _n_red += int(_m_sub.sum())
+                    _val_red += float((_sub.loc[_m_sub, "PO Value"] - _sub.loc[_m_sub, "_Final"]).sum())
+                _show_pivot(_sub, f"Summary Pivot PO - {_b} - High WOI > {hw_limit:g} - {po_date_str}",
+                            f"pivot_helper_{_b.lower()}")
+        _cap.caption(f"{_n_red} SKU kena pengurangan High WOI · nilai dikurangi Rp {_val_red:,.0f}")
+
+        # ---- Prepare MODIFY PO: hasil final per distributor, format yang dibaca halaman Modify File ----
+        # Qty final per SKU SAMA dengan pivot: status pengurangan (Stop PO, Steve, dst) -> dihapus;
+        # SKU yang dipilih di Pivot Helper -> qty pilihan (0 = dihapus); selain itu -> PO Qty asli.
+        _all_map, _chg_map, _del_map = {}, {}, {}
+        for _i, _rr in pv_hw.iterrows():
+            _d, _sku = _rr["Distributor"], str(_rr["SKU"])
+            _po_i = int(pd.to_numeric(_rr["PO Qty"], errors="coerce") or 0)
+            if pd.notna(_rr["_Status"]):
+                _fq_i = 0                      # kena pengurangan utama (Stop PO / Steve / Neg. Alloc / Sulawesi Only, dst.)
+            elif _i in _qty_new:
+                _fq_i = int(_qty_new[_i])      # dipilih di Pivot Helper
+            else:
+                _fq_i = _po_i
+            if _fq_i <= 0:
+                _del_map.setdefault(_d, set()).add(_sku)
+                continue
+            _all_map.setdefault(_d, {})[_sku] = _fq_i
+            if _fq_i != _po_i:
+                _chg_map.setdefault(_d, {})[_sku] = _fq_i
+
+        def _fmt_blocks(m, with_qty):
+            out = []
+            for _d in sorted(m):
+                out.append(f"=== {_d} ===")
+                if with_qty:
+                    out += [f"{k}, {v}" for k, v in sorted(m[_d].items())]
+                else:
+                    out += sorted(m[_d])
+                out.append("")
+            return chr(10).join(out).strip()
+
+        st.markdown("""<div style="font-size:.95rem;font-weight:700;color:#FFFFFF;margin:1.4rem 0 .4rem;">Prepare MODIFY PO — hasil final per distributor</div>""", unsafe_allow_html=True)
+        _mod_map = _chg_map   # hanya SKU yang qty-nya berubah (SKU yang dihapus ada di kotak Hapus)
+        if not _mod_map and not _del_map:
+            st.info("Belum ada SKU yang perlu dimodify / dihapus.")
+        else:
+            _pm1, _pm2 = st.columns(2)
+            with _pm1:
+                st.caption(f"✏️ Modify QTY (format: SKU, QTY) — {sum(len(v) for v in _mod_map.values())} SKU")
+                st.code(_fmt_blocks(_mod_map, True) or "-", language=None)
+            with _pm2:
+                st.caption(f"🗑️ Hapus SKU — {sum(len(v) for v in _del_map.values())} SKU")
+                st.code(_fmt_blocks(_del_map, False) or "-", language=None)
+            st.caption("Copy masing-masing kotak lalu paste ke Modify File (kolom Modify QTY / Hapus QTY per distributor).")
 
     # ============ 8. Save Supply Control ============
     st.markdown("""<div class="pipeline-step active"><span class="step-number">8</span><strong>Save Supply Control</strong></div>""", unsafe_allow_html=True)
@@ -2314,8 +2805,8 @@ def _render_sim_results(e_dfs, e_npd, folder_res, sku_col_sim, qty_col_sim, dist
     base_cols = ["distributor_name", "sku", "product_name", "brand", "file_name", "po_qty", "current_woi", "allocation","final_qty"]
 
     is_po_row = sc_base.get("is_po_sku", False) == True
-    # exclude UNAVAILABLE di sini + buang kasus #2 (N/A)
-    valid_final = is_po_row & sc_base["final_qty"].notna() & (~is_unavailable)
+    # semua baris PO asli ter-capture (termasuk kasus #2 -> final_qty NaN, tersimpan sebagai 0); hanya UNAVAILABLE yang di-exclude
+    valid_final = is_po_row & (~is_unavailable)
 
     supply_rows = sc_base.loc[valid_final, base_cols].copy()
     supply_rows["status_supply"] = sc_base.loc[supply_rows.index, "status_supply"]
@@ -2412,7 +2903,7 @@ def _file_upload_section(page_key: str):
                         return h, True
                 except ValueError:
                     pass
-        return detect_header_row(fbytes, fname, sheet_name=sheet_sel), False
+        return _detect_header_row_cached(fbytes, fname, sheet_sel), False
 
     def _apply_range(df, rng_r, rng_c):
         if rng_c.strip():
@@ -2475,11 +2966,11 @@ def _file_upload_section(page_key: str):
                 for zname in zf.namelist():
                     ext = zname.rsplit(".",1)[-1].lower() if "." in zname else ""
                     if ext in ("xlsx","xls","csv"):
-                        new_name, new_bytes = _convert_to_xlsx(zname, zf.read(zname))
+                        new_name, new_bytes = _convert_to_xlsx_cached(zname, zf.read(zname))
                         raw_entries.append((new_name, new_bytes))
         else:
             
-            new_name, new_bytes = _convert_to_xlsx(uf.name, fb)
+            new_name, new_bytes = _convert_to_xlsx_cached(uf.name, fb)
             raw_entries.append((new_name, new_bytes))
 
 
@@ -2516,9 +3007,7 @@ def _file_upload_section(page_key: str):
     file_sheets_map = {}
     for idx, (fname, fbytes) in enumerate(raw_entries):
         try:
-            wb_tmp = openpyxl.load_workbook(io.BytesIO(fbytes), data_only=True)
-            file_sheets_map[idx] = [ws.title for ws in wb_tmp.worksheets if ws.sheet_state == 'visible']
-            wb_tmp.close()
+            file_sheets_map[idx] = _visible_sheets_cached(fbytes)
         except Exception:
             file_sheets_map[idx] = []
 
@@ -2622,12 +3111,7 @@ def _file_upload_section(page_key: str):
             hrow, hrow_overridden = _resolve_header_row(row_rng_prev, fbytes, fname, sheet_sel)
 
             try:
-                ext = fname.rsplit(".",1)[-1].lower()
-                if ext == "csv":
-                    df_f = pd.read_csv(io.BytesIO(fbytes), header=hrow, dtype=str, encoding_errors="replace")
-                else:
-                    engine = _excel_engine(fname)
-                    df_f = pd.read_excel(io.BytesIO(fbytes), sheet_name=sheet_sel, header=hrow, engine=engine, dtype=str)
+                df_f = _read_sheet_cached(fbytes, fname, sheet_sel, hrow)
                 df_f = df_f.loc[:, ~df_f.columns.astype(str).str.startswith('Unnamed')].dropna(how='all')
                 df_f = df_f[df_f.apply(lambda r: r.astype(str).str.strip().ne('').any(), axis=1)]
                 parse_err = None
@@ -2636,6 +3120,19 @@ def _file_upload_section(page_key: str):
 
             if df_f is not None:
                 df_f.columns = [str(c).strip().upper() for c in df_f.columns]
+                # Nama kolom kembar (mis. 2 kolom "QTY") bikin df[col] jadi DataFrame -> error indexing.
+                # Kolom pertama dipertahankan, kolom kembar berikutnya diberi akhiran .1, .2, dst.
+                if df_f.columns.duplicated().any():
+                    _dups = sorted(set(df_f.columns[df_f.columns.duplicated()]))
+                    _seen_c, _new_c = {}, []
+                    for _c in df_f.columns:
+                        if _c in _seen_c:
+                            _seen_c[_c] += 1; _new_c.append(f"{_c}.{_seen_c[_c]}")
+                        else:
+                            _seen_c[_c] = 0; _new_c.append(_c)
+                    df_f.columns = _new_c
+                    st.warning(f"⚠️ Nama kolom kembar di **{fname}**: {', '.join(_dups)}. "
+                               "Yang dipakai simulator adalah kolom pertama; kolom kembar lainnya diberi akhiran .1/.2.")
                 qty_col = next((c for c in df_f.columns if c.strip().upper() in ("QTY","QUANTITY")), None)
                 if qty_col:
                     def _qty_valid(v):
@@ -2777,7 +3274,30 @@ def _file_upload_section(page_key: str):
                         _cols.append(_c)
                     df_preview = df_preview.copy()
                     df_preview.columns = _cols
-                    st.dataframe(df_preview.reset_index(drop=True), use_container_width=True)
+                    # Tampilkan kolom sesuai template PO di depan (DISTRIBUTOR, PRODUCT CODE, DESCRIPTION, QTY),
+                    # kolom tambahan dari file ada di kanan. Distributor diisi dari pilihan di atas kalau file tidak punya.
+                    _tmpl_alias = {
+                        "DISTRIBUTOR":  {"DISTRIBUTOR", "DISTRIBUTOR NAME", "CUSTOMER NAME"},
+                        "PRODUCT CODE": {"PRODUCT CODE", "SKU", "SKU CODE", "KODE", "KODE PRODUK", "KODE G2G",
+                                         "PRODUCT KODE", "KODE SKU", "PRODUCT ID", "ITEM CODE"},
+                        "DESCRIPTION":  {"DESCRIPTION", "PRODUCT NAME", "NAMA PRODUK", "NAMA BARANG"},
+                        "QTY":          {"QTY", "QUANTITY", "FINAL PO", "QTY PO", "JUMLAH"},
+                    }
+                    _lead = {}
+                    for _k, _al in _tmpl_alias.items():
+                        _hit = next((c for c in df_preview.columns if _norm_col(c) in _al), None)
+                        if _hit is not None:
+                            _lead[_k] = _hit
+                    _view = df_preview[[*_lead.values()] + [c for c in df_preview.columns if c not in _lead.values()]].copy()
+                    _view = _view.rename(columns={v: k for k, v in _lead.items()})
+                    if "DISTRIBUTOR" not in _view.columns and dist_val not in ("", "(Pilih)", None):
+                        _view.insert(0, "DISTRIBUTOR", dist_val)
+                    _missing_t = [k for k in _tmpl_alias if k not in _view.columns and k != "DISTRIBUTOR"]
+                    if _missing_t:
+                        st.warning("Kolom template PO tidak ditemukan di file: " + ", ".join(_missing_t))
+                    # tinggi eksplisit supaya baris terakhir tidak terpotong
+                    _h = min(420, 36 * (len(_view) + 1) + 6)
+                    st.dataframe(_view.reset_index(drop=True), use_container_width=True, height=_h)
 
                 parsed.append({"name":fname,"df":df_f,"row_rng":row_rng,"col_rng":col_rng,
                                 "dist_val":dist_val,"has_dist":has_dist,"error":None,
@@ -3139,6 +3659,24 @@ def _file_upload_section(page_key: str):
             except Exception:
                 return s
 
+        # Stock diambil SEKALI per distributor (gabungan SKU semua file-nya, sorted) -> argumen sama
+        # dengan yang dipakai simulasi, jadi query BigQuery tidak diulang per file / per tahap.
+        _SKU_KEYS_M = ['sku','product code','kode','code','sku code','sku kode','product kode']
+        _dist_skus = {}
+        for _p in ready:
+            _dv0 = _p.get("dist_val", "")
+            if _dv0 in ("", "(Pilih)", None):
+                continue
+            _d0 = _apply_range(_p["df"].copy(), _p["row_rng"], _p["col_rng"])
+            _d0.columns = [str(c).strip().upper() for c in _d0.columns]
+            _sc0 = next((c for c in _d0.columns if any(k in c.lower() for k in _SKU_KEYS_M)), None)
+            if _sc0 is None:
+                continue
+            _v0 = _d0[_sc0].astype(str).str.strip().str.upper()
+            _v0 = _v0[_v0.ne("") & _v0.ne("NAN")]
+            _dist_skus.setdefault(str(_dv0).strip().upper(), set()).update(_v0.tolist())
+        _stock_by_dist = {d: get_stock_data(d, tuple(sorted(sk))) for d, sk in _dist_skus.items()}
+
         for p in ready:
             fname = p["name"]
             sh = p.get("sheet_name")
@@ -3160,7 +3698,7 @@ def _file_upload_section(page_key: str):
             _dv = p.get("dist_val", "")
             stop_skus = set()
             if _dv not in ("", "(Pilih)", None):
-                _stk = get_stock_data(str(_dv).upper(), tuple(df_moq[sku_col_m].dropna().unique()))
+                _stk = _stock_by_dist.get(str(_dv).strip().upper(), pd.DataFrame()).copy()
                 if not _stk.empty:
                     _stk["sku"] = _stk["sku"].astype(str).str.upper()
                     stop_skus = set(_stk.loc[
@@ -3314,12 +3852,13 @@ def _file_upload_section(page_key: str):
     res = st.session_state.get(f"folder_result_{page_key}")
     if res is not None:
         combined_df = res["df"]
-        st.success(f"✅ **{len(combined_df):,}** baris · {combined_df.shape[1]} kolom dari {len(ready)} file")
         for col in ['QTY','DPP','TOTAL PRICE']:
             if col in combined_df.columns:
                 combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
-        st.subheader("Hasil Gabungan")
-        st.dataframe(combined_df, use_container_width=True, hide_index=True)
+        with st.expander(f"✅ {len(combined_df):,} baris · {combined_df.shape[1]} kolom dari {len(ready)} file (lihat hasil gabungan)",
+                         expanded=False):
+            st.dataframe(combined_df, use_container_width=True, hide_index=True,
+                         height=min(420, 36 * (len(combined_df) + 1) + 6))
 
     return raw_entries, res
 
@@ -3327,7 +3866,9 @@ def _file_upload_section(page_key: str):
 # Streamlit membuang state widget yang tidak dirender; nilai disalin ke _widget_snap lalu dikembalikan.
 _SNAP_PREFIXES = ("region_mode_radio_", "kalbar_submode_", "sheetpick_", "fs_", "row_", "col_", "dist_",
                   "skupick_", "qtypick_", "kalbar_preview_pick_", "moq_preview_pick_",
-                  "pi_sel_", "pi_ck_", "pi_refs_", "pi_primary_", "pi_choice_", "pi_manual_")
+                  "pi_sel_", "pi_ck_", "pi_refs_", "pi_primary_", "pi_choice_", "pi_manual_",
+                  "hw_",                                   # Pivot Helper: batas WOI, remark, pilihan SKU, qty
+                  "hist_period", "hist_range", "hist_search")  # filter tab History
 _MOD_PREFIXES = ("check_sheet_", "check_hrow_", "del_", "edit_", "mass_del", "mass_edit", "mass_dist_",
                  "tab3_enable_", "tab3_file_select", "tab3_del_input", "tab3_edit_input", "tab3_map_")
 _ALL_SNAP = _SNAP_PREFIXES + _MOD_PREFIXES
@@ -3336,8 +3877,10 @@ _snap = st.session_state.setdefault('_widget_snap', {})
 _snap.update({k: v for k, v in st.session_state.items() if isinstance(k, str) and k.startswith(_ALL_SNAP)})
 _restore_prefixes = {"modify": _MOD_PREFIXES, "po_changer": _SNAP_PREFIXES}.get(st.session_state.get('page'))
 if _restore_prefixes:
+    # JANGAN pop: backup harus tetap ada. Kalau run ini terputus/error (mis. file di-update saat rerun) sebelum widget
+    # sempat dirender, Streamlit membuang state-nya; dengan backup yang dipertahankan, run berikutnya bisa memulihkannya.
     for _k in [k for k in _snap if k.startswith(_restore_prefixes)]:
-        _v = _snap.pop(_k)
+        _v = _snap[_k]
         if _k not in st.session_state:
             try:
                 st.session_state[_k] = _v
@@ -3403,7 +3946,7 @@ if st.session_state.get('page') == 'po_changer':
 
 
 ###################PO Simulator (For RSA) 
-    tab_po, tab_pi = st.tabs(["📤 PO Simulator", "🔁 PI Validation"])
+    tab_po, tab_pi, tab_hist = st.tabs(["📤 PO Simulator", "🔁 PI Validation", "🕘 History"])
 
     with tab_po:
         raw_entries, folder_res = _file_upload_section("rsa")
@@ -3442,8 +3985,137 @@ if st.session_state.get('page') == 'po_changer':
     with tab_pi:
         _render_pi_validation()
 
+    with tab_hist:
+        _render_sc_history()
+
     st.stop()
 
+
+
+class _POFileError(Exception):
+    """Error pembacaan file PO dengan pesan yang bisa langsung ditampilkan ke user."""
+
+
+def _read_spv_po_file(fname: str, fbytes: bytes):
+    """Baca file PO untuk PO Simulator - SPV dengan parser yang sama kuatnya dengan RSA
+    (auto-detect baris header, alias nama kolom, .xls/.csv, QTY tidak valid dibuang).
+    Return (df[Distributor, Customer SKU Code, PO Qty, is_po_sku], notes:list[str]).
+    Raise _POFileError berisi alasan jelas kalau file tidak bisa dibaca."""
+    notes = []
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+    if ext not in ("xlsx", "xls", "csv"):
+        raise _POFileError(f"Format file **.{ext or '?'}** tidak didukung. Gunakan .xlsx, .xls, atau .csv.")
+    if not fbytes:
+        raise _POFileError("File **kosong** (0 byte). Upload ulang file yang benar.")
+
+    # 1) buka file -> xlsx
+    try:
+        xname, xbytes = _convert_to_xlsx(fname, fbytes)
+    except ImportError as e:
+        raise _POFileError(f"File .xls tidak bisa dibaca karena library pendukung belum terpasang ({e}). Simpan ulang file sebagai .xlsx lalu upload lagi.")
+    except Exception as e:
+        raise _POFileError(f"File **rusak / bukan Excel/CSV yang valid / diproteksi password** ({type(e).__name__}: {e}). "
+                           "Buka di Excel, hapus password, lalu Save As .xlsx.")
+
+    # 2) pilih sheet: sheet visible pertama yang punya isi
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(xbytes), data_only=True, read_only=True)
+        sheets = [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"]
+        wb.close()
+    except Exception as e:
+        raise _POFileError(f"File Excel tidak bisa dibuka ({type(e).__name__}: {e}). Kemungkinan rusak atau diproteksi password.")
+    if not sheets:
+        raise _POFileError("Tidak ada sheet yang terlihat (semua sheet di-hide). Unhide sheet PO lalu upload lagi.")
+
+    def _normc(c):
+        return re.sub(r"[\s_]+", " ", str(c)).strip().upper()
+
+    _ALIASES = {
+        "PRODUCT CODE": {"PRODUCT CODE", "SKU", "SKU CODE", "KODE", "KODE PRODUK", "KODE G2G", "PRODUCT KODE",
+                         "KODE SKU", "PRODUCT ID", "ITEM CODE", "CUSTOMER SKU CODE"},
+        "QTY": {"QTY", "QUANTITY", "FINAL PO", "QTY PO", "JUMLAH", "PO QTY"},
+        "DISTRIBUTOR": {"DISTRIBUTOR", "DISTRIBUTOR NAME", "CUSTOMER NAME"},
+    }
+    best, last_cols, last_empty = None, [], False
+    for sh in sheets:
+        try:
+            hrow = detect_header_row(xbytes, xname, sheet_name=sh)
+            df = pd.read_excel(io.BytesIO(xbytes), sheet_name=sh, header=hrow, engine="openpyxl", dtype=str)
+        except Exception as e:
+            continue
+        df = df.loc[:, ~df.columns.astype(str).str.startswith("Unnamed")].dropna(how="all")
+        if df.columns.duplicated().any():  # kolom kembar -> pakai yang pertama
+            df = df.loc[:, ~df.columns.duplicated()]
+        last_cols = [str(c) for c in df.columns]
+        if df.empty:
+            last_empty = True
+            continue
+        ren = {}
+        for canon, al in _ALIASES.items():
+            hit = next((c for c in df.columns if c not in ren and _normc(c) in al), None)
+            if hit is not None:
+                ren[hit] = canon
+        df = df.rename(columns=ren)
+        if {"PRODUCT CODE", "QTY"}.issubset(df.columns):
+            best = (sh, df); break
+    if best is None:
+        found = ", ".join(last_cols[:12]) or "(tidak ada kolom terbaca)"
+        if last_empty and not last_cols:
+            raise _POFileError("Sheet PO **kosong** — tidak ada baris data yang terbaca.")
+        raise _POFileError("Kolom wajib tidak ditemukan. Dibutuhkan kolom **PRODUCT CODE** (atau SKU/Kode) dan **QTY**, "
+                           f"plus **DISTRIBUTOR**. Kolom yang terbaca: {found}. "
+                           "Pakai template PO atau samakan nama kolomnya.")
+    sh, df = best
+    if len(sheets) > 1:
+        notes.append(f"Sheet yang dibaca: `{sh}`")
+
+    if "DISTRIBUTOR" not in df.columns:
+        raise _POFileError("Kolom **DISTRIBUTOR** tidak ada di file. Tambahkan kolom DISTRIBUTOR (nama distributor sesuai master) lalu upload lagi.")
+
+    # 3) bersihkan
+    n0 = len(df)
+    qty = pd.to_numeric(df["QTY"].astype(str).str.strip().str.replace(",", ".", regex=False), errors="coerce")
+    bad_qty = int((qty.isna() | (qty <= 0)).sum())
+    df = df.assign(QTY=qty)
+    df = df[df["QTY"].notna() & (df["QTY"] > 0)]
+    if bad_qty:
+        notes.append(f"{bad_qty:,} baris dibuang karena QTY kosong / 0 / bukan angka.")
+    if df.empty:
+        raise _POFileError(f"Tidak ada baris dengan QTY > 0 (dari {n0:,} baris terbaca). Cek kolom QTY — pastikan berisi angka, bukan teks.")
+
+    df["PRODUCT CODE"] = df["PRODUCT CODE"].astype(str).str.strip().str.upper()
+    df["DISTRIBUTOR"] = df["DISTRIBUTOR"].astype(str).str.strip().str.upper()
+    blank = (df["PRODUCT CODE"].isin(["", "NAN", "NONE"])) | (df["DISTRIBUTOR"].isin(["", "NAN", "NONE"]))
+    if blank.any():
+        notes.append(f"{int(blank.sum()):,} baris dibuang karena PRODUCT CODE atau DISTRIBUTOR kosong.")
+        df = df[~blank]
+    if df.empty:
+        raise _POFileError("Semua baris PRODUCT CODE / DISTRIBUTOR kosong. Isi kedua kolom itu lalu upload lagi.")
+
+    out = df.rename(columns={"PRODUCT CODE": "Customer SKU Code", "QTY": "PO Qty", "DISTRIBUTOR": "Distributor"})
+    out = out[["Distributor", "Customer SKU Code", "PO Qty"]].copy()
+    out["is_po_sku"] = True
+    return out.reset_index(drop=True), notes
+
+
+
+def _explain_sim_error(e: Exception) -> str:
+    """Terjemahkan error simulasi jadi alasan yang bisa dipahami user."""
+    name, msg = type(e).__name__, str(e)
+    low = msg.lower()
+    if any(k in low for k in ("403", "forbidden", "permission", "access denied")):
+        return "Akses ke **BigQuery ditolak** (permission). Hubungi admin untuk cek izin service account."
+    if any(k in low for k in ("404", "not found: table", "not found: dataset")) and "bigquery" in (type(e).__module__ + low):
+        return "**Tabel/dataset BigQuery tidak ditemukan**. Hubungi admin — kemungkinan nama tabel berubah."
+    if any(k in low for k in ("timeout", "timed out", "connection", "503", "502", "temporarily", "ssl")):
+        return "**Koneksi ke BigQuery bermasalah / timeout**. Tunggu sebentar lalu upload ulang atau refresh halaman."
+    if any(k in low for k in ("quota", "rate limit", "exceeded")):
+        return "**Kuota BigQuery habis / terlalu banyak request**. Coba lagi beberapa menit lagi."
+    if name == "KeyError":
+        return f"Kolom/data yang dibutuhkan simulator **tidak ada**: `{msg}`. Biasanya karena data master di BigQuery berubah atau kolom di file tidak sesuai."
+    if name in ("ValueError", "TypeError"):
+        return f"Ada **nilai yang tidak bisa diproses** (format angka/teks tidak sesuai): `{name}: {msg}`. Cek isi kolom QTY dan PRODUCT CODE di file."
+    return f"Error tak terduga: `{name}: {msg}`."
 
 #################PO Simulator (For SPV) LOGIC SPV
 
@@ -3540,64 +4212,38 @@ if st.session_state.get('page') == 'po_spv':
                 st.rerun()
 
         if uploaded_file:
+            _fname = getattr(uploaded_file, "name", "file")
             try:
-                required_cols = [ "DISTRIBUTOR", "PRODUCT CODE", "DESCRIPTION", "QTY"]
+                po_df, _notes = _read_spv_po_file(_fname, uploaded_file.getvalue())
+            except _POFileError as e:
+                st.error(f"❌ **Simulator tidak bisa membaca file `{_fname}`.**  \n{e}")
+                st.stop()
+            except Exception as e:
+                st.error(f"❌ **Simulator tidak bisa membaca file `{_fname}`** karena error tak terduga: `{type(e).__name__}: {e}`")
+                st.stop()
+            st.success(f"File berhasil dibaca — {len(po_df):,} baris PO, {po_df['Distributor'].nunique()} distributor")
+            for _n in _notes:
+                st.caption("ℹ️ " + _n)
+            st.write("Preview of uploaded PO data:")
+            st.dataframe(po_df.drop(columns=["is_po_sku"]).head())
 
-                if uploaded_file.name.endswith(".xlsx"):
-                    po_df = pd.read_excel(uploaded_file, header=7, engine="openpyxl")
-                else:
-                    po_df = pd.read_csv(uploaded_file, header=7)
-                st.success("File uploaded successfully!")
+            st.header("3. PO Simulation")
 
-                po_df.dropna(axis=1, how='all', inplace=True)
-                po_df.drop(columns=[col for col in po_df.columns if 'Unnamed' in str(col)], inplace=True)
-
-                if not all(col in po_df.columns for col in required_cols):
-                    st.error("The uploaded file is missing one or more required columns.")
-                    st.write("Please check for these columns:", required_cols)
-                    st.stop()
-
-                po_df["QTY"] = pd.to_numeric(po_df["QTY"], errors="coerce")
-                po_df.dropna(subset=["QTY"], inplace=True)
-
-                po_df["DISTRIBUTOR"] = po_df["DISTRIBUTOR"].str.upper()
-                po_df["PRODUCT CODE"] = po_df["PRODUCT CODE"].astype(str).str.strip().str.upper()
-
-                st.write("Preview of uploaded PO data:")
-                st.dataframe(po_df.head())
-
-                po_df = po_df[po_df["QTY"] > 0]
-                po_df.dropna(subset=["PRODUCT CODE", "QTY", "DISTRIBUTOR"], inplace=True)
-
-                po_df["is_po_sku"] = True
-
-                po_df.rename(
-                    columns={
-                        "PRODUCT CODE": "Customer SKU Code",
-                        "QTY": "PO Qty",
-                        "DISTRIBUTOR": "Distributor"
-                    },
-                    inplace=True,
-                )
-
-                po_df = po_df[["Distributor", "Customer SKU Code", "PO Qty", "is_po_sku"]]
-
-                st.header("3. PO Simulation")
-
-                # Logika simulasi SAMA dengan PO Simulator - RSA (_run_po_simulation).
-                # Hasil di-cache per file supaya ganti format output / rerun tidak simulasi ulang.
-                import hashlib as _hashlib
-                _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
-                _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
-                              "WOI Threshold", "WOI Threshold Status", "WOI STANDARD", "80% Max ST YTD",
-                              "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
-                _spv_cache =st.session_state.get("sim_result_spv")
-                if _spv_cache and _spv_cache.get("dfs"):
-                    _first = next(iter(_spv_cache["dfs"].values()))
-                    if not _need_cols.issubset(_first.columns):
-                        _spv_cache = None
-                if _spv_cache is None or _spv_cache.get("sig") != _sig:
-                    _sim_in = po_df[["Distributor", "Customer SKU Code", "PO Qty"]].copy()
+            # Logika simulasi SAMA dengan PO Simulator - RSA (_run_po_simulation).
+            # Hasil di-cache per file supaya ganti format output / rerun tidak simulasi ulang.
+            import hashlib as _hashlib
+            _sig = _hashlib.md5(uploaded_file.getvalue()).hexdigest()
+            _need_cols = {"Suggested PO buffer", "Suggested QTY SO", "Suggested QTY Final",
+                          "WOI Threshold", "WOI Threshold Status", "WOI STANDARD", "80% Max ST YTD",
+                          "National Alloc %", "National Alloc Status", "National Alloc Qty (Basis)"}
+            _spv_cache =st.session_state.get("sim_result_spv")
+            if _spv_cache and _spv_cache.get("dfs"):
+                _first = next(iter(_spv_cache["dfs"].values()))
+                if not _need_cols.issubset(_first.columns):
+                    _spv_cache = None
+            if _spv_cache is None or _spv_cache.get("sig") != _sig:
+                _sim_in = po_df[["Distributor", "Customer SKU Code", "PO Qty"]].copy()
+                try:
                     _dfs, _npd, _bm = _run_po_simulation(
                         _sim_in, "Customer SKU Code", "PO Qty", "Distributor",
                         _MANUAL_REJECT_APPROVAL, _MANUAL_REJECT_NO_TOL,
@@ -3605,22 +4251,33 @@ if st.session_state.get('page') == 'po_spv':
                         __REJECTED_SKUS_2, _REGION_LIST_2,
                         _LIMITED_SKUS_QTY, ___MAX_QTY_LIMIT,
                     )
-                    _spv_cache = {"sig": _sig, "dfs": _dfs, "npd": _npd}
-                    st.session_state["sim_result_spv"] = _spv_cache
-
-                excel_dfs = _spv_cache["dfs"]
-                all_npd_sku_list = _spv_cache["npd"]
-                if not excel_dfs:
-                    st.warning("Tidak ada distributor yang berhasil diproses.")
+                except Exception as e:
+                    st.error("❌ **Simulator gagal memproses PO.**  \n" + _explain_sim_error(e))
+                    with st.expander("Detail teknis (untuk dikirim ke admin)"):
+                        import traceback as _tb
+                        st.code(_tb.format_exc())
                     st.stop()
-                st.success(f"Simulasi selesai — {len(excel_dfs)} distributor")
+                _spv_cache = {"sig": _sig, "dfs": _dfs, "npd": _npd}
+                st.session_state["sim_result_spv"] = _spv_cache
 
-                # SPV: output sama persis dengan RSA, KECUALI kolom MOQ tidak ikut di Excel
-                # + kolom bantu WOI Threshold tidak ikut; WOI STANDARD & 80% Max ST YTD tampil (sama dengan PO Result RSA)
-                _MOQ_COLS = ["MOQ", "Check MOQ", "Suggested Min Order Qty",
-                             "WOI Threshold"]
-                spv_dfs = {k: v.drop(columns=_MOQ_COLS, errors="ignore") for k, v in excel_dfs.items()}
+            excel_dfs = _spv_cache["dfs"]
+            all_npd_sku_list = _spv_cache["npd"]
+            if not excel_dfs:
+                st.error("❌ **Tidak ada distributor yang berhasil diproses.**  \n"
+                         "Kemungkinan: (1) nama distributor di file tidak sama dengan master "
+                         "(lihat pesan error di atas), (2) SKU di file tidak ada di data SKU/Stock BigQuery "
+                         "untuk distributor tsb, atau (3) semua baris ter-filter. Perbaiki file lalu upload ulang.")
+                st.session_state.pop("sim_result_spv", None)
+                st.stop()
+            st.success(f"Simulasi selesai — {len(excel_dfs)} distributor")
 
+            # SPV: output sama persis dengan RSA, KECUALI kolom MOQ tidak ikut di Excel
+            # + kolom bantu WOI Threshold tidak ikut; WOI STANDARD & 80% Max ST YTD tampil (sama dengan PO Result RSA)
+            _MOQ_COLS = ["MOQ", "Check MOQ", "Suggested Min Order Qty",
+                         "WOI Threshold"]
+            spv_dfs = {k: v.drop(columns=_MOQ_COLS, errors="ignore").assign(_source_file=_fname) for k, v in excel_dfs.items()}
+
+            try:
                 st.subheader("4. Select Output Format and Download")
                 output_format = st.radio(
                     "Choose Excel Output Format:",
@@ -3658,12 +4315,12 @@ if st.session_state.get('page') == 'po_spv':
                     "National Alloc Qty (Basis)", "National Alloc %", "National Alloc Status",
                 ]
                 st.dataframe(final_display_df.reindex(columns=final_cols).reset_index(drop=True))
-
             except Exception as e:
-                st.error(f"An error occurred: {e}")
-                st.info(
-                    "Please ensure the uploaded file is a valid .xlsx or .csv and contains all the required columns."
-                )
+                st.error("❌ **Simulasi selesai, tapi hasil gagal dibuat jadi Excel/tabel.**  \n"
+                         f"`{type(e).__name__}: {e}`  \nCoba upload ulang file; kalau masih sama, kirim detail ini ke admin.")
+                with st.expander("Detail teknis"):
+                    import traceback as _tb
+                    st.code(_tb.format_exc())
 
     st.stop()
 
