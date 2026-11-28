@@ -3672,9 +3672,10 @@ def _file_upload_section(page_key: str):
             _sc0 = next((c for c in _d0.columns if any(k in c.lower() for k in _SKU_KEYS_M)), None)
             if _sc0 is None:
                 continue
-            _v0 = _d0[_sc0].astype(str).str.strip().str.upper()
-            _v0 = _v0[_v0.ne("") & _v0.ne("NAN")]
-            _dist_skus.setdefault(str(_dv0).strip().upper(), set()).update(_v0.tolist())
+            # dropna dulu: di pandas baru astype(str) membiarkan NaN tetap NaN (float) -> sorted() error campur float & str
+            _v0 = _d0[_sc0].dropna().astype(str).str.strip().str.upper()
+            _v0 = _v0[_v0.ne("") & _v0.ne("NAN") & _v0.ne("NONE")]
+            _dist_skus.setdefault(str(_dv0).strip().upper(), set()).update(str(x) for x in _v0.tolist())
         _stock_by_dist = {d: get_stock_data(d, tuple(sorted(sk))) for d, sk in _dist_skus.items()}
 
         for p in ready:
